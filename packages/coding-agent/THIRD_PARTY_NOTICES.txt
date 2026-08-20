@@ -443,7 +443,7 @@ Package: @breadboard/sdk@0.3.0
 Artifact: packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz
 Artifact SHA-256: 7da1ae7af9483efb81ad313e7123b3be47b2acb38a6521cb9f3dc4f2afc853ce
 Provenance: packages/coding-agent/breadboard-sdk-provenance.json
-Provenance SHA-256: af542d48e6f67439566634c26157e98e5ec170390a02ccf33baa3b9da062aeca
+Provenance SHA-256: 7ef93669dbc41fd4520ad1ff4a45339b3b311c3e55785348f9fd8fa0788dadc2
 License assertion: none; archive inspection found no LICENSE/NOTICE member.
 ===== END BUNDLED COMPONENT PROVENANCE =====
 
