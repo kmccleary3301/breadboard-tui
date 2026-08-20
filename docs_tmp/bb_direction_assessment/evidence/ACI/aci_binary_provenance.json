@@ -1,12 +1,12 @@
 {
   "schemaVersion": "aci.bb-binary-provenance.v1",
   "source": {
-    "commit": "6271b62568fb2412d6f5ad797099bba9ba1f44a3",
-    "tree": "0704cdb3e45fcd47f4fe9deb6618d899e1ea8c3f"
+    "commit": "25c566fab7d181c4600b3cd476dc808dd615701a",
+    "tree": "10e4d51f9de8c97c4b90f7cfc524023d006291da"
   },
   "artifact": {
     "path": "packages/coding-agent/dist/bb",
-    "sha256": "9b7e822e04f86c031a698aff58b65ae23aa4b6cff9f4a83574a16ba477bf5e16",
+    "sha256": "0bebf9f150b6805c4311cf2cf97e49d7cea07d1c1ab4007a296b85e42a80b336",
     "signed": "adhoc-local"
   },
   "build": {
