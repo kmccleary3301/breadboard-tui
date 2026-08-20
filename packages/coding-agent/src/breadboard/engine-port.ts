@@ -143,10 +143,21 @@ function createConnectedPort(
 	monitor: LifecycleMonitor,
 	options: BreadboardEngineConnectionOptions,
 ): BreadboardEnginePort {
+	const strictEventFetch = Object.assign(
+		(input: Parameters<typeof handle.requestFetch>[0], init: Parameters<typeof handle.requestFetch>[1]) => {
+			const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+			if (url.pathname.endsWith("/events")) {
+				url.searchParams.set("schema", "2");
+				url.searchParams.set("include_legacy", "false");
+			}
+			return handle.requestFetch(url, init);
+		},
+		{ preconnect: handle.requestFetch.preconnect },
+	);
 	const clientConfig = {
 		baseUrl: handle.binding.endpoint,
 		requestTimeoutMs: supervisor.config.requestTimeoutMs,
-		fetch: handle.requestFetch,
+		fetch: strictEventFetch,
 	};
 	const canonicalClient = createCanonicalE4Client(clientConfig);
 	const controlClient = createBreadboardClient(clientConfig);
