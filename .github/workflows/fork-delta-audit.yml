@@ -96,7 +96,7 @@ jobs:
       - name: Build candidate binary
         env:
           BREADBOARD_P30_BACKEND_ROOT: ${{ github.workspace }}/breadboard-backend
-        run: bun --cwd packages/coding-agent run build:bb
+        run: bun run --cwd packages/coding-agent build:bb
       - name: Smoke candidate binary
         run: |
           ./packages/coding-agent/dist/bb --version
