@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { type AddressInfo, createServer } from "node:net";
 import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk";
+import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { type BreadboardSdkProvenance, openVerifiedBackendSnapshot } from "../scripts/verify-breadboard-sdk-provenance";
 import { retryAmbiguousReplay } from "./helpers/retry-ambiguous-replay";
 

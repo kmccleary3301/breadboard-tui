@@ -11,8 +11,8 @@ import type {
 	LifecycleE4Client,
 	LifecycleEngineBinding,
 	PrepareHardSignalInput,
-} from "@breadboard/sdk";
-import { LifecycleE4ClientError } from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
+import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { presentLifecycle, writeLifecyclePresentation } from "./lifecycle-presenter";
 import { type LifecycleState, lifecycleFailure } from "./lifecycle-state";
 import * as lifecycleModule from "./lifecycle-supervisor";

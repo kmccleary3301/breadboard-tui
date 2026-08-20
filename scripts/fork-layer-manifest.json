@@ -92,6 +92,7 @@
     "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
     "packages/coding-agent/src/breadboard/model-role-port.ts",
     "packages/coding-agent/src/breadboard/provider-auth-adapter.ts",
-    "packages/coding-agent/src/modes/interactive-mode.ts"
+    "packages/coding-agent/src/modes/interactive-mode.ts",
+    "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz"
   ]
 }

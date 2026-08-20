@@ -17,7 +17,7 @@ import {
 	type LifecycleEngineBinding,
 	P30_SESSION_CONTRACT_ID,
 	P30_SESSION_SCHEMA_SHA256,
-} from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
 import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
 	type LifecycleReadyHandle,

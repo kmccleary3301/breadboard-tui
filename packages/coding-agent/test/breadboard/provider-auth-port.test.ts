@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createBreadboardProviderAuthPort } from "../../src/breadboard/provider-auth-adapter";
+import { createBreadboardModelRolePort } from "../../src/breadboard/model-role-port";
 import type {
 	AuthCredentialView,
 	AuthLoginSession,
@@ -178,39 +179,72 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(selected).toEqual([]);
 	});
 
-	test("SDK adapter preserves snake_case status and attach DTOs without secret-bearing summaries", async () => {
+	test("SDK adapter preserves real 0.3.0 DTOs without secret-bearing summaries", async () => {
 		const requests: unknown[] = [];
+		const credentialRow = {
+			account_id: "bbacct_work",
+			credential_id: "bbcred_work",
+			provider_id: "openai",
+			auth_scheme_id: "api_key",
+			label: "work",
+			credential_kind: "api_key",
+			status: "active",
+			source: "broker",
+			secret_version: 1,
+			created_at_ms: 1,
+			updated_at_ms: 2,
+		};
 		const client = {
-			async getProviderAuthStatus() {
-				return {
-					attached: [
-						{
-							provider_id: "openai",
-							alias: "work",
-							has_api_key: true,
-							header_keys: ["Authorization"],
-						},
-					],
-				};
+			async listProviders() {
+				return [{ provider_id: "openai", display_name: "OpenAI", auth_schemes: ["api_key"], login_available: false }];
 			},
-			async attachProviderAuth(request: unknown) {
-				requests.push(request);
-				return {
-					ok: true,
-					detail: { credential: { provider_id: "openai", credential_ref: "bbcred_work", account_label: "work" } },
-				};
+			async listCredentials() {
+				return [credentialRow];
 			},
-			async detachProviderAuth() {
+			async beginLogin() {
+				return { login_session_id: "login-1", provider_id: "openai", status: "unavailable" };
+			},
+			async getLogin() {
+				return { login_session_id: "login-1", provider_id: "openai", status: "unavailable" };
+			},
+			async completeLogin() {
+				return { login_session_id: "login-1", provider_id: "openai", status: "unavailable" };
+			},
+			async cancelLogin() {
+				return { ok: true };
+			},
+			async putApiKey(providerId: string, accountLabel: string, input: unknown) {
+				requests.push({ providerId, accountLabel, input });
+				return credentialRow;
+			},
+			async logout() {
+				return { ok: true };
+			},
+			async revoke() {
 				return { ok: true };
 			},
 		};
 		const port = createBreadboardProviderAuthPort(client);
 		const rows = await port.listCredentials("openai");
-		expect(rows).toMatchObject([{ providerId: "openai", credentialRef: "openai:work", accountLabel: "work" }]);
+		expect(rows).toMatchObject([{ providerId: "openai", credentialRef: "bbcred_work", accountLabel: "work" }]);
 		const stored = await port.putApiKey({ providerId: "openai", accountLabel: "work", apiKey: "secret-value" });
+		const rotated = await port.putApiKey({ providerId: "openai", accountLabel: "work", apiKey: "rotated-secret" });
 		expect(stored).toMatchObject({ providerId: "openai", credentialRef: "bbcred_work" });
-		expect(requests).toEqual([{ material: { provider_id: "openai", api_key: "secret-value", headers: {} } }]);
+		expect(rotated.accountLabel).toBe(stored.accountLabel);
+		expect(requests).toEqual([
+			{ providerId: "openai", accountLabel: "work", input: { api_key: "secret-value" } },
+			{ providerId: "openai", accountLabel: "work", input: { api_key: "rotated-secret" } },
+		]);
+		const rolePort = createBreadboardModelRolePort({
+			async resolveModelRoles() {
+				return { lock: { role: "default", provider_id: "openai", account_id: "bbacct_work" }, lock_hash: "lock-static" };
+			},
+		});
+		const firstLock = await rolePort.resolveModelRoles({ model_roles: { schema_version: "bb.model_roles.v1" } });
+		const rotatedLock = await rolePort.resolveModelRoles({ model_roles: { schema_version: "bb.model_roles.v1" } });
+		expect(rotatedLock.lock_hash).toBe(firstLock.lock_hash);
 		expect(JSON.stringify(rows)).not.toContain("secret-value");
+		expect(JSON.stringify(rows)).not.toContain("rotated-secret");
 	});
 
 	test("native data source reports credential summaries without exposing secret bytes", async () => {

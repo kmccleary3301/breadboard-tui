@@ -1,9 +1,7 @@
 import { join } from "node:path";
 import {
 	createBreadboardClient,
-	createCanonicalE4Client,
-	type EngineFeatureAuditResponse,
-	type LifecycleEngineBinding,
+	type EngineStatusResponse,
 	type ModelCatalogResponse,
 	type ProviderAuthAttachRequest,
 	type ProviderAuthAttachResponse,
@@ -11,6 +9,8 @@ import {
 	type ProviderAuthDetachResponse,
 	type ProviderAuthStatusResponse,
 } from "@breadboard/sdk";
+import type { LifecycleEngineBinding } from "@breadboard/sdk/internal";
+import { createCanonicalE4Client } from "@breadboard/sdk/internal";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { CanonicalE4SessionPort } from "./canonical-e4-session-port";
 import {
@@ -65,7 +65,7 @@ export interface BreadboardEnginePort {
 	readonly lifecycleFailure: BreadboardLifecycleFailureSignal;
 	openSession(target: OpenSession, signal?: AbortSignal): Promise<OpenedSession>;
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
-	getFeatures(): Promise<EngineFeatureAuditResponse>;
+	getFeatures(): Promise<EngineStatusResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
 	readonly modelRoles: ModelRolePort;
@@ -220,7 +220,7 @@ function createConnectedPort(
 		openSession,
 		getFeatures: async () => {
 			assertOperational();
-			return controlClient.getFeatures();
+			return controlClient.engineStatus();
 		},
 		getModelCatalog: async configPath => {
 			assertOperational();
@@ -228,15 +228,15 @@ function createConnectedPort(
 		},
 		getProviderAuthStatus: async () => {
 			assertOperational();
-			return controlClient.getProviderAuthStatus();
+			return controlClient.providerAuthStatus();
 		},
 		attachProviderAuth: async request => {
 			assertOperational();
-			return controlClient.attachProviderAuth(request);
+			return controlClient.providerAuthAttach(request);
 		},
 		detachProviderAuth: async request => {
 			assertOperational();
-			return controlClient.detachProviderAuth(request);
+			return controlClient.providerAuthDetach(request);
 		},
 		modelRoles: createBreadboardModelRolePort(controlClient),
 		close,

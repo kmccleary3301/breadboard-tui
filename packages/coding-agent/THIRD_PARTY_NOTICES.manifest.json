@@ -3,7 +3,7 @@
   "generator": "scripts/generate-third-party-notices.ts",
   "bundle": {
     "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "sha256": "1cbd748af997a911421346d960c2e4a926db168ec35a3e7398c93040d13e6501",
+    "sha256": "e9cd859a2072b9054992d9a2fb74319ef667aced0ed14f1f1dfd3cbe5b3de3a6",
     "bytes": 22768
   },
   "packageLicense": {
@@ -11,10 +11,10 @@
     "sha256": "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308"
   },
   "sdk": {
-    "artifactPath": "packages/coding-agent/vendor/breadboard-sdk-0.2.5.tgz",
-    "artifactSha256": "10d0ad86df39c8a7972073efb274c15c24bc9aa86d2c663123e1deef91489782",
+    "artifactPath": "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz",
+    "artifactSha256": "7da1ae7af9483efb81ad313e7123b3be47b2acb38a6521cb9f3dc4f2afc853ce",
     "provenancePath": "packages/coding-agent/breadboard-sdk-provenance.json",
-    "provenanceSha256": "c0b578487b0c8e090f001993325271a2648eea9c2b2f701351bbe6d89df90f58",
+    "provenanceSha256": "af542d48e6f67439566634c26157e98e5ec170390a02ccf33baa3b9da062aeca",
     "licenseNoticeMemberPresent": false,
     "licenseAssertion": "none",
     "licenseNoticeMembers": []

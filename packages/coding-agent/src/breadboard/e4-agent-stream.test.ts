@@ -9,8 +9,8 @@ import type {
 	StructuredSubmit,
 	SubmitInput,
 	SubmitReceipt,
-} from "@breadboard/sdk";
-import { decodeLoggedSessionEvent, LifecycleE4ClientError } from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
+import { decodeLoggedSessionEvent, LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { Agent, type AgentEvent, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Context } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

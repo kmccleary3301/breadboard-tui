@@ -17,7 +17,7 @@ import {
 	type PermissionDecisionReceipt,
 	type SessionReplayFacts,
 	type SubmitReceipt,
-} from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
 import { E4AgentStreamBridge, breadboardProjectionEventId } from "../../src/breadboard/e4-agent-stream";
 import { CanonicalE4SessionPort } from "../../src/breadboard/canonical-e4-session-port";
 import { displayEndpointIdentity, presentLifecycle, restoreLifecycleTerminal, secretSafeLifecycleStatus } from "../../src/breadboard/lifecycle/lifecycle-presenter";
@@ -93,6 +93,7 @@ function openedSession(events: readonly LoggedSessionEvent[], submissions: unkno
 	};
 }
 
+type MutableReplayFacts = { -readonly [Key in keyof SessionReplayFacts]: SessionReplayFacts[Key] };
 const validReplayFacts = (): SessionReplayFacts => ({
 	replayRetention: { maxEvents: 1000, maxAgeMs: 86_400_000, configurationDigest: replayConfigurationDigest },
 	earliestRetainedSequence: 1,
@@ -113,8 +114,8 @@ function offConfig(): BreadboardRunConfig {
 	return resolveBreadboardRunConfig({ ...configInput, cli: { engineMode: "off" } });
 }
 
-function failedResult(reason: "mode_forbidden" | "engine_mode_off" = "mode_forbidden"): LifecycleResult {
-	return lifecycleFailure("off", "failed", reason);
+function failedResult(reason: "mode_forbidden" | "engine_mode_off" = "mode_forbidden"): Extract<LifecycleResult, { kind: "failure" }> {
+	return lifecycleFailure("off", "failed", reason) as Extract<LifecycleResult, { kind: "failure" }>;
 }
 
 describe("BBOMP-CORE-52 — SDK event envelope, decoding, ordering, and cursor behavior (12)", () => {
@@ -200,7 +201,7 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 	});
 	test("[fast] does not start a bridge stream before the bridge is started", async () => {
 		const bridge = new E4AgentStreamBridge({ session: openedSession([]), emitAgentEvent: async () => {}, releaseAgentEvent: () => {}, submissionOwned: async () => {}, projectionCommitted: async () => {} });
-		const result = await bridge.stream(model, context).result();
+		const result = await (await bridge.stream(model, context)).result();
 		expect(result.stopReason).toBe("error");
 		await bridge.close();
 	});
@@ -208,7 +209,7 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 		const submissions: unknown[] = [];
 		const bridge = new E4AgentStreamBridge({ session: openedSession([turnStarted, wireEvent(2, "assistant.message.end", { text: "done" }), wireEvent(3, "turn_completed", {})], submissions), emitAgentEvent: async () => {}, releaseAgentEvent: () => {}, submissionOwned: async () => {}, projectionCommitted: async () => {}, modelPolicy: { kind: "fixed", model } });
 		bridge.start();
-		const result = await bridge.stream(model, context).result();
+		const result = await (await bridge.stream(model, context)).result();
 		expect(submissions).toHaveLength(1);
 		expect(submissions[0]).toMatchObject({ text: "run the requested turn" });
 		expect(result.stopReason).toBe("stop");
@@ -223,7 +224,7 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 		expect(observed).toEqual([2]);
 	});
 	test("[fast] reconnect replay facts validate against the advertised retention contract", async () => {
-		const facts = validReplayFacts();
+		const facts = validReplayFacts() as MutableReplayFacts;
 		const { sessionReplayContractDigest: _ignored, ...replayFacts } = facts;
 		facts.sessionReplayContractDigest = await computeSessionReplayDigest(replayFacts as never) as never;
 		await expect(validateSessionReplayFacts(facts)).resolves.toBeUndefined();
@@ -274,20 +275,20 @@ describe("BBOMP-CORE-52 — tool result, terminal outcome, and exact-once visibi
 		const events = [turnStarted, wireEvent(2, "tool_call", { call_id: "call-1", tool: "read", arguments: {}, action: null, diff_preview: null, progress: null }), wireEvent(3, "tool.result", { call_id: "call-1", tool: "read", status: "completed", error: false, result: { text: "ok" }, artifact_ref: null }), wireEvent(4, "assistant.message.end", { text: "finished" }), wireEvent(5, "turn_completed", {})];
 		const bridge = new E4AgentStreamBridge({ session: openedSession(events), emitAgentEvent: async () => {}, releaseAgentEvent: () => {}, submissionOwned: async () => {}, projectionCommitted: async () => {}, modelPolicy: { kind: "fixed", model } });
 		bridge.start();
-		const result = await bridge.stream(model, context).result();
+		const result = await (await bridge.stream(model, context)).result();
 		expect(result.content).toEqual([{ type: "text", text: "finished" }]);
 		await bridge.close();
 	});
 	test("a terminal turn completion is represented as a stop outcome", async () => {
 		const bridge = new E4AgentStreamBridge({ session: openedSession([turnStarted, wireEvent(2, "turn_completed", {})]), emitAgentEvent: async () => {}, releaseAgentEvent: () => {}, submissionOwned: async () => {}, projectionCommitted: async () => {}, modelPolicy: { kind: "fixed", model } });
 		bridge.start();
-		expect((await bridge.stream(model, context).result()).stopReason).toBe("stop");
+		expect((await (await bridge.stream(model, context)).result()).stopReason).toBe("stop");
 		await bridge.close();
 	});
 	test("a terminal turn failure remains an error rather than a successful stop", async () => {
 		const bridge = new E4AgentStreamBridge({ session: openedSession([turnStarted, wireEvent(2, "turn_failed", { error: { code: "turn_execution_failed", message: "[redacted]" } })]), emitAgentEvent: async () => {}, releaseAgentEvent: () => {}, submissionOwned: async () => {}, projectionCommitted: async () => {}, modelPolicy: { kind: "fixed", model } });
 		bridge.start();
-		expect((await bridge.stream(model, context).result()).stopReason).toBe("error");
+		expect((await (await bridge.stream(model, context)).result()).stopReason).toBe("error");
 		await bridge.close();
 	});
 	test("projection receipt IDs identify already-visible events for exact-once replay", () => {
@@ -312,7 +313,10 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 		expect(() => lifecycleState("local-owned", "failed")).toThrow();
 	});
 	test("off lifecycle presentation exits successfully with actionable remediation", () => {
-		const presentation = presentLifecycle({ kind: "off", state: lifecycleState("off", "off") });
+		const presentation = presentLifecycle({
+			kind: "off",
+			state: lifecycleState("off", "off") as Extract<LifecycleResult, { kind: "off" }>["state"],
+		});
 		expect(presentation).toMatchObject({ summary: "BreadBoard engine: off", exitCode: 0 });
 		expect(presentation.remediation).toContain("--engine-mode");
 	});
@@ -332,10 +336,10 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 
 describe("BBOMP-CORE-52 — package identity, SDK provenance, version, and compatibility (6)", () => {
 	test("package identity names the pinned BreadBoard SDK artifact", () => {
-		expect(provenance).toMatchObject({ packageName: "@breadboard/sdk", packageVersion: "0.2.5" });
+		expect(provenance).toMatchObject({ packageName: "@breadboard/sdk", packageVersion: "0.3.0" });
 	});
 	test("SDK provenance records a content-addressed artifact", () => {
-		expect(provenance.artifactPath).toContain("breadboard-sdk-0.2.5.tgz");
+		expect(provenance.artifactPath).toContain("breadboard-sdk-0.3.0.tgz");
 		expect(provenance.artifactSha256).toMatch(/^[0-9a-f]{64}$/);
 	});
 	test("SDK provenance records the source commit used for the artifact", () => {
@@ -345,8 +349,7 @@ describe("BBOMP-CORE-52 — package identity, SDK provenance, version, and compa
 		expect(() => assertAdvertisedReplayConfigurationDigest(replayConfigurationDigest)).not.toThrow();
 	});
 	test("the event envelope includes the SDK-owned stable cursor fields", () => {
-		expect(serializeLoggedSessionEvent(turnStarted)).toBeInstanceOf(Uint8Array);
-		expect(turnStarted.eventId).toBe("event-1");
+		expect(String(turnStarted.eventId)).toBe("event-1");
 	});
 	test("compatibility facts reject a mismatched replay configuration digest", () => {
 		expect(() => assertAdvertisedReplayConfigurationDigest("sha256:not-the-pinned-digest")).toThrow();

@@ -90,7 +90,7 @@ async function runSmokeTest(): Promise<void> {
 	const noticeBundle = await Bun.file(noticeBundlePath).text();
 	if (
 		!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n") ||
-		!noticeBundle.includes("Package: @breadboard/sdk@0.2.5")
+		!noticeBundle.includes("Package: @breadboard/sdk@0.3.0")
 	) {
 		throw new Error("distribution notice bundle is missing or malformed");
 	}

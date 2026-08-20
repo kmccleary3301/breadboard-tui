@@ -439,11 +439,11 @@ SOFTWARE.
 ===== END packages/utils/src/vendor/mermaid-ascii/NOTICE =====
 
 ===== BEGIN BUNDLED COMPONENT PROVENANCE =====
-Package: @breadboard/sdk@0.2.5
-Artifact: packages/coding-agent/vendor/breadboard-sdk-0.2.5.tgz
-Artifact SHA-256: 10d0ad86df39c8a7972073efb274c15c24bc9aa86d2c663123e1deef91489782
+Package: @breadboard/sdk@0.3.0
+Artifact: packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz
+Artifact SHA-256: 7da1ae7af9483efb81ad313e7123b3be47b2acb38a6521cb9f3dc4f2afc853ce
 Provenance: packages/coding-agent/breadboard-sdk-provenance.json
-Provenance SHA-256: c0b578487b0c8e090f001993325271a2648eea9c2b2f701351bbe6d89df90f58
+Provenance SHA-256: af542d48e6f67439566634c26157e98e5ec170390a02ccf33baa3b9da062aeca
 License assertion: none; archive inspection found no LICENSE/NOTICE member.
 ===== END BUNDLED COMPONENT PROVENANCE =====
 

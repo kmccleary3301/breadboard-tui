@@ -6,7 +6,7 @@ import {
 	type StructuredSubmit,
 	type SubmitReceipt,
 	sha256Bytes,
-} from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
 import type { AgentEvent, AgentToolResult, StreamFn } from "@oh-my-pi/pi-agent-core";
 import type {
 	AssistantMessage,

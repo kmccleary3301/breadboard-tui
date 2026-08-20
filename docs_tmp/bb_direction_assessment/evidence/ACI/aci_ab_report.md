@@ -69,15 +69,15 @@ The fork's existing compile entrypoint is `packages/coding-agent/scripts/build-b
 Provenance and checksum: `aci_binary_provenance.json`
 
 ```text
-source commit: d3dbb216b24b81266dc1442437b4db2eb7679144
-source tree:   a4af095931e3cb5afee2d8be62c00df7bd976799
-artifact sha256: 461235004786018c56307d8b0e31766c26bdc617d059819b54b064827ef9433a
+source commit: d68a82e496c07b7a952c6dcc46ae83284c034827
+source tree:   ef20c39ec1de09414ea852b7e37027141f87acec
+artifact sha256: 69d82d4c5f49faf1a7ea6e90b2f1e6dee971f23266c6cacacfd3acea9c23125a
 ```
 
 Build and smoke commands:
 
 ```text
-BREADBOARD_P30_BACKEND_ROOT=/tmp/bb_p30_backend_pin bun --cwd=packages/coding-agent run build
+BREADBOARD_P30_BACKEND_ROOT=/Users/kylemccleary/projects/breadboard/breadboard_outcome_campaign_20260818 bun --cwd=packages/coding-agent run build
 packages/coding-agent/dist/bb --version   # omp/17.4.0
 packages/coding-agent/dist/bb --help      # exit 0
 packages/coding-agent/dist/bb --smoke-test # smoke-test: ok

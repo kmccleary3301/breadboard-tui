@@ -1,4 +1,4 @@
-import type { BoundLifecycleE4Client, LifecycleEngineBinding } from "@breadboard/sdk";
+import type { BoundLifecycleE4Client, LifecycleEngineBinding } from "@breadboard/sdk/internal";
 import type { BreadboardEngineMode } from "./run-config";
 
 export const LIFECYCLE_STATES = [

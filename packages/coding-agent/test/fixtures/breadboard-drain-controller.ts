@@ -1,4 +1,4 @@
-import { createLifecycleE4Client } from "@breadboard/sdk";
+import { createLifecycleE4Client } from "@breadboard/sdk/internal";
 
 interface ControllerInput {
 	readonly baseUrl: string;

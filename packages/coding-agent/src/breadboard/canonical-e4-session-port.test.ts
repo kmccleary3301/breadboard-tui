@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import type { OpenedSession as CanonicalOpenedSession, SessionId } from "@breadboard/sdk";
+import type { OpenedSession as CanonicalOpenedSession, SessionId } from "@breadboard/sdk/internal";
 import { CanonicalE4SessionPort } from "./canonical-e4-session-port";
 
 const asSessionId = (value: string): SessionId => value as SessionId;

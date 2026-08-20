@@ -7,7 +7,7 @@
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
-import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk";
+import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk/internal";
 import { type AgentEvent, EventLoopKeepalive, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
