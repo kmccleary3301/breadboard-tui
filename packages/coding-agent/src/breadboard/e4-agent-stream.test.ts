@@ -218,6 +218,72 @@ describe("E4AgentStreamBridge", () => {
 		await bridge.close();
 	});
 
+	test("uses repeated backend turn starts as completed assistant message boundaries", async () => {
+		const submitted: SubmitInput[] = [];
+		const agentEvents: AgentEvent[] = [];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[
+					started,
+					wireEvent(3, "assistant.message.delta", { text: "first" }),
+					wireEvent(4, "assistant.message.end", { text: "first" }),
+					wireEvent(5, "turn_start", {}),
+					wireEvent(6, "assistant.message.delta", { text: "second" }),
+					wireEvent(7, "assistant.message.end", { text: "second" }),
+					wireEvent(8, "turn_completed", {}),
+				],
+				submitted,
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			emitAgentEvent: async event => {
+				agentEvents.push(event);
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const result = await (await startBridgeStream(bridge, model, context)).result();
+		const firstCompletion = agentEvents.find(event => event.type === "message_end");
+
+		expect(
+			firstCompletion?.type === "message_end" && firstCompletion.message.role === "assistant"
+				? firstCompletion.message.content
+				: null,
+		).toEqual([{ type: "text", text: "first" }]);
+		expect(result.content).toEqual([{ type: "text", text: "second" }]);
+		await bridge.close();
+	});
+
+	test("commits session-scoped compaction tree nodes before the owned turn", async () => {
+		const submitted: SubmitInput[] = [];
+		const committed: number[] = [];
+		const events = [
+			wireEvent(1, "ctree_node", { node: { id: "bootstrap" } }, null),
+			started,
+			wireEvent(3, "assistant.message.delta", { text: "ready" }),
+			wireEvent(4, "assistant.message.end", { text: "ready" }),
+			wireEvent(5, "turn_completed", {}),
+		];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(events, submitted),
+			releaseAgentEvent() {},
+			async projectionCommitted(cursor) {
+				committed.push(cursor.sequence);
+			},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const stream = await startBridgeStream(bridge, model, context);
+		const result = await stream.result();
+
+		expect(result.content).toEqual([{ type: "text", text: "ready" }]);
+		expect(committed).toContain(1);
+		await bridge.close();
+	});
+
 	test("reuses the exact structured submission after an ambiguous failure without retrying automatically", async () => {
 		const submitted: SubmitInput[] = [];
 		const retryStarted = Promise.withResolvers<void>();

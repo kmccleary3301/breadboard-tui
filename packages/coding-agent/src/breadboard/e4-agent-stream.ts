@@ -547,6 +547,7 @@ export class E4AgentStreamBridge {
 						case "checkpoint_restored":
 						case "skills_catalog_observed":
 						case "skills_selection_observed":
+						case "ctree_node_observed":
 						case "ctree_snapshot_observed":
 							await this.#trackEventApplication(this.#commit(event, []));
 							continue;
@@ -612,6 +613,7 @@ export class E4AgentStreamBridge {
 		if (sink.terminal) return;
 		switch (event.kind) {
 			case "turn_started":
+				await this.#flushAssistantText(sink);
 				this.#ensureStarted(sink);
 				await this.#commit(event, []);
 				return;

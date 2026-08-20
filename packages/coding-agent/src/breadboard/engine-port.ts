@@ -142,10 +142,17 @@ const SESSION_SCOPED_EVENT_TYPES = new Set([
 	"checkpoint_restored",
 	"skills_catalog",
 	"skills_selection",
+	"ctree_node",
 	"ctree_snapshot",
 ]);
 
-function filterUncorrelatedCanonicalEvents(response: Response): Response {
+function visibleAssistantText(payload: unknown): string {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+	const text = (payload as Record<string, unknown>).text;
+	return typeof text === "string" ? text.replace(/\n*>>>>>> END RESPONSE\s*$/, "") : "";
+}
+
+export function filterUncorrelatedCanonicalEvents(response: Response): Response {
 	if (!response.body) return response;
 	const decoder = new TextDecoder();
 	const encoder = new TextEncoder();
@@ -173,20 +180,8 @@ function filterUncorrelatedCanonicalEvents(response: Response): Response {
 					try {
 						const raw = JSON.parse(data) as Record<string, unknown>;
 						if (raw.type === "assistant_message") {
-							raw.type = "assistant.message.delta";
-							const payload = raw.payload;
-							raw.payload = {
-								text:
-									payload &&
-									typeof payload === "object" &&
-									!Array.isArray(payload) &&
-									typeof (payload as Record<string, unknown>).text === "string"
-										? (payload as Record<string, unknown>).text
-										: "",
-							};
-						} else if (raw.type === "completion") {
 							raw.type = "assistant.message.end";
-							raw.payload = { text: null };
+							raw.payload = { text: visibleAssistantText(raw.payload) };
 						} else if (raw.type === "run_finished") {
 							raw.type = "turn_completed";
 							raw.payload = {};
@@ -209,7 +204,7 @@ function filterUncorrelatedCanonicalEvents(response: Response): Response {
 						}
 						drop =
 							raw.stable_cursor === true &&
-							raw.turn === null &&
+							(raw.turn_id == null || raw.input_id == null) &&
 							typeof raw.type === "string" &&
 							!SESSION_SCOPED_EVENT_TYPES.has(raw.type);
 					} catch {

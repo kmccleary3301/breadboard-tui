@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { connectCanonicalBreadboardEnginePort } from "./engine-port";
+import { connectCanonicalBreadboardEnginePort, filterUncorrelatedCanonicalEvents } from "./engine-port";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
 
 const offConfig = {
@@ -52,5 +52,56 @@ describe("connectCanonicalBreadboardEnginePort", () => {
 		expect(connection.kind).toBe("failure");
 		if (connection.kind === "failure") expect(connection.result.kind).toBe("failure");
 		expect(failures).toEqual([]);
+	});
+});
+
+describe("filterUncorrelatedCanonicalEvents", () => {
+	test("retains canonical correlation even when the legacy numeric turn is null", async () => {
+		const envelope = (sequence: number, type: string, correlation: boolean, payload: object = {}): string =>
+			[
+				`id: ${sequence}`,
+				`data: ${JSON.stringify({
+					stable_cursor: true,
+					id: `event-${sequence}`,
+					seq: sequence,
+					session_id: "session-1",
+					input_id: correlation ? "input-1" : null,
+					turn_id: correlation ? "turn-1" : null,
+					turn: null,
+					timestamp_ms: sequence,
+					type,
+					payload,
+				})}`,
+				"",
+				"",
+			].join("\n");
+		const response = new Response(
+			[
+				`data: ${JSON.stringify({ stable_cursor: false, type: "stream.open", payload: {} })}\n\n`,
+				envelope(3, "ctree_node", true),
+				envelope(4, "user_message", true),
+				envelope(5, "ctree_node", false),
+				envelope(6, "warning", false),
+				envelope(7, "assistant_message", true, { text: "done\n\n>>>>>> END RESPONSE" }),
+				envelope(8, "completion", true, { summary: { completed: true } }),
+				envelope(9, "run_finished", true, { completed: true }),
+			].join(""),
+			{ headers: { "content-type": "text/event-stream" } },
+		);
+
+		const filtered = await filterUncorrelatedCanonicalEvents(response).text();
+
+		expect(filtered).toContain('"seq":3');
+		expect(filtered).toContain('"seq":4');
+		expect(filtered).toContain('"seq":5');
+		expect(filtered).not.toContain('"seq":6');
+		expect(filtered).toContain('"seq":7');
+		expect(filtered).toContain('"type":"assistant.message.end"');
+		expect(filtered).toContain('"text":"done"');
+		expect(filtered).not.toContain(">>>>>> END RESPONSE");
+		expect(filtered).toContain('"seq":8');
+		expect(filtered).toContain('"type":"completion"');
+		expect(filtered).toContain('"seq":9');
+		expect(filtered).toContain('"type":"turn_completed"');
 	});
 });
