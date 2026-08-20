@@ -2593,6 +2593,10 @@ export async function runRootCommand(
 				throw error;
 			}
 		}
+		// The bridge must observe and admit turns even when no extension UI
+		// context is installed (for example OMP_SKIP_SETUP=1). The callback
+		// below remains an idempotent compatibility path for extension hosts.
+		if (isInteractive) preparedBreadboardRuntime?.start();
 		const setInteractiveToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean): void => {
 			breadboardUIContext = hasUI ? uiContext : undefined;
 			setToolUIContext(uiContext, hasUI);
