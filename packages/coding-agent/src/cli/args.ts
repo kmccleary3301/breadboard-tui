@@ -27,6 +27,8 @@ export interface Args {
 	/** Workspace directories beyond cwd for this session (repeatable `--add-dir`). */
 	addDir?: string[];
 	profile?: string;
+	engineMode?: string;
+	engineUrl?: string;
 	alias?: string;
 	allowHome?: boolean;
 	provider?: string;
