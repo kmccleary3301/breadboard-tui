@@ -136,6 +136,67 @@ function authorityFacts(handle: BreadboardEngineReadyHandle): BreadboardEngineAu
 		ownerGeneration: handle.ownerGeneration,
 	});
 }
+const SESSION_SCOPED_EVENT_TYPES = new Set([
+	"todo_updated",
+	"checkpoint_list",
+	"checkpoint_restored",
+	"skills_catalog",
+	"skills_selection",
+	"ctree_snapshot",
+]);
+
+function filterUncorrelatedCanonicalEvents(response: Response): Response {
+	if (!response.body) return response;
+	const decoder = new TextDecoder();
+	const encoder = new TextEncoder();
+	let pending = "";
+	let block = "";
+	const transform = new TransformStream<Uint8Array, Uint8Array>({
+		transform(chunk, controller) {
+			pending += decoder.decode(chunk, { stream: true });
+			for (;;) {
+				const newline = pending.indexOf("\n");
+				if (newline < 0) break;
+				const line = pending.slice(0, newline);
+				pending = pending.slice(newline + 1);
+				if (line.length > 0) {
+					block += `${line}\n`;
+					continue;
+				}
+				let drop = false;
+				const data = block
+					.split("\n")
+					.filter(line => line.startsWith("data:"))
+					.map(line => line.slice(5).trimStart())
+					.join("\n");
+				if (data) {
+					try {
+						const raw = JSON.parse(data) as { stable_cursor?: unknown; type?: unknown; turn?: unknown };
+						drop =
+							raw.stable_cursor === true &&
+							raw.turn === null &&
+							typeof raw.type === "string" &&
+							!SESSION_SCOPED_EVENT_TYPES.has(raw.type);
+					} catch {
+						drop = false;
+					}
+				}
+				if (!drop) controller.enqueue(encoder.encode(`${block}\n`));
+				block = "";
+			}
+		},
+		flush(controller) {
+			pending += decoder.decode();
+			if (pending.length > 0) block += pending;
+			if (block.length > 0) controller.enqueue(encoder.encode(block));
+		},
+	});
+	return new Response(response.body.pipeThrough(transform), {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
+}
 
 function createConnectedPort(
 	handle: BreadboardEngineReadyHandle,
@@ -144,13 +205,14 @@ function createConnectedPort(
 	options: BreadboardEngineConnectionOptions,
 ): BreadboardEnginePort {
 	const strictEventFetch = Object.assign(
-		(input: Parameters<typeof handle.requestFetch>[0], init: Parameters<typeof handle.requestFetch>[1]) => {
+		async (input: Parameters<typeof handle.requestFetch>[0], init: Parameters<typeof handle.requestFetch>[1]) => {
 			const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
 			if (url.pathname.endsWith("/events")) {
 				url.searchParams.set("schema", "2");
 				url.searchParams.set("include_legacy", "false");
 			}
-			return handle.requestFetch(url, init);
+			const response = await handle.requestFetch(url, init);
+			return url.pathname.endsWith("/events") ? filterUncorrelatedCanonicalEvents(response) : response;
 		},
 		{ preconnect: handle.requestFetch.preconnect },
 	);
