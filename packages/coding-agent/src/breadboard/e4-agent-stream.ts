@@ -66,6 +66,7 @@ interface PendingSubmit {
 	readonly canonicalDigest: string;
 	readonly input: StructuredSubmit;
 	recoveringAfterAbort: boolean;
+	acceptedWithoutReceipt: boolean;
 	turnId: TurnId | undefined;
 }
 
@@ -321,6 +322,23 @@ export class E4AgentStreamBridge {
 			notifyWaiters,
 		);
 	}
+	async #recoverAcceptedSubmissionWithoutReceipt(attempt: PendingSubmit, error: unknown): Promise<SubmitReceipt> {
+		attempt.recoveringAfterAbort = true;
+		attempt.acceptedWithoutReceipt = true;
+		while (attempt.turnId === undefined && !this.#closed && !this.#observeFailure) {
+			await this.#waitForOwnershipChange();
+		}
+		if (!attempt.turnId) throw error;
+		const owned = this.#ownedSubmissions.get(String(attempt.turnId));
+		if (!owned) throw error;
+		return {
+			clientMessageId: owned.clientMessageId as SubmitReceipt["clientMessageId"],
+			inputId: owned.inputId as SubmitReceipt["inputId"],
+			turnId: owned.turnId as SubmitReceipt["turnId"],
+			disposition: "started",
+			originalDisposition: "started",
+		};
+	}
 
 	async #submitAttempt(
 		attempt: PendingSubmit,
@@ -332,7 +350,13 @@ export class E4AgentStreamBridge {
 			return undefined;
 		}
 		const submission = this.#session.submit(attempt.input);
-		if (!signal) return submission;
+		if (!signal) {
+			return submission.catch(error =>
+				isAcceptedWithoutReceipt(error)
+					? this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error)
+					: Promise.reject(error),
+			);
+		}
 		let abortSubmission!: () => void;
 		const aborted = new Promise<{ readonly kind: "aborted" }>(resolve => {
 			abortSubmission = () => resolve({ kind: "aborted" });
@@ -343,6 +367,8 @@ export class E4AgentStreamBridge {
 			| { readonly kind: "aborted" };
 		try {
 			result = await Promise.race([submission.then(receipt => ({ kind: "receipt" as const, receipt })), aborted]);
+		} catch (error) {
+			return await this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error);
 		} finally {
 			signal.removeEventListener("abort", abortSubmission);
 		}
@@ -448,6 +474,7 @@ export class E4AgentStreamBridge {
 					input: { ...input, clientMessageId: crypto.randomUUID() },
 					recoveringAfterAbort: false,
 					turnId: undefined,
+					acceptedWithoutReceipt: false,
 				};
 			const receipt = await this.#submitAttempt(attempt, sink, signal);
 			if (!receipt) return;
@@ -529,7 +556,7 @@ export class E4AgentStreamBridge {
 				}
 				const turnKey = String(event.turnId);
 				let sink = this.#sinks.get(turnKey);
-				if (!sink && this.#submissionsInFlight.size) {
+				if (!sink && this.#submissionsInFlight.size && !this.#pendingSubmit?.recoveringAfterAbort) {
 					await Promise.all([...this.#submissionsInFlight]);
 					sink = this.#sinks.get(turnKey);
 					if (this.#closed || this.#observeFailure) break;
@@ -537,10 +564,27 @@ export class E4AgentStreamBridge {
 				let ownership = this.#ownedSubmissions.get(turnKey);
 				const pendingAttempt = this.#pendingSubmit;
 				if (!sink && !ownership && pendingAttempt && pendingAttempt.turnId === undefined) {
-					await this.#waitForOwnershipChange();
-					if (this.#closed || this.#observeFailure) break;
+					if (pendingAttempt.acceptedWithoutReceipt) {
+						pendingAttempt.turnId = event.turnId;
+						const syntheticReceipt = {
+							clientMessageId: pendingAttempt.input.clientMessageId,
+							inputId: event.inputId,
+							turnId: event.turnId,
+							disposition: "started",
+							originalDisposition: "started",
+						} as SubmitReceipt;
+						await this.#recordOwnedSubmission(syntheticReceipt);
+						ownership = this.#ownedSubmissions.get(turnKey);
+					} else {
+						await this.#waitForOwnershipChange();
+						if (this.#closed || this.#observeFailure) break;
+						sink = this.#sinks.get(turnKey);
+						ownership = this.#ownedSubmissions.get(turnKey);
+					}
+				}
+				if (pendingAttempt?.acceptedWithoutReceipt && ownership && !sink) {
+					await Promise.all([...this.#submissionsInFlight]);
 					sink = this.#sinks.get(turnKey);
-					ownership = this.#ownedSubmissions.get(turnKey);
 				}
 				if (!sink && !ownership) {
 					await this.#trackEventApplication(this.#commit(event, []));
@@ -1068,6 +1112,13 @@ async function canonicalSubmitDigest(input: LogicalSubmit): Promise<string> {
 	}
 }
 
+function isAcceptedWithoutReceipt(error: unknown): boolean {
+	return (
+		error instanceof CanonicalE4ClientError &&
+		error.failure.kind === "protocol" &&
+		error.failure.code === "invalid_client_message_id"
+	);
+}
 function isAmbiguousSubmitFailure(error: unknown): boolean {
 	if (!(error instanceof CanonicalE4ClientError || error instanceof LifecycleE4ClientError)) return false;
 	return (

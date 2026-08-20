@@ -148,10 +148,21 @@ function createConnectedPort(
 		requestTimeoutMs: supervisor.config.requestTimeoutMs,
 		fetch: handle.requestFetch,
 	};
-	const sessionPort = new CanonicalE4SessionPort(createCanonicalE4Client(clientConfig), {
+	const canonicalClient = createCanonicalE4Client(clientConfig);
+	const controlClient = createBreadboardClient(clientConfig);
+	const sessionClient = {
+		...canonicalClient,
+		async create(request: Parameters<typeof canonicalClient.create>[0]) {
+			if (request.task === undefined) {
+				const created = await controlClient.createSession({ config_path: request.configPath } as never);
+				return await canonicalClient.attach({ sessionId: created.session_id });
+			}
+			return await canonicalClient.create(request);
+		},
+	};
+	const sessionPort = new CanonicalE4SessionPort(sessionClient, {
 		onLateCloseError: options.onLateSessionCloseError,
 	});
-	const controlClient = createBreadboardClient(clientConfig);
 	const sessions = new Set<OpenedSession>();
 	let closed = false;
 	let closePromise: Promise<void> | undefined;
