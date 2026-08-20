@@ -69,9 +69,9 @@ The fork's existing compile entrypoint is `packages/coding-agent/scripts/build-b
 Provenance and checksum: `aci_binary_provenance.json`
 
 ```text
-source commit: 879eeb1917971e4b78846a2a9dc42dcfaa2d65b1
-source tree:   208b278fae934e7b29ec9cb4e40f0acc6318ddd2
-artifact sha256: 392328895789b17b5ff8e1717bbe25188f2dd2dff201f1c68b2ea82f7be6c12a
+source commit: c4de1e8d01eb5a74cac03a5736b81426b880e200
+source tree:   fefa2fcf862d46a56a10abc3857d9ed9ea408d8c
+artifact sha256: a294536d00f026a62db1fd939ebc90dc6264948f5476e5313466c0562e749515
 ```
 
 Build and smoke commands:
