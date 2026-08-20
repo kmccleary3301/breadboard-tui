@@ -171,7 +171,21 @@ function filterUncorrelatedCanonicalEvents(response: Response): Response {
 					.join("\n");
 				if (data) {
 					try {
-						const raw = JSON.parse(data) as { stable_cursor?: unknown; type?: unknown; turn?: unknown };
+						const raw = JSON.parse(data) as Record<string, unknown>;
+						const turn = raw.turn;
+						if (
+							raw.stable_cursor === true &&
+							Number.isSafeInteger(turn) &&
+							raw.turn_id == null &&
+							raw.input_id == null
+						) {
+							raw.turn_id = `turn-${turn}`;
+							raw.input_id = `input-${turn}`;
+							const lines = block.split("\n");
+							const dataIndex = lines.findIndex(line => line.startsWith("data:"));
+							if (dataIndex >= 0) lines[dataIndex] = `data: ${JSON.stringify(raw)}`;
+							block = lines.join("\n");
+						}
 						drop =
 							raw.stable_cursor === true &&
 							raw.turn === null &&
