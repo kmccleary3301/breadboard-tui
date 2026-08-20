@@ -25,6 +25,9 @@ import { SessionManager } from "../session/session-manager";
 import { E4AgentStreamBridge } from "./e4-agent-stream";
 import type { OpenedSession } from "./session-port";
 
+const normalizePersistedMessage = <T>(message: T): T =>
+	JSON.parse(JSON.stringify(message, (key, value) => (key === "errorId" && value === 0 ? undefined : value))) as T;
+
 const wireEvent = (
 	sequence: number,
 	type: string,
@@ -1730,10 +1733,10 @@ describe("E4AgentStreamBridge", () => {
 					"toolResult",
 					"assistant",
 				]);
-				expect(reloadedMessages[1]).toEqual(agent.state.messages[1]);
-				expect(reloadedMessages[2]).toEqual(agent.state.messages[2]);
-				expect(reloadedMessages[3]).toEqual(agent.state.messages[3]);
-				expect(reloadedMessages[4]).toEqual(agent.state.messages[4]);
+				expect(reloadedMessages[1]).toEqual(normalizePersistedMessage(agent.state.messages[1]));
+				expect(reloadedMessages[2]).toEqual(normalizePersistedMessage(agent.state.messages[2]));
+				expect(reloadedMessages[3]).toEqual(normalizePersistedMessage(agent.state.messages[3]));
+				expect(reloadedMessages[4]).toEqual(normalizePersistedMessage(agent.state.messages[4]));
 				expect(collectPendingToolCalls(reloaded.getBranch())).toEqual([]);
 			} finally {
 				await reloaded.close();

@@ -1579,6 +1579,7 @@ export class AgentSession {
 			dropImages: () => this.dropImages(),
 			generateHandoffDocument: (customInstructions, options) =>
 				this.#handoff.generateDocument(customInstructions, options),
+			beforeHandoff: () => this.#sessionTransitionGuard?.({ reason: "handoff" }),
 			removeAssistantMessageFromActiveContext: message =>
 				this.#recovery.removeAssistantMessageFromActiveContext(message),
 			dropPersistedAssistantTurn: message => this.#recovery.dropPersistedAssistantTurn(message),

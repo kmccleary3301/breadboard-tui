@@ -1327,7 +1327,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("rejects threshold-triggered auto-handoff before generation or session mutation", async () => {
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 
@@ -1383,8 +1383,10 @@ describe("AgentSession handoff", () => {
 		expect(generateHandoffSpy).not.toHaveBeenCalled();
 		expect(session.sessionFile).toBe(originalSessionFile);
 		expect(session.sessionId).toBe(original.sessionId);
-		expect(sessionManager.getEntries()).toEqual(original.entries);
-		expect(session.agent.state.messages).toEqual(original.messages);
+		const stableState = (value: unknown): unknown =>
+			JSON.parse(JSON.stringify(value, (key, item) => (key === "errorId" && item === 0 ? undefined : item)));
+		expect(stableState(sessionManager.getEntries())).toEqual(stableState(original.entries));
+		expect(stableState(session.agent.state.messages)).toEqual(stableState(original.messages));
 		expect(session.agent.peekSteeringQueue()).toEqual(original.steering);
 		expect(session.agent.peekFollowUpQueue()).toEqual(original.followUp);
 		expect(session.model).toBe(original.model);

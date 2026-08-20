@@ -295,6 +295,7 @@ export interface SessionMaintenanceHost {
 		customInstructions?: string,
 		options?: SessionHandoffOptions,
 	): Promise<HandoffResult | undefined>;
+	beforeHandoff(): void | Promise<void>;
 	removeAssistantMessageFromActiveContext(message: AssistantMessage): void;
 	dropPersistedAssistantTurn(message: AssistantMessage): Promise<string | undefined>;
 	runRecoveryCompactionWithRollback(
@@ -1083,6 +1084,7 @@ export class SessionMaintenance {
 		const entries = this.#host.sessionManager.getBranch();
 		const messageCount = entries.filter(e => e.type === "message").length;
 		if (messageCount < 2) throw new Error("Nothing to hand off (no messages yet)");
+		await this.#host.beforeHandoff();
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		const preparation = prepareCompaction(
 			entries,
@@ -2809,6 +2811,9 @@ export class SessionMaintenance {
 			// queue, not the core steering queue (which handoff's agent.reset() would wipe).
 			const startEvent = { type: "auto_compaction_start" as const, reason, action };
 			await this.#emitLifecycleEvent(startEvent, false);
+			if (action === "handoff") {
+				await this.#host.beforeHandoff();
+			}
 			if (armedSpec) {
 				// A background speculation already produced this compaction's
 				// summary; splice it in instead of paying for a blocking
