@@ -7,6 +7,7 @@
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
+import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk";
 import { type AgentEvent, EventLoopKeepalive, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
@@ -22,7 +23,6 @@ import {
 	VERSION,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk";
 import {
 	breadboardProjectionEventId,
 	E4AgentStreamBridge,
@@ -44,6 +44,7 @@ import {
 	resolveBreadboardRunConfig,
 } from "./breadboard/lifecycle/run-config";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import type { OpenedSession, OpenSession } from "./breadboard/session-port";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -492,6 +493,7 @@ async function runInteractiveMode(
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 	joinLink?: string,
+	providerAuthPort?: ProviderAuthPort,
 ): Promise<void> {
 	const mode = new InteractiveMode(
 		session,
@@ -501,6 +503,7 @@ async function runInteractiveMode(
 		lspServers,
 		mcpManager,
 		eventBus,
+		providerAuthPort,
 	);
 
 	// Cold-launch gate: the full setup wizard (every scene + the overlay and
@@ -1505,6 +1508,7 @@ export function resolveBreadboardSessionTarget(
 }
 
 export interface PreparedBreadboardRuntime {
+	readonly providerAuth: ProviderAuthPort;
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
@@ -1928,6 +1932,7 @@ export async function prepareConnectedBreadboardRuntime(
 		return {
 			stream: bridge.stream,
 			sessionId: initialBinding.sessionId,
+			providerAuth: options.engine.providerAuth,
 			model,
 			activate,
 			start,
@@ -2558,7 +2563,6 @@ export async function runRootCommand(
 			}
 		}
 
-
 		const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = await createSession({
 			...sessionOptions,
 			eventBus,
@@ -2695,6 +2699,7 @@ export async function runRootCommand(
 				initialMessage,
 				initialImages,
 				parsedArgs.join,
+				preparedBreadboardRuntime?.providerAuth,
 			);
 		} else {
 			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.

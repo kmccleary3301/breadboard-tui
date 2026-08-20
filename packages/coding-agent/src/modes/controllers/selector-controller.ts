@@ -13,6 +13,7 @@ import {
 	resolveAdvisorConfigEditPath,
 	saveWatchdogConfigFile,
 } from "../../advisor";
+import type { AuthCredentialView, AuthLoginSession, ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import { reset as resetCapabilities } from "../../capability";
 import {
 	formatModelSelectorValue,
@@ -42,7 +43,11 @@ import {
 } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
-import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome } from "../../session/auth-storage";
+import type {
+	OAuthLoginIdentity,
+	ResetCreditAccountStatus,
+	ResetCreditRedeemOutcome,
+} from "../../session/auth-storage";
 import {
 	createForeignSessionStore,
 	foreignSessionInfoToSessionInfo,
@@ -90,6 +95,7 @@ import { LoginDialogComponent } from "../components/login-dialog";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
 import { ModelHubComponent, type ModelRoleSelectionScope } from "../components/model-hub";
 import { ModelPickerComponent } from "../components/model-picker";
+import { createNativeProviderAuthDataSource } from "../components/oauth-provider-data-source";
 import { OAuthSelectorComponent } from "../components/oauth-selector";
 import { PluginSelectorComponent } from "../components/plugin-selector";
 import { ReadToolGroupComponent } from "../components/read-tool-group";
@@ -108,7 +114,10 @@ import { buildCopyTargets } from "../utils/copy-targets";
 const MANUAL_LOGIN_PROMPT = "Paste the authorization code (or full redirect URL), then press Enter:";
 
 export class SelectorController {
-	constructor(private ctx: InteractiveModeContext) {}
+	constructor(
+		private ctx: InteractiveModeContext,
+		private readonly providerAuthPort?: ProviderAuthPort,
+	) {}
 	/**
 	 * Mount a primary fullscreen menu through the one polished modal path shared
 	 * by Settings, Model Hub, and Agent Hub.
@@ -1657,6 +1666,47 @@ export class SelectorController {
 		await this.showSessionSelector();
 	}
 
+	async #completeProviderLogin(
+		providerId: string,
+		dialog: LoginDialogComponent,
+		useManualInput: boolean,
+	): Promise<AuthLoginSession> {
+		if (!this.providerAuthPort) throw new Error("BreadBoard provider auth port is not configured");
+		let loginSessionId: string | undefined;
+		const cancelLogin = () => {
+			if (loginSessionId) void this.providerAuthPort?.cancelLogin(loginSessionId).catch(() => {});
+		};
+		dialog.signal.addEventListener("abort", cancelLogin, { once: true });
+		try {
+			let session = await this.providerAuthPort.beginLogin({
+				providerId,
+				flow: useManualInput ? "manual" : "auto",
+			});
+			loginSessionId = session.loginSessionId;
+			if (session.authorizeUrl) dialog.showAuth(session.authorizeUrl, session.instructions, session.launchUrl);
+			if (session.status === "pending" || session.status === "awaiting_input") {
+				if (session.prompt) {
+					const redirectOrCode = await dialog.showPrompt(session.prompt);
+					session = await this.providerAuthPort.completeLogin({
+						loginSessionId: session.loginSessionId,
+						redirectOrCode,
+					});
+				} else if (!session.authorizeUrl) {
+					session = await this.providerAuthPort.getLogin(session.loginSessionId);
+				}
+			}
+			if (session.status === "failed" || session.status === "cancelled" || session.status === "unavailable") {
+				throw new Error(session.problem?.message ?? `Provider login ${session.status}`);
+			}
+			if (session.status !== "completed" || !session.credential) {
+				throw new Error("Provider login did not complete");
+			}
+			return session;
+		} finally {
+			dialog.signal.removeEventListener("abort", cancelLogin);
+		}
+	}
+
 	/**
 	 * Run the OAuth login flow for `providerId` inside a cancellable
 	 * {@link LoginDialogComponent} that replaces the editor slot. Esc aborts:
@@ -1687,34 +1737,31 @@ export class SelectorController {
 		this.ctx.ui.setFocus(dialog);
 		this.ctx.ui.requestRender();
 		try {
-			const identity = await this.ctx.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
-				signal: dialog.signal,
-				onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
-					// The dialog renders the full URL (SSH-safe copy target) and
-					// opens the browser best-effort.
-					dialog.showAuth(info.url, info.instructions, info.launchUrl);
-				},
-				onPrompt: (prompt: { message: string; placeholder?: string }) =>
-					dialog.showPrompt(prompt.message, prompt.placeholder),
-				onProgress: (message: string) => {
-					dialog.showProgress(message);
-				},
-				// Paste-code providers (e.g. Codex) may need the user to paste the
-				// fallback redirect URL when the loopback callback can't complete
-				// (headless/remote/Windows). Mount a focused input in the dialog so
-				// the paste lands somewhere the OAuth flow consumes — the hidden
-				// editor's `/login <url>` path is unreachable while the dialog holds
-				// focus (#5339).
-				onManualCodeInput: useManualInput ? () => dialog.showManualInput(MANUAL_LOGIN_PROMPT) : undefined,
-			});
-			// Scope the post-login refresh to the just-authenticated provider with an
-			// `online` strategy: the default all-provider `online-if-uncached` reuses
-			// a fresh authoritative cache row (e.g. an empty result fetched before
-			// login), so newly persisted credentials would never re-run discovery and
-			// models would stay unavailable in-session (#5780). Unrelated providers
-			// are left untouched. `refreshProvider` swallows discovery failures, so
-			// awaiting cannot reject the login.
-			await this.ctx.session.modelRegistry.refreshProvider(providerId, "online");
+			let identity: OAuthLoginIdentity | undefined;
+			if (this.providerAuthPort) {
+				const session = await this.#completeProviderLogin(providerId, dialog, useManualInput);
+				identity = {
+					type: "oauth",
+					accountId: session.credential?.accountLabel,
+				};
+			} else {
+				identity = await this.ctx.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
+					signal: dialog.signal,
+					onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
+						dialog.showAuth(info.url, info.instructions, info.launchUrl);
+					},
+					onPrompt: (prompt: { message: string; placeholder?: string }) =>
+						dialog.showPrompt(prompt.message, prompt.placeholder),
+					onProgress: (message: string) => {
+						dialog.showProgress(message);
+					},
+					onManualCodeInput: useManualInput ? () => dialog.showManualInput(MANUAL_LOGIN_PROMPT) : undefined,
+				});
+			}
+			if (!this.providerAuthPort) {
+				// Native mode refreshes only the just-authenticated provider.
+				await this.ctx.session.modelRegistry.refreshProvider(providerId, "online");
+			}
 			const block = new TranscriptBlock();
 			// Name the account (and Anthropic organization) that was stored so a
 			// login that lands on an unintended account/subscription is visible
@@ -1729,13 +1776,25 @@ export class SelectorController {
 					0,
 				),
 			);
-			block.addChild(new Text(theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`), 1, 0));
+			block.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						this.providerAuthPort
+							? "Credentials managed by BreadBoard auth broker"
+							: `Credentials saved to ${getAgentDbPath()}`,
+					),
+					1,
+					0,
+				),
+			);
 			this.ctx.present(block);
 			return true;
 		} catch (error: unknown) {
 			if (dialog.signal.aborted) {
 				// User-cancelled: the dialog already restored the editor and
 				// surfaced "Login cancelled".
+
 				return false;
 			}
 			this.ctx.showError(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1743,6 +1802,18 @@ export class SelectorController {
 		} finally {
 			restoreEditor();
 		}
+	}
+
+	async #handleProviderLogout(providerId: string): Promise<void> {
+		if (!this.providerAuthPort) throw new Error("BreadBoard provider auth port is not configured");
+		const credentials: ReadonlyArray<AuthCredentialView> = await this.providerAuthPort.listCredentials(providerId);
+		const credential = credentials.find(item => item.status === "active");
+		if (!credential) {
+			this.ctx.showStatus(`No stored BreadBoard credentials for ${providerId}.`);
+			return;
+		}
+		await this.providerAuthPort.logout({ credentialRef: credential.credentialRef });
+		this.ctx.showStatus(`Successfully logged out ${credential.accountLabel} from ${providerId}`);
 	}
 
 	async #handleCredentialLogout(providerId: string, account: LogoutAccount): Promise<void> {
@@ -1785,6 +1856,10 @@ export class SelectorController {
 	}
 
 	async #showOAuthLogoutAccountSelector(providerId: string): Promise<void> {
+		if (this.providerAuthPort) {
+			await this.#handleProviderLogout(providerId);
+			return;
+		}
 		const authStorage = this.ctx.session.modelRegistry.authStorage;
 		try {
 			await authStorage.reload();
@@ -1834,14 +1909,24 @@ export class SelectorController {
 		}
 
 		if (mode === "logout") {
-			await this.#refreshOAuthProviderAuthState();
-			const oauthProviders = getOAuthProviders();
-			const loggedInProviders = oauthProviders.filter(provider =>
-				this.ctx.session.modelRegistry.authStorage.has(provider.id),
-			);
-			if (loggedInProviders.length === 0) {
-				this.ctx.showStatus("No stored provider credentials to log out. Remove env or config auth at its source.");
-				return;
+			if (this.providerAuthPort) {
+				const credentials = await this.providerAuthPort.listCredentials();
+				if (!credentials.some(credential => credential.status === "active")) {
+					this.ctx.showStatus("No stored BreadBoard provider credentials to log out.");
+					return;
+				}
+			} else {
+				await this.#refreshOAuthProviderAuthState();
+				const oauthProviders = getOAuthProviders();
+				const loggedInProviders = oauthProviders.filter(provider =>
+					this.ctx.session.modelRegistry.authStorage.has(provider.id),
+				);
+				if (loggedInProviders.length === 0) {
+					this.ctx.showStatus(
+						"No stored provider credentials to log out. Remove env or config auth at its source.",
+					);
+					return;
+				}
 			}
 		}
 
@@ -1849,8 +1934,8 @@ export class SelectorController {
 			let selector: OAuthSelectorComponent;
 			selector = new OAuthSelectorComponent(
 				mode,
-				this.ctx.session.modelRegistry.authStorage,
-				async (selectedProviderId: string) => {
+				this.providerAuthPort ?? createNativeProviderAuthDataSource(this.ctx.session.modelRegistry.authStorage),
+				async selectedProviderId => {
 					selector.stopValidation();
 					done();
 					if (mode === "login") {
@@ -1865,7 +1950,11 @@ export class SelectorController {
 					this.ctx.ui.requestRender();
 				},
 				{
-					validateAuth: async (selectedProviderId: string) => {
+					validateAuth: async selectedProviderId => {
+						if (this.providerAuthPort) {
+							const credentials = await this.providerAuthPort.listCredentials(selectedProviderId);
+							return credentials.some(credential => credential.status === "active");
+						}
 						const apiKey = await this.ctx.session.modelRegistry.getApiKeyForProvider(
 							selectedProviderId,
 							this.ctx.session.sessionId,

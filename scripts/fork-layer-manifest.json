@@ -81,6 +81,17 @@
     "packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts",
     "docs_tmp/bb_direction_assessment/evidence/ACI/aci_ab_report.md",
     "docs_tmp/bb_direction_assessment/evidence/ACI/aci_binary_provenance.json",
-    "docs_tmp/bb_direction_assessment/evidence/ACI/aci_signing_runbook.md"
+    "docs_tmp/bb_direction_assessment/evidence/ACI/aci_signing_runbook.md",
+    "packages/coding-agent/src/breadboard/provider-auth-port.ts",
+    "packages/coding-agent/src/modes/components/oauth-provider-data-source.ts",
+    "packages/coding-agent/src/modes/components/oauth-selector.ts",
+    "packages/coding-agent/src/modes/controllers/selector-controller.ts",
+    "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
+    "packages/coding-agent/src/session/auth-storage.ts",
+    "packages/coding-agent/test/breadboard/provider-auth-port.test.ts",
+    "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
+    "packages/coding-agent/src/breadboard/model-role-port.ts",
+    "packages/coding-agent/src/breadboard/provider-auth-adapter.ts",
+    "packages/coding-agent/src/modes/interactive-mode.ts"
   ]
 }

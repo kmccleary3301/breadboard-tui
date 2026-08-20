@@ -26,6 +26,10 @@ import {
 } from "./lifecycle/lifecycle-supervisor";
 import { LocalAuthorityStore } from "./lifecycle/local-authority-store";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
+import type { ModelRolePort } from "./model-role-port";
+import { createBreadboardModelRolePort } from "./model-role-port";
+import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
+import type { ProviderAuthPort } from "./provider-auth-port";
 import type { OpenedSession, OpenSession } from "./session-port";
 
 type BreadboardEngineReadyHandle = Pick<
@@ -64,8 +68,10 @@ export interface BreadboardEnginePort {
 	getFeatures(): Promise<EngineFeatureAuditResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
+	readonly modelRoles: ModelRolePort;
 	attachProviderAuth(request: ProviderAuthAttachRequest): Promise<ProviderAuthAttachResponse>;
 	detachProviderAuth(request: ProviderAuthDetachRequest): Promise<ProviderAuthDetachResponse>;
+	readonly providerAuth: ProviderAuthPort;
 	close(): Promise<void>;
 }
 
@@ -232,7 +238,9 @@ function createConnectedPort(
 			assertOperational();
 			return controlClient.detachProviderAuth(request);
 		},
+		modelRoles: createBreadboardModelRolePort(controlClient),
 		close,
+		providerAuth: createBreadboardProviderAuthPort(controlClient),
 	};
 	return Object.freeze(port);
 }

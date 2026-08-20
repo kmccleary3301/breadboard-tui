@@ -11,6 +11,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { copyToClipboard } from "../../../utils/clipboard";
+import { createNativeProviderAuthDataSource } from "../../components/oauth-provider-data-source";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
@@ -176,7 +177,7 @@ export class SignInTab implements SetupTab {
 	#createSelector(): OAuthSelectorComponent {
 		return new OAuthSelectorComponent(
 			"login",
-			this.#authStorage,
+			createNativeProviderAuthDataSource(this.#authStorage),
 			providerId => {
 				void this.#login(providerId);
 			},
