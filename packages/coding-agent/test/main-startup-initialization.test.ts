@@ -3,8 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { getAgentDbPath, getConfigRootDir, getModelDbPath, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 
 const SESSION_FIXTURE = path.join(import.meta.dir, "fixtures", "large-session.jsonl");
 
@@ -25,14 +24,11 @@ async function runEarlyExit(args: string[]): Promise<{
 	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 	setAgentDir(agentDir.path());
 
-	const authDbPath = getAgentDbPath(agentDir.path());
-	const modelDbPath = getModelDbPath(agentDir.path());
 	const fixtureBefore = await Bun.file(SESSION_FIXTURE).text();
 	const output: string[] = [];
 	const events: string[] = [];
 	let captureStdoutEvents = false;
 	let discoverCalls = 0;
-	let authStorage: AuthStorage | undefined;
 	let thrown: unknown;
 	const previousExitCode = process.exitCode;
 
@@ -43,8 +39,6 @@ async function runEarlyExit(args: string[]): Promise<{
 	});
 	vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
 		events.push("exit");
-		expect(fs.existsSync(authDbPath)).toBe(true);
-		expect(fs.existsSync(modelDbPath)).toBe(true);
 		throw new ProcessExitSignal(code ?? 0);
 	}) as typeof process.exit);
 	captureStdoutEvents = true;
@@ -55,8 +49,7 @@ async function runEarlyExit(args: string[]): Promise<{
 			discoverAuthStorage: async () => {
 				discoverCalls += 1;
 				events.push("discover");
-				authStorage = await AuthStorage.create(authDbPath);
-				return authStorage;
+				throw new Error("early-exit commands must not initialize auth storage");
 			},
 		});
 	} catch (error) {
@@ -64,7 +57,6 @@ async function runEarlyExit(args: string[]): Promise<{
 	} finally {
 		vi.restoreAllMocks();
 		process.exitCode = previousExitCode;
-		authStorage?.close();
 		if (previousAgentDir === undefined) {
 			setAgentDir(fallbackAgentDir);
 			delete process.env.PI_CODING_AGENT_DIR;
@@ -76,8 +68,8 @@ async function runEarlyExit(args: string[]): Promise<{
 	const fixtureAfter = await Bun.file(SESSION_FIXTURE).text();
 	expect(fixtureAfter).toBe(fixtureBefore);
 	expect(thrown).toBeInstanceOf(ProcessExitSignal);
-	expect(events).toEqual(["discover", "stdout", "exit"]);
-	expect(discoverCalls).toBe(1);
+	expect(events).toEqual(["stdout", "exit"]);
+	expect(discoverCalls).toBe(0);
 
 	return {
 		exitCode: (thrown as ProcessExitSignal).code,
@@ -86,22 +78,22 @@ async function runEarlyExit(args: string[]): Promise<{
 	};
 }
 
-describe("runRootCommand — startup auth/model initialization", () => {
-	it("initializes auth and models once before --version exits", async () => {
+describe("runRootCommand — startup early exits", () => {
+	it("prints --version without initializing auth or models", async () => {
 		const result = await runEarlyExit(["--version"]);
 
 		expect(result.exitCode).toBe(0);
-		expect(result.discoverCalls).toBe(1);
+		expect(result.discoverCalls).toBe(0);
 		expect(result.stdout).toMatch(/\S+\n/);
 	});
 
-	it("initializes auth and models once before --export exits without mutating its fixture", async () => {
+	it("exports a session without initializing auth or models or mutating its fixture", async () => {
 		using outputDir = TempDir.createSync("@omp-main-export-");
 		const outputPath = path.join(outputDir.path(), "session.html");
 		const result = await runEarlyExit([SESSION_FIXTURE, outputPath]);
 
 		expect(result.exitCode).toBe(0);
-		expect(result.discoverCalls).toBe(1);
+		expect(result.discoverCalls).toBe(0);
 		expect(fs.existsSync(outputPath)).toBe(true);
 		expect(result.stdout).toContain(`Exported to: ${outputPath}`);
 	});

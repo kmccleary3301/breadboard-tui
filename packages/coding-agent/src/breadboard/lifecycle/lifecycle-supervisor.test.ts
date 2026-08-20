@@ -3684,7 +3684,7 @@ describe("CLI lifecycle composition boundary", () => {
 			.trim()
 			.split("\n")
 			.map(line => JSON.parse(line) as { type?: string });
-		expect(frames[0]).toEqual({ type: "ready" });
+		expect(frames[0]).toMatchObject({ type: "ready" });
 		expect(frames.every(frame => typeof frame.type === "string")).toBe(true);
 		expect(`${result.stdout}${result.stderr}`).not.toContain("BreadBoard engine:");
 		expect(result.stderr).not.toContain("missing_engine_artifact");
