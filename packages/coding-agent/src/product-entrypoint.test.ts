@@ -76,9 +76,9 @@ describe("BreadBoard product entrypoint", () => {
 		expect(await readFile(sentinel, "utf8")).toBe("native-only\n");
 		expect(await Bun.file(path.join(home, ".breadboard")).exists()).toBe(false);
 	});
-	test("keeps the native omp identity and namespace available", async () => {
+	test("keeps the native omp identity and namespace despite an inherited BreadBoard marker", async () => {
 		const home = await temporaryHome();
-		const result = await runProcess(["src/cli.ts", "--version"], home);
+		const result = await runProcess(["src/omp.ts", "--version"], home, { BREADBOARD_PRODUCT: "1" });
 
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.trim()).toBe("omp/17.4.0");

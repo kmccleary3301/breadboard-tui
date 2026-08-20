@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { auditDeclarations, loadDeltaPolicy, readChangedPathPatch, type ForkLayerManifest } from "./audit-fork-delta";
+import {
+	assertManifestUpstreamIdentity,
+	auditDeclarations,
+	loadDeltaPolicy,
+	readChangedPathPatch,
+	type ForkLayerManifest,
+} from "./audit-fork-delta";
 
 const policy = await loadDeltaPolicy();
 const upstream = policy.upstream;
@@ -21,6 +27,18 @@ function git(root: string, ...args: string[]): void {
 	if (result.exitCode !== 0) throw new Error(result.stderr.toString());
 }
 
+describe("fork delta upstream identity", () => {
+	test("rejects a manifest baseline that differs from policy", () => {
+		const mismatched = {
+			...manifest([]),
+			upstream: { ...upstream, commit: "0".repeat(40) },
+		};
+
+		expect(() => assertManifestUpstreamIdentity(mismatched, policy)).toThrow(
+			"manifest upstream.commit does not match policy upstream.commit",
+		);
+	});
+});
 describe("fork delta audit declarations", () => {
 	test("creates an unknown path and fails closed", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "bb-fork-unknown-"));

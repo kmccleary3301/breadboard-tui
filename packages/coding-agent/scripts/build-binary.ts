@@ -84,7 +84,7 @@ async function main(): Promise<void> {
 	const crossBuild = resolveCrossBuild(Bun.env.CROSS_TARGET);
 	const shouldAdhocSign = process.platform === "darwin" && !crossBuild && Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
 	const outName = crossBuild ? `${product}-${crossBuild.id}` : product;
-	const entrypointName = product === "bb" ? "bb.ts" : "cli.ts";
+	const entrypointName = product === "bb" ? "bb.ts" : "omp.ts";
 	const outputPath = path.join(packageDir, "dist", outName);
 	// Generate inside the try so the finally always restores generated placeholders
 	// (stats client archive, docs index) even on failure.

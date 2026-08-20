@@ -385,6 +385,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/src/omp.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/src/product-entrypoint.test.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"

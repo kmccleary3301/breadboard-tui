@@ -15,6 +15,9 @@ concurrency:
 
 env:
   BBOMP_CORE_52: packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts
+  BBOMP_UPSTREAM_TAG: v17.4.0
+  BBOMP_UPSTREAM_COMMIT: 72000acfeb902e21816252699482887f34d1a5a4
+  BBOMP_UPSTREAM_TREE: c337de936afe886b9c5d566d026427839462dbf4
 
 jobs:
   audit:
@@ -40,10 +43,16 @@ jobs:
       - name: Fetch pinned canonical upstream tag
         run: |
           set -euo pipefail
-          tag="$(jq -r .upstream.tag scripts/p31/upstream-sync-policy.json)"
-          expected="$(jq -r .upstream.commit scripts/p31/upstream-sync-policy.json)"
-          git fetch --no-tags https://github.com/can1357/oh-my-pi.git "refs/tags/$tag:refs/tags/$tag"
-          test "$(git rev-parse "$tag^{commit}")" = "$expected"
+          test "$(jq -r .upstream.tag scripts/p31/upstream-sync-policy.json)" = "$BBOMP_UPSTREAM_TAG"
+          test "$(jq -r .upstream.commit scripts/p31/upstream-sync-policy.json)" = "$BBOMP_UPSTREAM_COMMIT"
+          test "$(jq -r .upstream.tree scripts/p31/upstream-sync-policy.json)" = "$BBOMP_UPSTREAM_TREE"
+          test "$(jq -r .upstream.tag scripts/fork-layer-manifest.json)" = "$BBOMP_UPSTREAM_TAG"
+          test "$(jq -r .upstream.commit scripts/fork-layer-manifest.json)" = "$BBOMP_UPSTREAM_COMMIT"
+          test "$(jq -r .upstream.tree scripts/fork-layer-manifest.json)" = "$BBOMP_UPSTREAM_TREE"
+          git fetch --no-tags https://github.com/can1357/oh-my-pi.git \
+            "refs/tags/$BBOMP_UPSTREAM_TAG:refs/tags/$BBOMP_UPSTREAM_TAG"
+          test "$(git rev-parse "$BBOMP_UPSTREAM_TAG^{commit}")" = "$BBOMP_UPSTREAM_COMMIT"
+          test "$(git rev-parse "$BBOMP_UPSTREAM_TAG^{tree}")" = "$BBOMP_UPSTREAM_TREE"
       - name: Fast BBOMP-CORE-52 (pull request)
         if: github.event_name == 'pull_request'
         run: bun test "$BBOMP_CORE_52" --test-name-pattern '\[fast\]'

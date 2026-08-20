@@ -369,6 +369,17 @@ export async function loadForkManifest(manifestPath = MANIFEST_PATH): Promise<Fo
 	} as unknown as ForkLayerManifest;
 }
 
+export function assertManifestUpstreamIdentity(manifest: ForkLayerManifest, policy: DeltaPolicy): void {
+	for (const field of ["tag", "commit", "tree"] as const) {
+		if (manifest.upstream[field] !== policy.upstream[field]) {
+			throw new Error(
+				`manifest upstream.${field} does not match policy upstream.${field}: ` +
+					`${manifest.upstream[field]} != ${policy.upstream[field]}`,
+			);
+		}
+	}
+}
+
 function readIdentity(repoRoot: string, policy: DeltaPolicy): GitIdentity {
 	const upstreamCommit = runGit(repoRoot, [
 		"rev-parse",
@@ -784,6 +795,7 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 	try {
 		const policy = await loadDeltaPolicy(options.policyPath ?? POLICY_PATH);
 		const manifest = await loadForkManifest(options.manifestPath ?? MANIFEST_PATH);
+		assertManifestUpstreamIdentity(manifest, policy);
 		const identity = readIdentity(repoRoot, policy);
 		const collected = collectChanged(repoRoot, policy);
 		const state: AuditState = { policy, manifest, identity, records: collected.records, paths: collected.paths };

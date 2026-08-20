@@ -23,6 +23,7 @@
       "patterns": [
         "packages/coding-agent/src/breadboard/**",
         "packages/coding-agent/src/bb.ts",
+        "packages/coding-agent/src/omp.ts",
         "packages/coding-agent/src/product-entrypoint.test.ts",
         "packages/coding-agent/src/modes/theme/defaults/breadboard*.json",
         "packages/coding-agent/src/modes/theme/defaults/index.ts",
@@ -267,6 +268,7 @@
       "packages/coding-agent/src/commands/launch.ts",
       "packages/coding-agent/src/config/settings.ts",
       "packages/coding-agent/src/bb.ts",
+      "packages/coding-agent/src/omp.ts",
       "packages/coding-agent/src/product-entrypoint.test.ts",
       "packages/utils/src/dirs.ts",
       "packages/coding-agent/scripts/build-binary.ts",
