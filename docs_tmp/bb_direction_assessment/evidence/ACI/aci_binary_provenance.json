@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "aci.bb-binary-provenance.v1",
+  "source": {
+    "commit": "d3dbb216b24b81266dc1442437b4db2eb7679144",
+    "tree": "a4af095931e3cb5afee2d8be62c00df7bd976799"
+  },
+  "artifact": {
+    "path": "packages/coding-agent/dist/bb",
+    "sha256": "461235004786018c56307d8b0e31766c26bdc617d059819b54b064827ef9433a",
+    "signed": "adhoc-local"
+  },
+  "build": {
+    "entrypoint": "packages/coding-agent/scripts/build-binary.ts",
+    "command": "BREADBOARD_P30_BACKEND_ROOT=/tmp/bb_p30_backend_pin bun --cwd=packages/coding-agent run build",
+    "compileTarget": "darwin-arm64"
+  },
+  "smoke": {
+    "version": "omp/17.4.0",
+    "help": "exit 0",
+    "smokeTest": "smoke-test: ok"
+  }
+}
