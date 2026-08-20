@@ -3,9 +3,9 @@
   "matrix_sha256": "e6bae987ffc0c6bbc5fad384a3eab858cc287b1e482ad188379d762e2aaad87d",
   "owner_projection_schema": "p30-p24-salvage-owner-v1",
   "owner_projection_sha256": "7e8518ff5e1a744530094008225bd0da5051cb9632211c2d170dfb0493404c5a",
-  "record_sha256": "sha256:102ab076c87b4216caf50ff4816074c6669cd3f4c45d427be935208736166721",
+  "record_sha256": "sha256:0d0aa0db536450262ff619b2295e337d6cc99a6e86fa10b33e4b488a3b29332e",
   "row_id_set_sha256": "sha256:eace187b78991a722212df10a9ec36ecb13b660d8646fc072c2ef0e436d48978",
-  "tsv_byte_count": 81012,
+  "tsv_byte_count": 85467,
   "header_row_count": 1,
   "data_row_count": 104,
   "row_count": 104,
@@ -130,5 +130,5 @@
   ],
   "completed_row_count": 104,
   "record_state": "complete-bb-89n.16",
-  "tsv_sha256": "102ab076c87b4216caf50ff4816074c6669cd3f4c45d427be935208736166721"
+  "tsv_sha256": "0d0aa0db536450262ff619b2295e337d6cc99a6e86fa10b33e4b488a3b29332e"
 }

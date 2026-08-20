@@ -11,7 +11,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createSessionManager, SessionResolutionError, writeStartupNotice } from "@oh-my-pi/pi-coding-agent/main";
+import {
+	createBreadboardStartupForkPolicy,
+	createSessionManager,
+	SessionResolutionError,
+	writeStartupNotice,
+} from "@oh-my-pi/pi-coding-agent/main";
 import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 
@@ -48,7 +53,7 @@ function buildForkArgs(fork: string, noSession = false): Args {
 	};
 }
 
-const stubSettings = { get: () => undefined } as unknown as Settings;
+const stubSettings = { get: () => undefined, getRaw: () => undefined } as unknown as Settings;
 
 const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);
 const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);
@@ -195,5 +200,10 @@ describe("createSessionManager — missing session (#2084)", () => {
 			message: "--fork requires session persistence",
 			hint: undefined,
 		});
+	});
+
+	it("keeps unconfigured startup forks on the native OMP path", () => {
+		const policy = createBreadboardStartupForkPolicy({}, stubSettings, os.tmpdir());
+		expect(policy).not.toThrow();
 	});
 });

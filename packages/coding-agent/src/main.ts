@@ -1429,7 +1429,7 @@ function resolveNativeSurfaceEngineSelection(
 		process.env.BREADBOARD_ENGINE_BACKEND_COMMIT,
 	].some(value => value !== undefined);
 	if (parsed.engineMode === undefined && parsed.engineUrl === undefined && !selectedExplicit && !environmentExplicit) {
-		return parsed;
+		return { engineMode: "off" };
 	}
 	const effective = resolveBreadboardRunConfig({
 		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
@@ -1447,7 +1447,8 @@ export function createBreadboardStartupForkPolicy(
 ): StartupForkPolicy {
 	if (!canPrepareBreadboardRuntime) return ALLOW_STARTUP_FORK;
 	return () => {
-		const config = resolveEffectiveBreadboardRunConfig(parsed, activeSettings, workspacePath);
+		const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
+		const config = resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
 		if (config.mode === "off") return;
 		throw new BreadboardSessionTransitionError(
 			"BreadBoard cannot fork an OMP session at startup because the current E4 SDK cannot atomically rebind the bridge to the forked transcript. Start a new OMP session or run with BreadBoard mode off.",
@@ -1952,7 +1953,8 @@ export async function prepareBreadboardRuntime(
 		throw new Error("BreadBoard released an agent event without an active AgentSession binding");
 	},
 ): Promise<PreparedBreadboardRuntime | null> {
-	const config = resolveEffectiveBreadboardRunConfig(parsed, activeSettings, getProjectDir());
+	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, getProjectDir());
+	const config = resolveEffectiveBreadboardRunConfig(selected, activeSettings, getProjectDir());
 	if (config.mode === "off") return null;
 	const sessionBinding =
 		parsed.continue || parsed.resume === true || typeof parsed.resume === "string"
