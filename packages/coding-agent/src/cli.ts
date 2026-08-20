@@ -18,6 +18,8 @@ import { parentPort } from "node:worker_threads";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
+	IS_BREADBOARD_PRODUCT,
+	formatBreadboardVersion,
 	getActiveProfile,
 	MIN_BUN_VERSION,
 	resolveProfileEnv,
@@ -333,6 +335,10 @@ async function runTinyWorker(): Promise<void> {
 	await runIpcSubprocessWorker(startTinyTitleWorker);
 }
 
+function writeProductVersion(): void {
+	process.stdout.write(`${formatBreadboardVersion()}\n`);
+}
+
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export async function runCli(argv: string[]): Promise<void> {
 	let resolvedArgv = argv;
@@ -373,6 +379,11 @@ export async function runCli(argv: string[]): Promise<void> {
 		const message = error instanceof Error ? error.message : String(error);
 		process.stderr.write(`Error: ${message}\n`);
 		process.exitCode = 1;
+		return;
+	}
+
+	if (IS_BREADBOARD_PRODUCT && (resolvedArgv[0] === "--version" || resolvedArgv[0] === "-v")) {
+		writeProductVersion();
 		return;
 	}
 

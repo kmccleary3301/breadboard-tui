@@ -9,9 +9,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: fork-delta-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BBOMP_CORE_52: packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts
+
 jobs:
   audit:
-    name: Verify declared fork layers
+    name: Fast BBOMP-CORE-52 and delta audit
     runs-on: ubuntu-22.04
     steps:
       - name: Check out full history
@@ -24,5 +31,55 @@ jobs:
           bun-version: 1.3.14
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Audit delta against pinned upstream
-        run: bun scripts/audit-fork-delta.ts
+      - name: Fast BBOMP-CORE-52 (pull request)
+        if: github.event_name == 'pull_request'
+        run: bun test "$BBOMP_CORE_52" --test-name-pattern '\[fast\]'
+      - name: Productized fork delta audit
+        if: always()
+        run: bun scripts/audit-fork-delta.ts --receipt-dir artifacts
+      - name: Upload deterministic audit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bb-omp-delta-audit-${{ github.run_id }}
+          path: |
+            artifacts/fork-delta-audit.json
+            artifacts/fork-delta-audit.md
+          if-no-files-found: error
+
+  candidate:
+    name: Full BBOMP-CORE-52, build, and smoke
+    if: github.event_name != 'pull_request'
+    needs: audit
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Full BBOMP-CORE-52
+        run: bun test "$BBOMP_CORE_52"
+      - name: Read pinned backend provenance
+        id: backend
+        run: echo "commit=$(jq -r .backendCommit packages/coding-agent/breadboard-sdk-provenance.json)" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned BreadBoard backend provenance
+        uses: actions/checkout@v4
+        with:
+          repository: kmccleary3301/breadboard
+          ref: ${{ steps.backend.outputs.commit }}
+          path: breadboard-backend
+      - name: Build candidate binary
+        env:
+          BREADBOARD_P30_BACKEND_ROOT: ${{ github.workspace }}/breadboard-backend
+        run: bun --cwd packages/coding-agent run build
+      - name: Smoke candidate binary
+        run: |
+          ./packages/coding-agent/dist/bb --version
+          ./packages/coding-agent/dist/bb --help
+          ./packages/coding-agent/dist/bb --smoke-test

@@ -1,99 +1,578 @@
 {
-  "schemaVersion": "aci.fork-layer-manifest.v1",
-  "upstreamRef": "72000acfeb",
+  "schemaVersion": "bb-omp.delta-manifest.v2",
+  "policySchemaVersion": "bb-omp.delta-policy.v1",
+  "upstream": {
+    "tag": "v17.4.0",
+    "commit": "72000acfeb902e21816252699482887f34d1a5a4",
+    "tree": "c337de936afe886b9c5d566d026427839462dbf4"
+  },
   "paths": [
-    "Dockerfile",
-    "bun.lock",
-    "docs/conformance/p30/bb-omp/harbor-license-provenance.v1.manifest.json",
-    "docs/conformance/p30/bb-omp/harbor-license-provenance.v1.tsv",
-    "docs/conformance/p30/bb-omp/session-port-live-journeys.v1.json",
-    "docs/conformance/p31/e4-canonical-tui-evidence.md",
-    "package.json",
-    "packages/agent/src/agent.ts",
-    "packages/agent/test/agent.test.ts",
-    "packages/coding-agent/LICENSE",
-    "packages/coding-agent/THIRD_PARTY_NOTICES.manifest.json",
-    "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "packages/coding-agent/breadboard-sdk-provenance.json",
-    "packages/coding-agent/package.json",
-    "packages/coding-agent/scripts/verify-breadboard-sdk-provenance.ts",
-    "packages/coding-agent/src/breadboard/canonical-e4-session-port.test.ts",
-    "packages/coding-agent/src/breadboard/canonical-e4-session-port.ts",
-    "packages/coding-agent/src/breadboard/e4-agent-stream.test.ts",
-    "packages/coding-agent/src/breadboard/e4-agent-stream.ts",
-    "packages/coding-agent/src/breadboard/engine-port.test.ts",
-    "packages/coding-agent/src/breadboard/engine-port.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/darwin-pinned-directory.test.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/darwin-pinned-directory.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/darwin-verified-spawn.test.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/darwin-verified-spawn.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/lifecycle-presenter.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/lifecycle-state.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/lifecycle-supervisor.test.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/lifecycle-supervisor.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/linux-pinned-directory.test.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/linux-pinned-directory.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/local-authority-store.test.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/local-authority-store.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/pinned-directory.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/run-config.test.ts",
-    "packages/coding-agent/src/breadboard/lifecycle/run-config.ts",
-    "packages/coding-agent/src/breadboard/native-launch-policy.ts",
-    "packages/coding-agent/src/breadboard/session-port.ts",
-    "packages/coding-agent/src/cli-commands.ts",
-    "packages/coding-agent/src/cli.ts",
-    "packages/coding-agent/src/cli/args.ts",
-    "packages/coding-agent/src/cli/flag-tables.ts",
-    "packages/coding-agent/src/commands/engine.ts",
-    "packages/coding-agent/src/commands/launch.ts",
-    "packages/coding-agent/src/config/settings.ts",
-    "packages/coding-agent/src/main.ts",
-    "packages/coding-agent/src/modes/controllers/event-controller.ts",
-    "packages/coding-agent/src/sdk.ts",
-    "packages/coding-agent/src/session/agent-session.ts",
-    "packages/coding-agent/src/session/session-maintenance.ts",
-    "packages/coding-agent/test/agent-session-handoff.test.ts",
-    "packages/coding-agent/test/agent-session-switch-prev-context.test.ts",
-    "packages/coding-agent/test/breadboard-lifecycle-real-backend.integration.test.ts",
-    "packages/coding-agent/test/breadboard-sdk-provenance.test.ts",
-    "packages/coding-agent/test/fixtures/breadboard-drain-controller.ts",
-    "packages/coding-agent/test/helpers/retry-ambiguous-replay.ts",
-    "packages/coding-agent/test/main-session-resolution-error.test.ts",
-    "packages/coding-agent/test/main-startup-initialization.test.ts",
-    "packages/coding-agent/test/retry-ambiguous-replay.test.ts",
-    "packages/coding-agent/test/session-exit-diagnostics.test.ts",
-    "packages/coding-agent/test/streaming-preview-height.test.ts",
-    "packages/coding-agent/test/tool-execution-write-repaint.test.ts",
-    "packages/coding-agent/vendor/breadboard-sdk-0.2.5.tgz",
-    "scripts/generate-third-party-notices.test.ts",
-    "scripts/generate-third-party-notices.ts",
-    "scripts/inspect-upstream-sync.test.ts",
-    "scripts/inspect-upstream-sync.ts",
-    "scripts/p31/upstream-sync-policy.json",
-    "scripts/source-identity-generators.test.ts",
-    "scripts/sync-themes.ts",
-    "scripts/sync-versions.ts",
-    "scripts/verify-upstream-sync.test.ts",
-    "scripts/verify-upstream-sync.ts",
-    ".github/workflows/fork-delta-audit.yml",
-    "scripts/audit-fork-delta.ts",
-    "scripts/fork-layer-manifest.json",
-    "packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts",
-    "docs_tmp/bb_direction_assessment/evidence/ACI/aci_ab_report.md",
-    "docs_tmp/bb_direction_assessment/evidence/ACI/aci_binary_provenance.json",
-    "docs_tmp/bb_direction_assessment/evidence/ACI/aci_signing_runbook.md",
-    "packages/coding-agent/src/breadboard/provider-auth-port.ts",
-    "packages/coding-agent/src/modes/components/oauth-provider-data-source.ts",
-    "packages/coding-agent/src/modes/components/oauth-selector.ts",
-    "packages/coding-agent/src/modes/controllers/selector-controller.ts",
-    "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
-    "packages/coding-agent/src/session/auth-storage.ts",
-    "packages/coding-agent/test/breadboard/provider-auth-port.test.ts",
-    "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
-    "packages/coding-agent/src/breadboard/model-role-port.ts",
-    "packages/coding-agent/src/breadboard/provider-auth-adapter.ts",
-    "packages/coding-agent/src/modes/interactive-mode.ts",
-    "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz",
-    "packages/coding-agent/scripts/c03-provider-parity-smoke.ts"
+    {
+      "path": ".github/workflows/fork-delta-audit.yml",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "Dockerfile",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-release",
+      "layer": 1
+    },
+    {
+      "path": "bun.lock",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-release",
+      "layer": 1
+    },
+    {
+      "path": "docs/conformance/p30/bb-omp/harbor-license-provenance.v1.manifest.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs/conformance/p30/bb-omp/harbor-license-provenance.v1.tsv",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs/conformance/p30/bb-omp/session-port-live-journeys.v1.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs/conformance/p31/e4-canonical-tui-evidence.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_ab_report.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_binary_provenance.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_signing_runbook.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "package.json",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-release",
+      "layer": 1
+    },
+    {
+      "path": "packages/agent/src/agent.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/agent/test/agent.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/DEVELOPMENT.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/LICENSE",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-release",
+      "layer": 1
+    },
+    {
+      "path": "packages/coding-agent/THIRD_PARTY_NOTICES.manifest.json",
+      "class": "generated",
+      "rule": "generated-artifacts"
+    },
+    {
+      "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
+      "class": "generated",
+      "rule": "generated-artifacts"
+    },
+    {
+      "path": "packages/coding-agent/breadboard-sdk-provenance.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/package.json",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-release",
+      "layer": 1
+    },
+    {
+      "path": "packages/coding-agent/scripts/build-binary.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/scripts/c03-provider-parity-smoke.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/scripts/verify-breadboard-sdk-provenance.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/bb.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/canonical-e4-session-port.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/canonical-e4-session-port.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/e4-agent-stream.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/e4-agent-stream.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/engine-port.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/engine-port.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/darwin-pinned-directory.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/darwin-pinned-directory.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/darwin-verified-spawn.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/darwin-verified-spawn.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/lifecycle-presenter.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/lifecycle-state.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/lifecycle-supervisor.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/lifecycle-supervisor.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/linux-pinned-directory.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/linux-pinned-directory.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/local-authority-store.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/local-authority-store.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/pinned-directory.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/run-config.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/lifecycle/run-config.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/model-role-port.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/native-launch-policy.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/provider-auth-adapter.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/provider-auth-port.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/breadboard/session-port.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/cli-commands.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/cli.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/cli/args.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/cli/command-help.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/cli/help-extra.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/cli/flag-tables.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/commands/engine.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/commands/launch-help.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/commands/launch.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/config/settings.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/main.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/oauth-provider-data-source.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/oauth-selector.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/welcome.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/controllers/event-controller.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/controllers/selector-controller.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/interactive-mode.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/theme/defaults/breadboard-light.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/theme/defaults/breadboard.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/theme/defaults/index.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/theme/theme.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/product-entrypoint.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/sdk.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/session/agent-session.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/session/auth-storage.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/session/session-maintenance.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/agent-session-handoff.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/agent-session-switch-prev-context.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/breadboard-lifecycle-real-backend.integration.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/breadboard-sdk-provenance.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/breadboard/provider-auth-port.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/fixtures/breadboard-drain-controller.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/helpers/retry-ambiguous-replay.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/main-session-resolution-error.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/main-startup-initialization.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/modes/components/welcome.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/retry-ambiguous-replay.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/session-exit-diagnostics.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/streaming-preview-height.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/tool-execution-write-repaint.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/natives/native/loader-state.js",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/natives/test/issue-823-repro.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/utils/src/dirs.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/audit-fork-delta.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/audit-fork-delta.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/fork-layer-manifest.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/generate-third-party-notices.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/generate-third-party-notices.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/inspect-upstream-sync.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/inspect-upstream-sync.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/p31/upstream-sync-policy.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/source-identity-generators.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "scripts/sync-themes.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "scripts/sync-versions.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "scripts/verify-upstream-sync.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/verify-upstream-sync.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    }
   ]
 }

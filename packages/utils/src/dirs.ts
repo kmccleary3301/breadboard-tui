@@ -1,14 +1,14 @@
 /**
- * Centralized path helpers for omp config directories.
+ * Centralized path helpers for OMP and BreadBoard config directories.
  *
- * Uses PI_CONFIG_DIR (default ".omp") for the config root and
- * PI_CODING_AGENT_DIR to override the agent directory.
+ * Native OMP uses PI_CONFIG_DIR (default ".omp") and PI_CODING_AGENT_DIR.
+ * The bb entrypoint sets BREADBOARD_PRODUCT before this module loads, selecting
+ * the BreadBoard defaults (".breadboard" and "~/.breadboard/agent").
  *
  * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
  * variables are set, paths are redirected to XDG-compliant locations under
- * $XDG_*_HOME/omp/. This requires running `omp config migrate` first to
- * move data to the new locations. No filesystem existence checks are performed
- * — if the env var is set, omp trusts that the migration has been done.
+ * the active product namespace. This requires running the product's migration
+ * command first to move data to the new locations.
  */
 
 import * as fs from "node:fs";
@@ -16,20 +16,48 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { engines, version } from "../package.json" with { type: "json" };
 
-/** App name (e.g. "omp") */
-export const APP_NAME: string = "omp";
+/** Whether this process was bootstrapped through the BreadBoard product entrypoint. */
+export const IS_BREADBOARD_PRODUCT = process.env.BREADBOARD_PRODUCT === "1";
 
-/** Config directory name (e.g. ".omp") */
-export const CONFIG_DIR_NAME: string = ".omp";
+/** App name used in user-facing paths, process titles, and CLI output. */
+export const APP_NAME: string = IS_BREADBOARD_PRODUCT ? "bb" : "omp";
+
+/** Default config directory name (e.g. ".breadboard" or ".omp"). */
+export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
 
 /** Ordered main settings filenames: canonical write target first, legacy-compatible YAML fallback second. */
 export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
 
-/** Version (e.g. "1.0.0") */
-export const VERSION: string = version;
+/** BreadBoard product version. */
+export const BREADBOARD_VERSION = "0.1.0-rc.1";
 
-/** Default User-Agent header string (e.g. "omp/17.2.12") */
-export const USER_AGENT = `omp/${VERSION}`;
+/** Canonical SDK dependency version used by the BreadBoard product. */
+export const BREADBOARD_SDK_VERSION = "0.3.0";
+
+/** Supported BreadBoard engine API range. */
+export const BREADBOARD_ENGINE_API_RANGE = ">=0.1.0 <0.4.0";
+
+/** Upstream OMP version embedded by this fork. */
+export const OMP_VERSION: string = version;
+
+/** Structured BreadBoard product/version lineage. */
+export const BREADBOARD_VERSION_INFO = Object.freeze({
+	product: `bb/${BREADBOARD_VERSION}`,
+	omp: `omp/${OMP_VERSION}`,
+	sdk: `sdk/${BREADBOARD_SDK_VERSION}`,
+	engineApi: `engine-api ${BREADBOARD_ENGINE_API_RANGE}`,
+});
+
+/** Render the stable human-readable BreadBoard product/version lineage. */
+export function formatBreadboardVersion(): string {
+	return Object.values(BREADBOARD_VERSION_INFO).join(" ");
+}
+
+/** Version used by the active CLI identity. */
+export const VERSION: string = IS_BREADBOARD_PRODUCT ? BREADBOARD_VERSION : version;
+
+/** Default User-Agent header string (e.g. "omp/17.2.12" or "bb/0.1.0-rc.1"). */
+export const USER_AGENT = `${APP_NAME}/${VERSION}`;
 
 /** Minimum Bun version */
 export const MIN_BUN_VERSION: string = engines.bun.replace(/[^0-9.]/g, "");
@@ -107,6 +135,8 @@ function readProfileFromEnvSafe(): string | undefined {
 }
 
 function getBaseConfigRoot(): string {
+	const breadboardOverride = process.env.BREADBOARD_CONFIG_DIR;
+	if (breadboardOverride && path.isAbsolute(breadboardOverride)) return path.resolve(breadboardOverride);
 	return path.join(os.homedir(), getConfigDirName());
 }
 
@@ -205,15 +235,17 @@ export async function directoryExists(dir: string): Promise<boolean> {
 	}
 }
 
-/** Get the config directory name relative to home (e.g. ".omp" or PI_CONFIG_DIR override). */
+/** Get the config directory name or explicit path override. */
 export function getConfigDirName(): string {
-	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
+	return process.env.BREADBOARD_CONFIG_DIR || process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
 }
 
-/** Get the config agent directory name relative to home (e.g. ".omp/agent" or PI_CONFIG_DIR + "/agent"). */
+/** Get the config agent directory name (or path) relative to the config root. */
 export function getConfigAgentDirName(): string {
 	const profile = getActiveProfile();
-	return profile ? path.join(getConfigDirName(), "profiles", profile, "agent") : `${getConfigDirName()}/agent`;
+	return profile
+		? path.join(getConfigDirName(), "profiles", profile, "agent")
+		: path.join(getConfigDirName(), "agent");
 }
 
 // =============================================================================

@@ -48,12 +48,38 @@ function startupMarker(text) {
 	}
 }
 
-function getNativesDir() {
-	const xdgDataHome = process.env.XDG_DATA_HOME;
-	if (xdgDataHome && fs.existsSync(path.join(xdgDataHome, "omp"))) {
-		return path.join(xdgDataHome, "omp", "natives");
+/**
+ * Resolve the per-product native addon cache without depending on pi-utils
+ * (the native loader sits below it in the module graph).
+ *
+ * @param {{
+ *   env?: Record<string, string | undefined>;
+ *   homeDir?: string;
+ *   pathExists?: (candidate: string) => boolean;
+ * }} [options]
+ */
+export function resolveNativesDir({
+	env = process.env,
+	homeDir = os.homedir(),
+	pathExists = fs.existsSync,
+} = {}) {
+	const breadboard = env.BREADBOARD_PRODUCT === "1";
+	const configOverride = breadboard ? env.BREADBOARD_CONFIG_DIR : undefined;
+	if (configOverride) {
+		const configRoot = path.isAbsolute(configOverride) ? configOverride : path.join(homeDir, configOverride);
+		return path.join(configRoot, "natives");
 	}
-	return path.join(os.homedir(), ".omp", "natives");
+
+	const appName = breadboard ? "bb" : "omp";
+	const xdgDataHome = env.XDG_DATA_HOME;
+	if (xdgDataHome && pathExists(path.join(xdgDataHome, appName))) {
+		return path.join(xdgDataHome, appName, "natives");
+	}
+	return path.join(homeDir, breadboard ? ".breadboard" : ".omp", "natives");
+}
+
+function getNativesDir() {
+	return resolveNativesDir();
 }
 
 function resolveLeafPackageDir(platformTag) {

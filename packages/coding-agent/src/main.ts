@@ -15,6 +15,7 @@ import {
 	directoryExists,
 	getLogPath,
 	getProjectDir,
+	IS_BREADBOARD_PRODUCT,
 	logger,
 	normalizePathForComparison,
 	postmortem,
@@ -1432,7 +1433,7 @@ function resolveNativeSurfaceEngineSelection(
 		process.env.BREADBOARD_ENGINE_BACKEND_COMMIT,
 	].some(value => value !== undefined);
 	if (parsed.engineMode === undefined && parsed.engineUrl === undefined && !selectedExplicit && !environmentExplicit) {
-		return { engineMode: "off" };
+		return IS_BREADBOARD_PRODUCT ? {} : { engineMode: "off" };
 	}
 	const effective = resolveBreadboardRunConfig({
 		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
@@ -1568,6 +1569,11 @@ function formatBreadboardStartupError(error: unknown): string | undefined {
 	return undefined;
 }
 
+const BREADBOARD_MODEL_PROVIDER_ALIASES: Readonly<Record<string, string>> = {
+	// BreadBoard's engine owns the runtime id; OMP owns the catalog id.
+	codex: "openai-codex",
+};
+
 export function resolveBreadboardBackendModel(
 	backendModel: string | null | undefined,
 	modelRegistry: BreadboardModelRegistry,
@@ -1581,9 +1587,22 @@ export function resolveBreadboardBackendModel(
 	}
 
 	const models = modelRegistry.getAll();
+	const [backendProvider, ...backendModelParts] = selector.split("/");
+	const catalogProvider =
+		backendModelParts.length > 0 ? BREADBOARD_MODEL_PROVIDER_ALIASES[backendProvider] : undefined;
+	const catalogSelector =
+		catalogProvider === undefined ? undefined : `${catalogProvider}/${backendModelParts.join("/")}`;
 	const providerQualifiedMatches = models.filter(model => `${model.provider}/${model.id}` === selector);
+	const aliasedProviderMatches =
+		providerQualifiedMatches.length === 0 && catalogSelector !== undefined
+			? models.filter(model => `${model.provider}/${model.id}` === catalogSelector)
+			: [];
 	const matches =
-		providerQualifiedMatches.length > 0 ? providerQualifiedMatches : models.filter(model => model.id === selector);
+		providerQualifiedMatches.length > 0
+			? providerQualifiedMatches
+			: aliasedProviderMatches.length > 0
+				? aliasedProviderMatches
+				: models.filter(model => model.id === selector);
 	if (matches.length === 0) {
 		throw new BreadboardModelAuthorityError(
 			"unresolved_backend_model",
