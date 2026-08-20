@@ -3,8 +3,8 @@
   "generator": "scripts/generate-third-party-notices.ts",
   "bundle": {
     "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "sha256": "8846b2779b307a8c8f0634ec1c3df9727fb87c38b5e22ba8edf08017f2621f90",
-    "bytes": 69043
+    "sha256": "1cbd748af997a911421346d960c2e4a926db168ec35a3e7398c93040d13e6501",
+    "bytes": 22768
   },
   "packageLicense": {
     "path": "packages/coding-agent/LICENSE",
@@ -26,6 +26,16 @@
       "bytes": 1106
     },
     {
+      "path": "crates/pi-builtins/LICENSE",
+      "sha256": "baf02c1e63b7856dbf58368b2a9c7c0a8b2bd4f45d1dee14681418f11d191484",
+      "bytes": 9264
+    },
+    {
+      "path": "crates/pi-natives/data/LICENSE.ctok",
+      "sha256": "b694b6beb9435d6520e7f2976785fa8ac30da572fa4cab0cd503aa735932de39",
+      "bytes": 1364
+    },
+    {
       "path": "crates/pi-natives/src/fonts/Silver.LICENSE",
       "sha256": "b2b97a7c88214ea92e60c3a5d2c43da59a8e552507a89330c78d9f4c0160cdfd",
       "bytes": 565
@@ -36,249 +46,19 @@
       "bytes": 1879
     },
     {
-      "path": "crates/vendor/brush-builtins/LICENSE",
-      "sha256": "2399aea81767013ec29154455dd2c0ce3529c4ea721980418ac0d20960b2e763",
-      "bytes": 1665
-    },
-    {
       "path": "crates/vendor/brush-core/LICENSE",
       "sha256": "6a4fb3e5c86a86c6d45b0278d69c683cf88fe5d6ded38ff620ae70742071c431",
       "bytes": 1739
     },
     {
-      "path": "crates/vendor/jaq/LICENSE",
-      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
-      "bytes": 1023
-    },
-    {
-      "path": "crates/vendor/uu-b2sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-base32/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-base64/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-basename/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-cat/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-checksum-common/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-comm/LICENSE",
-      "sha256": "cb594ad80aefd42d445cc729150f453d178bae2664e0e876b15d56f9dd079baa",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-cut/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-date/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-dirname/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-head/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-hostname/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-ln/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-ls/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-md5sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-mkdir/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-mktemp/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-mv/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-nproc/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-paste/LICENSE",
-      "sha256": "cb594ad80aefd42d445cc729150f453d178bae2664e0e876b15d56f9dd079baa",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-printenv/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-readlink/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-realpath/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-rm/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sed/LICENSE",
-      "sha256": "3676ea0deb03da4927350e1cf89b2f728a6d44e402ade1a9ccc0dc6f7201a8df",
-      "bytes": 1075
-    },
-    {
-      "path": "crates/vendor/uu-seq/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sha1sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sha224sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sha256sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sha384sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sha512sum/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-sort/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-stat/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-tac/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-tee/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-touch/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-tr/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-truncate/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-uname/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-uniq/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-wc/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-wc/src/utf8/LICENSE",
-      "sha256": "8ec6fb66af71790cee082a59d1d69e766e13fd3491e077678cc860df7f23522f",
-      "bytes": 1096
-    },
-    {
-      "path": "crates/vendor/uu-whoami/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
-      "path": "crates/vendor/uu-xargs/LICENSE",
-      "sha256": "b2888851106d2281b01ff2b807b4950463725c39895dd064770c43d28d419a71",
-      "bytes": 1051
-    },
-    {
-      "path": "crates/vendor/uu-yes/LICENSE",
-      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
-      "bytes": 1056
-    },
-    {
       "path": "packages/coding-agent/src/markit/NOTICE",
-      "sha256": "ab5c7a4bdf8df34effc521ec153fd3b5db046d0994c2f70031a76d74a9d7ada4",
-      "bytes": 1737
+      "sha256": "500039a00217d3ebb1f708e15d71ddb26116f980ba80c8e9ce6c2685a91dedfa",
+      "bytes": 1653
+    },
+    {
+      "path": "packages/omptype/test/ark/LICENSE",
+      "sha256": "387b9b7c0853565f6aad01470195812a2b625d70389c974d626293c29cdde09c",
+      "bytes": 1047
     },
     {
       "path": "packages/utils/src/vendor/mermaid-ascii/NOTICE",
