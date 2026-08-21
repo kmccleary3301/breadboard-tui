@@ -14,6 +14,7 @@ import type {
 	ImageContent,
 	Model,
 	TextContent,
+	ThinkingContent,
 	ToolCall,
 	ToolResultMessage,
 	Usage,
@@ -42,6 +43,25 @@ export type E4PermissionRequest = Extract<LoggedSessionEvent, { readonly kind: "
 export type E4PermissionDecision = "allow" | "deny" | "cancel";
 export type E4PermissionHandler = (request: E4PermissionRequest, signal: AbortSignal) => Promise<E4PermissionDecision>;
 
+type AssistantReasoningEvent = Extract<
+	LoggedSessionEvent,
+	{ readonly kind: "assistant_reasoning_delta" | "assistant_thought_summary_delta" }
+>;
+type AssistantToolStreamEvent = Extract<
+	LoggedSessionEvent,
+	{
+		readonly kind: "assistant_tool_call_started" | "assistant_tool_call_delta" | "assistant_tool_call_completed";
+	}
+>;
+
+interface StreamedToolCallState {
+	readonly callId: string;
+	index: number;
+	tool: string | null;
+	argumentsJson: string;
+	ended: boolean;
+}
+
 interface TurnSink {
 	readonly model: E4BackendModelAttribution;
 	readonly stream: AssistantMessageEventStream | undefined;
@@ -51,6 +71,7 @@ interface TurnSink {
 	readonly projectedToolCallIds: Set<string>;
 	readonly projectedToolResultIds: Set<string>;
 	readonly pendingProjectionKeys: string[];
+	readonly streamedToolCallsByCallId: Map<string, StreamedToolCallState>;
 	turnId: TurnId | undefined;
 	cancelRequested: boolean;
 	text: string;
@@ -59,6 +80,9 @@ interface TurnSink {
 	textStarted: boolean;
 	failureDelivered: boolean;
 	terminal: boolean;
+	thinkingText: string;
+	reasoningStarted: boolean;
+	pendingReasoningEvent: AssistantReasoningEvent | undefined;
 	pendingTextCompletion: Extract<LoggedSessionEvent, { readonly kind: "assistant_text_completed" }> | undefined;
 }
 
@@ -255,6 +279,7 @@ export class E4AgentStreamBridge {
 			toolCallsByCallId: new Map(),
 			projectedToolCallIds: new Set(),
 			projectedToolResultIds: new Set(),
+			streamedToolCallsByCallId: new Map(),
 			pendingProjectionKeys: [],
 			turnId: undefined,
 			cancelRequested: false,
@@ -262,6 +287,9 @@ export class E4AgentStreamBridge {
 			messageText: "",
 			started: false,
 			textStarted: false,
+			thinkingText: "",
+			reasoningStarted: false,
+			pendingReasoningEvent: undefined,
 			failureDelivered: false,
 			terminal: false,
 			pendingTextCompletion: undefined,
@@ -613,16 +641,23 @@ export class E4AgentStreamBridge {
 		if (sink.terminal) return;
 		switch (event.kind) {
 			case "turn_started":
+				await this.#flushReasoning(sink);
 				await this.#flushAssistantText(sink);
 				this.#ensureStarted(sink);
 				await this.#commit(event, []);
 				return;
 			case "assistant_message_started":
+				await this.#flushReasoning(sink);
 				await this.#flushAssistantText(sink);
 				this.#ensureStarted(sink);
 				await this.#commit(event, []);
 				return;
+			case "assistant_reasoning_delta":
+			case "assistant_thought_summary_delta":
+				await this.#projectReasoningDelta(sink, event);
+				return;
 			case "assistant_text_delta":
+				await this.#flushReasoning(sink);
 				this.#appendText(sink, event.payload.text);
 				if (event.payload.text) this.#undurableSinks.add(sink);
 				return;
@@ -635,7 +670,17 @@ export class E4AgentStreamBridge {
 				}
 				sink.pendingTextCompletion = event;
 				return;
+			case "assistant_tool_call_started":
+				await this.#projectStreamingToolStart(sink, event);
+				return;
+			case "assistant_tool_call_delta":
+				await this.#projectStreamingToolDelta(sink, event);
+				return;
+			case "assistant_tool_call_completed":
+				await this.#projectStreamingToolEnd(sink, event);
+				return;
 			case "tool_called":
+				await this.#flushReasoning(sink);
 				if (!sink.projectedToolCallIds.has(String(event.payload.callId))) {
 					await this.#flushAssistantText(sink);
 					await this.#projectToolCall(sink, event);
@@ -650,15 +695,19 @@ export class E4AgentStreamBridge {
 				}
 				return;
 			case "turn_completed":
+				await this.#flushReasoning(sink);
 				await this.#completeSink(sink, event);
 				return;
 			case "turn_failed":
+				await this.#flushReasoning(sink);
 				await this.#terminalFailure(sink, event, `BreadBoard turn failed [${event.payload.error.code}]`, "error");
 				return;
 			case "turn_cancelled":
+				await this.#flushReasoning(sink);
 				await this.#terminalFailure(sink, event, `BreadBoard turn cancelled [${event.payload.reason}]`, "aborted");
 				return;
 			case "runtime_error_observed": {
+				await this.#flushReasoning(sink);
 				const message = `BreadBoard runtime error [${event.payload.error.code}]: ${event.payload.error.message}`;
 				if (sink.adopted) throw new Error(message);
 				this.#failSinkPendingTerminal(sink, message, "error");
@@ -675,8 +724,6 @@ export class E4AgentStreamBridge {
 			case "input_observed":
 			case "conversation_compaction_started":
 			case "conversation_compaction_completed":
-			case "assistant_reasoning_delta":
-			case "assistant_thought_summary_delta":
 			case "tool_execution_started":
 			case "tool_execution_stdout_delta":
 			case "tool_execution_stderr_delta":
@@ -705,6 +752,188 @@ export class E4AgentStreamBridge {
 		}
 	}
 
+	async #projectReasoningDelta(sink: TurnSink, event: AssistantReasoningEvent): Promise<void> {
+		this.#ensureStarted(sink);
+		if (!sink.reasoningStarted) {
+			sink.reasoningStarted = true;
+			if (!this.#receipts.has(String(event.eventId))) {
+				const initial = assistantThinkingMessage(sink.model, "", String(event.eventId));
+				await this.#emit(event, "reasoning_message_start", { type: "message_start", message: initial }, sink);
+				await this.#emit(
+					event,
+					"reasoning_start",
+					{
+						type: "message_update",
+						message: initial,
+						assistantMessageEvent: { type: "thinking_start", contentIndex: 0, partial: initial },
+					},
+					sink,
+				);
+			}
+		}
+		sink.thinkingText += event.payload.text;
+		sink.pendingReasoningEvent = event;
+		if (!this.#receipts.has(String(event.eventId))) {
+			const message = assistantThinkingMessage(sink.model, sink.thinkingText, String(event.eventId));
+			await this.#emit(
+				event,
+				"reasoning_delta",
+				{
+					type: "message_update",
+					message,
+					assistantMessageEvent: {
+						type: "thinking_delta",
+						contentIndex: 0,
+						delta: event.payload.text,
+						partial: message,
+					},
+				},
+				sink,
+			);
+		}
+	}
+
+	async #flushReasoning(sink: TurnSink): Promise<void> {
+		const event = sink.pendingReasoningEvent;
+		if (!sink.reasoningStarted || !event) return;
+		const thinking = sink.thinkingText;
+		if (!this.#receipts.has(String(event.eventId))) {
+			const message = assistantThinkingMessage(sink.model, thinking, String(event.eventId));
+			await this.#emit(
+				event,
+				"reasoning_end",
+				{
+					type: "message_update",
+					message,
+					assistantMessageEvent: {
+						type: "thinking_end",
+						contentIndex: 0,
+						content: thinking,
+						partial: message,
+					},
+				},
+				sink,
+			);
+			await this.#emit(event, "reasoning_message_end", { type: "message_end", message }, sink);
+		}
+		sink.thinkingText = "";
+		sink.reasoningStarted = false;
+		sink.pendingReasoningEvent = undefined;
+	}
+
+	async #projectStreamingToolStart(
+		sink: TurnSink,
+		event: Extract<AssistantToolStreamEvent, { readonly kind: "assistant_tool_call_started" }>,
+	): Promise<void> {
+		await this.#flushReasoning(sink);
+		await this.#flushAssistantText(sink);
+		const callId = String(event.payload.callId);
+		const existing = sink.streamedToolCallsByCallId.get(callId);
+		const state: StreamedToolCallState = existing ?? {
+			callId,
+			index: event.payload.index,
+			tool: event.payload.tool,
+			argumentsJson: "",
+			ended: false,
+		};
+		state.index = event.payload.index;
+		state.tool = event.payload.tool ?? state.tool;
+		sink.streamedToolCallsByCallId.set(callId, state);
+		if (existing || this.#receipts.has(String(event.eventId))) return;
+		const message = streamedToolCallMessage(sink.model, state, String(event.eventId));
+		await this.#emit(event, "streamed_tool_message_start", { type: "message_start", message }, sink);
+		await this.#emit(
+			event,
+			"streamed_tool_start",
+			{
+				type: "message_update",
+				message,
+				assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, partial: message },
+			},
+			sink,
+		);
+	}
+
+	async #projectStreamingToolDelta(
+		sink: TurnSink,
+		event: Extract<AssistantToolStreamEvent, { readonly kind: "assistant_tool_call_delta" }>,
+	): Promise<void> {
+		const callId = String(event.payload.callId);
+		let state = sink.streamedToolCallsByCallId.get(callId);
+		if (!state) {
+			await this.#projectStreamingToolStart(sink, {
+				...event,
+				kind: "assistant_tool_call_started",
+				payload: {
+					index: event.payload.index,
+					callId: event.payload.callId,
+					tool: event.payload.tool,
+				},
+			});
+			state = sink.streamedToolCallsByCallId.get(callId);
+		}
+		if (!state) throw new Error("BreadBoard tool-call delta has no start state");
+		state.tool = event.payload.tool ?? state.tool;
+		state.argumentsJson += event.payload.argumentsDelta;
+		if (this.#receipts.has(String(event.eventId))) return;
+		const message = streamedToolCallMessage(sink.model, state, String(event.eventId));
+		await this.#emit(
+			event,
+			"streamed_tool_delta",
+			{
+				type: "message_update",
+				message,
+				assistantMessageEvent: {
+					type: "toolcall_delta",
+					contentIndex: 0,
+					delta: event.payload.argumentsDelta,
+					partial: message,
+				},
+			},
+			sink,
+		);
+	}
+
+	async #projectStreamingToolEnd(
+		sink: TurnSink,
+		event: Extract<AssistantToolStreamEvent, { readonly kind: "assistant_tool_call_completed" }>,
+	): Promise<void> {
+		const callId = String(event.payload.callId);
+		let state = sink.streamedToolCallsByCallId.get(callId);
+		if (!state) {
+			await this.#projectStreamingToolStart(sink, {
+				...event,
+				kind: "assistant_tool_call_started",
+				payload: {
+					index: event.payload.index,
+					callId: event.payload.callId,
+					tool: event.payload.tool,
+				},
+			});
+			state = sink.streamedToolCallsByCallId.get(callId);
+		}
+		if (!state) throw new Error("BreadBoard tool-call completion has no start state");
+		state.tool = event.payload.tool ?? state.tool;
+		state.argumentsJson = event.payload.arguments;
+		state.ended = true;
+		if (this.#receipts.has(String(event.eventId))) return;
+		const message = streamedToolCallMessage(sink.model, state, String(event.eventId));
+		const toolCall = message.content[0];
+		if (!toolCall || toolCall.type !== "toolCall")
+			throw new Error("BreadBoard streamed tool-call projection is invalid");
+		await this.#emit(
+			event,
+			"streamed_tool_end",
+			{
+				type: "message_update",
+				message,
+				assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall, partial: message },
+			},
+			sink,
+		);
+		await this.#emit(event, "streamed_tool_message_end", { type: "message_end", message }, sink);
+	}
+
 	async #projectToolCall(
 		sink: TurnSink,
 		event: Extract<LoggedSessionEvent, { readonly kind: "tool_called" }>,
@@ -715,9 +944,12 @@ export class E4AgentStreamBridge {
 		sink.projectedToolCallIds.add(toolCallId);
 		sink.toolCallsByCallId.set(toolCallId, event);
 		if (this.#receipts.has(String(event.eventId))) return;
-		const message = assistantToolCallMessage(sink.model, event);
-		await this.#emit(event, "message_start", { type: "message_start", message }, sink);
-		await this.#emit(event, "message_end", { type: "message_end", message }, sink);
+		const wasStreamed = sink.streamedToolCallsByCallId.has(toolCallId);
+		if (!wasStreamed) {
+			const message = assistantToolCallMessage(sink.model, event);
+			await this.#emit(event, "message_start", { type: "message_start", message }, sink);
+			await this.#emit(event, "message_end", { type: "message_end", message }, sink);
+		}
 		await this.#emit(
 			event,
 			"tool_execution_start",
@@ -741,6 +973,7 @@ export class E4AgentStreamBridge {
 		const toolCall = sink.toolCallsByCallId.get(toolCallId);
 		if (!toolCall) throw new Error("BreadBoard replay began mid-tool without the retained tool call");
 		sink.projectedToolResultIds.add(toolCallId);
+		sink.streamedToolCallsByCallId.delete(toolCallId);
 		if (!this.#receipts.has(String(event.eventId))) {
 			const toolName = event.payload.tool ?? toolCall.payload.tool;
 			const result = toolResult(event.payload.result, event.payload.artifactRef, String(event.eventId));
@@ -1114,6 +1347,48 @@ async function canonicalSubmitDigest(input: LogicalSubmit): Promise<string> {
 	}
 }
 
+function assistantThinkingMessage(
+	model: E4BackendModelAttribution,
+	thinking: string,
+	projectionEventId: string,
+): AssistantMessage {
+	const content: ThinkingContent = { type: "thinking", thinking };
+	return {
+		role: "assistant",
+		content: [content],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: ZERO_USAGE,
+		stopReason: "stop",
+		responseId: `${E4_PROJECTION_RECEIPT_PREFIX}${projectionEventId}`,
+		timestamp: Date.now(),
+	};
+}
+
+function streamedToolCallMessage(
+	model: E4BackendModelAttribution,
+	state: StreamedToolCallState,
+	projectionEventId: string,
+): AssistantMessage {
+	const toolCall: ToolCall = {
+		type: "toolCall",
+		id: state.callId,
+		name: state.tool ?? "unknown",
+		arguments: nativeToolArguments(state.argumentsJson),
+	};
+	return {
+		role: "assistant",
+		content: [toolCall],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: ZERO_USAGE,
+		stopReason: "toolUse",
+		responseId: `${E4_PROJECTION_RECEIPT_PREFIX}${projectionEventId}`,
+		timestamp: Date.now(),
+	};
+}
 function isAcceptedWithoutReceipt(error: unknown): boolean {
 	return (
 		error instanceof CanonicalE4ClientError &&
@@ -1173,6 +1448,7 @@ function nativeToolArguments(value: unknown): Record<string, unknown> {
 	if (value === null) return {};
 	if (isCanonicalJsonObject(value)) return { ...value };
 	if (typeof value === "string") {
+		if (!value.trim()) return {};
 		try {
 			const parsed: unknown = JSON.parse(value);
 			if (isCanonicalJsonObject(parsed)) return { ...parsed };

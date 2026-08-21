@@ -218,6 +218,92 @@ describe("E4AgentStreamBridge", () => {
 		await bridge.close();
 	});
 
+	test("projects reasoning and tool-call deltas without delegating backend tools to OMP", async () => {
+		const submitted: SubmitInput[] = [];
+		const agentEvents: AgentEvent[] = [];
+		const events = [
+			started,
+			wireEvent(3, "assistant.message.start", { message_id: "message-1" }),
+			wireEvent(4, "assistant.reasoning.delta", { text: "Inspecting." }),
+			wireEvent(5, "assistant.message.delta", { text: "Calling read." }),
+			wireEvent(6, "assistant.message.end", { text: "Calling read." }),
+			wireEvent(7, "assistant.tool_call.start", { index: 0, call_id: "call-1", tool: "read" }),
+			wireEvent(8, "assistant.tool_call.delta", {
+				index: 0,
+				call_id: "call-1",
+				tool: "read",
+				arguments_delta: '{"path":',
+			}),
+			wireEvent(9, "assistant.tool_call.delta", {
+				index: 0,
+				call_id: "call-1",
+				tool: "read",
+				arguments_delta: '"README.md"}',
+			}),
+			wireEvent(10, "assistant.tool_call.end", {
+				index: 0,
+				call_id: "call-1",
+				tool: "read",
+				arguments: '{"path":"README.md"}',
+			}),
+			wireEvent(11, "tool_call", {
+				call_id: "call-1",
+				tool: "read",
+				arguments: { path: "README.md" },
+				action: null,
+				diff_preview: null,
+				progress: null,
+			}),
+			wireEvent(12, "tool.result", {
+				call_id: "call-1",
+				tool: "read",
+				status: "completed",
+				error: false,
+				result: { text: "contents" },
+				artifact_ref: null,
+			}),
+			wireEvent(13, "turn_completed", {}),
+		];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(events, submitted),
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			emitAgentEvent: async event => {
+				agentEvents.push(event);
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const stream = await startBridgeStream(bridge, model, context);
+		const result = await stream.result();
+
+		expect(result.content).toEqual([]);
+		const updates = agentEvents.filter(
+			(event): event is Extract<AgentEvent, { type: "message_update" }> => event.type === "message_update",
+		);
+		expect(updates.map(event => event.assistantMessageEvent.type)).toEqual([
+			"thinking_start",
+			"thinking_delta",
+			"thinking_end",
+			"toolcall_start",
+			"toolcall_delta",
+			"toolcall_delta",
+			"toolcall_end",
+		]);
+		const toolCallMessages = agentEvents.filter(
+			event =>
+				event.type === "message_start" &&
+				event.message.role === "assistant" &&
+				event.message.content.some(block => block.type === "toolCall"),
+		);
+		expect(toolCallMessages).toHaveLength(1);
+		expect(agentEvents.filter(event => event.type === "tool_execution_start")).toHaveLength(1);
+		expect(agentEvents.filter(event => event.type === "tool_execution_end")).toHaveLength(1);
+		await bridge.close();
+	});
+
 	test("uses repeated backend turn starts as completed assistant message boundaries", async () => {
 		const submitted: SubmitInput[] = [];
 		const agentEvents: AgentEvent[] = [];

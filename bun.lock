@@ -477,7 +477,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.8", "", { "os": "win32", "cpu": "x64" }, "sha512-I2czzXTY61f3nFJxXoMDq80t7MivxDEnCjE+8sDKoFfcKMaoQdkqhIFQ3KyY0XLzeSpUBYeNAXgD+iOV/BU0VA=="],
 
-    "@breadboard/sdk": ["@breadboard/sdk@./vendor/breadboard-sdk-0.3.0.tgz", { "dependencies": { "eventsource-parser": "^1.1.2" } }, "sha512-vgxIAvpZAvCKzHPNqQlKvMmiYqZPI/RzSyYKn/sWkndznaB1yurmNqcLmn6ycXQ78zGtX9oYIW+QTu4gl/dqtQ=="],
+    "@breadboard/sdk": ["@breadboard/sdk@./vendor/breadboard-sdk-0.3.0.tgz", { "dependencies": { "eventsource-parser": "^1.1.2" } }, "sha512-A7DxlvUMbFlTCQ+JA9NOOxi+RQ2/8lNGwvb5mlmPNGdJwMBmoR2TWaQ93JRAvLjKblFh7xNRJ7ROxaSjLzNtHA=="],
 
     "@emnapi/core": ["@emnapi/core@1.9.2", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA=="],
 
