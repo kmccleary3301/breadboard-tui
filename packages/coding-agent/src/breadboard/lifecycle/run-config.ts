@@ -103,6 +103,7 @@ export class BreadboardRunConfigError extends Error {
 	}
 }
 
+export const DEFAULT_BREADBOARD_ENGINE_ENDPOINT = "http://127.0.0.1:9099";
 const DEFAULT_ENDPOINT = "http://127.0.0.1:7777";
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -385,11 +386,12 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 	const cliMode = input.cli?.engineMode;
 	const envMode = environment.BREADBOARD_ENGINE_MODE;
 	const selectedMode = hasOwn(selected, "engineMode") ? selected.engineMode : undefined;
+	const defaultEndpoint = environment.BREADBOARD_PRODUCT === "1" ? DEFAULT_BREADBOARD_ENGINE_ENDPOINT : undefined;
 	const endpointChoice = pick(
 		input.cli?.engineUrl,
 		environment.BREADBOARD_API_URL,
 		hasOwn(selected, "baseUrl") ? selected.baseUrl : undefined,
-		undefined,
+		defaultEndpoint,
 	);
 	const normalizedEndpoint = endpointChoice.value === undefined ? undefined : normalizeEndpoint(endpointChoice.value);
 
@@ -488,7 +490,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 			fail("missing_engine_artifact", "engineArtifact", "local-owned requires an explicit engine artifact identity");
 		tls = { kind: "local-loopback" };
 	} else if (mode === "local-external") {
-		if (!endpointChoice.explicit || endpoint === undefined)
+		if ((!endpointChoice.explicit && environment.BREADBOARD_PRODUCT !== "1") || endpoint === undefined)
 			fail("missing_endpoint", "endpoint", "local-external requires an explicit loopback endpoint");
 		if (!isLoopbackEndpoint(endpoint))
 			fail("mode_endpoint_conflict", "endpoint", "local-external requires a loopback endpoint");

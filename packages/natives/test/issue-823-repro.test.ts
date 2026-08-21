@@ -35,7 +35,34 @@ import {
 	extractEmbeddedAddonArchive,
 	getAddonFilenames,
 	resolveLoaderCandidates,
+	resolveNativesDir,
 } from "../native/loader-state.js";
+
+describe("product-native cache isolation", () => {
+	it("keeps native OMP in its existing cache namespace", () => {
+		expect(resolveNativesDir({ env: {}, homeDir: "/home/u", pathExists: () => false })).toBe("/home/u/.omp/natives");
+	});
+
+	it("uses the BreadBoard cache namespace for the bb product", () => {
+		expect(
+			resolveNativesDir({
+				env: { BREADBOARD_PRODUCT: "1" },
+				homeDir: "/home/u",
+				pathExists: () => false,
+			}),
+		).toBe("/home/u/.breadboard/natives");
+	});
+
+	it("honors the explicit BreadBoard config root", () => {
+		expect(
+			resolveNativesDir({
+				env: { BREADBOARD_PRODUCT: "1", BREADBOARD_CONFIG_DIR: "/var/lib/breadboard" },
+				homeDir: "/home/u",
+				pathExists: () => false,
+			}),
+		).toBe("/var/lib/breadboard/natives");
+	});
+});
 
 describe("issue 823: standalone-binary native loader path resolution", () => {
 	it("detects compiled-binary mode from embedded-addon presence when env and url markers are absent", () => {

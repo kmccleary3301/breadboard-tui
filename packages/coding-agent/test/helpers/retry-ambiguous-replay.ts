@@ -1,4 +1,4 @@
-import { LifecycleE4ClientError } from "@breadboard/sdk";
+import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
 
 function isAmbiguousReplayFailure(error: unknown): boolean {
 	if (!(error instanceof LifecycleE4ClientError)) return false;

@@ -13,7 +13,7 @@ import type {
 	SubmitReceipt,
 	SubmitTextTurn,
 	TurnId,
-} from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
 
 export type {
 	AttachSessionRequest,

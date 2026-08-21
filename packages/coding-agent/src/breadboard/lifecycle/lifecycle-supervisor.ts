@@ -17,7 +17,7 @@ import {
 	type LifecycleEngineBinding,
 	P30_SESSION_CONTRACT_ID,
 	P30_SESSION_SCHEMA_SHA256,
-} from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
 import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
 	type LifecycleReadyHandle,
@@ -649,22 +649,22 @@ function createBoundHttpsFetch(security: ResolvedRemoteSecurity, spkiPin: string
 }
 
 abstract class ModeStrategy {
-	private leaseTimer: NodeJS.Timeout | undefined;
-	private currentState: LifecycleStateName | undefined;
-	protected context: ReadyContext | undefined;
-	protected readonly clientInstanceId: string;
-	protected readonly registrationCredential: string;
-	protected readonly clock: LifecycleClock;
-	protected readonly makeCredential: () => string;
-	protected readonly makeOwnerCredential: () => Buffer;
-	protected readonly makeSecret: () => Buffer;
-	protected readonly createClient: NonNullable<LifecycleSupervisorDependencies["createClient"]>;
-	protected readonly stateChanged: (state: LifecycleState) => void;
-	protected readonly abortController = new AbortController();
+	leaseTimer: NodeJS.Timeout | undefined;
+	currentState: LifecycleStateName | undefined;
+	context: ReadyContext | undefined;
+	readonly clientInstanceId: string;
+	readonly registrationCredential: string;
+	readonly clock: LifecycleClock;
+	readonly makeCredential: () => string;
+	readonly makeOwnerCredential: () => Buffer;
+	readonly makeSecret: () => Buffer;
+	readonly createClient: NonNullable<LifecycleSupervisorDependencies["createClient"]>;
+	readonly stateChanged: (state: LifecycleState) => void;
+	readonly abortController = new AbortController();
 
 	constructor(
-		protected readonly config: BreadboardRunConfig,
-		protected readonly dependencies: LifecycleSupervisorDependencies,
+		readonly config: BreadboardRunConfig,
+		readonly dependencies: LifecycleSupervisorDependencies,
 	) {
 		this.clock = dependencies.clock ?? { now: Date.now, sleep: milliseconds => Bun.sleep(milliseconds) };
 		this.makeCredential = dependencies.randomCredential ?? randomCredential;
@@ -688,7 +688,7 @@ abstract class ModeStrategy {
 		this.stateChanged = dependencies.stateChanged ?? (() => undefined);
 	}
 
-	protected requestFetch: typeof fetch = globalThis.fetch;
+	requestFetch: typeof fetch = globalThis.fetch;
 
 	abstract connect(): Promise<LifecycleResult>;
 	async start(): Promise<LifecycleResult> {
@@ -711,7 +711,7 @@ abstract class ModeStrategy {
 		return false;
 	}
 
-	protected transition(name: LifecycleStateName, attempt = 0): void {
+	transition(name: LifecycleStateName, attempt = 0): void {
 		const allowed =
 			this.currentState === undefined ||
 			INITIAL_STATES.has(name) ||
@@ -721,7 +721,7 @@ abstract class ModeStrategy {
 		this.stateChanged(lifecycleState(this.config.mode, name, attempt));
 	}
 
-	protected async clientSecurity(): Promise<{ readonly bearerToken?: string; readonly fetch?: typeof fetch }> {
+	async clientSecurity(): Promise<{ readonly bearerToken?: string; readonly fetch?: typeof fetch }> {
 		const auth = this.config.auth;
 		let security: ResolvedRemoteSecurity = {};
 		if (auth?.kind === "process-secret") security = { bearerToken: auth.value };
@@ -737,25 +737,25 @@ abstract class ModeStrategy {
 		};
 	}
 
-	protected async unboundClient(): Promise<LifecycleE4Client> {
+	async unboundClient(): Promise<LifecycleE4Client> {
 		if (!this.config.endpoint) throw new Error("resolved lifecycle endpoint is missing");
 		const security = await this.clientSecurity();
 		this.requestFetch = createAuthenticatedRequestFetch(security);
 		return this.createClient({ baseUrl: this.config.endpoint, timeoutMs: this.config.requestTimeoutMs, ...security });
 	}
 
-	protected async handshake(options: { readonly ignoreAbort?: boolean } = {}): Promise<BoundLifecycleE4Client> {
+	async handshake(options: { readonly ignoreAbort?: boolean } = {}): Promise<BoundLifecycleE4Client> {
 		return await (await this.unboundClient()).handshake({
 			signal: options.ignoreAbort ? undefined : this.abortController.signal,
 		});
 	}
 
-	protected isRetryableTransport(error: unknown): boolean {
+	isRetryableTransport(error: unknown): boolean {
 		if (this.abortController.signal.aborted || !(error instanceof LifecycleE4ClientError)) return false;
 		return error.failure.kind === "timeout" || (error.failure.kind === "http" && error.failure.status === 0);
 	}
 
-	protected async withReconnect<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
+	async withReconnect<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
 		let failure: unknown;
 		for (let attempt = 0; attempt < RESTART_DELAYS_MS.length; attempt++) {
 			try {
@@ -770,7 +770,7 @@ abstract class ModeStrategy {
 		throw failure;
 	}
 
-	protected async register(client: BoundLifecycleE4Client): Promise<ReadyContext> {
+	async register(client: BoundLifecycleE4Client): Promise<ReadyContext> {
 		this.transition("registering-client");
 		const registration = await client.registerClient({
 			clientInstanceId: this.clientInstanceId,
@@ -789,7 +789,7 @@ abstract class ModeStrategy {
 		};
 	}
 
-	protected startLeaseRenewal(context: ReadyContext): void {
+	startLeaseRenewal(context: ReadyContext): void {
 		if (this.leaseTimer !== undefined) clearInterval(this.leaseTimer);
 		this.leaseTimer = setInterval(() => {
 			void (async () => {
@@ -820,13 +820,13 @@ abstract class ModeStrategy {
 		this.leaseTimer.unref?.();
 	}
 
-	protected stopLeaseRenewal(): void {
+	stopLeaseRenewal(): void {
 		if (this.leaseTimer === undefined) return;
 		clearInterval(this.leaseTimer);
 		this.leaseTimer = undefined;
 	}
 
-	protected projectReadyResult(context: ReadyContext): LifecycleResult {
+	projectReadyResult(context: ReadyContext): LifecycleResult {
 		const handle: LifecycleReadyHandle = Object.freeze({
 			mode: this.config.mode as Exclude<BreadboardRunConfig["mode"], "off">,
 			binding: context.binding,
@@ -848,14 +848,14 @@ abstract class ModeStrategy {
 		};
 	}
 
-	protected readyResult(context: ReadyContext): LifecycleResult {
+	readyResult(context: ReadyContext): LifecycleResult {
 		this.context = context;
 		this.startLeaseRenewal(context);
 		this.transition("ready");
 		return this.projectReadyResult(context);
 	}
 
-	protected projectObservedResult(binding: LifecycleEngineBinding): LifecycleResult {
+	projectObservedResult(binding: LifecycleEngineBinding): LifecycleResult {
 		return {
 			kind: "observed",
 			state: lifecycleState(this.config.mode, "compatible-observed") as LifecycleState & {
@@ -865,12 +865,12 @@ abstract class ModeStrategy {
 		};
 	}
 
-	protected observedResult(binding: LifecycleEngineBinding): LifecycleResult {
+	observedResult(binding: LifecycleEngineBinding): LifecycleResult {
 		this.transition("compatible-observed");
 		return this.projectObservedResult(binding);
 	}
 
-	protected async detach(): Promise<LifecycleResult> {
+	async detach(): Promise<LifecycleResult> {
 		const context = this.context;
 		if (!context) return lifecycleFailure(this.config.mode, "failed", "endpoint_unreachable");
 		this.transition("detaching-client");

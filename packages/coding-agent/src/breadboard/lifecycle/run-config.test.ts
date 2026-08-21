@@ -148,6 +148,39 @@ describe("resolveBreadboardRunConfig", () => {
 		).toBe("missing_endpoint");
 	});
 
+	test("uses the BreadBoard endpoint default while preserving explicit engine precedence", () => {
+		const productEnvironment = { BREADBOARD_PRODUCT: "1" };
+		const derived = resolveBreadboardRunConfig({ ...baseInput, environment: productEnvironment });
+		expect(derived.mode).toBe("local-external");
+		expect(derived.endpoint).toBe("http://127.0.0.1:9099");
+		expect(derived.sources.endpoint).toBe("derived-default");
+
+		const selected = resolveBreadboardRunConfig({
+			...baseInput,
+			environment: productEnvironment,
+			selectedConfig: { baseUrl: "http://127.0.0.1:8080" },
+		});
+		expect(selected.endpoint).toBe("http://127.0.0.1:8080");
+		expect(selected.sources.endpoint).toBe("selected-config");
+
+		const environment = resolveBreadboardRunConfig({
+			...baseInput,
+			environment: { ...productEnvironment, BREADBOARD_API_URL: "http://127.0.0.1:8081" },
+			selectedConfig: { baseUrl: "http://127.0.0.1:8080" },
+		});
+		expect(environment.endpoint).toBe("http://127.0.0.1:8081");
+		expect(environment.sources.endpoint).toBe("environment");
+
+		const cli = resolveBreadboardRunConfig({
+			...baseInput,
+			environment: { ...productEnvironment, BREADBOARD_API_URL: "http://127.0.0.1:8081" },
+			cli: { engineUrl: "http://127.0.0.1:8082" },
+			selectedConfig: { baseUrl: "http://127.0.0.1:8080" },
+		});
+		expect(cli.endpoint).toBe("http://127.0.0.1:8082");
+		expect(cli.sources.endpoint).toBe("cli");
+	});
+
 	test("requires explicit typed artifact identity for local-owned", () => {
 		const missing = configError(() => resolveBreadboardRunConfig(baseInput));
 		expect(missing.code).toBe("missing_engine_artifact");

@@ -83,14 +83,14 @@ describe("distribution notice bundle", () => {
 			check.exited,
 		]);
 		expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
-		expect(JSON.parse(stdout)).toMatchObject({ mode: "check", entries: 53 });
+		expect(JSON.parse(stdout)).toMatchObject({ mode: "check", entries: 9 });
 
 		const manifest = await Bun.file(path.join(packageRoot, "THIRD_PARTY_NOTICES.manifest.json")).json();
 		const bundle = await Bun.file(path.join(packageRoot, "THIRD_PARTY_NOTICES.txt")).text();
 		const sdkBytes = new Uint8Array(
-			await Bun.file(path.join(packageRoot, "vendor", "breadboard-sdk-0.2.5.tgz")).arrayBuffer(),
+			await Bun.file(path.join(packageRoot, "vendor", "breadboard-sdk-0.3.0.tgz")).arrayBuffer(),
 		);
-		expect(manifest.entries).toHaveLength(53);
+		expect(manifest.entries).toHaveLength(9);
 		expect(manifest.bundle.sha256).toBe(sha256(bundle));
 		expect(manifest.sdk).toMatchObject({
 			artifactSha256: sha256(sdkBytes),
@@ -100,7 +100,7 @@ describe("distribution notice bundle", () => {
 		});
 		expect(bundle).toContain("===== BEGIN LICENSE =====");
 		expect(bundle).toContain("===== BEGIN crates/pi-natives/src/fonts/Silver.LICENSE =====");
-		expect(bundle).toContain("Package: @breadboard/sdk@0.2.5");
+		expect(bundle).toContain("Package: @breadboard/sdk@0.3.0");
 		expect(await Bun.file(path.join(packageRoot, "LICENSE")).text()).toBe(
 			await Bun.file(path.join(repoRoot, "LICENSE")).text(),
 		);

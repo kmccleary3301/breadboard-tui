@@ -1,9 +1,7 @@
 import { join } from "node:path";
 import {
 	createBreadboardClient,
-	createCanonicalE4Client,
-	type EngineFeatureAuditResponse,
-	type LifecycleEngineBinding,
+	type EngineStatusResponse,
 	type ModelCatalogResponse,
 	type ProviderAuthAttachRequest,
 	type ProviderAuthAttachResponse,
@@ -11,6 +9,8 @@ import {
 	type ProviderAuthDetachResponse,
 	type ProviderAuthStatusResponse,
 } from "@breadboard/sdk";
+import type { LifecycleEngineBinding } from "@breadboard/sdk/internal";
+import { createCanonicalE4Client } from "@breadboard/sdk/internal";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { CanonicalE4SessionPort } from "./canonical-e4-session-port";
 import {
@@ -26,6 +26,10 @@ import {
 } from "./lifecycle/lifecycle-supervisor";
 import { LocalAuthorityStore } from "./lifecycle/local-authority-store";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
+import type { ModelRolePort } from "./model-role-port";
+import { createBreadboardModelRolePort } from "./model-role-port";
+import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
+import type { ProviderAuthPort } from "./provider-auth-port";
 import type { OpenedSession, OpenSession } from "./session-port";
 
 type BreadboardEngineReadyHandle = Pick<
@@ -61,11 +65,13 @@ export interface BreadboardEnginePort {
 	readonly lifecycleFailure: BreadboardLifecycleFailureSignal;
 	openSession(target: OpenSession, signal?: AbortSignal): Promise<OpenedSession>;
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
-	getFeatures(): Promise<EngineFeatureAuditResponse>;
+	getFeatures(): Promise<EngineStatusResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
+	readonly modelRoles: ModelRolePort;
 	attachProviderAuth(request: ProviderAuthAttachRequest): Promise<ProviderAuthAttachResponse>;
 	detachProviderAuth(request: ProviderAuthDetachRequest): Promise<ProviderAuthDetachResponse>;
+	readonly providerAuth: ProviderAuthPort;
 	close(): Promise<void>;
 }
 
@@ -130,6 +136,94 @@ function authorityFacts(handle: BreadboardEngineReadyHandle): BreadboardEngineAu
 		ownerGeneration: handle.ownerGeneration,
 	});
 }
+const SESSION_SCOPED_EVENT_TYPES = new Set([
+	"todo_updated",
+	"checkpoint_list",
+	"checkpoint_restored",
+	"skills_catalog",
+	"skills_selection",
+	"ctree_node",
+	"ctree_snapshot",
+]);
+
+function visibleAssistantText(payload: unknown): string {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+	const text = (payload as Record<string, unknown>).text;
+	return typeof text === "string" ? text.replace(/\n*>>>>>> END RESPONSE\s*$/, "") : "";
+}
+
+export function filterUncorrelatedCanonicalEvents(response: Response): Response {
+	if (!response.body) return response;
+	const decoder = new TextDecoder();
+	const encoder = new TextEncoder();
+	let pending = "";
+	let block = "";
+	const transform = new TransformStream<Uint8Array, Uint8Array>({
+		transform(chunk, controller) {
+			pending += decoder.decode(chunk, { stream: true });
+			for (;;) {
+				const newline = pending.indexOf("\n");
+				if (newline < 0) break;
+				const line = pending.slice(0, newline);
+				pending = pending.slice(newline + 1);
+				if (line.length > 0) {
+					block += `${line}\n`;
+					continue;
+				}
+				let drop = false;
+				const data = block
+					.split("\n")
+					.filter(line => line.startsWith("data:"))
+					.map(line => line.slice(5).trimStart())
+					.join("\n");
+				if (data) {
+					try {
+						const raw = JSON.parse(data) as Record<string, unknown>;
+						if (raw.type === "assistant_message") {
+							raw.type = "assistant.message.end";
+							raw.payload = { text: visibleAssistantText(raw.payload) };
+						}
+						const turn = raw.turn;
+						if (
+							raw.stable_cursor === true &&
+							Number.isSafeInteger(turn) &&
+							raw.turn_id == null &&
+							raw.input_id == null
+						) {
+							raw.turn_id = `turn-${turn}`;
+							raw.input_id = `input-${turn}`;
+						}
+						if (raw.stable_cursor === true && raw.turn_id != null && raw.input_id != null) {
+							const lines = block.split("\n");
+							const dataIndex = lines.findIndex(line => line.startsWith("data:"));
+							if (dataIndex >= 0) lines[dataIndex] = `data: ${JSON.stringify(raw)}`;
+							block = lines.join("\n");
+						}
+						drop =
+							raw.stable_cursor === true &&
+							(raw.turn_id == null || raw.input_id == null) &&
+							typeof raw.type === "string" &&
+							!SESSION_SCOPED_EVENT_TYPES.has(raw.type);
+					} catch {
+						drop = false;
+					}
+				}
+				if (!drop) controller.enqueue(encoder.encode(`${block}\n`));
+				block = "";
+			}
+		},
+		flush(controller) {
+			pending += decoder.decode();
+			if (pending.length > 0) block += pending;
+			if (block.length > 0) controller.enqueue(encoder.encode(block));
+		},
+	});
+	return new Response(response.body.pipeThrough(transform), {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
+}
 
 function createConnectedPort(
 	handle: BreadboardEngineReadyHandle,
@@ -137,15 +231,38 @@ function createConnectedPort(
 	monitor: LifecycleMonitor,
 	options: BreadboardEngineConnectionOptions,
 ): BreadboardEnginePort {
+	const strictEventFetch = Object.assign(
+		async (input: Parameters<typeof handle.requestFetch>[0], init: Parameters<typeof handle.requestFetch>[1]) => {
+			const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+			if (url.pathname.endsWith("/events")) {
+				url.searchParams.set("schema", "2");
+				url.searchParams.set("include_legacy", "false");
+			}
+			const response = await handle.requestFetch(url, init);
+			return url.pathname.endsWith("/events") ? filterUncorrelatedCanonicalEvents(response) : response;
+		},
+		{ preconnect: handle.requestFetch.preconnect },
+	);
 	const clientConfig = {
 		baseUrl: handle.binding.endpoint,
 		requestTimeoutMs: supervisor.config.requestTimeoutMs,
-		fetch: handle.requestFetch,
+		fetch: strictEventFetch,
 	};
-	const sessionPort = new CanonicalE4SessionPort(createCanonicalE4Client(clientConfig), {
+	const canonicalClient = createCanonicalE4Client(clientConfig);
+	const controlClient = createBreadboardClient(clientConfig);
+	const sessionClient = {
+		...canonicalClient,
+		async create(request: Parameters<typeof canonicalClient.create>[0]) {
+			if (request.task === undefined) {
+				const created = await controlClient.createSession({ config_path: request.configPath } as never);
+				return await canonicalClient.attach({ sessionId: created.session_id });
+			}
+			return await canonicalClient.create(request);
+		},
+	};
+	const sessionPort = new CanonicalE4SessionPort(sessionClient, {
 		onLateCloseError: options.onLateSessionCloseError,
 	});
-	const controlClient = createBreadboardClient(clientConfig);
 	const sessions = new Set<OpenedSession>();
 	let closed = false;
 	let closePromise: Promise<void> | undefined;
@@ -214,7 +331,7 @@ function createConnectedPort(
 		openSession,
 		getFeatures: async () => {
 			assertOperational();
-			return controlClient.getFeatures();
+			return controlClient.engineStatus();
 		},
 		getModelCatalog: async configPath => {
 			assertOperational();
@@ -222,17 +339,19 @@ function createConnectedPort(
 		},
 		getProviderAuthStatus: async () => {
 			assertOperational();
-			return controlClient.getProviderAuthStatus();
+			return controlClient.providerAuthStatus();
 		},
 		attachProviderAuth: async request => {
 			assertOperational();
-			return controlClient.attachProviderAuth(request);
+			return controlClient.providerAuthAttach(request);
 		},
 		detachProviderAuth: async request => {
 			assertOperational();
-			return controlClient.detachProviderAuth(request);
+			return controlClient.providerAuthDetach(request);
 		},
+		modelRoles: createBreadboardModelRolePort(controlClient),
 		close,
+		providerAuth: createBreadboardProviderAuthPort(controlClient),
 	};
 	return Object.freeze(port);
 }

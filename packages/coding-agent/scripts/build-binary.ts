@@ -15,6 +15,15 @@ export interface CrossBuild {
 	readonly target: Bun.Build.CompileTarget;
 }
 
+export type BinaryProduct = "bb" | "omp";
+
+/** Resolve the local binary product, defaulting to the BreadBoard release candidate. */
+export function resolveBinaryProduct(value: string | undefined): BinaryProduct {
+	if (value === undefined || value === "") return "bb";
+	if (value === "bb" || value === "omp") return value;
+	throw new Error(`Unsupported BUILD_PRODUCT: ${value}`);
+}
+
 /** Resolves a CROSS_TARGET value to the Bun compile target used by local binary builds. */
 export function resolveCrossBuild(value: string | undefined): CrossBuild | null {
 	switch (value) {
@@ -71,12 +80,14 @@ async function runCommand(
 }
 
 async function main(): Promise<void> {
+	const product = resolveBinaryProduct(Bun.env.BUILD_PRODUCT);
 	const crossBuild = resolveCrossBuild(Bun.env.CROSS_TARGET);
 	const shouldAdhocSign = process.platform === "darwin" && !crossBuild && Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
-	const outName = crossBuild ? `omp-${crossBuild.id}` : "omp";
+	const outName = crossBuild ? `${product}-${crossBuild.id}` : product;
+	const entrypointName = product === "bb" ? "bb.ts" : "omp.ts";
 	const outputPath = path.join(packageDir, "dist", outName);
-	// Generate inside the try so the finally always restores the empty checked-in
-	// placeholders (stats client archive, docs index) even on failure.
+	// Generate inside the try so the finally always restores generated placeholders
+	// (stats client archive, docs index) even on failure.
 	try {
 		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats"]);
 		// The in-memory legacy Pi virtual module reaches the coding-agent
@@ -91,7 +102,7 @@ async function main(): Promise<void> {
 		try {
 			await compileCodingAgent({
 				repoRoot,
-				entrypoint: path.join(packageDir, "src", "cli.ts"),
+				entrypoint: path.join(packageDir, "src", entrypointName),
 				outfile: outputPath,
 				transformersVersion,
 				target: crossBuild?.target,

@@ -9,8 +9,8 @@ import type {
 	StructuredSubmit,
 	SubmitInput,
 	SubmitReceipt,
-} from "@breadboard/sdk";
-import { decodeLoggedSessionEvent, LifecycleE4ClientError } from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
+import { decodeLoggedSessionEvent, LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { Agent, type AgentEvent, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Context } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -215,6 +215,158 @@ describe("E4AgentStreamBridge", () => {
 		expect(result.content).toEqual([{ type: "text", text: "hello world" }]);
 		expect(result.provider).toBe(model.provider);
 		expect(agentEvents).toEqual([]);
+		await bridge.close();
+	});
+
+	test("projects reasoning and tool-call deltas without delegating backend tools to OMP", async () => {
+		const submitted: SubmitInput[] = [];
+		const agentEvents: AgentEvent[] = [];
+		const events = [
+			started,
+			wireEvent(3, "assistant.message.start", { message_id: "message-1" }),
+			wireEvent(4, "assistant.reasoning.delta", { text: "Inspecting." }),
+			wireEvent(5, "assistant.message.delta", { text: "Calling read." }),
+			wireEvent(6, "assistant.message.end", { text: "Calling read." }),
+			wireEvent(7, "assistant.tool_call.start", { index: 0, call_id: "call-1", tool: "read" }),
+			wireEvent(8, "assistant.tool_call.delta", {
+				index: 0,
+				call_id: "call-1",
+				tool: "read",
+				arguments_delta: '{"path":',
+			}),
+			wireEvent(9, "assistant.tool_call.delta", {
+				index: 0,
+				call_id: "call-1",
+				tool: "read",
+				arguments_delta: '"README.md"}',
+			}),
+			wireEvent(10, "assistant.tool_call.end", {
+				index: 0,
+				call_id: "call-1",
+				tool: "read",
+				arguments: '{"path":"README.md"}',
+			}),
+			wireEvent(11, "tool_call", {
+				call_id: "call-1",
+				tool: "read",
+				arguments: { path: "README.md" },
+				action: null,
+				diff_preview: null,
+				progress: null,
+			}),
+			wireEvent(12, "tool.result", {
+				call_id: "call-1",
+				tool: "read",
+				status: "completed",
+				error: false,
+				result: { text: "contents" },
+				artifact_ref: null,
+			}),
+			wireEvent(13, "turn_completed", {}),
+		];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(events, submitted),
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			emitAgentEvent: async event => {
+				agentEvents.push(event);
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const stream = await startBridgeStream(bridge, model, context);
+		const result = await stream.result();
+
+		expect(result.content).toEqual([]);
+		const updates = agentEvents.filter(
+			(event): event is Extract<AgentEvent, { type: "message_update" }> => event.type === "message_update",
+		);
+		expect(updates.map(event => event.assistantMessageEvent.type)).toEqual([
+			"thinking_start",
+			"thinking_delta",
+			"thinking_end",
+			"toolcall_start",
+			"toolcall_delta",
+			"toolcall_delta",
+			"toolcall_end",
+		]);
+		const toolCallMessages = agentEvents.filter(
+			event =>
+				event.type === "message_start" &&
+				event.message.role === "assistant" &&
+				event.message.content.some(block => block.type === "toolCall"),
+		);
+		expect(toolCallMessages).toHaveLength(1);
+		expect(agentEvents.filter(event => event.type === "tool_execution_start")).toHaveLength(1);
+		expect(agentEvents.filter(event => event.type === "tool_execution_end")).toHaveLength(1);
+		await bridge.close();
+	});
+
+	test("uses repeated backend turn starts as completed assistant message boundaries", async () => {
+		const submitted: SubmitInput[] = [];
+		const agentEvents: AgentEvent[] = [];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[
+					started,
+					wireEvent(3, "assistant.message.delta", { text: "first" }),
+					wireEvent(4, "assistant.message.end", { text: "first" }),
+					wireEvent(5, "turn_start", {}),
+					wireEvent(6, "assistant.message.delta", { text: "second" }),
+					wireEvent(7, "assistant.message.end", { text: "second" }),
+					wireEvent(8, "turn_completed", {}),
+				],
+				submitted,
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			emitAgentEvent: async event => {
+				agentEvents.push(event);
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const result = await (await startBridgeStream(bridge, model, context)).result();
+		const firstCompletion = agentEvents.find(event => event.type === "message_end");
+
+		expect(
+			firstCompletion?.type === "message_end" && firstCompletion.message.role === "assistant"
+				? firstCompletion.message.content
+				: null,
+		).toEqual([{ type: "text", text: "first" }]);
+		expect(result.content).toEqual([{ type: "text", text: "second" }]);
+		await bridge.close();
+	});
+
+	test("commits session-scoped compaction tree nodes before the owned turn", async () => {
+		const submitted: SubmitInput[] = [];
+		const committed: number[] = [];
+		const events = [
+			wireEvent(1, "ctree_node", { node: { id: "bootstrap" } }, null),
+			started,
+			wireEvent(3, "assistant.message.delta", { text: "ready" }),
+			wireEvent(4, "assistant.message.end", { text: "ready" }),
+			wireEvent(5, "turn_completed", {}),
+		];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(events, submitted),
+			releaseAgentEvent() {},
+			async projectionCommitted(cursor) {
+				committed.push(cursor.sequence);
+			},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const stream = await startBridgeStream(bridge, model, context);
+		const result = await stream.result();
+
+		expect(result.content).toEqual([{ type: "text", text: "ready" }]);
+		expect(committed).toContain(1);
 		await bridge.close();
 	});
 

@@ -3218,6 +3218,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			settings,
 			createSettingsAwareStreamFn(settings),
 		);
+		const primaryStreamFn = options.mainStreamFn ?? settingsAwareStreamFn;
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
 			const maxTimeout = settings.get("tools.maxTimeout");
@@ -3284,7 +3285,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					settings.get("externalThinking") &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
-				return settingsAwareStreamFn(streamModel, context, {
+				return primaryStreamFn(streamModel, context, {
 					...streamOptions,
 					anthropicCacheRefresh: true,
 					forceReasoningOff: externalThinking || streamOptions?.forceReasoningOff,

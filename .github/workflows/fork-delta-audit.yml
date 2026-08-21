@@ -1,0 +1,113 @@
+name: Fork delta audit
+
+on:
+  pull_request:
+  push:
+    branches: ["bb-omp-convergence/v17.4.0-aci"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-delta-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BBOMP_CORE_52: packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts
+  BBOMP_UPSTREAM_TAG: v17.4.0
+  BBOMP_UPSTREAM_COMMIT: 72000acfeb902e21816252699482887f34d1a5a4
+  BBOMP_UPSTREAM_TREE: c337de936afe886b9c5d566d026427839462dbf4
+
+jobs:
+  audit:
+    name: Fast BBOMP-CORE-52 and delta audit
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Install release native addons
+        run: |
+          set -euo pipefail
+          tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@17.4.0 dist.tarball)"
+          curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/package"/pi_natives.linux-x64-*.node packages/natives/native/
+      - name: Fetch pinned canonical upstream tag
+        run: |
+          set -euo pipefail
+          test "$(jq -r .upstream.tag scripts/p31/upstream-sync-policy.json)" = "$BBOMP_UPSTREAM_TAG"
+          test "$(jq -r .upstream.commit scripts/p31/upstream-sync-policy.json)" = "$BBOMP_UPSTREAM_COMMIT"
+          test "$(jq -r .upstream.tree scripts/p31/upstream-sync-policy.json)" = "$BBOMP_UPSTREAM_TREE"
+          test "$(jq -r .upstream.tag scripts/fork-layer-manifest.json)" = "$BBOMP_UPSTREAM_TAG"
+          test "$(jq -r .upstream.commit scripts/fork-layer-manifest.json)" = "$BBOMP_UPSTREAM_COMMIT"
+          test "$(jq -r .upstream.tree scripts/fork-layer-manifest.json)" = "$BBOMP_UPSTREAM_TREE"
+          git fetch --no-tags https://github.com/can1357/oh-my-pi.git \
+            "refs/tags/$BBOMP_UPSTREAM_TAG:refs/tags/$BBOMP_UPSTREAM_TAG"
+          test "$(git rev-parse "$BBOMP_UPSTREAM_TAG^{commit}")" = "$BBOMP_UPSTREAM_COMMIT"
+          test "$(git rev-parse "$BBOMP_UPSTREAM_TAG^{tree}")" = "$BBOMP_UPSTREAM_TREE"
+      - name: Fast BBOMP-CORE-52 (pull request)
+        if: github.event_name == 'pull_request'
+        run: bun test "$BBOMP_CORE_52" --test-name-pattern '\[fast\]'
+      - name: Productized fork delta audit
+        if: always()
+        run: bun scripts/audit-fork-delta.ts --receipt-dir artifacts
+      - name: Upload deterministic audit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bb-omp-delta-audit-${{ github.run_id }}
+          path: |
+            artifacts/fork-delta-audit.json
+            artifacts/fork-delta-audit.md
+          if-no-files-found: error
+
+  candidate:
+    name: Full BBOMP-CORE-52, build, and smoke
+    if: github.event_name != 'pull_request'
+    needs: audit
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Install release native addons
+        run: |
+          set -euo pipefail
+          tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@17.4.0 dist.tarball)"
+          curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/package"/pi_natives.linux-x64-*.node packages/natives/native/
+      - name: Full BBOMP-CORE-52
+        run: bun test "$BBOMP_CORE_52"
+      - name: Read pinned backend provenance
+        id: backend
+        run: echo "commit=$(jq -r .backendCommit packages/coding-agent/breadboard-sdk-provenance.json)" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned BreadBoard backend provenance
+        uses: actions/checkout@v4
+        with:
+          repository: kmccleary3301/breadboard
+          ref: ${{ steps.backend.outputs.commit }}
+          path: breadboard-backend
+      - name: Build candidate binary
+        env:
+          BREADBOARD_P30_BACKEND_ROOT: ${{ github.workspace }}/breadboard-backend
+        run: bun run --cwd packages/coding-agent build:bb
+      - name: Smoke candidate binary
+        run: |
+          ./packages/coding-agent/dist/bb --version
+          ./packages/coding-agent/dist/bb --help
+          ./packages/coding-agent/dist/bb --smoke-test

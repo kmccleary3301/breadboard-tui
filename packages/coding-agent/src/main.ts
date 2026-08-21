@@ -7,6 +7,7 @@
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
+import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk/internal";
 import { type AgentEvent, EventLoopKeepalive, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
@@ -14,6 +15,7 @@ import {
 	directoryExists,
 	getLogPath,
 	getProjectDir,
+	IS_BREADBOARD_PRODUCT,
 	logger,
 	normalizePathForComparison,
 	postmortem,
@@ -22,7 +24,6 @@ import {
 	VERSION,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk";
 import {
 	breadboardProjectionEventId,
 	E4AgentStreamBridge,
@@ -44,6 +45,7 @@ import {
 	resolveBreadboardRunConfig,
 } from "./breadboard/lifecycle/run-config";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import type { OpenedSession, OpenSession } from "./breadboard/session-port";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -492,6 +494,7 @@ async function runInteractiveMode(
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 	joinLink?: string,
+	providerAuthPort?: ProviderAuthPort,
 ): Promise<void> {
 	const mode = new InteractiveMode(
 		session,
@@ -501,6 +504,7 @@ async function runInteractiveMode(
 		lspServers,
 		mcpManager,
 		eventBus,
+		providerAuthPort,
 	);
 
 	// Cold-launch gate: the full setup wizard (every scene + the overlay and
@@ -1429,7 +1433,7 @@ function resolveNativeSurfaceEngineSelection(
 		process.env.BREADBOARD_ENGINE_BACKEND_COMMIT,
 	].some(value => value !== undefined);
 	if (parsed.engineMode === undefined && parsed.engineUrl === undefined && !selectedExplicit && !environmentExplicit) {
-		return { engineMode: "off" };
+		return IS_BREADBOARD_PRODUCT ? {} : { engineMode: "off" };
 	}
 	const effective = resolveBreadboardRunConfig({
 		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
@@ -1505,6 +1509,7 @@ export function resolveBreadboardSessionTarget(
 }
 
 export interface PreparedBreadboardRuntime {
+	readonly providerAuth: ProviderAuthPort;
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
@@ -1564,6 +1569,11 @@ function formatBreadboardStartupError(error: unknown): string | undefined {
 	return undefined;
 }
 
+const BREADBOARD_MODEL_PROVIDER_ALIASES: Readonly<Record<string, string>> = {
+	// BreadBoard's engine owns the runtime id; OMP owns the catalog id.
+	codex: "openai-codex",
+};
+
 export function resolveBreadboardBackendModel(
 	backendModel: string | null | undefined,
 	modelRegistry: BreadboardModelRegistry,
@@ -1577,9 +1587,22 @@ export function resolveBreadboardBackendModel(
 	}
 
 	const models = modelRegistry.getAll();
+	const [backendProvider, ...backendModelParts] = selector.split("/");
+	const catalogProvider =
+		backendModelParts.length > 0 ? BREADBOARD_MODEL_PROVIDER_ALIASES[backendProvider] : undefined;
+	const catalogSelector =
+		catalogProvider === undefined ? undefined : `${catalogProvider}/${backendModelParts.join("/")}`;
 	const providerQualifiedMatches = models.filter(model => `${model.provider}/${model.id}` === selector);
+	const aliasedProviderMatches =
+		providerQualifiedMatches.length === 0 && catalogSelector !== undefined
+			? models.filter(model => `${model.provider}/${model.id}` === catalogSelector)
+			: [];
 	const matches =
-		providerQualifiedMatches.length > 0 ? providerQualifiedMatches : models.filter(model => model.id === selector);
+		providerQualifiedMatches.length > 0
+			? providerQualifiedMatches
+			: aliasedProviderMatches.length > 0
+				? aliasedProviderMatches
+				: models.filter(model => model.id === selector);
 	if (matches.length === 0) {
 		throw new BreadboardModelAuthorityError(
 			"unresolved_backend_model",
@@ -1928,6 +1951,7 @@ export async function prepareConnectedBreadboardRuntime(
 		return {
 			stream: bridge.stream,
 			sessionId: initialBinding.sessionId,
+			providerAuth: options.engine.providerAuth,
 			model,
 			activate,
 			start,
@@ -2558,7 +2582,6 @@ export async function runRootCommand(
 			}
 		}
 
-
 		const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = await createSession({
 			...sessionOptions,
 			eventBus,
@@ -2589,6 +2612,10 @@ export async function runRootCommand(
 				throw error;
 			}
 		}
+		// The bridge must observe and admit turns even when no extension UI
+		// context is installed (for example OMP_SKIP_SETUP=1). The callback
+		// below remains an idempotent compatibility path for extension hosts.
+		if (isInteractive) preparedBreadboardRuntime?.start();
 		const setInteractiveToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean): void => {
 			breadboardUIContext = hasUI ? uiContext : undefined;
 			setToolUIContext(uiContext, hasUI);
@@ -2695,6 +2722,7 @@ export async function runRootCommand(
 				initialMessage,
 				initialImages,
 				parsedArgs.join,
+				preparedBreadboardRuntime?.providerAuth,
 			);
 		} else {
 			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.

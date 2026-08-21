@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { type AddressInfo, createServer } from "node:net";
 import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk";
+import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { type BreadboardSdkProvenance, openVerifiedBackendSnapshot } from "../scripts/verify-breadboard-sdk-provenance";
 import { retryAmbiguousReplay } from "./helpers/retry-ambiguous-replay";
 
@@ -20,7 +20,7 @@ const backendPython =
 	(backendRoot === undefined ? undefined : resolve(backendRoot, ".venv/bin/python"));
 const expectedSessionContract = {
 	contractId: "p30-e4-session-v1" as const,
-	schemaSha256: "sha256:5757652c22d6aa2eb7a1cc8be1a40021d3f6a15df18d69ca22dc1916a400dbd4" as const,
+	schemaSha256: "sha256:4c796e33684136cd7304c989318ec7ea2735c3702b15de9067a687dcc5310813" as const,
 };
 const authorityId = (): string => randomBytes(32).toString("base64url");
 const clientId = (label: string): string => `p30-real-${label}-${authorityId()}`;

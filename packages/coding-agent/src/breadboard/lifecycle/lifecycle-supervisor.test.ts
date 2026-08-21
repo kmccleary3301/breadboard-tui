@@ -11,8 +11,8 @@ import type {
 	LifecycleE4Client,
 	LifecycleEngineBinding,
 	PrepareHardSignalInput,
-} from "@breadboard/sdk";
-import { LifecycleE4ClientError } from "@breadboard/sdk";
+} from "@breadboard/sdk/internal";
+import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { presentLifecycle, writeLifecyclePresentation } from "./lifecycle-presenter";
 import { type LifecycleState, lifecycleFailure } from "./lifecycle-state";
 import * as lifecycleModule from "./lifecycle-supervisor";
@@ -91,7 +91,7 @@ function bindingFor(
 		launchId,
 		protocolVersion: "1.0",
 		sessionContractId: "p30-e4-session-v1",
-		sessionSchemaSha256: "sha256:5757652c22d6aa2eb7a1cc8be1a40021d3f6a15df18d69ca22dc1916a400dbd4",
+		sessionSchemaSha256: "sha256:4c796e33684136cd7304c989318ec7ea2735c3702b15de9067a687dcc5310813",
 		sessionReplayContractDigest: {} as LifecycleEngineBinding["sessionReplayContractDigest"],
 		liveness: { status: "live" },
 		process: {
@@ -111,7 +111,7 @@ function bindingFor(
 		protocol: { protocolVersion: "1.0" },
 		sessionContract: {
 			contractId: "p30-e4-session-v1",
-			schemaSha256: "sha256:5757652c22d6aa2eb7a1cc8be1a40021d3f6a15df18d69ca22dc1916a400dbd4",
+			schemaSha256: "sha256:4c796e33684136cd7304c989318ec7ea2735c3702b15de9067a687dcc5310813",
 			compatibility: "compatible",
 			sessionReplayContractDigest: {} as LifecycleEngineBinding["sessionReplayContractDigest"],
 		},

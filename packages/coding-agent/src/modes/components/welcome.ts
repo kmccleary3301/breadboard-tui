@@ -8,8 +8,13 @@ import {
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
-import { theme } from "../../modes/theme/theme";
+import { getCurrentThemeName, isBreadboardProduct, isLightTheme, theme } from "../../modes/theme/theme";
 import tipsText from "./tips.txt" with { type: "text" };
+
+/** Display name for the box title under the BreadBoard product entrypoint;
+ *  native OMP keeps {@link APP_NAME}. Sourced from the canonical branding
+ *  README (docs/media/branding/README.md), not model-generated. */
+const BREADBOARD_PRODUCT_NAME = "BreadBoard";
 
 /** Tips embedded at build time, one per line; blanks dropped. */
 const TIPS: readonly string[] = tipsText
@@ -356,7 +361,8 @@ export class WelcomeComponent implements Component {
 		const lines: string[] = [];
 
 		// Top border with embedded title
-		const title = ` ${APP_NAME} v${this.version} `;
+		const appName = isBreadboardProduct() ? BREADBOARD_PRODUCT_NAME : APP_NAME;
+		const title = ` ${appName} v${this.version} `;
 		const titlePrefixRaw = hChar.repeat(3);
 		const titleStyled = theme.fg("dim", titlePrefixRaw) + theme.fg("muted", title);
 		const titleVisLen = visibleWidth(titlePrefixRaw) + visibleWidth(title);
@@ -446,14 +452,26 @@ export class WelcomeComponent implements Component {
 
 	/** Pick the logo frame for the current intro phase, or the resting frame. */
 	#currentLogoFrame(): readonly string[] {
-		if (this.#animStart == null) return REST_FRAME;
+		const style = currentLogoStyle();
+		if (this.#animStart == null) return style.rest;
 		const elapsed = performance.now() - this.#animStart;
-		if (elapsed >= INTRO_MS) return REST_FRAME;
-		return introLogoFrame(elapsed / INTRO_MS);
+		if (elapsed >= INTRO_MS) return style.rest;
+		return introLogoFrame(elapsed / INTRO_MS, style.art, style.palette);
 	}
 }
 
 export const PI_LOGO = ["▀██████████▀", " ╘██    ██  ", "  ██    ██  ", "  ██    ██  ", " ▄██▄  ▄██▄ "];
+
+/**
+ * BreadBoard "bb" brand mark, rendered under the product entrypoint. Authored
+ * from the canonical `bb` icon glyph in
+ * docs/media/branding/breadboard_icon_bb_v1.svg of the outcome-campaign repo
+ * (checksums.sha256-verified icon sha256
+ * 87c6e65ca32d35b3604d6c3970bfa2a8d447440ea399809103df3e3bc49a873b). Sized to
+ * the 12-column logo slot and 5 rows so the two-column layout and intro timing
+ * match {@link PI_LOGO}.
+ */
+export const BB_LOGO = ["██    ██   ", "██    ██   ", "███▄  ███▄ ", "██ █  ██ █ ", "███▀  ███▀ "];
 
 /** Multi-stop palette for the diagonal gradient. */
 const GRADIENT_STOPS: ReadonlyArray<readonly [number, number, number]> = [
@@ -466,6 +484,41 @@ const GRADIENT_STOPS: ReadonlyArray<readonly [number, number, number]> = [
 
 /** 256-color ramp fallback when truecolor isn't available. */
 const GRADIENT_RAMP_256 = [199, 171, 135, 99, 75, 51, 87];
+
+/** Palette driving {@link gradientEscape}: a truecolor multi-stop ramp plus a
+ *  256-color fallback ramp. */
+export interface GradientPalette {
+	readonly stops: ReadonlyArray<readonly [number, number, number]>;
+	readonly ramp256: readonly number[];
+}
+
+/** Upstream OMP gradient palette. Default for every caller so native visuals
+ *  stay byte-identical. */
+const OMP_PALETTE: GradientPalette = { stops: GRADIENT_STOPS, ramp256: GRADIENT_RAMP_256 };
+
+/** Dune-orange brand ramp for dark backgrounds; every stop clears 4.4:1 against
+ *  a near-black terminal (WCAG AA large-text/graphics threshold). */
+const BRAND_PALETTE_DARK: GradientPalette = {
+	stops: [
+		[214, 90, 10],
+		[237, 132, 15],
+		[255, 163, 56],
+		[255, 196, 112],
+	],
+	ramp256: [130, 166, 172, 208, 214, 220],
+};
+
+/** Dune-orange brand ramp for light backgrounds; deepened so every stop clears
+ *  4.2:1 against white. */
+const BRAND_PALETTE_LIGHT: GradientPalette = {
+	stops: [
+		[98, 42, 2],
+		[140, 58, 4],
+		[176, 74, 4],
+		[204, 88, 8],
+	],
+	ramp256: [52, 94, 130, 166, 172],
+};
 
 /** Half-width of the shine highlight band, expressed in gradient-t units. */
 const SHINE_HALF_WIDTH = 0.18;
@@ -483,13 +536,13 @@ export interface ShineConfig {
  * Shared by {@link gradientLogo} and the setup splash so both stay
  * color-identical (truecolor when available, 256-color ramp otherwise).
  */
-export function gradientEscape(t: number, shine?: ShineConfig): string {
+export function gradientEscape(t: number, shine?: ShineConfig, palette: GradientPalette = OMP_PALETTE): string {
 	const shineStrength = shine && shine.strength > 0 ? shine.strength : 0;
 	const shinePos = shine ? shine.pos : 0;
 	if (TERMINAL.trueColor) {
 		// 5-stop palette widens the visible color range and avoids the
 		// deep-blue valley a naive HSL lerp falls into.
-		const stops = GRADIENT_STOPS;
+		const stops = palette.stops;
 		const seg = t * (stops.length - 1);
 		const i = Math.min(stops.length - 2, Math.floor(seg));
 		const f = seg - i;
@@ -509,7 +562,7 @@ export function gradientEscape(t: number, shine?: ShineConfig): string {
 		}
 		return `\x1b[38;2;${Math.round(r)};${Math.round(g)};${Math.round(bl)}m`;
 	}
-	const ramp = GRADIENT_RAMP_256;
+	const ramp = palette.ramp256;
 	let idx = Math.min(ramp.length - 1, Math.max(0, Math.floor(t * (ramp.length - 1) + 0.5)));
 	if (shineStrength > 0) {
 		const dist = Math.abs(t - shinePos);
@@ -526,7 +579,12 @@ export function gradientEscape(t: number, shine?: ShineConfig): string {
  * gradient along the diagonal, wrapping at 1. When `shine` is provided, a soft
  * white highlight is composited on top, centered at `shine.pos`.
  */
-export function gradientLogo(lines: readonly string[], phase = 0, shine?: ShineConfig): string[] {
+export function gradientLogo(
+	lines: readonly string[],
+	phase = 0,
+	shine?: ShineConfig,
+	palette: GradientPalette = OMP_PALETTE,
+): string[] {
 	const reset = "\x1b[0m";
 	const rows = lines.length;
 	const cols = Math.max(...lines.map(l => l.length));
@@ -544,7 +602,7 @@ export function gradientLogo(lines: readonly string[], phase = 0, shine?: ShineC
 			// Diagonal: bottom-left (x=0, y=rows-1) → top-right (x=cols-1, y=0)
 			const base = (x + (rows - 1 - y)) / span;
 			const t = (((base + phase) % 1) + 1) % 1;
-			result += gradientEscape(t, shine) + char + reset;
+			result += gradientEscape(t, shine, palette) + char + reset;
 		}
 		return result;
 	});
@@ -569,13 +627,39 @@ const INTRO_SHINE_TRAVERSALS = 3;
  * fades with the same ease-out curve so the highlight is gone by the resting
  * frame.
  */
-function introLogoFrame(progress: number): string[] {
+function introLogoFrame(
+	progress: number,
+	art: readonly string[] = PI_LOGO,
+	palette: GradientPalette = OMP_PALETTE,
+): string[] {
 	const eased = 1 - (1 - progress) ** 3;
 	const phase = ((((1 - eased) * INTRO_SWEEPS) % 1) + 1) % 1;
 	const shinePos = (((progress * INTRO_SHINE_TRAVERSALS) % 1) + 1) % 1;
 	const shineStrength = (1 - eased) ** 1.5;
-	return gradientLogo(PI_LOGO, phase, { strength: shineStrength, pos: shinePos });
+	return gradientLogo(art, phase, { strength: shineStrength, pos: shinePos }, palette);
 }
 
 /** Resting gradient frame, cached for re-renders outside of the intro. */
 const REST_FRAME = gradientLogo(PI_LOGO, 0);
+
+/** Resting brand frames, cached like {@link REST_FRAME}, one per appearance. */
+const BB_REST_FRAME_DARK = gradientLogo(BB_LOGO, 0, undefined, BRAND_PALETTE_DARK);
+const BB_REST_FRAME_LIGHT = gradientLogo(BB_LOGO, 0, undefined, BRAND_PALETTE_LIGHT);
+
+interface LogoStyle {
+	readonly art: readonly string[];
+	readonly rest: readonly string[];
+	readonly palette: GradientPalette;
+}
+
+/**
+ * Logo art, resting frame, and gradient palette for the active mode. Native OMP
+ * keeps the π mark and its palette; the BreadBoard product swaps in the brand
+ * mark and an appearance-matched dune-orange ramp.
+ */
+function currentLogoStyle(): LogoStyle {
+	if (!isBreadboardProduct()) return { art: PI_LOGO, rest: REST_FRAME, palette: OMP_PALETTE };
+	return isLightTheme(getCurrentThemeName())
+		? { art: BB_LOGO, rest: BB_REST_FRAME_LIGHT, palette: BRAND_PALETTE_LIGHT }
+		: { art: BB_LOGO, rest: BB_REST_FRAME_DARK, palette: BRAND_PALETTE_DARK };
+}
