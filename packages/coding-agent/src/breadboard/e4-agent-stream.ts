@@ -307,9 +307,9 @@ export class E4AgentStreamBridge {
 
 	#waitForOwnershipChange(): Promise<void> {
 		if (this.#closed) return Promise.resolve();
-		return new Promise(resolve => {
-			this.#ownershipWaiters.add(resolve);
-		});
+		const { promise, resolve } = Promise.withResolvers<void>();
+		this.#ownershipWaiters.add(resolve);
+		return promise;
 	}
 
 	async #recordOwnedCorrelation(submission: E4OwnedSubmission, turnId: TurnId, notifyWaiters = true): Promise<void> {
@@ -372,7 +372,7 @@ export class E4AgentStreamBridge {
 		attempt: PendingSubmit,
 		sink: TurnSink,
 		signal: AbortSignal | undefined,
-	): Promise<Awaited<ReturnType<OpenedSession["submit"]>> | undefined> {
+	): Promise<SubmitReceipt | undefined> {
 		if (signal?.aborted) {
 			this.#failSink(sink, "BreadBoard submission cancelled before admission", "aborted");
 			return undefined;
@@ -385,13 +385,13 @@ export class E4AgentStreamBridge {
 					: Promise.reject(error),
 			);
 		}
-		let abortSubmission!: () => void;
-		const aborted = new Promise<{ readonly kind: "aborted" }>(resolve => {
-			abortSubmission = () => resolve({ kind: "aborted" });
-			signal.addEventListener("abort", abortSubmission, { once: true });
-		});
+		const { promise: aborted, resolve: resolveAborted } = Promise.withResolvers<{
+			readonly kind: "aborted";
+		}>();
+		const abortSubmission = () => resolveAborted({ kind: "aborted" as const });
+		signal.addEventListener("abort", abortSubmission, { once: true });
 		let result:
-			| { readonly kind: "receipt"; readonly receipt: Awaited<ReturnType<OpenedSession["submit"]>> }
+			| { readonly kind: "receipt"; readonly receipt: SubmitReceipt }
 			| { readonly kind: "aborted" };
 		try {
 			result = await Promise.race([submission.then(receipt => ({ kind: "receipt" as const, receipt })), aborted]);
