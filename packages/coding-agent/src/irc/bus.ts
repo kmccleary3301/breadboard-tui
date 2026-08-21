@@ -55,7 +55,8 @@ export class IrcBus {
 	readonly #lifecycle: () => AgentLifecycleManager;
 	readonly #mailboxes = new Map<string, IrcMessage[]>();
 	readonly #waiters = new Map<string, IrcWaiter[]>();
-	readonly history: IrcHistoryStore;
+	#history: IrcHistoryStore;
+	readonly #historiesBySession = new Map<string, IrcHistoryStore>();
 
 	constructor(
 		registry: AgentRegistry = AgentRegistry.global(),
@@ -66,11 +67,26 @@ export class IrcBus {
 		// Lazy: the lifecycle global self-constructs against the global registry,
 		// so only touch it when a parked recipient actually needs reviving.
 		this.#lifecycle = () => lifecycle ?? AgentLifecycleManager.global();
-		this.history = history;
+		this.#history = history;
+		this.#historiesBySession.set("", history);
+	}
+
+	get history(): IrcHistoryStore {
+		return this.#history;
+	}
+
+	historyForSession(sessionFile?: string | null): IrcHistoryStore {
+		const key = sessionFile ?? "";
+		const existing = this.#historiesBySession.get(key);
+		if (existing) return existing;
+		const history = new IrcHistoryStore();
+		history.configureSessionFile(sessionFile);
+		this.#historiesBySession.set(key, history);
+		return history;
 	}
 
 	configureHistory(sessionFile?: string | null): void {
-		this.history.configureSessionFile(sessionFile);
+		this.#history = this.historyForSession(sessionFile);
 	}
 
 	historyRecords(): IrcHistoryRecord[] {
@@ -103,11 +119,16 @@ export class IrcBus {
 	 */
 	async send(
 		msg: Omit<IrcMessage, "id" | "ts">,
-		opts?: { expectsReply?: boolean; suppressRelay?: boolean },
+		opts?: {
+			expectsReply?: boolean;
+			suppressRelay?: boolean;
+			history?: IrcHistoryStore;
+		},
 	): Promise<IrcDeliveryReceipt> {
 		const message: IrcMessage = { ...msg, id: Snowflake.next(), ts: Date.now() };
+		const history = opts?.history ?? this.#history;
 		try {
-			const pendingRecord = this.history.recordMessage(message);
+			const pendingRecord = history.recordMessage(message);
 			if (pendingRecord) await pendingRecord;
 		} catch (error) {
 			return {
@@ -118,7 +139,7 @@ export class IrcBus {
 		}
 		const finish = async (receipt: TerminalReceipt): Promise<TerminalReceipt> => {
 			try {
-				const pendingDelivery = this.history.recordDelivery(message.id, receipt);
+				const pendingDelivery = history.recordDelivery(message.id, receipt);
 				if (pendingDelivery) await pendingDelivery;
 			} catch (error) {
 				logger.error("IRC delivery outcome persistence failed", {

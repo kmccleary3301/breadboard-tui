@@ -2,16 +2,12 @@ import type { Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import { recordOf } from "../utils/objects";
 import type { IrcDeliveryReceipt, IrcHistoryEvent, IrcHistoryRecord, IrcMessage, IrcReadCursor } from "./types";
 
 const MAX_HISTORY_RECORDS = 5_000;
 const MAX_HISTORY_LOAD_BYTES = 8 * 1024 * 1024;
 
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: undefined;
-}
 
 function parseMessage(value: unknown): IrcMessage | undefined {
 	const message = recordOf(value);

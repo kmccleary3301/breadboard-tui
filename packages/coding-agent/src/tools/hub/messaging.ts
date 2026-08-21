@@ -169,7 +169,7 @@ export async function executeSend(
 	}
 
 	const bus = IrcBus.global();
-	bus.configureHistory(deps.sessionFile);
+	const history = bus.historyForSession(deps.sessionFile);
 	let waited: IrcMessage | null | undefined;
 	const timeoutMs = params.await ? resolveMessageTimeoutMs(settings, params.timeoutMs) : undefined;
 	const awaitAbort = params.await ? new AbortController() : undefined;
@@ -217,7 +217,7 @@ export async function executeSend(
 					// Awaited sends mark the sender as blocked on an answer so a
 					// busy recipient that cannot reach a step boundary (async
 					// disabled) auto-replies instead of stranding the sender.
-					{ expectsReply: params.await || undefined, suppressRelay: suppressRelay || undefined },
+					{ expectsReply: params.await || undefined, suppressRelay: suppressRelay || undefined, history },
 				),
 			),
 		);

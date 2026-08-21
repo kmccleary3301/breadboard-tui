@@ -714,10 +714,10 @@ export class CollabHost {
 			return;
 		}
 		this.#ircHistoryFetchAt.set(fromPeer, now);
-		bus.configureHistory(this.#ctx.sessionManager.getSessionFile());
-		void bus.history.ready().then(
+		const history = bus.historyForSession(this.#ctx.sessionManager.getSessionFile());
+		void history.ready().then(
 			() => {
-				const records = bus.historyRecords().slice(-IRC_HISTORY_RECORD_CAP);
+				const records = history.list().slice(-IRC_HISTORY_RECORD_CAP);
 				const bounded: typeof records = [];
 				let bytes = Buffer.byteLength(JSON.stringify({ t: "irc-history", reqId, records: [] }), "utf8");
 				for (let index = records.length - 1; index >= 0; index--) {
@@ -784,7 +784,7 @@ export class CollabHost {
 		}
 		const registry = this.#registry;
 		const bus = this.#irc;
-		bus.configureHistory(this.#ctx.sessionManager.getSessionFile());
+		const history = bus.historyForSession(this.#ctx.sessionManager.getSessionFile());
 		if (target === "all") {
 			const targets = registry
 				.listVisibleTo(MAIN_AGENT_ID)
@@ -796,7 +796,9 @@ export class CollabHost {
 				);
 			const broadcastId = Snowflake.next();
 			const receipts = await Promise.all(
-				targets.map(ref => bus.send({ from: MAIN_AGENT_ID, to: ref.id, body: trimmed, replyTo, broadcastId })),
+				targets.map(ref =>
+					bus.send({ from: MAIN_AGENT_ID, to: ref.id, body: trimmed, replyTo, broadcastId }, { history }),
+				),
 			);
 			const errors = receipts.filter(receipt => receipt.outcome === "failed").map(receipt => receipt.error);
 			reply(
@@ -810,7 +812,7 @@ export class CollabHost {
 			);
 			return;
 		}
-		const receipt = await bus.send({ from: MAIN_AGENT_ID, to: target, body: trimmed, replyTo });
+		const receipt = await bus.send({ from: MAIN_AGENT_ID, to: target, body: trimmed, replyTo }, { history });
 		reply(receipt.outcome === "failed" ? (receipt.error ?? `Delivery to ${target} failed`) : undefined);
 	}
 

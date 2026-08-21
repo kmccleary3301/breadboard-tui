@@ -1,6 +1,7 @@
 import type { Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import type { AgentProgress } from "../task/types";
+import { recordOf } from "../utils/objects";
 
 export type AgentActivityKind = "response" | "tool" | "irc" | "lifecycle";
 export type AgentActivityStatus = "pending" | "success" | "error" | "aborted";
@@ -65,11 +66,6 @@ const MAX_ROWS_PER_AGENT = 256;
 const DEFAULT_QUERY_LIMIT = 200;
 const MAX_QUERY_LIMIT = 2_000;
 
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: undefined;
-}
 
 function timestampOf(value: unknown, fallback: number): number {
 	if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -139,6 +135,11 @@ function argumentsSummary(toolName: string, value: unknown): string {
 			}
 		}
 	}
+}
+
+function takeLast<T>(values: readonly T[], limit: number): T[] {
+	const count = Math.max(0, limit);
+	return count === 0 ? [] : values.slice(-count);
 }
 
 function toolBlocks(content: unknown): Array<{ id: string; name: string; args: unknown }> {
@@ -281,7 +282,7 @@ export class AgentActivityIndex {
 		const merged = persisted.filter(row => !liveKeys.has(`${row.kind}:${row.toolName ?? row.title}:${row.summary}`));
 		merged.push(...live);
 		merged.sort(compareRows);
-		return merged.slice(-Math.max(0, limit));
+		return takeLast(merged, limit);
 	}
 
 	query(query: AgentActivityQuery = {}): AgentActivityRow[] {
@@ -310,7 +311,7 @@ export class AgentActivityIndex {
 		}
 		rows.sort(compareRows);
 		const limit = Math.max(0, Math.min(MAX_QUERY_LIMIT, query.limit ?? DEFAULT_QUERY_LIMIT));
-		return rows.slice(-limit);
+		return takeLast(rows, limit);
 	}
 
 	clear(): void {

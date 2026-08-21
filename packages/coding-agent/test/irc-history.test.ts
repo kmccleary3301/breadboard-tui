@@ -70,6 +70,25 @@ describe("IRC history", () => {
 		expect(records[0]?.message.id).toBeTruthy();
 	});
 
+	it("persists concurrent sends in their originating sessions", async () => {
+		using tempDir = TempDir.createSync("irc-history-concurrent-");
+		const firstSession = path.join(tempDir.path(), "first.jsonl");
+		const secondSession = path.join(tempDir.path(), "second.jsonl");
+		const bus = new IrcBus(new AgentRegistry());
+		const firstHistory = bus.historyForSession(firstSession);
+		const secondHistory = bus.historyForSession(secondSession);
+
+		await Promise.all([
+			bus.send({ from: "First", to: "Missing", body: "first body" }, { history: firstHistory }),
+			bus.send({ from: "Second", to: "Missing", body: "second body" }, { history: secondHistory }),
+		]);
+
+		expect((await journalLines(firstSession)).map(event => event.event)).toEqual(["message", "delivery"]);
+		expect((await journalLines(secondSession)).map(event => event.event)).toEqual(["message", "delivery"]);
+		expect(firstHistory.list()[0]?.message.body).toBe("first body");
+		expect(secondHistory.list()[0]?.message.body).toBe("second body");
+	});
+
 	it("isolates pending writes and unread cursors when the active session changes", async () => {
 		using tempDir = TempDir.createSync("irc-history-switch-");
 		const firstSession = path.join(tempDir.path(), "first.jsonl");
