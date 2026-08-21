@@ -85,6 +85,7 @@ describe("filterUncorrelatedCanonicalEvents", () => {
 				envelope(7, "assistant_message", true, { text: "done\n\n>>>>>> END RESPONSE" }),
 				envelope(8, "completion", true, { summary: { completed: true } }),
 				envelope(9, "run_finished", true, { completed: true }),
+				envelope(10, "turn_completed", true),
 			].join(""),
 			{ headers: { "content-type": "text/event-stream" } },
 		);
@@ -102,6 +103,8 @@ describe("filterUncorrelatedCanonicalEvents", () => {
 		expect(filtered).toContain('"seq":8');
 		expect(filtered).toContain('"type":"completion"');
 		expect(filtered).toContain('"seq":9');
+		expect(filtered).toContain('"type":"run_finished"');
+		expect(filtered).toContain('"seq":10');
 		expect(filtered).toContain('"type":"turn_completed"');
 	});
 });

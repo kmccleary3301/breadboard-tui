@@ -182,9 +182,6 @@ export function filterUncorrelatedCanonicalEvents(response: Response): Response 
 						if (raw.type === "assistant_message") {
 							raw.type = "assistant.message.end";
 							raw.payload = { text: visibleAssistantText(raw.payload) };
-						} else if (raw.type === "run_finished") {
-							raw.type = "turn_completed";
-							raw.payload = {};
 						}
 						const turn = raw.turn;
 						if (
