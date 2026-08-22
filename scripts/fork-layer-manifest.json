@@ -8,7 +8,27 @@
   },
   "paths": [
     {
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": ".github/SECURITY.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": ".github/workflows/fork-delta-audit.yml",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "README.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs/README.omp-upstream.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
