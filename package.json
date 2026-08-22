@@ -1,6 +1,6 @@
 {
-  "name": "omp",
-  "homepage": "https://omp.sh",
+  "name": "breadboard-tui",
+  "homepage": "https://github.com/kmccleary3301/breadboard-tui",
   "private": true,
   "author": "Stencil Labs, Inc.",
   "license": "MIT",

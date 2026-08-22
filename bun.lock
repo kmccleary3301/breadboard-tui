@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omp",
+      "name": "breadboard-tui",
       "dependencies": {
         "sherpa-onnx": "1.13.2",
         "sherpa-onnx-darwin-arm64": "1.13.3",
