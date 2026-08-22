@@ -14,7 +14,9 @@ export interface ModelRolePort {
 }
 
 /** Keeps role resolution behind the SDK client boundary. */
-export function createBreadboardModelRolePort(client: { resolveModelRoles(input: ModelRoleResolutionInput): Promise<ModelRoleResolutionResult> }): ModelRolePort {
+export function createBreadboardModelRolePort(client: {
+	resolveModelRoles(input: ModelRoleResolutionInput): Promise<ModelRoleResolutionResult>;
+}): ModelRolePort {
 	return {
 		resolveModelRoles(input) {
 			return client.resolveModelRoles(input);

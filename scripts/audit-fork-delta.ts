@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { gunzipSync } from "node:zlib";
-import { classifyPath, loadSyncPolicy, matchesPolicyPattern, type SyncPolicy } from "./inspect-upstream-sync";
 import { readTarNoticeMembers } from "./generate-third-party-notices";
+import { classifyPath, loadSyncPolicy, matchesPolicyPattern, type SyncPolicy } from "./inspect-upstream-sync";
 
 export const POLICY_PATH = path.resolve(import.meta.dir, "p31", "upstream-sync-policy.json");
 export const MANIFEST_PATH = path.resolve(import.meta.dir, "fork-layer-manifest.json");
@@ -20,7 +20,6 @@ const BREADBOARD_LITERAL =
 	/@breadboard\/sdk|https?:\/\/[^\s"'`]*breadboard[^\s"'`]*|\b(?:BreadBoard|BREADBOARD_[A-Z0-9_]+|P30_[A-Z0-9_]+|workspace:v1:sha256:|breadboard:[a-z][a-z0-9_-]*)\b/i;
 const INLINE_BREADBOARD =
 	/@breadboard\/sdk|https?:\/\/[^\s"'`]*breadboard[^\s"'`]*|\b(?:BreadBoard|BREADBOARD_[A-Z0-9_]+|P30_[A-Z0-9_]+|workspace:v1:sha256:|breadboard:[a-z][a-z0-9_-]*)\b/i;
-const HEX = /^[0-9a-f]{40,64}$/;
 
 type DeltaClass = (typeof CLASSES)[number];
 
@@ -871,7 +870,7 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 }
 
 if (import.meta.main) {
-	const receiptDirArgumentIndex = process.argv.findIndex(argument => argument === "--receipt-dir");
+	const receiptDirArgumentIndex = process.argv.indexOf("--receipt-dir");
 	const receiptDir = receiptDirArgumentIndex >= 0 ? process.argv[receiptDirArgumentIndex + 1] : undefined;
 	const result = await auditForkDelta({ ...(receiptDir ? { receiptDir } : {}) });
 	console.log(JSON.stringify(result, null, 2));

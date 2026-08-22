@@ -18,6 +18,14 @@ export interface EmbeddedAddon {
 	archive?: EmbeddedAddonArchive;
 }
 
+export interface ResolveNativesDirOptions {
+	env?: Record<string, string | undefined>;
+	homeDir?: string;
+	pathExists?: (candidate: string) => boolean;
+}
+
+export function resolveNativesDir(options?: ResolveNativesDirOptions): string;
+
 export interface DetectCompiledBinaryInput {
 	embeddedAddon: EmbeddedAddon | null | undefined;
 	env: Record<string, string | undefined>;

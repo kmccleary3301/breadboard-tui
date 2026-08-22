@@ -5,9 +5,9 @@
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { type Args as ParsedArgs, parseArgs, reportCliUsageError } from "../cli/args";
-import { CLI_THINKING_LEVELS } from "../thinking";
 import { runRootCommand } from "../main";
 import { prepareAcpTerminalAuthArgs } from "../modes/acp/terminal-auth";
+import { CLI_THINKING_LEVELS } from "../thinking";
 
 export default class Index extends Command {
 	static description = "AI coding assistant";

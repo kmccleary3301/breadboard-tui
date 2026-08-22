@@ -1,6 +1,6 @@
 import { matchesKey, padding, visibleWidth } from "@oh-my-pi/pi-tui";
 import { Snowflake } from "@oh-my-pi/pi-utils";
-import { IrcBus, type IrcHistoryRecord, type IrcReadCursor } from "../../../irc/bus";
+import type { IrcBus, IrcHistoryRecord, IrcReadCursor } from "../../../irc/bus";
 import { deriveIrcConversations, type IrcConversation } from "../../../irc/conversations";
 import { type AgentRegistry, MAIN_AGENT_ID } from "../../../registry/agent-registry";
 import { truncateToWidth } from "../../../tools/render-utils";

@@ -66,7 +66,6 @@ const MAX_ROWS_PER_AGENT = 256;
 const DEFAULT_QUERY_LIMIT = 200;
 const MAX_QUERY_LIMIT = 2_000;
 
-
 function timestampOf(value: unknown, fallback: number): number {
 	if (typeof value === "number" && Number.isFinite(value)) return value;
 	if (typeof value !== "string") return fallback;

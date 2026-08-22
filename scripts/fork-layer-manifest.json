@@ -633,6 +633,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/natives/native/loader-state.d.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/natives/native/loader-state.js",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"

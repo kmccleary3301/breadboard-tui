@@ -3,16 +3,12 @@ import { fstatSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { LinuxPinnedDirectoryError, normalizeNodeErrno, openLinuxPinnedDirectory } from "./linux-pinned-directory";
 import {
-	LinuxPinnedDirectoryError,
-	normalizeNodeErrno,
-	openLinuxPinnedDirectory,
-} from "./linux-pinned-directory";
-import {
-	PINNED_DIRECTORY_LIMITS,
-	PinnedDirectoryUnsupportedPlatformError,
 	openPinnedDirectory,
+	PINNED_DIRECTORY_LIMITS,
 	type PinnedDirectory,
+	PinnedDirectoryUnsupportedPlatformError,
 } from "./pinned-directory";
 
 const roots: string[] = [];
@@ -75,14 +71,23 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")("Linux p
 		const pinned = await openPinnedDirectory(root);
 		handles.push(pinned);
 
-		for (const relativePath of ["", ".", "..", "/real/value", "real//value", "real/./value", "real/../value", "nul\0tail"]) {
+		for (const relativePath of [
+			"",
+			".",
+			"..",
+			"/real/value",
+			"real//value",
+			"real/./value",
+			"real/../value",
+			"nul\0tail",
+		]) {
 			await expect(pinned.readFile(relativePath, 16)).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
 		}
 		await expect(pinned.readFile("alias/value", 16)).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
 		await expect(pinned.readFile("link", 16)).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
-		await expect(pinned.readFile(`${"a".repeat(PINNED_DIRECTORY_LIMITS.maxComponentBytes + 1)}/value`, 16)).rejects.toBeInstanceOf(
-			LinuxPinnedDirectoryError,
-		);
+		await expect(
+			pinned.readFile(`${"a".repeat(PINNED_DIRECTORY_LIMITS.maxComponentBytes + 1)}/value`, 16),
+		).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
 		await expect(pinned.readFile("real/value", PINNED_DIRECTORY_LIMITS.maxFileBytes + 1)).rejects.toBeInstanceOf(
 			LinuxPinnedDirectoryError,
 		);
@@ -99,8 +104,12 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")("Linux p
 		const rootFd = pinned.fd;
 		handles.push(pinned);
 
-		await expect(pinned.listLeaves({ maxEntries: 1, maxPathBytes: 128 })).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
-		await expect(pinned.listLeaves({ maxEntries: 8, maxPathBytes: 1 })).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
+		await expect(pinned.listLeaves({ maxEntries: 1, maxPathBytes: 128 })).rejects.toBeInstanceOf(
+			LinuxPinnedDirectoryError,
+		);
+		await expect(pinned.listLeaves({ maxEntries: 8, maxPathBytes: 1 })).rejects.toBeInstanceOf(
+			LinuxPinnedDirectoryError,
+		);
 		await file.close();
 		await file.close();
 		expect(() => fstatSync(fileFd)).toThrow();

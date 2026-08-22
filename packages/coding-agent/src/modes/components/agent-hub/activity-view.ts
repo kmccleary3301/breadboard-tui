@@ -1,15 +1,10 @@
-import { visibleWidth } from "@oh-my-pi/pi-tui";
-import {
-	AgentActivityIndex,
-	type AgentActivityKind,
-	type AgentActivityRow,
-} from "../../../activity";
+import { matchesKey, visibleWidth } from "@oh-my-pi/pi-tui";
+import type { AgentActivityIndex, AgentActivityKind, AgentActivityRow } from "../../../activity";
+import type { Settings } from "../../../config/settings";
 import type { AgentRef, AgentRegistry } from "../../../registry/agent-registry";
 import type { ObservableSession } from "../../session-observer-registry";
-import type { Settings } from "../../../config/settings";
-import { matchesKey } from "@oh-my-pi/pi-tui";
-import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
 import { theme } from "../../theme/theme";
+import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
 import { formatRoleBadge, sanitizeLine } from "../agent-hub-renderer";
 import { bottomBorder, divider, row, topBorder } from "../overlay-box";
 
@@ -104,7 +99,11 @@ export class ActivityView {
 
 	refreshRows(): void {
 		const kinds: ReadonlySet<AgentActivityKind> | undefined =
-			this.#filter === "responses" ? new Set(["response"]) : this.#filter === "tools" ? new Set(["tool"]) : undefined;
+			this.#filter === "responses"
+				? new Set(["response"])
+				: this.#filter === "tools"
+					? new Set(["tool"])
+					: undefined;
 		let rows = this.#activity.query({
 			agentIds: this.#activityAgentIds(),
 			kinds,
@@ -138,7 +137,10 @@ export class ActivityView {
 				? `search: ${this.#search}`
 				: "search: —";
 		body.push(
-			theme.fg("dim", `${scope}${theme.sep.dot}${this.#filter}${theme.sep.dot}${this.#follow ? "following" : "paused"}${theme.sep.dot}${search}`),
+			theme.fg(
+				"dim",
+				`${scope}${theme.sep.dot}${this.#filter}${theme.sep.dot}${this.#follow ? "following" : "paused"}${theme.sep.dot}${search}`,
+			),
 		);
 		if (contentRows >= 8) body.push("");
 
@@ -164,7 +166,10 @@ export class ActivityView {
 		lines.push(divider(width));
 		lines.push(
 			row(
-				theme.fg("dim", "1:agents  j/k:select  Enter:transcript  Space:follow  f:filter  s:scope  /:search  Esc:close"),
+				theme.fg(
+					"dim",
+					"1:agents  j/k:select  Enter:transcript  Space:follow  f:filter  s:scope  /:search  Esc:close",
+				),
 				width,
 			),
 		);
@@ -241,7 +246,9 @@ export class ActivityView {
 	handleWheel(delta: -1 | 1): void {
 		if (this.#rows.length > 0) {
 			this.#follow = false;
-			this.#setSelectedActivityRow(Math.max(0, Math.min(this.#getSelectedActivityRow() + delta, this.#rows.length - 1)));
+			this.#setSelectedActivityRow(
+				Math.max(0, Math.min(this.#getSelectedActivityRow() + delta, this.#rows.length - 1)),
+			);
 		}
 		this.#requestRender();
 	}
@@ -299,7 +306,10 @@ export class ActivityView {
 		const role = observed?.progress?.modelRole ?? ref?.history?.modelRole;
 		const roleBadge = role && this.#settings ? `${formatRoleBadge(role, this.#settings)} ` : "";
 		const agent = sanitizeLine(activity.agentId, Math.max(8, Math.min(18, Math.floor(width * 0.18))));
-		const title = sanitizeLine(activity.kind === "tool" ? (activity.toolName ?? activity.title) : activity.title, width);
+		const title = sanitizeLine(
+			activity.kind === "tool" ? (activity.toolName ?? activity.title) : activity.title,
+			width,
+		);
 		const prefix =
 			`${cursor} ${theme.fg("dim", activityClock(activity.timestamp))} ${activityGlyph(activity)} ` +
 			`${roleBadge}${theme.bold(agent)} ${theme.fg(activity.kind === "response" ? "success" : "muted", title)}`;

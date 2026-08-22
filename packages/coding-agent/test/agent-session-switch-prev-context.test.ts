@@ -334,7 +334,8 @@ describe("AgentSession.switchSession previous-context build", () => {
 			session,
 			sessionManager,
 			expectedPlan: { reason: "branchFromBtw", targetEntryId: leafId },
-			run: () => session.branchFromBtw("side question", assistantMsg("side answer"), leafId, sessionManager.getSessionId()),
+			run: () =>
+				session.branchFromBtw("side question", assistantMsg("side answer"), leafId, sessionManager.getSessionId()),
 			order,
 		});
 		expect(order).toEqual(["session_before_branch", "guard"]);

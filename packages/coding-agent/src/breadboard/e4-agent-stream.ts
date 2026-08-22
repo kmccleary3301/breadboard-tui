@@ -390,9 +390,7 @@ export class E4AgentStreamBridge {
 		}>();
 		const abortSubmission = () => resolveAborted({ kind: "aborted" as const });
 		signal.addEventListener("abort", abortSubmission, { once: true });
-		let result:
-			| { readonly kind: "receipt"; readonly receipt: SubmitReceipt }
-			| { readonly kind: "aborted" };
+		let result: { readonly kind: "receipt"; readonly receipt: SubmitReceipt } | { readonly kind: "aborted" };
 		try {
 			result = await Promise.race([submission.then(receipt => ({ kind: "receipt" as const, receipt })), aborted]);
 		} catch (error) {
@@ -919,8 +917,7 @@ export class E4AgentStreamBridge {
 		if (this.#receipts.has(String(event.eventId))) return;
 		const message = streamedToolCallMessage(sink.model, state, String(event.eventId));
 		const toolCall = message.content[0];
-		if (!toolCall || toolCall.type !== "toolCall")
-			throw new Error("BreadBoard streamed tool-call projection is invalid");
+		if (toolCall?.type !== "toolCall") throw new Error("BreadBoard streamed tool-call projection is invalid");
 		await this.#emit(
 			event,
 			"streamed_tool_end",

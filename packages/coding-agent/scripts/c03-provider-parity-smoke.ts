@@ -55,7 +55,8 @@ if (first.credentialRef !== rotated.credentialRef) throw new Error("credential r
 if (firstLock.lock_hash !== rotatedLock.lock_hash) throw new Error("model-role lock hash changed across rotation");
 const firstAccount = firstCredentials.find(row => row.credentialRef === first.credentialRef)?.providerId;
 const rotatedAccount = rotatedCredentials.find(row => row.credentialRef === rotated.credentialRef)?.providerId;
-if (firstAccount !== providerId || rotatedAccount !== providerId) throw new Error("provider status changed across rotation");
+if (firstAccount !== providerId || rotatedAccount !== providerId)
+	throw new Error("provider status changed across rotation");
 
 await auth.revoke({ credentialRef: rotated.credentialRef, reason: "c03 parity cleanup" });
 await auth.logout({ credentialRef: rotated.credentialRef });
@@ -71,5 +72,6 @@ const result = {
 	cleanup: "revoke+logout",
 };
 const output = JSON.stringify(result);
-if (output.includes(firstKey) || output.includes(rotatedKey)) throw new Error("parity output contains credential canary");
+if (output.includes(firstKey) || output.includes(rotatedKey))
+	throw new Error("parity output contains credential canary");
 console.log(output);

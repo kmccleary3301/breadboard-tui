@@ -62,7 +62,9 @@ let systemLibrary: SystemLibrary | undefined;
 
 function ensureLinuxX64(): void {
 	if (process.platform !== "linux" || process.arch !== "x64") {
-		throw new LinuxPinnedDirectoryError(`Linux x64 pinned directories are unsupported on ${process.platform}/${process.arch}`);
+		throw new LinuxPinnedDirectoryError(
+			`Linux x64 pinned directories are unsupported on ${process.platform}/${process.arch}`,
+		);
 	}
 }
 
@@ -415,8 +417,12 @@ function directoryEntries(lib: SystemLibrary, fd: number, remainingEntries: numb
 			while (nameEnd < recordEnd && buffer[nameEnd] !== 0) nameEnd += 1;
 			if (nameEnd === nameStart || nameEnd === recordEnd) throw invalid("directory entry record is malformed");
 			const nameBytes = Buffer.from(buffer.subarray(nameStart, nameEnd));
-			if (!(nameBytes.length === 1 && nameBytes[0] === 0x2e) && !(nameBytes.length === 2 && nameBytes[0] === 0x2e && nameBytes[1] === 0x2e)) {
-				if (entries.length >= remainingEntries) throw invalid("directory enumeration exceeds the configured entry limit");
+			if (
+				!(nameBytes.length === 1 && nameBytes[0] === 0x2e) &&
+				!(nameBytes.length === 2 && nameBytes[0] === 0x2e && nameBytes[1] === 0x2e)
+			) {
+				if (entries.length >= remainingEntries)
+					throw invalid("directory enumeration exceeds the configured entry limit");
 				let name: string;
 				try {
 					name = utf8Decoder.decode(nameBytes);
@@ -494,13 +500,7 @@ class NativePinnedDirectory implements PinnedDirectory {
 		this.#assertRoot();
 		const directory = options.directory === true;
 		const opened = openRelative(this.#lib, this.fd, relativePath, directory);
-		return new NativePinnedFile(
-			this.#lib,
-			opened.fd,
-			opened.stat,
-			directory ? "directory" : "regular",
-			relativePath,
-		);
+		return new NativePinnedFile(this.#lib, opened.fd, opened.stat, directory ? "directory" : "regular", relativePath);
 	}
 
 	async readFile(relativePath: string, maxBytes: number): Promise<Buffer> {
@@ -547,7 +547,8 @@ class NativePinnedDirectory implements PinnedDirectory {
 		let visitedEntries = 0;
 		const visit = (directoryFd: number, prefix: string): void => {
 			for (const entry of directoryEntries(this.#lib, directoryFd, maxEntries - visitedEntries)) {
-				if (visitedEntries === maxEntries) throw invalid(`directory enumeration exceeds the ${maxEntries}-entry limit`);
+				if (visitedEntries === maxEntries)
+					throw invalid(`directory enumeration exceeds the ${maxEntries}-entry limit`);
 				visitedEntries += 1;
 				const relativePath = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
 				const pathBytes = Buffer.byteLength(relativePath);

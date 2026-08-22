@@ -8,8 +8,8 @@ import { EPHEMERAL_MODEL_CHANGE_ROLE } from "../session/session-entries";
 import { visitEntriesFromFileStream } from "../session/session-loader";
 import { loadBundledAgents } from "../task/agents";
 import { isReadOnlyAgent } from "../task/read-only-policy";
-import { persistedVibeChildIds } from "../vibe/runtime";
 import { recordOf } from "../utils/objects";
+import { persistedVibeChildIds } from "../vibe/runtime";
 import {
 	type AgentHistorySummary,
 	type AgentMetricsSummary,
@@ -36,7 +36,6 @@ interface PersistedTranscript {
 	createdAt?: number;
 	lastActivity?: number;
 }
-
 
 function timestampOf(value: unknown): number | undefined {
 	if (typeof value !== "string") return undefined;

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { JSONC } from "bun";
 import {
-	PINNED_DIRECTORY_LIMITS,
 	openPinnedDirectory,
+	PINNED_DIRECTORY_LIMITS,
 	type PinnedDirectory,
 } from "../src/breadboard/lifecycle/pinned-directory";
 

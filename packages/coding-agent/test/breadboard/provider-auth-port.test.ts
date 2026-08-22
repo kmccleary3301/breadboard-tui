@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { createBreadboardProviderAuthPort } from "../../src/breadboard/provider-auth-adapter";
 import { createBreadboardModelRolePort } from "../../src/breadboard/model-role-port";
+import { createBreadboardProviderAuthPort } from "../../src/breadboard/provider-auth-adapter";
 import type {
 	AuthCredentialView,
 	AuthLoginSession,
@@ -196,7 +196,9 @@ describe("BreadBoard provider auth port integration", () => {
 		};
 		const client = {
 			async listProviders() {
-				return [{ provider_id: "openai", display_name: "OpenAI", auth_schemes: ["api_key"], login_available: false }];
+				return [
+					{ provider_id: "openai", display_name: "OpenAI", auth_schemes: ["api_key"], login_available: false },
+				];
 			},
 			async listCredentials() {
 				return [credentialRow];
@@ -237,7 +239,10 @@ describe("BreadBoard provider auth port integration", () => {
 		]);
 		const rolePort = createBreadboardModelRolePort({
 			async resolveModelRoles() {
-				return { lock: { role: "default", provider_id: "openai", account_id: "bbacct_work" }, lock_hash: "lock-static" };
+				return {
+					lock: { role: "default", provider_id: "openai", account_id: "bbacct_work" },
+					lock_hash: "lock-static",
+				};
 			},
 		});
 		const firstLock = await rolePort.resolveModelRoles({ model_roles: { schema_version: "bb.model_roles.v1" } });

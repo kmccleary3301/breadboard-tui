@@ -1,8 +1,8 @@
 import type {
+	BreadboardClient,
 	AuthCredentialView as SdkAuthCredentialView,
 	AuthLoginSession as SdkAuthLoginSession,
 	AuthProviderView as SdkAuthProviderView,
-	BreadboardClient,
 } from "@breadboard/sdk";
 import type {
 	AuthCredentialStatus,
@@ -17,6 +17,7 @@ import type {
 	RevokeInput,
 	RevokeResult,
 } from "./provider-auth-port";
+
 type BreadboardProviderAuthClient = Pick<
 	BreadboardClient,
 	| "listProviders"
@@ -66,13 +67,27 @@ function providerView(item: SdkAuthProviderView): AuthProviderView {
 
 function loginSession(item: SdkAuthLoginSession): AuthLoginSession {
 	const status = item.status;
-	const normalizedStatus = status === "completed" || status === "cancelled" || status === "failed" || status === "awaiting_input" || status === "unavailable" ? status : "pending";
+	const normalizedStatus =
+		status === "completed" ||
+		status === "cancelled" ||
+		status === "failed" ||
+		status === "awaiting_input" ||
+		status === "unavailable"
+			? status
+			: "pending";
 	const problem = item.problem;
 	return {
 		loginSessionId: item.login_session_id,
 		providerId: item.provider_id,
 		status: normalizedStatus,
-		...(problem ? { problem: { code: String(problem.code ?? "provider_auth_error"), message: String(problem.message ?? "Provider authentication failed") } } : {}),
+		...(problem
+			? {
+					problem: {
+						code: String(problem.code ?? "provider_auth_error"),
+						message: String(problem.message ?? "Provider authentication failed"),
+					},
+				}
+			: {}),
 	};
 }
 

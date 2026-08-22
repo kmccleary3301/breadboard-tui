@@ -8,7 +8,6 @@ import type { IrcDeliveryReceipt, IrcHistoryEvent, IrcHistoryRecord, IrcMessage,
 const MAX_HISTORY_RECORDS = 5_000;
 const MAX_HISTORY_LOAD_BYTES = 8 * 1024 * 1024;
 
-
 function parseMessage(value: unknown): IrcMessage | undefined {
 	const message = recordOf(value);
 	if (

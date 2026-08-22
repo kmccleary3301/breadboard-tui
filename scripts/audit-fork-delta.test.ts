@@ -1,13 +1,13 @@
+import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, test } from "bun:test";
 import {
 	assertManifestUpstreamIdentity,
 	auditDeclarations,
+	type ForkLayerManifest,
 	loadDeltaPolicy,
 	readChangedPathPatch,
-	type ForkLayerManifest,
 } from "./audit-fork-delta";
 
 const policy = await loadDeltaPolicy();
