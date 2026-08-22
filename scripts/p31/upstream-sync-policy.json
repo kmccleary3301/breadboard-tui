@@ -7,12 +7,12 @@
     "manual-review"
   ],
   "upstream": {
-    "tag": "v17.4.0",
-    "commit": "72000acfeb902e21816252699482887f34d1a5a4",
-    "tree": "c337de936afe886b9c5d566d026427839462dbf4"
+    "tag": "v18.0.0",
+    "commit": "96f42809764f0907f7d6b115eab5710de28941de",
+    "tree": "36ecb17efff14e1120dbf93c7f9fd0769e44626c"
   },
   "budgets": {
-    "maxTotalChangedPaths": 128,
+    "maxTotalChangedPaths": 160,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
@@ -149,6 +149,7 @@
       "class": "upstream-owned",
       "description": "Ordinary OMP package, crate, Python, and script paths remain upstream-authoritative.",
       "patterns": [
+        "packages/*/CHANGELOG.md",
         "packages/*/src/**",
         "packages/*/test/**",
         "packages/*/tests/**",

@@ -2,9 +2,9 @@
   "schemaVersion": "bb-omp.delta-manifest.v2",
   "policySchemaVersion": "bb-omp.delta-policy.v1",
   "upstream": {
-    "tag": "v17.4.0",
-    "commit": "72000acfeb902e21816252699482887f34d1a5a4",
-    "tree": "c337de936afe886b9c5d566d026427839462dbf4"
+    "tag": "v18.0.0",
+    "commit": "96f42809764f0907f7d6b115eab5710de28941de",
+    "tree": "36ecb17efff14e1120dbf93c7f9fd0769e44626c"
   },
   "paths": [
     {
@@ -79,16 +79,14 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/CHANGELOG.md",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/DEVELOPMENT.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
-    },
-    {
-      "path": "packages/coding-agent/LICENSE",
-      "class": "manual-review",
-      "rule": "manual-review-boundaries",
-      "owner": "fork-release",
-      "layer": 1
     },
     {
       "path": "packages/coding-agent/THIRD_PARTY_NOTICES.manifest.json",
@@ -126,6 +124,11 @@
       "path": "packages/coding-agent/scripts/verify-breadboard-sdk-provenance.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/activity/index.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/src/bb.ts",
@@ -289,16 +292,31 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
-      "path": "packages/coding-agent/src/cli/help-extra.ts",
-      "class": "breadboard-owned",
-      "rule": "breadboard-owned-adapters-and-controls"
-    },
-    {
       "path": "packages/coding-agent/src/cli/flag-tables.ts",
       "class": "manual-review",
       "rule": "manual-review-boundaries",
       "owner": "omp-entrypoint",
       "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/cli/help-extra.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/collab/guest.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/collab/host.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/collab/protocol.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/src/commands/engine.ts",
@@ -323,11 +341,61 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/src/irc/bus.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/irc/conversations.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/irc/history.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/irc/types.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/src/main.ts",
       "class": "manual-review",
       "rule": "manual-review-boundaries",
       "owner": "omp-entrypoint",
       "layer": 2
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/agent-hub.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/agent-hub/activity-view.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/agent-hub/messages-view.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/agent-hub/roster-view.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/agent-transcript-viewer.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/chat-transcript-builder.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/src/modes/components/oauth-provider-data-source.ts",
@@ -338,6 +406,11 @@
       "path": "packages/coding-agent/src/modes/components/oauth-selector.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/components/transcript-container.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/src/modes/components/welcome.ts",
@@ -385,6 +458,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/src/modes/types.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/src/omp.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
@@ -393,6 +471,11 @@
       "path": "packages/coding-agent/src/product-entrypoint.test.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/registry/persisted-agents.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/src/sdk.ts",
@@ -411,6 +494,41 @@
     },
     {
       "path": "packages/coding-agent/src/session/session-maintenance.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/slash-commands/builtin-session.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/tools/hub/index.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/tools/hub/messaging.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/utils/objects.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/activity-index.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/agent-hub-activate.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/agent-hub-ordering.test.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
     },
@@ -445,6 +563,16 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/test/collab/guest-ui-request.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/collab/read-only.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/test/fixtures/breadboard-drain-controller.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
@@ -453,6 +581,11 @@
       "path": "packages/coding-agent/test/helpers/retry-ambiguous-replay.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/irc-history.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/test/main-session-resolution-error.test.ts",
@@ -513,6 +646,23 @@
       "path": "packages/utils/src/dirs.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/wire/CHANGELOG.md",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/wire/src/index.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
+      "path": "packages/wire/test/constants.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "scripts/audit-fork-delta.test.ts",
