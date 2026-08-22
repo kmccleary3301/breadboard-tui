@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk/internal";
 import { type BreadboardSdkProvenance, openVerifiedBackendSnapshot } from "../scripts/verify-breadboard-sdk-provenance";
+import { lifecycleChildEnvironment } from "../src/breadboard/lifecycle/lifecycle-supervisor";
 import { retryAmbiguousReplay } from "./helpers/retry-ambiguous-replay";
 
 const packageRoot = resolve(import.meta.dir, "..");
@@ -189,16 +190,14 @@ test("real backend rolls back an expired cross-process drain exactly once and re
 	const diagnosticState: IntegrationDiagnosticState = { phase: "backend-startup", fetchFailure: null };
 	const diagnosticFetch = diagnosticFetchFor(diagnosticState);
 	try {
-		backend = spawn(backendPython!, ["-m", "agentic_coder_prototype.api.cli_bridge.server"], {
+		backend = spawn(backendPython!, ["-m", "breadboard_engine.api.cli_bridge.server"], {
 			cwd: verifiedBackend.root,
 			env: {
-				PATH: "/usr/bin:/bin",
+				...lifecycleChildEnvironment(launchId),
 				PYTHONPATH: verifiedBackend.root,
 				PYTHONUNBUFFERED: "1",
 				BREADBOARD_CLI_HOST: "127.0.0.1",
 				BREADBOARD_CLI_PORT: String(port),
-				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
-				BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 			},
 			stdio: ["ignore", "ignore", "pipe", "pipe"],
 		});

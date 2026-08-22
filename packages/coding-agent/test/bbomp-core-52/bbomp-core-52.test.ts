@@ -489,6 +489,7 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 	test("[fast] child process environment is an exact minimal allowlist", () => {
 		expect(lifecycleChildEnvironment("launch-1")).toEqual({
 			PATH: "/usr/bin:/bin",
+			BREADBOARD_LEGACY_ROUTES: "1",
 			BREADBOARD_ENGINE_LAUNCH_ID: "launch-1",
 			BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 		});

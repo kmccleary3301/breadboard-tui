@@ -2319,14 +2319,21 @@ export async function runRootCommand(
 			settingsInstance.override("externalThinking", true);
 		}
 
+		const configuredDarkTheme = settingsInstance.isConfigured("theme.dark")
+			? settingsInstance.get("theme.dark")
+			: undefined;
+		const configuredLightTheme = settingsInstance.isConfigured("theme.light")
+			? settingsInstance.get("theme.light")
+			: undefined;
+
 		await logger.time(
 			"initTheme:final",
 			initTheme,
 			isInteractive,
 			settingsInstance.get("symbolPreset"),
 			settingsInstance.get("colorBlindMode"),
-			settingsInstance.get("theme.dark"),
-			settingsInstance.get("theme.light"),
+			configuredDarkTheme,
+			configuredLightTheme,
 		);
 
 		applyStartupComposerPreferences({
@@ -2344,8 +2351,8 @@ export async function runRootCommand(
 			theme: {
 				symbolPreset: settingsInstance.get("symbolPreset"),
 				colorBlindMode: settingsInstance.get("colorBlindMode"),
-				darkTheme: settingsInstance.get("theme.dark"),
-				lightTheme: settingsInstance.get("theme.light"),
+				darkTheme: configuredDarkTheme,
+				lightTheme: configuredLightTheme,
 			},
 		});
 		setStartupComposerLspServers(discoverStartupLspServers(cwd, "connecting"));

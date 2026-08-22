@@ -505,6 +505,7 @@ describe("LifecycleSupervisor mode authority", () => {
 		try {
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).toEqual({
 				PATH: "/usr/bin:/bin",
+				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 			});

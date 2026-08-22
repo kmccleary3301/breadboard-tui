@@ -7,11 +7,13 @@ import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
 const originalPlatform = process.platform;
 const originalColorfgbg = Bun.env.COLORFGBG;
 const originalZellij = Bun.env.ZELLIJ;
+const originalBreadboardProduct = Bun.env.BREADBOARD_PRODUCT;
 
 type ThemeTestGlobals = {
 	platform?: NodeJS.Platform;
 	colorfgbg?: string;
 	zellij?: string;
+	breadboardProduct?: string;
 };
 
 const withThemeTestGlobals = (globals: ThemeTestGlobals = {}) => {
@@ -27,6 +29,9 @@ const withThemeTestGlobals = (globals: ThemeTestGlobals = {}) => {
 	if (globals.zellij === undefined) delete Bun.env.ZELLIJ;
 	else Bun.env.ZELLIJ = globals.zellij;
 
+	if (globals.breadboardProduct === undefined) delete Bun.env.BREADBOARD_PRODUCT;
+	else Bun.env.BREADBOARD_PRODUCT = globals.breadboardProduct;
+
 	return {
 		[Symbol.dispose]() {
 			themeModule.stopThemeWatcher();
@@ -39,6 +44,8 @@ const withThemeTestGlobals = (globals: ThemeTestGlobals = {}) => {
 			else Bun.env.COLORFGBG = originalColorfgbg;
 			if (originalZellij === undefined) delete Bun.env.ZELLIJ;
 			else Bun.env.ZELLIJ = originalZellij;
+			if (originalBreadboardProduct === undefined) delete Bun.env.BREADBOARD_PRODUCT;
+			else Bun.env.BREADBOARD_PRODUCT = originalBreadboardProduct;
 			vi.restoreAllMocks();
 		},
 	};
@@ -136,6 +143,22 @@ describe("theme auto-detection", () => {
 	afterEach(() => {
 		themeModule.stopThemeWatcher();
 		vi.restoreAllMocks();
+	});
+
+	it("uses BreadBoard appearance defaults when theme slots are unconfigured", async () => {
+		using _globals = withThemeTestGlobals({ colorfgbg: "15;0", breadboardProduct: "1" });
+
+		await themeModule.initTheme(false);
+
+		expect(themeModule.getCurrentThemeName()).toBe("breadboard");
+	});
+
+	it("preserves explicit theme slots in BreadBoard product mode", async () => {
+		using _globals = withThemeTestGlobals({ colorfgbg: "15;0", breadboardProduct: "1" });
+
+		await themeModule.initTheme(false, undefined, undefined, "dark", "light");
+
+		expect(themeModule.getCurrentThemeName()).toBe("dark");
 	});
 
 	it("prefers COLORFGBG before macOS fallback inside Zellij", async () => {

@@ -1219,6 +1219,7 @@ export class EventController {
 		}
 		if (
 			event.message.role === "assistant" &&
+			event.message.responseId?.startsWith("breadboard:e4:") &&
 			!this.ctx.streamingComponent &&
 			(assistantHasVisibleContent(event.message) || Boolean(event.message.errorMessage))
 		) {

@@ -192,6 +192,7 @@ export function lifecycleChildEnvironment(launchId: string): Readonly<Record<str
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
+		BREADBOARD_LEGACY_ROUTES: "1",
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 	});
 }

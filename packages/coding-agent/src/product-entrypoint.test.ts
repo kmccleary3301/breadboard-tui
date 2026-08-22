@@ -58,7 +58,7 @@ describe("BreadBoard product entrypoint", () => {
 		const result = await runProcess(["src/bb.ts", "--version"], await temporaryHome());
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout.trim()).toBe("bb/0.1.0-rc.1 omp/17.4.0 sdk/0.3.0 engine-api >=0.1.0 <0.4.0");
+		expect(result.stdout.trim()).toBe("bb/0.1.0-rc.1 omp/18.0.0 sdk/0.3.0 engine-api >=0.1.0 <0.4.0");
 	});
 
 	test("uses the bb identity and never touches a native ~/.omp tree", async () => {
@@ -81,7 +81,7 @@ describe("BreadBoard product entrypoint", () => {
 		const result = await runProcess(["src/omp.ts", "--version"], home, { BREADBOARD_PRODUCT: "1" });
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout.trim()).toBe("omp/17.4.0");
+		expect(result.stdout.trim()).toBe("omp/18.0.0");
 		expect(await Bun.file(path.join(home, ".breadboard")).exists()).toBe(false);
 	});
 

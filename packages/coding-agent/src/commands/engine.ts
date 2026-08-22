@@ -15,13 +15,14 @@ import {
 	parseSelectedBreadboardConfig,
 	resolveBreadboardRunConfig,
 } from "../breadboard/lifecycle/run-config";
+import { engineHelp as commandHelp } from "../cli/command-help";
 import { Settings } from "../config/settings";
 
 const ENGINE_ACTIONS = ["start", "status", "stop", "restart"] as const;
 type EngineAction = (typeof ENGINE_ACTIONS)[number];
 
 export default class Engine extends Command {
-	static description = "Manage the governed BreadBoard engine lifecycle";
+	static description = commandHelp.description;
 
 	static args = {
 		action: Args.string({
