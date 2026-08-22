@@ -41,6 +41,16 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 	let file: string;
 	let themed = false;
 
+	const multiplexerEnvKeys = [
+		"TMUX",
+		"STY",
+		"ZELLIJ",
+		"CMUX_WORKSPACE_ID",
+		"CMUX_SURFACE_ID",
+		"CMUX_REMOTE_TRANSPORT",
+		"TERM",
+	] as const;
+	let originalMultiplexerEnv: Partial<Record<(typeof multiplexerEnvKeys)[number], string | undefined>>;
 	// The streaming edit window is sized as min(EDIT_STREAMING_PREVIEW_LINES,
 	// previewWindowRows()), and previewWindowRows() reads process.stdout.rows.
 	// Pin a tall, stable viewport so the "full window of real diff" height
@@ -60,6 +70,11 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 	});
 
 	beforeEach(async () => {
+		originalMultiplexerEnv = {};
+		for (const key of multiplexerEnvKeys) {
+			originalMultiplexerEnv[key] = Bun.env[key];
+			delete Bun.env[key];
+		}
 		if (!themed) {
 			await initTheme();
 			themed = true;
@@ -73,6 +88,11 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 
 	afterEach(async () => {
 		resetSettingsForTest();
+		for (const key of multiplexerEnvKeys) {
+			const original = originalMultiplexerEnv[key];
+			if (original === undefined) delete Bun.env[key];
+			else Bun.env[key] = original;
+		}
 		await removeWithRetries(tmpDir);
 	});
 
@@ -144,6 +164,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 		const term = new VirtualTerminal(80, 8);
 		const scheduler = makeDrainableScheduler();
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.setScrollbackRebuild(true);
 		const tool = { mode: "replace" } as unknown as AgentTool;
 		const component = new ToolExecutionComponent(
 			"edit",

@@ -1,7 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import {
+	BB_LOGO,
+	PI_LOGO,
+	pickWeightedTip,
+	WelcomeComponent,
+} from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
+import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 describe("WelcomeComponent", () => {
 	beforeAll(async () => {
@@ -74,5 +79,65 @@ describe("WelcomeComponent", () => {
 		expect(plain).not.toContain(modelName);
 		expect(plain).toMatch(/DeepSeek V4 [^│]*…/);
 		expect(plain).toContain("Recent sessions");
+	});
+});
+
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
+const visLen = (s: string): number => [...stripAnsi(s)].length;
+const hasRow = (lines: string[], row: string): boolean => lines.some(l => l.includes(row.trimEnd()));
+
+describe("WelcomeComponent BreadBoard product mode", () => {
+	const priorProduct = process.env.BREADBOARD_PRODUCT;
+	afterEach(() => {
+		if (priorProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
+		else process.env.BREADBOARD_PRODUCT = priorProduct;
+	});
+
+	it("renders the BreadBoard brand mark and drops the OMP mark in product mode", () => {
+		process.env.BREADBOARD_PRODUCT = "1";
+		const lines = new WelcomeComponent("0.1.0-rc.1", "model", "provider").render(90).map(stripAnsi);
+		for (const row of BB_LOGO) expect(hasRow(lines, row)).toBe(true);
+		expect(hasRow(lines, PI_LOGO[1])).toBe(false);
+	});
+
+	it("renders the OMP mark and no brand mark in native mode", () => {
+		delete process.env.BREADBOARD_PRODUCT;
+		const lines = new WelcomeComponent("17.4.0", "model", "provider").render(90).map(stripAnsi);
+		for (const row of PI_LOGO) expect(hasRow(lines, row)).toBe(true);
+		expect(hasRow(lines, BB_LOGO[2])).toBe(false);
+	});
+
+	it("titles the box with the exact BreadBoard product copy", () => {
+		process.env.BREADBOARD_PRODUCT = "1";
+		const header = stripAnsi(new WelcomeComponent("0.1.0-rc.1", "model", "provider").render(90)[0] ?? "");
+		expect(header).toContain("BreadBoard v0.1.0-rc.1");
+		expect(header).not.toContain("omp v");
+	});
+
+	it("keeps the exact OMP copy in native mode", () => {
+		delete process.env.BREADBOARD_PRODUCT;
+		const header = stripAnsi(new WelcomeComponent("17.4.0", "model", "provider").render(90)[0] ?? "");
+		expect(header).toContain("omp v17.4.0");
+		expect(header).not.toContain("BreadBoard");
+	});
+
+	it("keeps product rendering within the terminal width when narrow", () => {
+		process.env.BREADBOARD_PRODUCT = "1";
+		const welcome = new WelcomeComponent("0.1.0-rc.1", "model", "provider");
+		for (const width of [20, 12, 6]) {
+			const lines = welcome.render(width);
+			for (const line of lines) expect(visLen(line)).toBeLessThanOrEqual(width);
+			welcome.invalidate();
+		}
+	});
+});
+
+describe("BreadBoard product themes", () => {
+	it("registers the dune-orange brand themes for both appearances", async () => {
+		const available = await getAvailableThemes();
+		expect(available).toContain("breadboard");
+		expect(available).toContain("breadboard-light");
+		expect(await getThemeByName("breadboard")).toBeDefined();
+		expect(await getThemeByName("breadboard-light")).toBeDefined();
 	});
 });

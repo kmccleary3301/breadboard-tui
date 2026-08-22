@@ -120,6 +120,12 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--add-dir": (result, value) => {
 		result.addDir = [...(result.addDir ?? []), value];
 	},
+	"--engine-mode": (result, value) => {
+		result.engineMode = value;
+	},
+	"--engine-url": (result, value) => {
+		result.engineUrl = value;
+	},
 	"--mode": (result, value) => {
 		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
 			result.mode = value;

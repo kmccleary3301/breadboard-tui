@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
 import {
+	CONFIG_DIR_NAME,
 	getAgentDbPath,
 	getAgentDir,
 	getLastChangelogVersionPath,
@@ -346,7 +347,7 @@ export class Settings {
 	#global: RawSettings = {};
 	/** Project settings from .claude/settings.yml etc */
 	#project: RawSettings = {};
-	/** Last successfully loaded native .omp/config.yml contents. */
+	/** Last successfully loaded active-product project config contents. */
 	#projectFileSettings: RawSettings = {};
 	/** Logical config paths whose malformed targets were moved aside. */
 	#quarantinedYamlTargets = new Map<string, string>();
@@ -505,6 +506,16 @@ export class Settings {
 			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : getDefault(path);
 		this.#resolvedCache.set(path, resolved);
 		return resolved as SettingValue<P>;
+	}
+
+	/**
+	 * Read an untyped value from the effective merged configuration.
+	 *
+	 * This is reserved for independently validated configuration namespaces
+	 * that are not part of the interactive settings schema.
+	 */
+	getRaw(path: string): unknown {
+		return getByPath(this.#merged, path.split("."));
 	}
 
 	/**
@@ -1374,7 +1385,7 @@ export class Settings {
 			// Capability discovery is best-effort; the native project config below
 			// remains authoritative for its model-role layer and must not be hidden.
 		}
-		const projectConfigPath = path.join(this.#cwd, ".omp", "config.yml");
+		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
 		const nativeProject = quarantineInvalid
 			? await this.#loadYaml(projectConfigPath)
 			: (this.#unwrapYamlLoadResult(projectConfigPath, await this.#loadYamlIfPresent(projectConfigPath, false)) ??
@@ -2365,7 +2376,7 @@ export class Settings {
 	async #saveProjectNow(): Promise<void> {
 		if (this.#savesCancelled || !this.#persist || this.#modifiedProjectModelRoles.size === 0) return;
 
-		const projectConfigPath = path.join(this.#cwd, ".omp", "config.yml");
+		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
 		const modifiedModelRoles = [...this.#modifiedProjectModelRoles];
 		this.#modifiedProjectModelRoles.clear();
 

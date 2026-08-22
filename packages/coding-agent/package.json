@@ -28,10 +28,13 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "omp": "src/cli.ts"
+    "omp": "src/omp.ts",
+    "bb": "src/bb.ts"
   },
   "scripts": {
-    "build": "bun scripts/build-binary.ts",
+    "build": "bun run gate:distribution && bun scripts/build-binary.ts",
+    "build:bb": "bun run gate:distribution && BUILD_PRODUCT=bb bun scripts/build-binary.ts",
+    "build:omp": "bun run gate:distribution && BUILD_PRODUCT=omp bun scripts/build-binary.ts",
     "check": "biome check . && bun run check:types",
     "check:types": "tsgo -p tsconfig.json --noEmit",
     "lint": "biome lint .",
@@ -43,11 +46,16 @@
     "gen:bundle": "bun scripts/bundle-dist.ts",
     "gen:native": "bun --cwd=../natives run gen:native",
     "gen:native:reset": "bun --cwd=../natives run gen:native:reset",
-    "prepack": "bun run gen:tool-views && bun run gen:bundle",
-    "bench:guard": "bun scripts/bench-guard.ts"
+    "prepack": "bun run gate:distribution && bun run gen:tool-views && bun run gen:bundle",
+    "bench:guard": "bun scripts/bench-guard.ts",
+    "gate:breadboard-sdk": "bun scripts/verify-breadboard-sdk-provenance.ts",
+    "gate:distribution": "bun run gate:breadboard-sdk && bun run gate:notices",
+    "gate:notices": "bun ../../scripts/generate-third-party-notices.ts --check"
   },
   "dependencies": {
     "@babel/parser": "catalog:",
+    "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.3.0.tgz",
+    "@mozilla/readability": "catalog:",
     "@oh-my-pi/hashline": "catalog:",
     "@oh-my-pi/omp-stats": "catalog:",
     "@oh-my-pi/omptype": "catalog:",
@@ -94,6 +102,11 @@
     "dist/template-*.js",
     "dist/tool-views.generated-*.js",
     "scripts",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.txt",
+    "THIRD_PARTY_NOTICES.manifest.json",
+    "breadboard-sdk-provenance.json",
+    "vendor/breadboard-sdk-0.3.0.tgz",
     "examples",
     "README.md",
     "CHANGELOG.md"

@@ -1,22 +1,53 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
+import type {
+	AuthCredentialView,
+	ProviderAuthDataSource,
+} from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { OAuthSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/oauth-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 
 beforeAll(async () => {
 	await initTheme();
 });
 
-const authStorage = {
-	has: (_providerId: string) => false,
-	hasAuth: (_providerId: string) => false,
-	getCredentialOrigin: (_providerId: string) => undefined,
-} as unknown as AuthStorage;
+function providerDataSource(storedProviders: readonly string[] = []): ProviderAuthDataSource {
+	return {
+		async listProviders() {
+			return getOAuthProviders().map(provider => ({
+				providerId: provider.id,
+				displayName: provider.name,
+				storeCredentialsAs: provider.storeCredentialsAs,
+				available: provider.available,
+				authSchemes: ["oauth2"],
+				loginAvailable: provider.available,
+			}));
+		},
+		async listCredentials() {
+			return storedProviders.map(
+				providerId =>
+					({
+						schemaVersion: "bb.auth.credential_summary.v1",
+						credentialRef: `${providerId}-credential`,
+						providerId,
+						authSchemeId: "oauth2",
+						credentialKind: "oauth2",
+						accountLabel: `${providerId} account`,
+						status: "active",
+						source: "oauth",
+						isDefault: true,
+						expiresAtUtc: null,
+						createdAtUtc: "",
+						lastUsedAtUtc: null,
+					}) satisfies AuthCredentialView,
+			);
+		},
+	};
+}
 
 describe("OAuthSelectorComponent", () => {
-	it("fuzzy-filters overflowing provider lists from typed input", () => {
+	it("fuzzy-filters overflowing provider lists from typed input", async () => {
 		const providers = getOAuthProviders();
 		expect(providers.length).toBeGreaterThan(10);
 		const target =
@@ -29,10 +60,11 @@ describe("OAuthSelectorComponent", () => {
 		const selected: string[] = [];
 		const component = new OAuthSelectorComponent(
 			"login",
-			authStorage,
+			providerDataSource(),
 			providerId => selected.push(providerId),
 			() => {},
 		);
+		await component.ready;
 
 		for (const char of target.id) {
 			component.handleInput(char);
@@ -48,19 +80,15 @@ describe("OAuthSelectorComponent", () => {
 		component.handleInput("\n");
 		expect(selected).toEqual([target.id]);
 	});
-
-	it("does not offer env-only providers as logout targets", () => {
+	it("does not offer env-only providers as logout targets", async () => {
 		const selected: string[] = [];
 		const component = new OAuthSelectorComponent(
 			"logout",
-			{
-				has: (_providerId: string) => false,
-				hasAuth: (providerId: string) => providerId === "opencode-go" || providerId === "opencode-zen",
-				getCredentialOrigin: (_providerId: string) => undefined,
-			} as unknown as AuthStorage,
+			providerDataSource(),
 			providerId => selected.push(providerId),
 			() => {},
 		);
+		await component.ready;
 
 		for (const char of "opencode-go") {
 			component.handleInput(char);
@@ -76,18 +104,15 @@ describe("OAuthSelectorComponent", () => {
 		expect(selected).toEqual([]);
 	});
 
-	it("offers stored providers as logout targets", () => {
+	it("offers stored providers as logout targets", async () => {
 		const selected: string[] = [];
 		const component = new OAuthSelectorComponent(
 			"logout",
-			{
-				has: (providerId: string) => providerId === "opencode-go",
-				hasAuth: (providerId: string) => providerId === "opencode-go",
-				getCredentialOrigin: (_providerId: string) => undefined,
-			} as unknown as AuthStorage,
+			providerDataSource(["opencode-go"]),
 			providerId => selected.push(providerId),
 			() => {},
 		);
+		await component.ready;
 
 		for (const char of "opencode-go") {
 			component.handleInput(char);
@@ -123,10 +148,11 @@ describe("OAuthSelectorComponent", () => {
 
 			const component = new OAuthSelectorComponent(
 				"login",
-				authStorage,
+				providerDataSource(),
 				() => {},
 				() => {},
 			);
+			await component.ready;
 			for (const char of victim.id) {
 				component.handleInput(char);
 			}
@@ -148,10 +174,11 @@ describe("OAuthSelectorComponent", () => {
 
 			const component = new OAuthSelectorComponent(
 				"login",
-				authStorage,
+				providerDataSource(),
 				() => {},
 				() => {},
 			);
+			await component.ready;
 			for (const char of alias.id) {
 				component.handleInput(char);
 			}
@@ -169,14 +196,11 @@ describe("OAuthSelectorComponent", () => {
 			const selected: string[] = [];
 			const component = new OAuthSelectorComponent(
 				"logout",
-				{
-					has: (providerId: string) => providerId === "opencode-go",
-					hasAuth: (providerId: string) => providerId === "opencode-go",
-					getCredentialOrigin: (_providerId: string) => undefined,
-				} as unknown as AuthStorage,
+				providerDataSource(["opencode-go"]),
 				providerId => selected.push(providerId),
 				() => {},
 			);
+			await component.ready;
 			for (const char of "opencode-go") {
 				component.handleInput(char);
 			}

@@ -7,6 +7,7 @@ import {
 	type AgentTool,
 	AppendOnlyContextManager,
 	filterProviderReplayMessages,
+	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type {
@@ -419,6 +420,12 @@ export interface CreateAgentSessionOptions {
 	providerPromptCacheKeySource?: "explicit" | "fork";
 	/** Absolute wall-clock deadline in Unix epoch milliseconds. */
 	deadline?: number;
+	/**
+	 * Optional transport for the primary Agent loop only. Side-channel, advisor,
+	 * title, and compaction requests retain OMP's native settings-aware streams.
+	 * This is the governed seam for an external durable turn runtime.
+	 */
+	mainStreamFn?: StreamFn;
 
 	/** Custom tools to register (in addition to built-in tools). Accepts both CustomTool and ToolDefinition. */
 	customTools?: (CustomTool | ToolDefinition)[];
@@ -3233,6 +3240,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			blobBroker,
 		);
 		const codeModeState: { namespacesInfo?: unknown } = {};
+		const primaryStreamFn = options.mainStreamFn ?? settingsAwareStreamFn;
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
 			const maxTimeout = settings.get("tools.maxTimeout");
@@ -3299,7 +3307,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					settings.get("externalThinking") &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
-				return settingsAwareStreamFn(streamModel, context, {
+				return primaryStreamFn(streamModel, context, {
 					...streamOptions,
 					anthropicCacheRefresh: true,
 					forceReasoningOff: externalThinking || streamOptions?.forceReasoningOff,

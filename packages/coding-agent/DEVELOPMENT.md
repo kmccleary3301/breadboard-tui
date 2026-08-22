@@ -20,7 +20,8 @@ Run from `packages/coding-agent/` (or add `--cwd=packages/coding-agent`):
 | Lint only | `bun run lint` |
 | Tests | `bun run test` |
 | Autofix: lint + format prompts | `bun run fix` |
-| Build the `dist/omp` binary | `bun run build` |
+| Build the BreadBoard `dist/bb` binary | `bun run build` |
+| Build the native OMP `dist/omp` binary | `bun run build:omp` |
 
 Never invoke `tsc`/`npx tsc` directly — `bun run check` is the typecheck gate. After
 changing the React tool renderers under `collab-web/src/tool-render/`, rebuild them

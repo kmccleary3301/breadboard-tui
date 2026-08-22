@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "p31.third-party-notices-manifest.v1",
+  "generator": "scripts/generate-third-party-notices.ts",
+  "bundle": {
+    "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
+    "sha256": "974a5911807a492318d9df4a27b89075e201312c810b3ece991f14c9e1148c66",
+    "bytes": 53932
+  },
+  "packageLicense": {
+    "path": "packages/coding-agent/LICENSE",
+    "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63"
+  },
+  "sdk": {
+    "artifactPath": "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz",
+    "artifactSha256": "c5f3ca334a475cd4fcb638336aa447c05066136641bd9e56572ec0a65516975a",
+    "provenancePath": "packages/coding-agent/breadboard-sdk-provenance.json",
+    "provenanceSha256": "7d5e9417a9c5ff8842c6704644301c9ebbf39301222431699021776ff820490c",
+    "licenseNoticeMemberPresent": false,
+    "licenseAssertion": "none",
+    "licenseNoticeMembers": []
+  },
+  "entries": [
+    {
+      "path": "LICENSE",
+      "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
+      "bytes": 1144
+    },
+    {
+      "path": "crates/pi-ast/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/pi-builtins/LICENSE",
+      "sha256": "13ff1d17c220d45ac0aab751bf6abf28968470ab3c9c3734f88bf5c181e3d7ba",
+      "bytes": 9269
+    },
+    {
+      "path": "crates/pi-builtins/LICENSE-MIT",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/pi-iso/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/pi-natives/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/pi-natives/data/LICENSE.ctok",
+      "sha256": "9ef5a4394eb84d8182c7accd4289e67c6f024e57f0a2bde45ed4ce2844724452",
+      "bytes": 1402
+    },
+    {
+      "path": "crates/pi-natives/src/fonts/Silver.LICENSE",
+      "sha256": "b2b97a7c88214ea92e60c3a5d2c43da59a8e552507a89330c78d9f4c0160cdfd",
+      "bytes": 565
+    },
+    {
+      "path": "crates/pi-shell/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/pi-shell/NOTICE",
+      "sha256": "351dbfd4c2a9774ce0fd9bcc896f77ffa020da01afe25b976ca806e7bedecbde",
+      "bytes": 1879
+    },
+    {
+      "path": "crates/pi-voice/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/pi-walker/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "crates/vendor/brush-core/LICENSE",
+      "sha256": "6a4fb3e5c86a86c6d45b0278d69c683cf88fe5d6ded38ff620ae70742071c431",
+      "bytes": 1739
+    },
+    {
+      "path": "packages/agent/LICENSE",
+      "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
+      "bytes": 1144
+    },
+    {
+      "path": "packages/ai/LICENSE",
+      "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
+      "bytes": 1144
+    },
+    {
+      "path": "packages/catalog/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/coding-agent/src/export/html/vendor/NOTICE",
+      "sha256": "ec0947082076dd4705612181410ff9924399c0094ff018fdd16b2c2826787fd0",
+      "bytes": 2785
+    },
+    {
+      "path": "packages/coding-agent/src/markit/NOTICE",
+      "sha256": "500039a00217d3ebb1f708e15d71ddb26116f980ba80c8e9ce6c2685a91dedfa",
+      "bytes": 1653
+    },
+    {
+      "path": "packages/coding-agent/src/tools/browser/relay/extension-assets/LICENSE.txt",
+      "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
+      "bytes": 1144
+    },
+    {
+      "path": "packages/hashline/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/mnemopi/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/natives/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/omptype/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/omptype/test/ark/LICENSE",
+      "sha256": "387b9b7c0853565f6aad01470195812a2b625d70389c974d626293c29cdde09c",
+      "bytes": 1047
+    },
+    {
+      "path": "packages/snapcompact/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/stats/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/tui/LICENSE",
+      "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
+      "bytes": 1144
+    },
+    {
+      "path": "packages/utils/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "packages/utils/src/vendor/mermaid-ascii/NOTICE",
+      "sha256": "9824d8cfb81dd754497864857edc44f88048199e5ba2c6b498a7248f5062bb82",
+      "bytes": 1748
+    },
+    {
+      "path": "packages/wire/LICENSE",
+      "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
+      "bytes": 1111
+    },
+    {
+      "path": "python/omp-rpc/LICENSE",
+      "sha256": "048c9ebb09976a1c2e895d23f91dbe9114bd7858bfd7ff3b6a8f957feccbdfeb",
+      "bytes": 1075
+    },
+    {
+      "path": "python/robomp/LICENSE",
+      "sha256": "048c9ebb09976a1c2e895d23f91dbe9114bd7858bfd7ff3b6a8f957feccbdfeb",
+      "bytes": 1075
+    }
+  ]
+}

@@ -53,6 +53,7 @@ import {
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
 import { reset as resetCapabilities } from "../capability";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
@@ -787,6 +788,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		mcpManager?: MCPManager,
 		eventBus?: EventBus,
 		composer?: Composer,
+		providerAuthPort?: ProviderAuthPort,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -980,7 +982,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController = new CommandController(this);
 		this.#todoCommandController = new TodoCommandController(this);
 		this.#liveCommandController = new LiveCommandController(this);
-		this.#selectorController = new SelectorController(this);
+		this.#selectorController = new SelectorController(this, providerAuthPort);
 		this.#focusController = new SessionFocusController(this);
 		this.#inputController = new InputController(this);
 		this.session.setTitleGenerationStart?.(() => {

@@ -18,7 +18,9 @@ import { parentPort } from "node:worker_threads";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
+	formatBreadboardVersion,
 	getActiveProfile,
+	IS_BREADBOARD_PRODUCT,
 	MIN_BUN_VERSION,
 	resolveProfileEnv,
 	setProfile,
@@ -27,6 +29,7 @@ import {
 import { interceptUnhandledRejections } from "@oh-my-pi/pi-utils/postmortem";
 import { setProcessName } from "@oh-my-pi/pi-utils/process-name";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
+import noticeBundlePath from "../THIRD_PARTY_NOTICES.txt" with { type: "file" };
 import { BLOB_BROKER_WORKER_ARG } from "./blob-broker/protocol";
 import { installProfileAlias, resolveProfileAliasCommandFromProcess } from "./cli/profile-alias";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
@@ -93,6 +96,13 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
  * tarball installs all exercise it on every CI run.
  */
 async function runSmokeTest(): Promise<void> {
+	const noticeBundle = await Bun.file(noticeBundlePath).text();
+	if (
+		!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n") ||
+		!noticeBundle.includes("Package: @breadboard/sdk@0.3.0")
+	) {
+		throw new Error("distribution notice bundle is missing or malformed");
+	}
 	const { smokeTestSyncWorker, startServer } = await import("@oh-my-pi/omp-stats");
 	const { smokeTestTinyTitleWorker } = await import("./tiny/title-client");
 	const { smokeTestSttWorker } = await import("./stt/asr-client");
@@ -339,6 +349,10 @@ async function runTinyWorker(): Promise<void> {
 	await runIpcSubprocessWorker(startTinyTitleWorker);
 }
 
+function writeProductVersion(): void {
+	process.stdout.write(`${formatBreadboardVersion()}\n`);
+}
+
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export async function runCli(argv: string[]): Promise<void> {
 	let resolvedArgv = argv;
@@ -379,6 +393,11 @@ export async function runCli(argv: string[]): Promise<void> {
 		const message = error instanceof Error ? error.message : String(error);
 		process.stderr.write(`Error: ${message}\n`);
 		process.exitCode = 1;
+		return;
+	}
+
+	if (IS_BREADBOARD_PRODUCT && (resolvedArgv[0] === "--version" || resolvedArgv[0] === "-v")) {
+		writeProductVersion();
 		return;
 	}
 

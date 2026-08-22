@@ -365,6 +365,16 @@ import { TtsrCoordinator, type TtsrCoordinatorHost } from "./ttsr-coordinator";
 const PLAN_MODE_REMINDER_MAX = 3;
 const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 
+export type SessionTransitionPlan =
+	| { readonly reason: "new" }
+	| { readonly reason: "resume"; readonly targetSessionFile: string }
+	| { readonly reason: "fork" }
+	| { readonly reason: "handoff" }
+	| { readonly reason: "branch"; readonly targetEntryId: string }
+	| { readonly reason: "branchFromBtw"; readonly targetEntryId: string }
+	| { readonly reason: "navigateTree"; readonly targetEntryId: string };
+export type SessionTransitionGuard = (plan: SessionTransitionPlan) => void | Promise<void>;
+
 /** Internal marker for hook messages queued through the agent loop */
 // ============================================================================
 // Constants
@@ -1598,6 +1608,7 @@ export class AgentSession {
 			dropImages: () => this.dropImages(),
 			generateHandoffDocument: (customInstructions, options) =>
 				this.#handoff.generateDocument(customInstructions, options),
+			beforeHandoff: () => this.#sessionTransitionGuard?.({ reason: "handoff" }),
 			removeAssistantMessageFromActiveContext: message =>
 				this.#recovery.removeAssistantMessageFromActiveContext(message),
 			dropPersistedAssistantTurn: message => this.#recovery.dropPersistedAssistantTurn(message),
@@ -1769,6 +1780,12 @@ export class AgentSession {
 
 	setSessionBeforeSwitchReconciler(reconciler: (() => Promise<void>) | null): void {
 		this.#sessionBeforeSwitchReconciler = reconciler ?? undefined;
+	}
+
+	#sessionTransitionGuard: SessionTransitionGuard | undefined;
+
+	setSessionTransitionGuard(guard: SessionTransitionGuard | null): void {
+		this.#sessionTransitionGuard = guard ?? undefined;
 	}
 
 	#sessionSwitchReconciler: (() => Promise<void>) | undefined;
@@ -6918,6 +6935,7 @@ export class AgentSession {
 				return false;
 			}
 		}
+		await this.#sessionTransitionGuard?.({ reason: "new" });
 
 		this.#disconnectFromAgent();
 		let advisorRecordersDetached = false;
@@ -7029,6 +7047,7 @@ export class AgentSession {
 				return false;
 			}
 		}
+		await this.#sessionTransitionGuard?.({ reason: "fork" });
 
 		await this.#bash.flushPending();
 		// Flush current session to ensure all entries are written
@@ -7988,6 +8007,7 @@ export class AgentSession {
 				return false;
 			}
 		}
+		await this.#sessionTransitionGuard?.({ reason: "resume", targetSessionFile: sessionPath });
 
 		this.#disconnectFromAgent();
 		await this.abort({ goalReason: "internal" });
@@ -8300,6 +8320,7 @@ export class AgentSession {
 			}
 			skipConversationRestore = result?.skipConversationRestore ?? false;
 		}
+		await this.#sessionTransitionGuard?.({ reason: "branch", targetEntryId: entryId });
 
 		// Clear pending messages (bound to old session state)
 		this.#pendingNextTurnMessages = [];
@@ -8409,6 +8430,7 @@ export class AgentSession {
 				return { cancelled: true, sessionFile: previousSessionFile };
 			}
 		}
+		await this.#sessionTransitionGuard?.({ reason: "branchFromBtw", targetEntryId: leafId });
 
 		if (this.sessionManager.getSessionId() !== sessionId || this.sessionManager.getLeafId() !== leafId) {
 			throw new Error("Cannot branch /btw: session changed since /btw started");
@@ -8665,6 +8687,9 @@ export class AgentSession {
 				fromExtension = true;
 			}
 		}
+		const sessionTransitionGuard = this.#sessionTransitionGuard;
+		await sessionTransitionGuard?.({ reason: "navigateTree", targetEntryId: targetId });
+		if (sessionTransitionGuard) await this.#bash.flushPending();
 
 		// Run default summarizer if needed
 		let summaryText: string | undefined;

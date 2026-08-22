@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { detectMacOSAppearance, MacAppearanceObserver } from "@oh-my-pi/pi-natives";
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
 import { colorLuma, getCustomThemesDir, logger } from "@oh-my-pi/pi-utils";
+import { Settings } from "../../config/settings";
 import { ansi256ToHex, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
 import type { ThemeColor, ThemeJson } from "./schema";
@@ -73,6 +74,18 @@ function getDefaultTheme(): string {
 	return bg === "light" ? autoLightTheme : autoDarkTheme;
 }
 
+/** Default dark theme under the BreadBoard product entrypoint (`BREADBOARD_PRODUCT=1`). */
+export const BREADBOARD_DARK_THEME = "breadboard";
+/** Default light theme under the BreadBoard product entrypoint. */
+export const BREADBOARD_LIGHT_THEME = "breadboard-light";
+
+/** Whether the process was launched via the BreadBoard product entrypoint. The
+ *  `bb` binary sets `BREADBOARD_PRODUCT=1` before loading the CLI; native `omp`
+ *  leaves it unset. Read live so tests and subprocess launches see changes. */
+export function isBreadboardProduct(): boolean {
+	return process.env.BREADBOARD_PRODUCT === "1";
+}
+
 // ============================================================================
 // Global Theme Instance
 // ============================================================================
@@ -121,6 +134,12 @@ function configureTheme(
 	autoDetectedTheme = true;
 	autoDarkTheme = darkTheme ?? "dark";
 	autoLightTheme = lightTheme ?? "light";
+	if (isBreadboardProduct()) {
+		// BreadBoard owns the product defaults; explicit user theme slots still win.
+		const configured = getConfiguredThemeSlots();
+		if (!configured.dark) autoDarkTheme = BREADBOARD_DARK_THEME;
+		if (!configured.light) autoLightTheme = BREADBOARD_LIGHT_THEME;
+	}
 	currentSymbolPresetOverride = symbolPreset;
 	currentColorBlindMode = colorBlindMode ?? false;
 	const name = getDefaultTheme();
@@ -153,6 +172,23 @@ export function initThemeSync(
 export async function ensureTheme(): Promise<void> {
 	if (typeof theme !== "undefined") return;
 	await initTheme();
+}
+
+/**
+ * Whether the user has explicitly configured the dark/light theme slots, versus
+ * falling back to the schema default. Used only to decide the BreadBoard product
+ * default so an explicit user theme is never overridden.
+ */
+function getConfiguredThemeSlots(): { dark: boolean; light: boolean } {
+	// `settings` statically imports this module, so the reference is used only at
+	// call time (never module-eval time) to keep the ESM cycle safe. A missing or
+	// uninitialized singleton reports "unconfigured" so product defaults apply.
+	try {
+		const settings = Settings.instance;
+		return { dark: settings.isConfigured("theme.dark"), light: settings.isConfigured("theme.light") };
+	} catch {
+		return { dark: false, light: false };
+	}
 }
 
 export async function initTheme(
