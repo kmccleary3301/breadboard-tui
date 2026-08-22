@@ -208,6 +208,11 @@ export class TranscriptContainer
 		}
 	>();
 
+	/** Row where a rendered child begins, used by transcript deep-links. */
+	getChildStartRow(child: Component): number | undefined {
+		const segment = this.#segments.find(candidate => candidate.component === child);
+		return segment ? segment.startRow + segment.sep : undefined;
+	}
 	// Stable-prefix floor accumulated across renders since the last
 	// getRenderStablePrefixRows() read (see RenderStablePrefix: reading
 	// consumes the report and re-bases the baseline). Out-of-band renders

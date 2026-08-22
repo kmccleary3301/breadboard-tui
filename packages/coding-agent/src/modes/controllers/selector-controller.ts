@@ -41,7 +41,7 @@ import {
 	setTheme,
 	theme,
 } from "../../modes/theme/theme";
-import type { InteractiveModeContext } from "../../modes/types";
+import type { AgentHubOpenOptions, InteractiveModeContext } from "../../modes/types";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
 import type {
 	OAuthLoginIdentity,
@@ -2185,10 +2185,7 @@ export class SelectorController {
 		});
 	}
 
-	showAgentHub(
-		observers: SessionObserverRegistry,
-		options?: { requireContent?: boolean; armCloseTap?: boolean },
-	): void {
+	showAgentHub(observers: SessionObserverRegistry, options?: AgentHubOpenOptions): void {
 		const hubKeys = [
 			...this.ctx.keybindings.getKeys("app.agents.hub"),
 			...this.ctx.keybindings.getKeys("app.session.observe"),
@@ -2212,6 +2209,7 @@ export class SelectorController {
 			settings: this.ctx.settings,
 			hubKeys,
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
+			initialSection: options?.initialSection,
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
 			registry: this.ctx.collabGuest?.agentRegistry,

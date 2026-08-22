@@ -16,27 +16,16 @@
  */
 
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { IrcHistoryStore } from "./history";
+import type { IrcDeliveryReceipt, IrcHistoryRecord, IrcMessage } from "./types";
+
+export type { IrcDeliveryReceipt, IrcHistoryRecord, IrcMessage, IrcReadCursor } from "./types";
+
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { CustomMessage } from "../session/messages";
 
-export interface IrcMessage {
-	id: string;
-	/** Sender agent id. */
-	from: string;
-	/** Recipient agent id (resolved; "all" is expanded by the tool, not stored). */
-	to: string;
-	body: string;
-	ts: number;
-	/** Message id being answered. */
-	replyTo?: string;
-}
-
-export interface IrcDeliveryReceipt {
-	to: string;
-	outcome: "injected" | "woken" | "revived" | "failed";
-	error?: string;
-}
+type TerminalReceipt = IrcDeliveryReceipt;
 
 interface IrcWaiter {
 	from?: string;
@@ -66,12 +55,42 @@ export class IrcBus {
 	readonly #lifecycle: () => AgentLifecycleManager;
 	readonly #mailboxes = new Map<string, IrcMessage[]>();
 	readonly #waiters = new Map<string, IrcWaiter[]>();
+	#history: IrcHistoryStore;
+	readonly #historiesBySession = new Map<string, IrcHistoryStore>();
 
-	constructor(registry: AgentRegistry = AgentRegistry.global(), lifecycle?: AgentLifecycleManager) {
+	constructor(
+		registry: AgentRegistry = AgentRegistry.global(),
+		lifecycle?: AgentLifecycleManager,
+		history: IrcHistoryStore = new IrcHistoryStore(),
+	) {
 		this.#registry = registry;
 		// Lazy: the lifecycle global self-constructs against the global registry,
 		// so only touch it when a parked recipient actually needs reviving.
 		this.#lifecycle = () => lifecycle ?? AgentLifecycleManager.global();
+		this.#history = history;
+		this.#historiesBySession.set("", history);
+	}
+
+	get history(): IrcHistoryStore {
+		return this.#history;
+	}
+
+	historyForSession(sessionFile?: string | null): IrcHistoryStore {
+		const key = sessionFile ?? "";
+		const existing = this.#historiesBySession.get(key);
+		if (existing) return existing;
+		const history = new IrcHistoryStore();
+		history.configureSessionFile(sessionFile);
+		this.#historiesBySession.set(key, history);
+		return history;
+	}
+
+	configureHistory(sessionFile?: string | null): void {
+		this.#history = this.historyForSession(sessionFile);
+	}
+
+	historyRecords(): IrcHistoryRecord[] {
+		return this.history.list();
 	}
 
 	/**
@@ -100,31 +119,58 @@ export class IrcBus {
 	 */
 	async send(
 		msg: Omit<IrcMessage, "id" | "ts">,
-		opts?: { expectsReply?: boolean; suppressRelay?: boolean },
+		opts?: {
+			expectsReply?: boolean;
+			suppressRelay?: boolean;
+			history?: IrcHistoryStore;
+		},
 	): Promise<IrcDeliveryReceipt> {
 		const message: IrcMessage = { ...msg, id: Snowflake.next(), ts: Date.now() };
+		const history = opts?.history ?? this.#history;
+		try {
+			const pendingRecord = history.recordMessage(message);
+			if (pendingRecord) await pendingRecord;
+		} catch (error) {
+			return {
+				to: message.to,
+				outcome: "failed",
+				error: `IRC history unavailable: ${error instanceof Error ? error.message : String(error)}`,
+			};
+		}
+		const finish = async (receipt: TerminalReceipt): Promise<TerminalReceipt> => {
+			try {
+				const pendingDelivery = history.recordDelivery(message.id, receipt);
+				if (pendingDelivery) await pendingDelivery;
+			} catch (error) {
+				logger.error("IRC delivery outcome persistence failed", {
+					messageId: message.id,
+					error: String(error),
+				});
+			}
+			return receipt;
+		};
 		const ref = this.#registry.get(message.to);
 		if (!ref) {
-			return {
+			return finish({
 				to: message.to,
 				outcome: "failed",
 				error: `Unknown agent "${message.to}" — check \`irc list\` for live peers.`,
-			};
+			});
 		}
 		if (ref.status === "aborted") {
-			return {
+			return finish({
 				to: message.to,
 				outcome: "failed",
 				error: `Agent "${message.to}" was hard-aborted and cannot be messaged or revived. Its transcript remains readable at history://${message.to}.`,
-			};
+			});
 		}
 		// Advisor refs are observability-only transcripts, never messageable peers.
 		if (ref.kind === "advisor") {
-			return {
+			return finish({
 				to: message.to,
 				outcome: "failed",
 				error: `Agent "${message.to}" is a read-only advisor transcript and cannot be messaged.`,
-			};
+			});
 		}
 
 		// A `parked` recipient always needs the lifecycle to revive it — this is
@@ -152,11 +198,11 @@ export class IrcBus {
 			} catch (error) {
 				// Not revivable / released / revive failed. Do not buffer: a permanent
 				// failure must not inflate unread counts or pretend delivery is pending.
-				return {
+				return finish({
 					to: message.to,
 					outcome: "failed",
 					error: error instanceof Error ? error.message : String(error),
-				};
+				});
 			}
 		}
 
@@ -167,29 +213,29 @@ export class IrcBus {
 		if (waiter) {
 			waiter.resolve(message);
 			if (!opts?.suppressRelay) this.#relayToMainUi(message);
-			return { to: message.to, outcome: revived ? "revived" : "injected" };
+			return finish({ to: message.to, outcome: revived ? "revived" : "injected" });
 		}
 
 		const session = this.#registry.get(message.to)?.session;
 		if (!session) {
-			return { to: message.to, outcome: "failed", error: `Agent "${message.to}" has no live session.` };
+			return finish({ to: message.to, outcome: "failed", error: `Agent "${message.to}" has no live session.` });
 		}
 
 		try {
 			const delivery = await session.deliverIrcMessage(message, opts);
 			if (!opts?.suppressRelay) this.#relayToMainUi(message);
-			return { to: message.to, outcome: revived ? "revived" : delivery };
+			return finish({ to: message.to, outcome: revived ? "revived" : delivery });
 		} catch (error) {
 			// Live hand-off failed (e.g. recipient disposed mid-shutdown): buffer
 			// the message so a later `wait`/`inbox` from the recipient can still
 			// pick it up. The receipt stays "failed" — the recipient has not
 			// seen it.
 			this.#enqueue(message);
-			return {
+			return finish({
 				to: message.to,
 				outcome: "failed",
 				error: error instanceof Error ? error.message : String(error),
-			};
+			});
 		}
 	}
 
