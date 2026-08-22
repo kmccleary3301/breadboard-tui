@@ -21,6 +21,10 @@
       "class": "breadboard-owned",
       "description": "BreadBoard adapters, policy controls, provenance, and conformance evidence are downstream-owned.",
       "patterns": [
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/SECURITY.md",
+        "README.md",
+        "docs/README.omp-upstream.md",
         "packages/coding-agent/src/breadboard/**",
         "packages/coding-agent/src/bb.ts",
         "packages/coding-agent/src/omp.ts",
