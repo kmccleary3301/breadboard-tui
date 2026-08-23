@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bounded the native PTY reader and JavaScript callback queues with lossless backpressure, preventing unbounded native-memory growth when the JavaScript event loop stalls while preserving every output byte once it resumes.
+
 ## [18.0.1] - 2026-08-23
 
 ### Fixed

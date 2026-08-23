@@ -13,7 +13,7 @@ use std::{
 };
 
 use napi::{
-	JsString,
+	JsString, Status,
 	bindgen_prelude::*,
 	threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
@@ -105,6 +105,14 @@ enum ControlMessage {
 
 const CONTROL_MESSAGES_PER_TICK: usize = 64;
 const READER_EVENTS_PER_TICK: usize = 256;
+/// Maximum chunks held in each native stage between the PTY and JavaScript.
+/// A decoded chunk is at most 64 KiB, so the bounded reader and N-API queues
+/// retain at most ~8 MiB of payload per stalled PTY instead of growing without
+/// limit when the JavaScript event loop stops draining callbacks (#7328).
+const OUTPUT_BACKLOG_CHUNKS: usize = 64;
+/// `on_chunk` callback whose N-API queue applies the output backlog bound.
+type ChunkCallback =
+	ThreadsafeFunction<String, Unknown<'static>, String, Status, true, false, OUTPUT_BACKLOG_CHUNKS>;
 const POST_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
 const POST_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
 /// How long a cancelled run polls for its SIGKILL'd child before handing the
@@ -147,7 +155,7 @@ impl PtySession {
 		env: &'env Env,
 		options: PtyStartOptions<'env>,
 		#[napi(ts_arg_type = "((error: Error | null, chunk: string) => void) | undefined | null")]
-		on_chunk: Option<ThreadsafeFunction<String>>,
+		on_chunk: Option<ChunkCallback>,
 		#[napi(ts_arg_type = "((error: Error | null, pid: number) => void) | undefined | null")]
 		on_start: Option<ThreadsafeFunction<u32>>,
 	) -> Result<PromiseRaw<'env, PtyRunResult>> {
@@ -169,7 +177,7 @@ impl PtySession {
 		env: &'env Env,
 		options: PtyArgvStartOptions<'env>,
 		#[napi(ts_arg_type = "((error: Error | null, chunk: string) => void) | undefined | null")]
-		on_chunk: Option<ThreadsafeFunction<String>>,
+		on_chunk: Option<ChunkCallback>,
 		#[napi(ts_arg_type = "((error: Error | null, pid: number) => void) | undefined | null")]
 		on_start: Option<ThreadsafeFunction<u32>>,
 	) -> Result<PromiseRaw<'env, PtyRunResult>> {
@@ -212,7 +220,7 @@ impl PtySession {
 		run_config: PtyRunConfig,
 		timeout_ms: Option<u32>,
 		signal: Option<Unknown<'env>>,
-		on_chunk: Option<ThreadsafeFunction<String>>,
+		on_chunk: Option<ChunkCallback>,
 		on_start: Option<ThreadsafeFunction<u32>>,
 	) -> Result<PromiseRaw<'env, PtyRunResult>> {
 		let ct = task::CancelToken::new(timeout_ms, signal);
@@ -275,7 +283,7 @@ fn terminate_pty_processes(
 }
 fn run_pty_sync(
 	config: PtyRunConfig,
-	on_chunk: Option<ThreadsafeFunction<String>>,
+	on_chunk: Option<ChunkCallback>,
 	on_start: Option<ThreadsafeFunction<u32>>,
 	control_rx: flume::Receiver<ControlMessage>,
 	ct: task::CancelToken,
@@ -388,7 +396,7 @@ fn run_pty_sync(
 		.try_clone_reader()
 		.map_err(|err| Error::from_reason(format!("Failed to create PTY reader: {err}")))?;
 
-	let (reader_tx, reader_rx) = flume::unbounded::<ReaderEvent>();
+	let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(OUTPUT_BACKLOG_CHUNKS);
 	let reader_thread = std::thread::spawn(move || {
 		const REPLACEMENT: &str = "\u{FFFD}";
 		const BUF: usize = 65536;
@@ -658,9 +666,13 @@ fn run_pty_sync(
 	Ok(PtyRunResult { exit_code, cancelled, timed_out })
 }
 
-fn emit_chunk(text: &str, callback: Option<&ThreadsafeFunction<String>>) {
+fn emit_chunk(text: &str, callback: Option<&ChunkCallback>) {
 	if let Some(callback) = callback {
-		callback.call(Ok(text.to_string()), ThreadsafeFunctionCallMode::NonBlocking);
+		// This runs on a spawn_blocking worker, never the JavaScript thread.
+		// Blocking at the bounded N-API queue propagates pressure through the
+		// bounded reader channel to the PTY. Output remains lossless and the
+		// producer stops instead of allocating while JavaScript is stalled.
+		callback.call(Ok(text.to_string()), ThreadsafeFunctionCallMode::Blocking);
 	}
 }
 

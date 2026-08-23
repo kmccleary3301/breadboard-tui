@@ -804,6 +804,86 @@ describe("pi-natives", () => {
 				} catch {}
 			}
 		});
+
+		it("bounds native output while JavaScript is stalled without dropping bytes", async () => {
+			if (process.platform === "win32") {
+				return;
+			}
+
+			const outputBytes = 64 * 1024 * 1024;
+			const script = `
+import { PtySession } from ${JSON.stringify(addonUrl)};
+
+const outputBytes = ${outputBytes};
+const session = new PtySession();
+const started = Promise.withResolvers();
+let deliveredBytes = 0;
+let callbackError = null;
+const run = session.startArgv(
+	{
+		application: process.execPath,
+		args: ["-e", \`process.stdout.write("x".repeat(\${outputBytes}))\`],
+		timeoutMs: 30_000,
+		cols: 80,
+		rows: 24,
+	},
+	(error, chunk) => {
+		callbackError = error;
+		deliveredBytes += Buffer.byteLength(chunk);
+	},
+	(error) => {
+		if (error) started.reject(error);
+		else started.resolve();
+	},
+);
+await started.promise;
+const baselineRss = process.memoryUsage().rss;
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_000);
+const stalledRss = process.memoryUsage().rss;
+const result = await run;
+console.log(JSON.stringify({
+	outputBytes,
+	deltaRss: stalledRss - baselineRss,
+	deliveredBytes,
+	callbackError: callbackError?.message ?? null,
+	result,
+}));
+`;
+			const child = Bun.spawn([process.execPath, "--eval", script], {
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			let watchdogFired = false;
+			const timer = setTimeout(() => {
+				if (child.exitCode === null) {
+					watchdogFired = true;
+					child.kill("SIGKILL");
+				}
+			}, 20_000);
+			const exited = child.exited.finally(() => clearTimeout(timer));
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				exited,
+			]);
+
+			if (watchdogFired || exitCode !== 0) {
+				throw new Error(
+					`PTY backlog probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
+				);
+			}
+			const probe = JSON.parse(stdout) as {
+				outputBytes: number;
+				deltaRss: number;
+				deliveredBytes: number;
+				callbackError: string | null;
+				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
+			};
+			expect(probe.deltaRss).toBeLessThan(24 * 1024 * 1024);
+			expect(probe.deliveredBytes).toBe(probe.outputBytes);
+			expect(probe.callbackError).toBeNull();
+			expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
+		}, 30_000);
 	});
 
 	describe("shell", () => {
