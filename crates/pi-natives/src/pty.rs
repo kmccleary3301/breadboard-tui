@@ -105,14 +105,40 @@ enum ControlMessage {
 
 const CONTROL_MESSAGES_PER_TICK: usize = 64;
 const READER_EVENTS_PER_TICK: usize = 256;
-/// Maximum chunks held in each native stage between the PTY and JavaScript.
-/// A decoded chunk is at most 64 KiB, so the bounded reader and N-API queues
-/// retain at most ~8 MiB of payload per stalled PTY instead of growing without
-/// limit when the JavaScript event loop stops draining callbacks (#7328).
+/// Maximum decoded chunks held between the PTY reader and its dispatcher.
+/// A decoded chunk is at most 64 KiB, so the reader queue retains at most
+/// ~4 MiB of payload per stalled PTY instead of growing without limit when
+/// JavaScript stops draining callbacks (#7328).
 const OUTPUT_BACKLOG_CHUNKS: usize = 64;
-/// `on_chunk` callback whose N-API queue applies the output backlog bound.
 type ChunkCallback =
 	ThreadsafeFunction<String, Unknown<'static>, String, Status, true, false, OUTPUT_BACKLOG_CHUNKS>;
+struct ChunkEmitter {
+	callback:           ChunkCallback,
+	acknowledgment_tx: std::sync::mpsc::SyncSender<()>,
+	acknowledgment_rx: std::sync::mpsc::Receiver<()>,
+}
+
+impl ChunkEmitter {
+	fn new(callback: ChunkCallback) -> Self {
+		let (acknowledgment_tx, acknowledgment_rx) = std::sync::mpsc::sync_channel(1);
+		Self { callback, acknowledgment_tx, acknowledgment_rx }
+	}
+
+	fn emit(&self, text: &str) {
+		let acknowledgment_tx = self.acknowledgment_tx.clone();
+		let status = self.callback.call_with_return_value(
+			Ok(text.to_string()),
+			ThreadsafeFunctionCallMode::Blocking,
+			move |result, _| {
+				let _ = acknowledgment_tx.send(());
+				result.map(|_| ())
+			},
+		);
+		if status == Status::Ok {
+			let _ = self.acknowledgment_rx.recv();
+		}
+	}
+}
 const POST_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
 const POST_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
 /// How long a cancelled run polls for its SIGKILL'd child before handing the
@@ -467,6 +493,7 @@ fn run_pty_sync(
 	let mut exit_code: Option<i32> = None;
 	let mut terminate_requested = false;
 	let mut reader_drain_deadline: Option<Instant> = None;
+	let chunk_emitter = on_chunk.map(ChunkEmitter::new);
 	while exit_code.is_none() || !reader_done {
 		if !terminate_requested && let Err(err) = ct.heartbeat() {
 			let message = err.to_string();
@@ -500,7 +527,7 @@ fn run_pty_sync(
 
 		for _ in 0..READER_EVENTS_PER_TICK {
 			match reader_rx.try_recv() {
-				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, on_chunk.as_ref()),
+				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, chunk_emitter.as_ref()),
 				Ok(ReaderEvent::Done) => {
 					reader_done = true;
 					break;
@@ -535,7 +562,7 @@ fn run_pty_sync(
 					.min(Duration::from_millis(16))
 			});
 			match reader_rx.recv_timeout(wait_duration) {
-				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, on_chunk.as_ref()),
+				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, chunk_emitter.as_ref()),
 				Ok(ReaderEvent::Done) => reader_done = true,
 				Err(flume::RecvTimeoutError::Timeout) => {},
 				Err(flume::RecvTimeoutError::Disconnected) => {
@@ -622,7 +649,7 @@ fn run_pty_sync(
 			let remaining = finalize_deadline.saturating_duration_since(Instant::now());
 			let wait_duration = remaining.min(Duration::from_millis(5));
 			match reader_rx.recv_timeout(wait_duration) {
-				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, on_chunk.as_ref()),
+				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, chunk_emitter.as_ref()),
 				Ok(ReaderEvent::Done) => {
 					reader_done = true;
 					break;
@@ -666,13 +693,13 @@ fn run_pty_sync(
 	Ok(PtyRunResult { exit_code, cancelled, timed_out })
 }
 
-fn emit_chunk(text: &str, callback: Option<&ChunkCallback>) {
-	if let Some(callback) = callback {
-		// This runs on a spawn_blocking worker, never the JavaScript thread.
-		// Blocking at the bounded N-API queue propagates pressure through the
-		// bounded reader channel to the PTY. Output remains lossless and the
-		// producer stops instead of allocating while JavaScript is stalled.
-		callback.call(Ok(text.to_string()), ThreadsafeFunctionCallMode::Blocking);
+fn emit_chunk(text: &str, emitter: Option<&ChunkEmitter>) {
+	if let Some(emitter) = emitter {
+		// Some Bun N-API implementations do not enforce the thread-safe
+		// function's queue limit. Waiting for callback completion here makes
+		// the one-chunk N-API stage explicit and propagates pressure through
+		// the bounded reader channel to the PTY without dropping output.
+		emitter.emit(text);
 	}
 }
 
