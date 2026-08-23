@@ -611,6 +611,11 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/test/eval-code-mode-declarations.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/test/export-html-template.test.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
