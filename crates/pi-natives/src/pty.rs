@@ -113,19 +113,18 @@ const OUTPUT_BACKLOG_CHUNKS: usize = 64;
 type ChunkCallback =
 	ThreadsafeFunction<String, Unknown<'static>, String, Status, true, false, OUTPUT_BACKLOG_CHUNKS>;
 struct ChunkEmitter {
-	callback:           ChunkCallback,
-	acknowledgment_tx: std::sync::mpsc::SyncSender<()>,
-	acknowledgment_rx: std::sync::mpsc::Receiver<()>,
+	callback: ChunkCallback,
 }
 
 impl ChunkEmitter {
 	fn new(callback: ChunkCallback) -> Self {
-		let (acknowledgment_tx, acknowledgment_rx) = std::sync::mpsc::sync_channel(1);
-		Self { callback, acknowledgment_tx, acknowledgment_rx }
+		Self { callback }
 	}
 
 	fn emit(&self, text: &str) {
-		let acknowledgment_tx = self.acknowledgment_tx.clone();
+		// A per-call channel lets shutdown unblock the dispatcher when N-API
+		// drops a queued callback without invoking it.
+		let (acknowledgment_tx, acknowledgment_rx) = std::sync::mpsc::sync_channel(1);
 		let status = self.callback.call_with_return_value(
 			Ok(text.to_string()),
 			ThreadsafeFunctionCallMode::Blocking,
@@ -135,7 +134,7 @@ impl ChunkEmitter {
 			},
 		);
 		if status == Status::Ok {
-			let _ = self.acknowledgment_rx.recv();
+			let _ = acknowledgment_rx.recv();
 		}
 	}
 }
