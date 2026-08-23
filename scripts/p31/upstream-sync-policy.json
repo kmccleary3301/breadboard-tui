@@ -21,6 +21,7 @@
       "class": "breadboard-owned",
       "description": "BreadBoard adapters, policy controls, provenance, and conformance evidence are downstream-owned.",
       "patterns": [
+        ".github/actions/setup-product-backend/action.yml",
         ".github/ISSUE_TEMPLATE/config.yml",
         ".github/SECURITY.md",
         "CONTRIBUTING.md",
@@ -165,6 +166,8 @@
         "packages/*/scripts/**",
         "crates/**",
         "python/**",
+        "scripts/install-tests/binary.dockerfile",
+        "scripts/install-tests/run-ci.sh",
         "scripts/**/*.ts",
         ".github/workflows/**"
       ]

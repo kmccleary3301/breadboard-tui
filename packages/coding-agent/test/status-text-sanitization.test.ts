@@ -10,6 +10,7 @@ describe("sanitizeStatusText", () => {
 			"\x1bPhidden-dcs\x1b\\" +
 			"\x1b^hidden-pm\x1b\\" +
 			"\x1b_hidden-apc\x1b\\" +
+			"\x90hidden-8bit-dcs\x9c" +
 			"\x9b31mred\x9b0m" +
 			" suffix";
 
