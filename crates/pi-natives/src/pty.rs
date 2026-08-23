@@ -105,36 +105,39 @@ enum ControlMessage {
 
 const CONTROL_MESSAGES_PER_TICK: usize = 64;
 const READER_EVENTS_PER_TICK: usize = 256;
-/// Maximum decoded chunks held between the PTY reader and its dispatcher.
-/// A decoded chunk is at most 64 KiB, so the reader queue retains at most
-/// ~4 MiB of payload per stalled PTY instead of growing without limit when
-/// JavaScript stops draining callbacks (#7328).
+/// Maximum decoded chunks held in each native stage between the PTY and
+/// JavaScript. A decoded chunk is at most 64 KiB, so the bounded reader and
+/// callback-payload queues retain at most ~8 MiB per stalled PTY instead of
+/// growing with total output (#7328).
 const OUTPUT_BACKLOG_CHUNKS: usize = 64;
 type ChunkCallback =
-	ThreadsafeFunction<String, Unknown<'static>, String, Status, true, false, OUTPUT_BACKLOG_CHUNKS>;
+	ThreadsafeFunction<(), Unknown<'static>, String, Status, true, false, OUTPUT_BACKLOG_CHUNKS>;
 struct ChunkEmitter {
 	callback: ChunkCallback,
+	chunks:   flume::Sender<String>,
 }
 
 impl ChunkEmitter {
-	fn new(callback: ChunkCallback) -> Self {
-		Self { callback }
+	fn new(callback: Function<'_, String, Unknown<'static>>) -> Result<Self> {
+		let (chunks, pending_chunks) = flume::bounded(OUTPUT_BACKLOG_CHUNKS);
+		let callback = callback
+			.build_threadsafe_function::<()>()
+			.callee_handled::<true>()
+			.max_queue_size::<OUTPUT_BACKLOG_CHUNKS>()
+			.build_callback(move |_| {
+				pending_chunks
+					.recv()
+					.map_err(|_| Error::from_status(Status::Closing))
+			})?;
+		Ok(Self { callback, chunks })
 	}
 
 	fn emit(&self, text: &str) {
-		// A per-call channel lets shutdown unblock the dispatcher when N-API
-		// drops a queued callback without invoking it.
-		let (acknowledgment_tx, acknowledgment_rx) = std::sync::mpsc::sync_channel(1);
-		let status = self.callback.call_with_return_value(
-			Ok(text.to_string()),
-			ThreadsafeFunctionCallMode::Blocking,
-			move |result, _| {
-				let _ = acknowledgment_tx.send(());
-				result.map(|_| ())
-			},
-		);
-		if status == Status::Ok {
-			let _ = acknowledgment_rx.recv();
+		// The payload lives in the bounded Rust queue; the N-API queue carries
+		// only a token. This remains bounded even when a runtime ignores the
+		// thread-safe function's declared queue limit.
+		if self.chunks.send(text.to_string()).is_ok() {
+			self.callback.call(Ok(()), ThreadsafeFunctionCallMode::Blocking);
 		}
 	}
 }
@@ -180,7 +183,7 @@ impl PtySession {
 		env: &'env Env,
 		options: PtyStartOptions<'env>,
 		#[napi(ts_arg_type = "((error: Error | null, chunk: string) => void) | undefined | null")]
-		on_chunk: Option<ChunkCallback>,
+		on_chunk: Option<Function<'env, String, Unknown<'static>>>,
 		#[napi(ts_arg_type = "((error: Error | null, pid: number) => void) | undefined | null")]
 		on_start: Option<ThreadsafeFunction<u32>>,
 	) -> Result<PromiseRaw<'env, PtyRunResult>> {
@@ -191,7 +194,14 @@ impl PtySession {
 			cols:    options.cols.unwrap_or(120).clamp(20, 400),
 			rows:    options.rows.unwrap_or(40).clamp(5, 200),
 		};
-		self.start_config(env, run_config, options.timeout_ms, options.signal, on_chunk, on_start)
+		self.start_config(
+			env,
+			run_config,
+			options.timeout_ms,
+			options.signal,
+			on_chunk.map(ChunkEmitter::new).transpose()?,
+			on_start,
+		)
 	}
 
 	/// Start an executable with separate arguments, stream output chunks, and
@@ -202,7 +212,7 @@ impl PtySession {
 		env: &'env Env,
 		options: PtyArgvStartOptions<'env>,
 		#[napi(ts_arg_type = "((error: Error | null, chunk: string) => void) | undefined | null")]
-		on_chunk: Option<ChunkCallback>,
+		on_chunk: Option<Function<'env, String, Unknown<'static>>>,
 		#[napi(ts_arg_type = "((error: Error | null, pid: number) => void) | undefined | null")]
 		on_start: Option<ThreadsafeFunction<u32>>,
 	) -> Result<PromiseRaw<'env, PtyRunResult>> {
@@ -213,7 +223,14 @@ impl PtySession {
 			cols:    options.cols.unwrap_or(120).clamp(20, 400),
 			rows:    options.rows.unwrap_or(40).clamp(5, 200),
 		};
-		self.start_config(env, run_config, options.timeout_ms, options.signal, on_chunk, on_start)
+		self.start_config(
+			env,
+			run_config,
+			options.timeout_ms,
+			options.signal,
+			on_chunk.map(ChunkEmitter::new).transpose()?,
+			on_start,
+		)
 	}
 
 	/// Write raw input bytes to PTY stdin.
@@ -245,7 +262,7 @@ impl PtySession {
 		run_config: PtyRunConfig,
 		timeout_ms: Option<u32>,
 		signal: Option<Unknown<'env>>,
-		on_chunk: Option<ChunkCallback>,
+		on_chunk: Option<ChunkEmitter>,
 		on_start: Option<ThreadsafeFunction<u32>>,
 	) -> Result<PromiseRaw<'env, PtyRunResult>> {
 		let ct = task::CancelToken::new(timeout_ms, signal);
@@ -308,7 +325,7 @@ fn terminate_pty_processes(
 }
 fn run_pty_sync(
 	config: PtyRunConfig,
-	on_chunk: Option<ChunkCallback>,
+	on_chunk: Option<ChunkEmitter>,
 	on_start: Option<ThreadsafeFunction<u32>>,
 	control_rx: flume::Receiver<ControlMessage>,
 	ct: task::CancelToken,
@@ -492,7 +509,6 @@ fn run_pty_sync(
 	let mut exit_code: Option<i32> = None;
 	let mut terminate_requested = false;
 	let mut reader_drain_deadline: Option<Instant> = None;
-	let chunk_emitter = on_chunk.map(ChunkEmitter::new);
 	while exit_code.is_none() || !reader_done {
 		if !terminate_requested && let Err(err) = ct.heartbeat() {
 			let message = err.to_string();
@@ -526,7 +542,7 @@ fn run_pty_sync(
 
 		for _ in 0..READER_EVENTS_PER_TICK {
 			match reader_rx.try_recv() {
-				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, chunk_emitter.as_ref()),
+				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, on_chunk.as_ref()),
 				Ok(ReaderEvent::Done) => {
 					reader_done = true;
 					break;
@@ -561,7 +577,7 @@ fn run_pty_sync(
 					.min(Duration::from_millis(16))
 			});
 			match reader_rx.recv_timeout(wait_duration) {
-				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, chunk_emitter.as_ref()),
+				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, on_chunk.as_ref()),
 				Ok(ReaderEvent::Done) => reader_done = true,
 				Err(flume::RecvTimeoutError::Timeout) => {},
 				Err(flume::RecvTimeoutError::Disconnected) => {
@@ -648,7 +664,7 @@ fn run_pty_sync(
 			let remaining = finalize_deadline.saturating_duration_since(Instant::now());
 			let wait_duration = remaining.min(Duration::from_millis(5));
 			match reader_rx.recv_timeout(wait_duration) {
-				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, chunk_emitter.as_ref()),
+				Ok(ReaderEvent::Chunk(chunk)) => emit_chunk(&chunk, on_chunk.as_ref()),
 				Ok(ReaderEvent::Done) => {
 					reader_done = true;
 					break;
@@ -694,10 +710,6 @@ fn run_pty_sync(
 
 fn emit_chunk(text: &str, emitter: Option<&ChunkEmitter>) {
 	if let Some(emitter) = emitter {
-		// Some Bun N-API implementations do not enforce the thread-safe
-		// function's queue limit. Waiting for callback completion here makes
-		// the one-chunk N-API stage explicit and propagates pressure through
-		// the bounded reader channel to the PTY without dropping output.
 		emitter.emit(text);
 	}
 }
