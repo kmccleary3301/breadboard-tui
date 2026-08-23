@@ -5,8 +5,14 @@
  * contain secret material; only the broker's execution path may receive it.
  */
 export type AuthProviderFlow = "auto" | "browser_pkce" | "device" | "manual";
-export type AuthCredentialKind = "oauth2" | "api_key";
-export type AuthCredentialStatus = "active" | "disabled" | "revoked" | "reauthorization_required" | "quarantined";
+export type AuthCredentialKind = "oauth2" | "api_key" | (string & {});
+export type AuthCredentialStatus =
+	| "active"
+	| "disabled"
+	| "revoked"
+	| "reauthorization_required"
+	| "quarantined"
+	| (string & {});
 export type AuthLoginStatus = "pending" | "awaiting_input" | "completed" | "cancelled" | "failed" | "unavailable";
 
 export interface AuthProviderView {

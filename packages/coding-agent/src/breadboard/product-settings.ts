@@ -1,3 +1,4 @@
+import "./product-env";
 import { type SettingDefaultOverrides, setDistributionSettingDefaults } from "../config/settings-schema";
 
 export const BREADBOARD_SETTING_DEFAULTS = {
@@ -10,3 +11,5 @@ export const BREADBOARD_SETTING_DEFAULTS = {
 export function installBreadboardSettingDefaults(): void {
 	setDistributionSettingDefaults(BREADBOARD_SETTING_DEFAULTS);
 }
+
+installBreadboardSettingDefaults();

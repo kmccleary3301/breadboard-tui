@@ -6,7 +6,6 @@ import type {
 } from "@breadboard/sdk";
 import { parseCallbackInput } from "@oh-my-pi/pi-ai/oauth/callback-server";
 import type {
-	AuthCredentialStatus,
 	AuthCredentialView,
 	AuthLoginSession,
 	AuthProviderView,
@@ -31,15 +30,8 @@ type BreadboardProviderAuthClient = Pick<
 	| "logout"
 	| "revoke"
 >;
-function credentialStatus(value: string): AuthCredentialStatus {
-	if (value === "disabled" || value === "revoked" || value === "reauthorization_required" || value === "quarantined") {
-		return value;
-	}
-	return "active";
-}
-
 function credentialView(row: SdkAuthCredentialView): AuthCredentialView {
-	const kind = row.credential_kind === "oauth2" ? "oauth2" : "api_key";
+	const kind = row.credential_kind || "api_key";
 	return {
 		schemaVersion: "bb.auth.credential_summary.v1",
 		accountId: row.account_id,
@@ -49,7 +41,7 @@ function credentialView(row: SdkAuthCredentialView): AuthCredentialView {
 		credentialKind: kind,
 		...(row.alias ? { alias: row.alias } : {}),
 		accountLabel: row.label,
-		status: credentialStatus(row.status),
+		status: row.status,
 		source: row.source ?? "broker",
 		isDefault: false,
 		updatedAtUtc: new Date(row.updated_at_ms).toISOString(),

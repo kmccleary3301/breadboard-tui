@@ -263,6 +263,57 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(JSON.stringify(rows)).not.toContain("rotated-secret");
 	});
 
+	test("SDK adapter preserves unknown credential classifications without promoting them active", async () => {
+		const futureCredential = {
+			account_id: "bbacct_future",
+			credential_id: "bbcred_future",
+			provider_id: "future-provider",
+			auth_scheme_id: "future-auth",
+			label: "future credential",
+			credential_kind: "service_account",
+			status: "expired",
+			source: "broker",
+			secret_version: 1,
+			created_at_ms: 1,
+			updated_at_ms: 2,
+		};
+		const client = {
+			async listProviders() {
+				return [];
+			},
+			async listCredentials() {
+				return [futureCredential];
+			},
+			async beginLogin() {
+				return { login_session_id: "unused", provider_id: "future-provider", status: "unavailable" };
+			},
+			async getLogin() {
+				return { login_session_id: "unused", provider_id: "future-provider", status: "unavailable" };
+			},
+			async completeLogin() {
+				return { login_session_id: "unused", provider_id: "future-provider", status: "unavailable" };
+			},
+			async cancelLogin() {
+				return { ok: true };
+			},
+			async putApiKey() {
+				return futureCredential;
+			},
+			async logout() {
+				return { ok: true };
+			},
+			async revoke() {
+				return { ok: true };
+			},
+		};
+		const port = createBreadboardProviderAuthPort(client);
+
+		const [row] = await port.listCredentials();
+
+		expect(row).toMatchObject({ credentialKind: "service_account", status: "expired" });
+		expect(row?.status).not.toBe("active");
+	});
+
 	test("SDK adapter preserves browser launch metadata and parses callback completion", async () => {
 		let beginRequest: unknown;
 		let completeRequest: unknown;
