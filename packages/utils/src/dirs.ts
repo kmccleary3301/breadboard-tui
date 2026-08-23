@@ -29,7 +29,7 @@ export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
 export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
 
 /** BreadBoard product version. */
-export const BREADBOARD_VERSION = "0.1.0-rc.1";
+export const BREADBOARD_VERSION = "0.1.0-rc.2";
 
 /** Canonical SDK dependency version used by the BreadBoard product. */
 export const BREADBOARD_SDK_VERSION = "0.3.0";
@@ -56,7 +56,7 @@ export function formatBreadboardVersion(): string {
 /** Version used by the active CLI identity. */
 export const VERSION: string = IS_BREADBOARD_PRODUCT ? BREADBOARD_VERSION : version;
 
-/** Default User-Agent header string (e.g. "omp/17.2.12" or "bb/0.1.0-rc.1"). */
+/** Default User-Agent header string (e.g. "omp/17.2.12" or "bb/0.1.0-rc.2"). */
 export const USER_AGENT = `${APP_NAME}/${VERSION}`;
 
 /** Minimum Bun version */
