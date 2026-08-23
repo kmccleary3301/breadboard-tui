@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.
+- Unconfigured downstream-product task sessions default to four concurrent subagents, one delegation level, and a 30-minute per-subagent wall clock. Explicit settings still override these bounds, and OMP retains its existing 32/two-level/unlimited defaults.
+
+### Fixed
+
+- Fixed the downstream provider-login adapter dropping auth scheme, flow, browser/device authorization metadata, callback fields, account labels, and completed credential summaries.
+- Fixed ordinary external-runtime submission failures entering ambiguous-receipt recovery, and bounded close when a signal-less submission remains unresolved.
+- Fixed Ask dialogs duplicating rendered `(Recommended)` suffixes and terminal-title spinners continuing after interactive shutdown.
+
 ## [18.0.1] - 2026-08-23
 
 ### Added

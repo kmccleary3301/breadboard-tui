@@ -8,17 +8,17 @@
   },
   "paths": [
     {
-      "path": ".github/actions/setup-product-backend/action.yml",
-      "class": "breadboard-owned",
-      "rule": "breadboard-owned-adapters-and-controls"
-    },
-    {
       "path": ".github/ISSUE_TEMPLATE/config.yml",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": ".github/SECURITY.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": ".github/actions/setup-product-backend/action.yml",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -43,6 +43,13 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "Dockerfile",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-release",
+      "layer": 1
+    },
+    {
       "path": "README.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
@@ -53,18 +60,16 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
-      "path": "Dockerfile",
+      "path": "bun.lock",
       "class": "manual-review",
       "rule": "manual-review-boundaries",
       "owner": "fork-release",
       "layer": 1
     },
     {
-      "path": "bun.lock",
-      "class": "manual-review",
-      "rule": "manual-review-boundaries",
-      "owner": "fork-release",
-      "layer": 1
+      "path": "crates/pi-shell/BUILD.bazel",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "docs/conformance/p30/bb-omp/harbor-license-provenance.v1.manifest.json",
@@ -85,6 +90,27 @@
       "path": "docs/conformance/p31/e4-canonical-tui-evidence.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "docs/task-agent-discovery.md",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-runtime",
+      "layer": 3
+    },
+    {
+      "path": "docs/tools/eval.md",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-runtime",
+      "layer": 3
+    },
+    {
+      "path": "docs/tools/task.md",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "fork-runtime",
+      "layer": 3
     },
     {
       "path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_ab_report.md",
@@ -344,6 +370,13 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/src/cli/update-cli.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
       "path": "packages/coding-agent/src/collab/guest.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
@@ -464,11 +497,6 @@
       "path": "packages/coding-agent/src/modes/interactive-mode.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
-    },
-    {
-      "path": "crates/pi-shell/BUILD.bazel",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
@@ -601,6 +629,13 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/test/cli/update-cli.test.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
+    },
+    {
       "path": "packages/coding-agent/test/collab/guest-ui-request.test.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
@@ -671,12 +706,12 @@
       "rule": "upstream-ordinary-omp"
     },
     {
-      "path": "packages/coding-agent/test/streaming-preview-height.test.ts",
+      "path": "packages/coding-agent/test/status-text-sanitization.test.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
     },
     {
-      "path": "packages/coding-agent/test/status-text-sanitization.test.ts",
+      "path": "packages/coding-agent/test/streaming-preview-height.test.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
     },

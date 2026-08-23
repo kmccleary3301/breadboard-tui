@@ -5966,8 +5966,24 @@ export type SettingValue<P extends SettingPath> = Schema[P] extends { type: "boo
 								? D
 								: never;
 
-/** Get the default value for a setting path */
+/** Defaults installed by a distribution before creating any Settings instance. */
+export type SettingDefaultOverrides = Partial<{ [P in SettingPath]: SettingValue<P> }>;
+
+let distributionSettingDefaults: SettingDefaultOverrides = {};
+
+/**
+ * Replace distribution defaults. Call during entrypoint bootstrap, before any
+ * Settings instance can cache a resolved default.
+ */
+export function setDistributionSettingDefaults(defaults: SettingDefaultOverrides): void {
+	distributionSettingDefaults = { ...defaults };
+}
+
+/** Get the active distribution's default value for a setting path. */
 export function getDefault<P extends SettingPath>(path: P): SettingValue<P> {
+	if (Object.hasOwn(distributionSettingDefaults, path)) {
+		return distributionSettingDefaults[path] as SettingValue<P>;
+	}
 	return SETTINGS_SCHEMA[path].default as SettingValue<P>;
 }
 

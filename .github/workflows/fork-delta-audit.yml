@@ -15,9 +15,9 @@ concurrency:
 
 env:
   BBOMP_CORE_52: packages/coding-agent/test/bbomp-core-52/bbomp-core-52.test.ts
-  BBOMP_UPSTREAM_TAG: v18.0.0
-  BBOMP_UPSTREAM_COMMIT: 96f42809764f0907f7d6b115eab5710de28941de
-  BBOMP_UPSTREAM_TREE: 36ecb17efff14e1120dbf93c7f9fd0769e44626c
+  BBOMP_UPSTREAM_TAG: v18.0.1
+  BBOMP_UPSTREAM_COMMIT: 6c1209842323bb4713f127ac303c97fd043d585c
+  BBOMP_UPSTREAM_TREE: 67a19f0d45a71af8c3d9ae83562ffb1fcb579d61
 
 jobs:
   product-gate:
@@ -37,7 +37,7 @@ jobs:
       - name: Install release native addons
         run: |
           set -euo pipefail
-          tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@18.0.0 dist.tarball)"
+          tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@18.0.1 dist.tarball)"
           curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
           cp "$RUNNER_TEMP/package"/pi_natives.linux-x64-*.node packages/natives/native/
       - name: Fetch pinned canonical upstream tag

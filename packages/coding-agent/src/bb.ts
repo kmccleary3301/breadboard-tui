@@ -7,6 +7,8 @@ process.env.BREADBOARD_PRODUCT = "1";
 const isCompiled = process.env.PI_COMPILED === "true";
 
 async function main(): Promise<void> {
+	const { installBreadboardSettingDefaults } = await import("./breadboard/product-settings");
+	installBreadboardSettingDefaults();
 	const { runCli } = await import("./cli");
 	// A compiled CLI module self-dispatches from its process entry. Source
 	// execution imports cli.ts as a module, so the wrapper owns invocation there.
