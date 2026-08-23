@@ -34,9 +34,12 @@ rust_library(
     ],
 )
 
+# Process-group tests spawn isolated children and rely on prompt SIGCHLD
+# delivery. Run after other build/test actions instead of racing compilers.
 rust_test(
     name = "pi-shell_test",
     crate = ":pi-shell",
+    tags = ["exclusive"],
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro_dev = True),
     deps = all_crate_deps(normal_dev = True),
