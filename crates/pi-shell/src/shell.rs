@@ -2790,8 +2790,11 @@ mod tests {
 		let (mut session, params) = kill_test_context().await;
 		let source_info = SourceInfo::from("pi-natives:test");
 
+		// This is a deadlock guard, not a latency assertion. On a 2-vCPU hosted
+		// runner Bazel schedules this isolated child beside compilation, and a
+		// stopped process group's SIGCHLD delivery can be starved past 5 seconds.
 		time::timeout(
-			Duration::from_secs(5),
+			Duration::from_secs(15),
 			session.shell.run_string(command, &source_info, &params),
 		)
 		.await
