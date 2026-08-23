@@ -805,13 +805,20 @@ describe("pi-natives", () => {
 			}
 		});
 
-		it("bounds native output while JavaScript is stalled without dropping bytes", async () => {
+		it("keeps stalled native output memory independent of total output without dropping bytes", async () => {
 			if (process.platform === "win32") {
 				return;
 			}
 
-			const outputBytes = 64 * 1024 * 1024;
-			const script = `
+			type BacklogProbe = {
+				outputBytes: number;
+				deltaRss: number;
+				deliveredBytes: number;
+				callbackError: string | null;
+				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
+			};
+			const probeBacklog = async (outputBytes: number): Promise<BacklogProbe> => {
+				const script = `
 import { PtySession } from ${JSON.stringify(addonUrl)};
 
 const outputBytes = ${outputBytes};
@@ -849,41 +856,43 @@ console.log(JSON.stringify({
 	result,
 }));
 `;
-			const child = Bun.spawn([process.execPath, "--eval", script], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			let watchdogFired = false;
-			const timer = setTimeout(() => {
-				if (child.exitCode === null) {
-					watchdogFired = true;
-					child.kill("SIGKILL");
-				}
-			}, 20_000);
-			const exited = child.exited.finally(() => clearTimeout(timer));
-			const [stdout, stderr, exitCode] = await Promise.all([
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
-				exited,
-			]);
+				const child = Bun.spawn([process.execPath, "--eval", script], {
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				let watchdogFired = false;
+				const timer = setTimeout(() => {
+					if (child.exitCode === null) {
+						watchdogFired = true;
+						child.kill("SIGKILL");
+					}
+				}, 20_000);
+				const exited = child.exited.finally(() => clearTimeout(timer));
+				const [stdout, stderr, exitCode] = await Promise.all([
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+					exited,
+				]);
 
-			if (watchdogFired || exitCode !== 0) {
-				throw new Error(
-					`PTY backlog probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
-				);
-			}
-			const probe = JSON.parse(stdout) as {
-				outputBytes: number;
-				deltaRss: number;
-				deliveredBytes: number;
-				callbackError: string | null;
-				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
+				if (watchdogFired || exitCode !== 0) {
+					throw new Error(
+						`PTY backlog probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
+					);
+				}
+				return JSON.parse(stdout) as BacklogProbe;
 			};
-			expect(probe.deltaRss).toBeLessThan(24 * 1024 * 1024);
-			expect(probe.deliveredBytes).toBe(probe.outputBytes);
-			expect(probe.callbackError).toBeNull();
-			expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
-		}, 30_000);
+
+			const small = await probeBacklog(16 * 1024 * 1024);
+			const large = await probeBacklog(128 * 1024 * 1024);
+			for (const probe of [small, large]) {
+				expect(probe.deliveredBytes).toBe(probe.outputBytes);
+				expect(probe.callbackError).toBeNull();
+				expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
+			}
+			// Absolute RSS deltas include platform allocator and lazy-addon costs.
+			// The contract is that retained backlog does not scale with total output.
+			expect(large.deltaRss - small.deltaRss).toBeLessThan(24 * 1024 * 1024);
+		}, 45_000);
 	});
 
 	describe("shell", () => {
