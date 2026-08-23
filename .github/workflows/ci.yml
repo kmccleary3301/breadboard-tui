@@ -204,10 +204,12 @@ jobs:
    # skips its version sentinel for workspace loads, so release addons load
    # fine under a newer checkout; a PR whose TS tests depend on changed
    # native behavior fails visibly and the native side lands via main.
-   # Main builds all Linux-hosted targets with bazel and the hosted disk cache.
-   # Job name says "bazel" for continuity with required checks.
+   # Main builds the Linux x64 pair consumed by tests; a release build expands
+   # to every Linux-hosted/cross target before publishing.
    native_addons:
       name: Build native addons (bazel)
+      needs: [release_metadata]
+      timeout-minutes: 45
       runs-on: ubuntu-22.04
       steps:
          - uses: actions/checkout@v4
@@ -262,37 +264,40 @@ jobs:
                 echo "::notice title=Native sources changed::PR CI tests against the latest release addons by design; native changes are validated post-merge on main and at release."
               fi
 
-         # ---- main path: bazel build of all Linux-hosted targets ----
+         # ---- main path: bazel build of required native targets ----
          - id: cache
            if: github.event_name != 'pull_request'
            uses: ./.github/actions/bazel-cache
            with:
               scope: linux
-         - name: Build native addons once
+         - name: Build native addons
            if: github.event_name != 'pull_request'
            run: |
               set -eo pipefail
               if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
-              # The addon cdylib links each peak at several GiB of rustc RSS;
-              # the aggregate //:natives-linux-all build runs all six
-              # concurrently, which OOMs the kata pod and takes the bazel
-              # server with it (exit 37 "Server terminated abruptly", runs
-              # 30556752623 / 30557524371). Build one addon per invocation —
-              # analysis and cached actions are shared through the persistent
-              # server, so only the heavy links serialize — then assemble the
-              # aggregate as a no-op (also catches targets added to the
-              # filegroup but missing from this list).
+              targets=(
+                natives-linux-x64-baseline
+                natives-linux-x64-modern
+              )
+              if [[ "${{ needs.release_metadata.outputs.is-release }}" == "true" ]]; then
+                targets=(
+                  natives-linux-arm64
+                  natives-linux-musl-arm64
+                  natives-linux-musl-x64-baseline
+                  natives-linux-x64-baseline
+                  natives-linux-x64-modern
+                  natives-win32-x64-baseline
+                )
+              fi
+              # Serialize the addon links: each peaks at several GiB of rustc
+              # RSS, while Bazel still shares analysis and cached actions.
               : > "$RUNNER_TEMP/bazel-build.log"
-              for target in \
-                natives-linux-arm64 \
-                natives-linux-musl-arm64 \
-                natives-linux-musl-x64-baseline \
-                natives-linux-x64-baseline \
-                natives-linux-x64-modern \
-                natives-win32-x64-baseline; do
+              for target in "${targets[@]}"; do
                 bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build "//:$target" 2>&1 | tee -a "$RUNNER_TEMP/bazel-build.log"
               done
-              bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-all 2>&1 | tee -a "$RUNNER_TEMP/bazel-build.log"
+              if [[ "${{ needs.release_metadata.outputs.is-release }}" == "true" ]]; then
+                bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-all 2>&1 | tee -a "$RUNNER_TEMP/bazel-build.log"
+              fi
          # Cache-hit visibility: a supposedly warm build that executes
          # thousands of actions is the failure mode that made CI slow — make
          # it visible in the run summary instead of discovering it weeks in.
