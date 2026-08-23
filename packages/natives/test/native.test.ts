@@ -805,23 +805,39 @@ describe("pi-natives", () => {
 			}
 		});
 
-		it("keeps stalled native output memory independent of total output without dropping bytes", async () => {
+		it("applies backpressure while JavaScript is stalled without dropping output", async () => {
 			if (process.platform === "win32") {
 				return;
 			}
 
-			type BacklogProbe = {
+			type BackpressureProbe = {
 				outputBytes: number;
-				deltaRss: number;
 				deliveredBytes: number;
+				producerFinishedDuringStall: boolean;
+				producerMarkerExistsAfterDrain: boolean;
 				callbackError: string | null;
 				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
 			};
-			const probeBacklog = async (outputBytes: number): Promise<BacklogProbe> => {
-				const script = `
+			const outputBytes = 64 * 1024 * 1024;
+			const markerPath = path.join(testDir, "pty-backpressure-producer.done");
+			await fs.rm(markerPath, { force: true });
+			const producerScript = [
+				"const fs = require('node:fs');",
+				"const chunk = Buffer.alloc(64 * 1024, 0x78);",
+				`let remaining = ${outputBytes};`,
+				"while (remaining > 0) {",
+				"const size = Math.min(remaining, chunk.length);",
+				"fs.writeSync(1, chunk, 0, size);",
+				"remaining -= size;",
+				"}",
+				`fs.writeFileSync(${JSON.stringify(markerPath)}, "done");`,
+			].join(" ");
+			const script = `
+import { existsSync } from "node:fs";
 import { PtySession } from ${JSON.stringify(addonUrl)};
 
 const outputBytes = ${outputBytes};
+const markerPath = ${JSON.stringify(markerPath)};
 const session = new PtySession();
 const started = Promise.withResolvers();
 let deliveredBytes = 0;
@@ -829,14 +845,7 @@ let callbackError = null;
 const run = session.startArgv(
 	{
 		application: process.execPath,
-		args: [
-			"-e",
-			"const fs = require('node:fs'); const chunk = Buffer.alloc(64 * 1024, 0x78); " +
-				"let remaining = " +
-				outputBytes +
-				"; while (remaining > 0) { const size = Math.min(remaining, chunk.length); " +
-				"fs.writeSync(1, chunk, 0, size); remaining -= size; }",
-		],
+		args: ["-e", ${JSON.stringify(producerScript)}],
 		timeoutMs: 30_000,
 		cols: 80,
 		rows: 24,
@@ -851,55 +860,48 @@ const run = session.startArgv(
 	},
 );
 await started.promise;
-const baselineRss = process.memoryUsage().rss;
-Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_000);
-const stalledRss = process.memoryUsage().rss;
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000);
+const producerFinishedDuringStall = existsSync(markerPath);
 const result = await run;
 console.log(JSON.stringify({
 	outputBytes,
-	deltaRss: stalledRss - baselineRss,
 	deliveredBytes,
+	producerFinishedDuringStall,
+	producerMarkerExistsAfterDrain: existsSync(markerPath),
 	callbackError: callbackError?.message ?? null,
 	result,
 }));
 `;
-				const child = Bun.spawn([process.execPath, "--eval", script], {
-					stdout: "pipe",
-					stderr: "pipe",
-				});
-				let watchdogFired = false;
-				const timer = setTimeout(() => {
-					if (child.exitCode === null) {
-						watchdogFired = true;
-						child.kill("SIGKILL");
-					}
-				}, 20_000);
-				const exited = child.exited.finally(() => clearTimeout(timer));
-				const [stdout, stderr, exitCode] = await Promise.all([
-					new Response(child.stdout).text(),
-					new Response(child.stderr).text(),
-					exited,
-				]);
-
-				if (watchdogFired || exitCode !== 0) {
-					throw new Error(
-						`PTY backlog probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
-					);
+			const child = Bun.spawn([process.execPath, "--eval", script], {
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			let watchdogFired = false;
+			const timer = setTimeout(() => {
+				if (child.exitCode === null) {
+					watchdogFired = true;
+					child.kill("SIGKILL");
 				}
-				return JSON.parse(stdout) as BacklogProbe;
-			};
+			}, 20_000);
+			const exited = child.exited.finally(() => clearTimeout(timer));
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				exited,
+			]);
 
-			const small = await probeBacklog(16 * 1024 * 1024);
-			const large = await probeBacklog(128 * 1024 * 1024);
-			for (const probe of [small, large]) {
-				expect(probe.deliveredBytes).toBe(probe.outputBytes);
-				expect(probe.callbackError).toBeNull();
-				expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
+			if (watchdogFired || exitCode !== 0) {
+				throw new Error(
+					`PTY backpressure probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
+				);
 			}
-			// Absolute RSS deltas include platform allocator and lazy-addon costs.
-			// The contract is that retained backlog does not scale with total output.
-			expect(large.deltaRss - small.deltaRss).toBeLessThan(24 * 1024 * 1024);
-		}, 45_000);
+			const probe = JSON.parse(stdout) as BackpressureProbe;
+			expect(probe.producerFinishedDuringStall).toBeFalse();
+			expect(probe.producerMarkerExistsAfterDrain).toBeTrue();
+			expect(probe.deliveredBytes).toBe(probe.outputBytes);
+			expect(probe.callbackError).toBeNull();
+			expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
+		}, 30_000);
 	});
 
 	describe("shell", () => {
