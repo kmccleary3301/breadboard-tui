@@ -164,7 +164,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 		const term = new VirtualTerminal(80, 8);
 		const scheduler = makeDrainableScheduler();
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
-		tui.setScrollbackRebuild(true);
+		tui.setResizeScrollback("rebuild");
 		const tool = { mode: "replace" } as unknown as AgentTool;
 		const component = new ToolExecutionComponent(
 			"edit",
