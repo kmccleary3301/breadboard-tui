@@ -23,8 +23,9 @@
       "patterns": [
         ".github/ISSUE_TEMPLATE/config.yml",
         ".github/SECURITY.md",
+        "CONTRIBUTING.md",
         "README.md",
-        "docs/README.omp-upstream.md",
+        "README.omp-upstream.md",
         "packages/coding-agent/src/breadboard/**",
         "packages/coding-agent/src/bb.ts",
         "packages/coding-agent/src/omp.ts",

@@ -23,12 +23,17 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "CONTRIBUTING.md",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "README.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
-      "path": "docs/README.omp-upstream.md",
+      "path": "README.omp-upstream.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
