@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test, vi } from "bun:test";
 import { createBreadboardModelRolePort } from "../../src/breadboard/model-role-port";
 import { createBreadboardProviderAuthPort } from "../../src/breadboard/provider-auth-adapter";
 import type {
@@ -13,9 +13,14 @@ import { OAuthSelectorComponent } from "../../src/modes/components/oauth-selecto
 import { SelectorController } from "../../src/modes/controllers/selector-controller";
 import { initTheme } from "../../src/modes/theme/theme";
 import type { InteractiveModeContext } from "../../src/modes/types";
+import * as openModule from "../../src/utils/open";
 
 beforeAll(async () => {
 	await initTheme();
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
 });
 
 const credential: AuthCredentialView = {
@@ -77,10 +82,16 @@ function providerPort(overrides: Partial<ProviderAuthPort> = {}): ProviderAuthPo
 	};
 }
 
-function controllerContext(authStorage: Record<string, unknown>, statuses: string[]): InteractiveModeContext {
+function controllerContext(
+	authStorage: Record<string, unknown>,
+	statuses: string[],
+	onFocus?: (component: unknown) => void,
+): InteractiveModeContext {
 	const ui = {
 		requestRender() {},
-		setFocus() {},
+		setFocus(component: unknown) {
+			onFocus?.(component);
+		},
 	};
 	const editorContainer = {
 		clear() {},
@@ -250,6 +261,297 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(rotatedLock.lock_hash).toBe(firstLock.lock_hash);
 		expect(JSON.stringify(rows)).not.toContain("secret-value");
 		expect(JSON.stringify(rows)).not.toContain("rotated-secret");
+	});
+
+	test("SDK adapter preserves browser launch metadata and parses callback completion", async () => {
+		let beginRequest: unknown;
+		let completeRequest: unknown;
+		const credentialRow = {
+			account_id: "bbacct_codex",
+			credential_id: "bbcred_codex",
+			provider_id: "codex",
+			auth_scheme_id: "oauth2",
+			label: "user@example.com",
+			credential_kind: "oauth2",
+			status: "active",
+			source: "broker",
+			secret_version: 1,
+			created_at_ms: 1,
+			updated_at_ms: 2,
+		};
+		const client = {
+			async listProviders() {
+				return [];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin(input: unknown) {
+				beginRequest = input;
+				return {
+					login_session_id: "login-browser",
+					provider_id: "codex",
+					status: "pending",
+					authorization_url: "https://auth.example/authorize?state=csrf-state",
+					redirect_uri: "http://localhost:1455/auth/callback",
+					flow_id: "openai-codex",
+					flow_kind: "browser",
+					instructions: "Complete login in your browser.",
+				};
+			},
+			async getLogin() {
+				throw new Error("not used");
+			},
+			async completeLogin(input: unknown) {
+				completeRequest = input;
+				return {
+					login_session_id: "login-browser",
+					provider_id: "codex",
+					status: "completed",
+					credential: credentialRow,
+				};
+			},
+			async cancelLogin() {
+				return { ok: true };
+			},
+			async putApiKey() {
+				return credentialRow;
+			},
+			async logout() {
+				return { ok: true };
+			},
+			async revoke() {
+				return { ok: true };
+			},
+		};
+		const port = createBreadboardProviderAuthPort(client);
+
+		const started = await port.beginLogin({ providerId: "codex", flow: "manual" });
+		expect(beginRequest).toEqual({ provider_id: "codex", flow: "browser" });
+		expect(started).toMatchObject({
+			status: "pending",
+			authorizeUrl: "https://auth.example/authorize?state=csrf-state",
+			instructions: "Complete login in your browser.",
+			prompt: "Paste the full callback URL from your browser, then press Enter.",
+		});
+
+		const completed = await port.completeLogin({
+			loginSessionId: started.loginSessionId,
+			redirectOrCode: "http://localhost:1455/auth/callback?code=authorization-code&state=csrf-state",
+		});
+		expect(completeRequest).toEqual({
+			login_session_id: "login-browser",
+			code: "authorization-code",
+			state: "csrf-state",
+		});
+		expect(completed).toMatchObject({
+			status: "completed",
+			credential: { credentialRef: "bbcred_codex", accountLabel: "user@example.com" },
+		});
+		expect(JSON.stringify(started)).not.toContain("authorization-code");
+		expect(JSON.stringify(completed)).not.toContain("authorization-code");
+	});
+
+	test("SDK adapter carries pending device authorization through explicit completion", async () => {
+		const requests: unknown[] = [];
+		const client = {
+			async listProviders() {
+				return [];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin(input: unknown) {
+				requests.push(input);
+				return {
+					login_session_id: "login-device",
+					provider_id: "codex",
+					status: "pending",
+					authorization_url: "https://auth.example/device",
+					flow_kind: "device",
+					user_code: "ABCD-EFGH",
+					instructions: "Enter the code in your browser.",
+				};
+			},
+			async getLogin() {
+				throw new Error("not used");
+			},
+			async completeLogin(input: unknown) {
+				requests.push(input);
+				return {
+					login_session_id: "login-device",
+					provider_id: "codex",
+					status: "completed",
+					credential: {
+						account_id: "bbacct_device",
+						credential_id: "bbcred_device",
+						provider_id: "codex",
+						auth_scheme_id: "oauth2",
+						label: "device-user",
+						credential_kind: "oauth2",
+						status: "active",
+						source: "broker",
+						secret_version: 1,
+						created_at_ms: 1,
+						updated_at_ms: 2,
+					},
+				};
+			},
+			async cancelLogin() {
+				return { ok: true };
+			},
+			async putApiKey() {
+				throw new Error("not used");
+			},
+			async logout() {
+				return { ok: true };
+			},
+			async revoke() {
+				return { ok: true };
+			},
+		};
+		const port = createBreadboardProviderAuthPort(client);
+
+		const started = await port.beginLogin({ providerId: "codex", authSchemeId: "oauth2", flow: "device" });
+		expect(started).toMatchObject({
+			flowKind: "device",
+			userCode: "ABCD-EFGH",
+			instructions: "Enter the code in your browser.\nAuthorization code: ABCD-EFGH",
+			prompt: "Complete authorization in your browser, then press Enter.",
+		});
+		const completed = await port.completeLogin({ loginSessionId: started.loginSessionId, redirectOrCode: "" });
+		expect(completed.status).toBe("completed");
+		expect(requests).toEqual([
+			{ provider_id: "codex", auth_scheme_id: "oauth2", flow: "device" },
+			{ login_session_id: "login-device" },
+		]);
+	});
+
+	test("pending browser login opens authorization and completes through the mounted prompt", async () => {
+		const opened: string[] = [];
+		const beginObserved = Promise.withResolvers<void>();
+		vi.spyOn(openModule, "openPath").mockImplementation(url => opened.push(url));
+		let focused:
+			| {
+					pasteText(text: string): void;
+					handleInput(data: string): void;
+			  }
+			| undefined;
+		const statuses: string[] = [];
+		const context = controllerContext({}, statuses, component => {
+			if (component && typeof component === "object" && "pasteText" in component && "handleInput" in component) {
+				focused = component as typeof focused;
+			}
+		});
+		const client = {
+			async listProviders() {
+				return [];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin() {
+				beginObserved.resolve();
+				return {
+					login_session_id: "login-pending",
+					provider_id: "codex",
+					status: "pending",
+					authorization_url: "https://auth.example/authorize?state=csrf-state",
+					flow_kind: "browser",
+				};
+			},
+			async getLogin() {
+				throw new Error("not used");
+			},
+			async completeLogin() {
+				return {
+					login_session_id: "login-pending",
+					provider_id: "codex",
+					status: "completed",
+					credential: {
+						account_id: "bbacct_codex",
+						credential_id: "bbcred_codex",
+						provider_id: "codex",
+						auth_scheme_id: "oauth2",
+						label: "user@example.com",
+						credential_kind: "oauth2",
+						status: "active",
+						source: "broker",
+						secret_version: 1,
+						created_at_ms: 1,
+						updated_at_ms: 2,
+					},
+				};
+			},
+			async cancelLogin() {
+				return { ok: true };
+			},
+			async putApiKey() {
+				throw new Error("not used");
+			},
+			async logout() {
+				return { ok: true };
+			},
+			async revoke() {
+				return { ok: true };
+			},
+		};
+		const controller = new SelectorController(context, createBreadboardProviderAuthPort(client));
+
+		const login = controller.showOAuthSelector("login", "codex");
+		for (let pass = 0; pass < 8 && !focused; pass++) await Promise.resolve();
+		if (!focused) throw new Error("Login prompt did not receive focus");
+		await beginObserved.promise;
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+		focused.pasteText("http://localhost:1455/auth/callback?code=auth-code&state=csrf-state");
+		focused.handleInput("\n");
+		await login;
+		expect(opened).toEqual(["https://auth.example/authorize?state=csrf-state"]);
+		expect(statuses).toEqual(["Logging in to codex…"]);
+	});
+
+	test("Escape cancels a pending broker login and restores the editor", async () => {
+		const beginObserved = Promise.withResolvers<void>();
+		const cancelCalls: string[] = [];
+		vi.spyOn(openModule, "openPath").mockImplementation(() => {});
+		let focused: { handleInput(data: string): void } | undefined;
+		const statuses: string[] = [];
+		const context = controllerContext({}, statuses, component => {
+			if (component && typeof component === "object" && "handleInput" in component) {
+				focused = component as { handleInput(data: string): void };
+			}
+		});
+		const port = providerPort({
+			async beginLogin() {
+				beginObserved.resolve();
+				return {
+					loginSessionId: "login-cancel",
+					providerId: "codex",
+					status: "pending",
+					authorizeUrl: "https://auth.example/authorize",
+					prompt: "Paste the callback URL.",
+				};
+			},
+			async cancelLogin(loginSessionId) {
+				cancelCalls.push(loginSessionId);
+			},
+			async completeLogin() {
+				throw new Error("cancelled login must not complete");
+			},
+		});
+		const controller = new SelectorController(context, port);
+
+		const login = controller.showOAuthSelector("login", "codex");
+		for (let pass = 0; pass < 8 && !focused; pass++) await Promise.resolve();
+		if (!focused) throw new Error("Login prompt did not receive focus");
+		await beginObserved.promise;
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+		focused.handleInput("\u001b");
+		await login;
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+
+		expect(cancelCalls).toEqual(["login-cancel"]);
+		expect(statuses).toEqual(["Logging in to codex…", "Login cancelled"]);
 	});
 
 	test("native data source reports credential summaries without exposing secret bytes", async () => {
