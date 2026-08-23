@@ -15,6 +15,7 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
+import { installGlobalProxyFetch } from "@oh-my-pi/pi-ai/utils/proxy";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
@@ -425,6 +426,10 @@ export async function runCli(argv: string[]): Promise<void> {
 	// poison `workerHostEntry()` for the whole test process, forcing eval/stats/
 	// browser workers onto the same-realm inline fallback.
 	if (isProcessEntry) declareWorkerHostEntry();
+
+	// OAuth refresh/login and usage probes use the bare global `fetch`, so the
+	// profile-scoped proxy must be installed before any provider call.
+	installGlobalProxyFetch();
 
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();

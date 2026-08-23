@@ -5,8 +5,14 @@
  * contain secret material; only the broker's execution path may receive it.
  */
 export type AuthProviderFlow = "auto" | "browser_pkce" | "device" | "manual";
-export type AuthCredentialKind = "oauth2" | "api_key";
-export type AuthCredentialStatus = "active" | "disabled" | "revoked" | "reauthorization_required" | "quarantined";
+export type AuthCredentialKind = "oauth2" | "api_key" | (string & {});
+export type AuthCredentialStatus =
+	| "active"
+	| "disabled"
+	| "revoked"
+	| "reauthorization_required"
+	| "quarantined"
+	| (string & {});
 export type AuthLoginStatus = "pending" | "awaiting_input" | "completed" | "cancelled" | "failed" | "unavailable";
 
 export interface AuthProviderView {
@@ -16,25 +22,34 @@ export interface AuthProviderView {
 	readonly storeCredentialsAs?: string;
 	readonly authSchemes: readonly string[];
 	readonly loginAvailable: boolean;
+	readonly oauthFlows?: readonly string[];
+	readonly runtimeId?: string;
+	readonly compatibleProtocol?: string;
+	readonly baseUrl?: string;
 }
 
 export interface AuthCredentialView {
 	readonly schemaVersion: "bb.auth.credential_summary.v1";
 	readonly credentialRef: string;
+	readonly accountId?: string;
 	readonly providerId: string;
 	readonly authSchemeId: string;
 	readonly credentialKind: AuthCredentialKind;
 	readonly accountLabel: string;
+	readonly alias?: string;
 	readonly status: AuthCredentialStatus;
 	readonly source: string;
 	readonly isDefault: boolean;
 	readonly expiresAtUtc: string | null;
 	readonly createdAtUtc: string;
+	readonly updatedAtUtc?: string;
+	readonly hasApiKey?: boolean;
 	readonly lastUsedAtUtc: string | null;
 }
 
 export interface BeginAuthLogin {
 	readonly providerId: string;
+	readonly authSchemeId?: string;
 	readonly flow?: AuthProviderFlow;
 	readonly accountLabel?: string;
 	readonly makeDefault?: boolean;
@@ -47,6 +62,10 @@ export interface AuthLoginSession {
 	readonly status: AuthLoginStatus;
 	readonly authorizeUrl?: string;
 	readonly launchUrl?: string;
+	readonly redirectUri?: string;
+	readonly flowId?: string;
+	readonly flowKind?: "browser" | "device";
+	readonly userCode?: string;
 	readonly instructions?: string;
 	readonly prompt?: string;
 	readonly problem?: { readonly code: string; readonly message: string };
@@ -56,6 +75,8 @@ export interface AuthLoginSession {
 export interface CompleteAuthLogin {
 	readonly loginSessionId: string;
 	readonly redirectOrCode: string;
+	readonly accountLabel?: string;
+	readonly alias?: string;
 }
 
 export interface PutApiKeyInput {
@@ -63,6 +84,7 @@ export interface PutApiKeyInput {
 	readonly accountLabel: string;
 	readonly apiKey: string;
 	readonly authSchemeId?: string;
+	readonly alias?: string;
 	readonly bindings?: Readonly<Record<string, string>>;
 	readonly makeDefault?: boolean;
 }

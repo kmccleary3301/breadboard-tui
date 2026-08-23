@@ -1,8 +1,84 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { getLatestRelease, runUpdateCommand } from "../../src/cli/update-cli";
+import {
+	getLatestBreadboardRelease,
+	getLatestRelease,
+	parseReportedVersion,
+	resolveLatestBreadboardRelease,
+	resolveReleaseBinaryAsset,
+	runUpdateCommand,
+} from "../../src/cli/update-cli";
 
 type FetchInput = string | URL | Request;
 type FetchInit = RequestInit | BunFetchRequestInit;
+
+const PRODUCT_REPOSITORY = "kmccleary3301/breadboard-tui";
+const PRODUCT_TAG = "product/breadboard-tui-v0.1.0-rc.3-canonical";
+
+describe("BreadBoard product releases", () => {
+	it("selects only the highest published canonical product release", () => {
+		const release = resolveLatestBreadboardRelease([
+			{ tag_name: "v18.0.1", draft: false, prerelease: false },
+			{ tag_name: "product/breadboard-tui-v0.1.0-rc.2-canonical", draft: false, prerelease: true },
+			{ tag_name: PRODUCT_TAG, draft: false, prerelease: true },
+			{ tag_name: "product/breadboard-tui-v9.0.0-canonical", draft: true, prerelease: false },
+			{ tag_name: "product/breadboard-tui-vnot-semver-canonical", draft: false, prerelease: false },
+		]);
+
+		expect(release).toEqual({
+			tag: PRODUCT_TAG,
+			version: "0.1.0-rc.3",
+			dist: "binary",
+			packages: { pkg: "@oh-my-pi/pi-coding-agent", natives: "@oh-my-pi/pi-natives" },
+			repository: PRODUCT_REPOSITORY,
+			prerelease: true,
+		});
+	});
+
+	it("fetches the product repository rather than npm or upstream OMP", async () => {
+		const urls: string[] = [];
+		const release = await getLatestBreadboardRelease({
+			fetchImpl: async input => {
+				urls.push(String(input));
+				return Response.json([{ tag_name: PRODUCT_TAG, draft: false, prerelease: true }]);
+			},
+		});
+
+		expect(release.version).toBe("0.1.0-rc.3");
+		expect(urls).toEqual([`https://api.github.com/repos/${PRODUCT_REPOSITORY}/releases?per_page=100`]);
+	});
+
+	it("validates the exact product prerelease asset and repository", () => {
+		const binaryName = "bb-darwin-arm64";
+		const url = `https://github.com/${PRODUCT_REPOSITORY}/releases/download/${PRODUCT_TAG}/${binaryName}`;
+		const asset = resolveReleaseBinaryAsset(
+			{
+				tag_name: PRODUCT_TAG,
+				draft: false,
+				prerelease: true,
+				assets: [
+					{
+						name: binaryName,
+						state: "uploaded",
+						size: 123,
+						digest: `sha256:${"ab".repeat(32)}`,
+						browser_download_url: url,
+					},
+				],
+			},
+			PRODUCT_TAG,
+			binaryName,
+			{ repository: PRODUCT_REPOSITORY, prerelease: true },
+		);
+
+		expect(asset).toEqual({ url, size: 123, digest: `sha256:${"ab".repeat(32)}` });
+	});
+
+	it("parses the exact active product token including prerelease suffixes", () => {
+		expect(parseReportedVersion("bb/0.1.0-rc.3 omp/18.0.1 sdk/0.3.0", "bb")).toBe("0.1.0-rc.3");
+		expect(parseReportedVersion("omp/18.0.1", "omp")).toBe("18.0.1");
+		expect(parseReportedVersion("omp/18.0.1", "bb")).toBeUndefined();
+	});
+});
 
 describe("runUpdateCommand fetch cancellation", () => {
 	afterEach(() => {

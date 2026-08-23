@@ -31,6 +31,7 @@ const ZERO_USAGE: Usage = {
 	totalTokens: 0,
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
+const CLOSE_SUBMISSION_GRACE_MS = 250;
 
 export type E4BackendModelAttribution = Readonly<Pick<Model, "api" | "provider" | "id">>;
 
@@ -157,6 +158,7 @@ export class E4AgentStreamBridge {
 	readonly #requestPermission: E4PermissionHandler | undefined;
 	readonly #initialCursor: E4DurableCursor | undefined;
 	readonly #observeAbort = new AbortController();
+	readonly #closeAdmissionAbort = new AbortController();
 	readonly #sinks = new Map<string, TurnSink>();
 	readonly #adoptedTerminalTurnIds = new Set<string>();
 	readonly #ownedSubmissions = new Map<string, E4OwnedSubmission>();
@@ -230,6 +232,17 @@ export class E4AgentStreamBridge {
 		for (const sink of [...this.#sinks.values(), ...this.#submittingSinks]) {
 			this.#failSink(sink, "BreadBoard session closed", "aborted");
 			this.#cancelSink(sink, "user_requested");
+		}
+		if (this.#submissionsInFlight.size > 0) {
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			const outcome = await Promise.race([
+				Promise.all([...this.#submissionsInFlight]).then(() => "settled" as const),
+				new Promise<"timeout">(resolve => {
+					timeout = setTimeout(() => resolve("timeout"), CLOSE_SUBMISSION_GRACE_MS);
+				}),
+			]);
+			if (timeout !== undefined) clearTimeout(timeout);
+			if (outcome === "timeout") this.#closeAdmissionAbort.abort();
 		}
 		await Promise.all([...this.#submissionsInFlight]);
 		await Promise.all([...this.#lateSubmissionRecoveries]);
@@ -311,6 +324,16 @@ export class E4AgentStreamBridge {
 		this.#ownershipWaiters.add(resolve);
 		return promise;
 	}
+	async #waitForSubmissionsOrOwnershipChange(submissions: readonly Promise<void>[]): Promise<void> {
+		if (this.#closed) return;
+		const { promise, resolve } = Promise.withResolvers<void>();
+		this.#ownershipWaiters.add(resolve);
+		try {
+			await Promise.race([Promise.all(submissions), promise]);
+		} finally {
+			this.#ownershipWaiters.delete(resolve);
+		}
+	}
 
 	async #recordOwnedCorrelation(submission: E4OwnedSubmission, turnId: TurnId, notifyWaiters = true): Promise<void> {
 		const previous = this.#ownedSubmissions.get(submission.turnId);
@@ -353,6 +376,9 @@ export class E4AgentStreamBridge {
 	async #recoverAcceptedSubmissionWithoutReceipt(attempt: PendingSubmit, error: unknown): Promise<SubmitReceipt> {
 		attempt.recoveringAfterAbort = true;
 		attempt.acceptedWithoutReceipt = true;
+		this.#pendingSubmit ??= attempt;
+		if (this.#pendingSubmit !== attempt) throw error;
+		this.#notifyOwnershipWaiters();
 		while (attempt.turnId === undefined && !this.#closed && !this.#observeFailure) {
 			await this.#waitForOwnershipChange();
 		}
@@ -368,6 +394,54 @@ export class E4AgentStreamBridge {
 		};
 	}
 
+	async #finishInterruptedSubmission(attempt: PendingSubmit, receipt: SubmitReceipt): Promise<void> {
+		const turnKey = String(receipt.turnId);
+		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
+			attempt.turnId = receipt.turnId;
+			this.#rememberObservedSubmit(attempt);
+			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
+			return;
+		}
+		if (!this.#closed) await this.#recordOwnedSubmission(receipt);
+		attempt.turnId = receipt.turnId;
+		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
+			this.#rememberObservedSubmit(attempt);
+			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
+			return;
+		}
+		await this.#cancel(receipt.turnId, "user_requested");
+	}
+
+	#trackLateSubmissionRecovery(operation: Promise<void>): void {
+		let recovery!: Promise<void>;
+		recovery = operation
+			.catch(error => {
+				if (!this.#closed) {
+					this.#invalidateBridge(`BreadBoard aborted submission recovery failed: ${safeErrorMessage(error)}`);
+				}
+			})
+			.finally(() => {
+				this.#lateSubmissionRecoveries.delete(recovery);
+			});
+		this.#lateSubmissionRecoveries.add(recovery);
+	}
+
+	#handleInterruptedSubmissionRejection(attempt: PendingSubmit, error: unknown): void {
+		if (isAcceptedWithoutReceipt(error)) {
+			this.#trackLateSubmissionRecovery(
+				this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error).then(receipt =>
+					this.#finishInterruptedSubmission(attempt, receipt),
+				),
+			);
+			return;
+		}
+		attempt.recoveringAfterAbort = false;
+		if (this.#pendingSubmit === attempt && !isAmbiguousSubmitFailure(error)) {
+			this.#pendingSubmit = undefined;
+			this.#notifyOwnershipWaiters();
+		}
+	}
+
 	async #submitAttempt(
 		attempt: PendingSubmit,
 		sink: TurnSink,
@@ -378,65 +452,30 @@ export class E4AgentStreamBridge {
 			return undefined;
 		}
 		const submission = this.#session.submit(attempt.input);
-		if (!signal) {
-			return submission.catch(error =>
-				isAcceptedWithoutReceipt(error)
-					? this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error)
-					: Promise.reject(error),
-			);
-		}
-		const { promise: aborted, resolve: resolveAborted } = Promise.withResolvers<{
-			readonly kind: "aborted";
-		}>();
-		const abortSubmission = () => resolveAborted({ kind: "aborted" as const });
-		signal.addEventListener("abort", abortSubmission, { once: true });
-		let result: { readonly kind: "receipt"; readonly receipt: SubmitReceipt } | { readonly kind: "aborted" };
+		const interruptedToken = Symbol("interrupted");
+		const { promise: interrupted, resolve: resolveInterrupted } = Promise.withResolvers<typeof interruptedToken>();
+		const interruptSubmission = () => resolveInterrupted(interruptedToken);
+		const closeSignal = this.#closeAdmissionAbort.signal;
+		if (signal?.aborted || closeSignal.aborted) interruptSubmission();
+		signal?.addEventListener("abort", interruptSubmission, { once: true });
+		closeSignal.addEventListener("abort", interruptSubmission, { once: true });
+		let result: SubmitReceipt | typeof interruptedToken;
 		try {
-			result = await Promise.race([submission.then(receipt => ({ kind: "receipt" as const, receipt })), aborted]);
+			result = await Promise.race([submission, interrupted]);
 		} catch (error) {
+			if (!isAcceptedWithoutReceipt(error)) throw error;
 			return await this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error);
 		} finally {
-			signal.removeEventListener("abort", abortSubmission);
+			signal?.removeEventListener("abort", interruptSubmission);
+			closeSignal.removeEventListener("abort", interruptSubmission);
 		}
-		if (result.kind === "receipt") return result.receipt;
+		if (result !== interruptedToken) return result;
 
 		attempt.recoveringAfterAbort = true;
 		this.#pendingSubmit ??= attempt;
 		void submission.then(
-			receipt => {
-				let recovery!: Promise<void>;
-				recovery = (async () => {
-					const turnKey = String(receipt.turnId);
-					if (this.#adoptedTerminalTurnIds.has(turnKey)) {
-						attempt.turnId = receipt.turnId;
-						this.#rememberObservedSubmit(attempt);
-						if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
-						return;
-					}
-					if (!this.#closed) await this.#recordOwnedSubmission(receipt);
-					attempt.turnId = receipt.turnId;
-					if (this.#adoptedTerminalTurnIds.has(turnKey)) {
-						this.#rememberObservedSubmit(attempt);
-						if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
-						return;
-					}
-					await this.#cancel(receipt.turnId, "user_requested");
-				})()
-					.catch(error => {
-						if (!this.#closed) {
-							this.#invalidateBridge(
-								`BreadBoard aborted submission recovery failed: ${safeErrorMessage(error)}`,
-							);
-						}
-					})
-					.finally(() => {
-						this.#lateSubmissionRecoveries.delete(recovery);
-					});
-				this.#lateSubmissionRecoveries.add(recovery);
-			},
-			() => {
-				if (this.#pendingSubmit === attempt) attempt.recoveringAfterAbort = false;
-			},
+			receipt => this.#trackLateSubmissionRecovery(this.#finishInterruptedSubmission(attempt, receipt)),
+			error => this.#handleInterruptedSubmissionRejection(attempt, error),
 		);
 		this.#failSink(sink, "BreadBoard submission cancelled while admission was in progress", "aborted");
 		return undefined;
@@ -584,14 +623,26 @@ export class E4AgentStreamBridge {
 				const turnKey = String(event.turnId);
 				let sink = this.#sinks.get(turnKey);
 				if (!sink && this.#submissionsInFlight.size && !this.#pendingSubmit?.recoveringAfterAbort) {
-					await Promise.all([...this.#submissionsInFlight]);
+					await this.#waitForSubmissionsOrOwnershipChange([...this.#submissionsInFlight]);
 					sink = this.#sinks.get(turnKey);
 					if (this.#closed || this.#observeFailure) break;
 				}
 				let ownership = this.#ownedSubmissions.get(turnKey);
 				const pendingAttempt = this.#pendingSubmit;
 				if (!sink && !ownership && pendingAttempt && pendingAttempt.turnId === undefined) {
-					if (pendingAttempt.acceptedWithoutReceipt) {
+					if (!pendingAttempt.acceptedWithoutReceipt) {
+						await this.#waitForOwnershipChange();
+						if (this.#closed || this.#observeFailure) break;
+						sink = this.#sinks.get(turnKey);
+						ownership = this.#ownedSubmissions.get(turnKey);
+					}
+					if (
+						!sink &&
+						!ownership &&
+						this.#pendingSubmit === pendingAttempt &&
+						pendingAttempt.acceptedWithoutReceipt &&
+						pendingAttempt.turnId === undefined
+					) {
 						pendingAttempt.turnId = event.turnId;
 						const syntheticReceipt = {
 							clientMessageId: pendingAttempt.input.clientMessageId,
@@ -601,11 +652,6 @@ export class E4AgentStreamBridge {
 							originalDisposition: "started",
 						} as SubmitReceipt;
 						await this.#recordOwnedSubmission(syntheticReceipt);
-						ownership = this.#ownedSubmissions.get(turnKey);
-					} else {
-						await this.#waitForOwnershipChange();
-						if (this.#closed || this.#observeFailure) break;
-						sink = this.#sinks.get(turnKey);
 						ownership = this.#ownedSubmissions.get(turnKey);
 					}
 				}

@@ -804,6 +804,104 @@ describe("pi-natives", () => {
 				} catch {}
 			}
 		});
+
+		it("delivers all output after an output callback stalls", async () => {
+			if (process.platform === "win32") {
+				return;
+			}
+
+			type CallbackStallProbe = {
+				outputBytes: number;
+				deliveredBytes: number;
+				producerMarkerExistsAfterDrain: boolean;
+				callbackError: string | null;
+				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
+			};
+			const outputBytes = 8 * 1024 * 1024;
+			const markerPath = path.join(testDir, "pty-callback-stall-producer.done");
+			await fs.rm(markerPath, { force: true });
+			const producerScript = [
+				"const fs = require('node:fs');",
+				"const chunk = Buffer.alloc(64 * 1024, 0x78);",
+				`let remaining = ${outputBytes};`,
+				"while (remaining > 0) {",
+				"const size = Math.min(remaining, chunk.length);",
+				"fs.writeSync(1, chunk, 0, size);",
+				"remaining -= size;",
+				"}",
+				`fs.writeFileSync(${JSON.stringify(markerPath)}, "done");`,
+			].join(" ");
+			const script = `
+import { existsSync } from "node:fs";
+import { PtySession } from ${JSON.stringify(addonUrl)};
+
+const outputBytes = ${outputBytes};
+const markerPath = ${JSON.stringify(markerPath)};
+const session = new PtySession();
+const started = Promise.withResolvers();
+let deliveredBytes = 0;
+let callbackError = null;
+let outputCallbackStalled = false;
+const run = session.startArgv(
+	{
+		application: process.execPath,
+		args: ["-e", ${JSON.stringify(producerScript)}],
+		timeoutMs: 30_000,
+		cols: 80,
+		rows: 24,
+	},
+	(error, chunk) => {
+		callbackError = error;
+		if (!outputCallbackStalled) {
+			outputCallbackStalled = true;
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000);
+		}
+		deliveredBytes += Buffer.byteLength(chunk);
+	},
+	(error) => {
+		if (error) started.reject(error);
+		else started.resolve();
+	},
+);
+await started.promise;
+const result = await run;
+console.log(JSON.stringify({
+	outputBytes,
+	deliveredBytes,
+	producerMarkerExistsAfterDrain: existsSync(markerPath),
+	callbackError: callbackError?.message ?? null,
+	result,
+}));
+`;
+			const child = Bun.spawn([process.execPath, "--eval", script], {
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			let watchdogFired = false;
+			const timer = setTimeout(() => {
+				if (child.exitCode === null) {
+					watchdogFired = true;
+					child.kill("SIGKILL");
+				}
+			}, 20_000);
+			const exited = child.exited.finally(() => clearTimeout(timer));
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				exited,
+			]);
+
+			if (watchdogFired || exitCode !== 0) {
+				throw new Error(
+					`PTY callback-stall probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
+				);
+			}
+			const probe = JSON.parse(stdout) as CallbackStallProbe;
+			expect(probe.producerMarkerExistsAfterDrain).toBeTrue();
+			expect(probe.deliveredBytes).toBe(probe.outputBytes);
+			expect(probe.callbackError).toBeNull();
+			expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
+		}, 30_000);
 	});
 
 	describe("shell", () => {

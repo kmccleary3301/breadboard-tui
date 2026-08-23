@@ -7,12 +7,12 @@
     "manual-review"
   ],
   "upstream": {
-    "tag": "v18.0.0",
-    "commit": "96f42809764f0907f7d6b115eab5710de28941de",
-    "tree": "36ecb17efff14e1120dbf93c7f9fd0769e44626c"
+    "tag": "v18.0.1",
+    "commit": "6c1209842323bb4713f127ac303c97fd043d585c",
+    "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 160,
+    "maxTotalChangedPaths": 180,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
@@ -83,8 +83,12 @@
     {
       "id": "manual-review-boundaries",
       "class": "manual-review",
-      "description": "Package, lockfile, license/notice, Docker, and executable entrypoint boundaries require an owner and ordered layer.",
+      "description": "Package, lockfile, license/notice, Docker, executable entrypoint, and mixed downstream/upstream documentation boundaries require an owner and ordered layer.",
       "patterns": [
+        "docs/task-agent-discovery.md",
+        "docs/tools/eval.md",
+        "docs/tools/task.md",
+        "packages/coding-agent/test/cli/update-cli.test.ts",
         "package.json",
         "**/package.json",
         "bun.lock",
@@ -219,6 +223,7 @@
         "packages/*/src/cli.ts",
         "packages/*/src/cli/**",
         "packages/*/src/cli-commands.ts",
+        "packages/coding-agent/test/cli/update-cli.test.ts",
         "packages/*/src/commands/launch.ts",
         "packages/*/src/main.ts",
         "packages/*/src/index.ts",
@@ -228,6 +233,16 @@
         "entrypoint.*",
         "**/entrypoint",
         "**/entrypoint.*"
+      ]
+    },
+    {
+      "id": "product-docs-boundary",
+      "owner": "fork-runtime",
+      "layer": 3,
+      "patterns": [
+        "docs/task-agent-discovery.md",
+        "docs/tools/eval.md",
+        "docs/tools/task.md"
       ]
     }
   ],
@@ -274,6 +289,7 @@
       "packages/coding-agent/src/cli.ts",
       "packages/coding-agent/src/cli-commands.ts",
       "packages/coding-agent/src/cli/**",
+      "packages/coding-agent/test/cli/update-cli.test.ts",
       "packages/coding-agent/src/commands/engine.ts",
       "packages/coding-agent/src/commands/launch-help.ts",
       "packages/coding-agent/src/commands/launch.ts",
