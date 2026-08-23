@@ -23,6 +23,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": ".github/workflows/bazel-cache-warm.yml",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": ".github/workflows/ci.yml",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
