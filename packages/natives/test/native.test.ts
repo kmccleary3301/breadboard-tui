@@ -805,7 +805,7 @@ describe("pi-natives", () => {
 			}
 		});
 
-		it("applies backpressure while JavaScript is stalled without dropping output", async () => {
+		it("applies backpressure while an output callback is stalled without dropping output", async () => {
 			if (process.platform === "win32") {
 				return;
 			}
@@ -813,12 +813,12 @@ describe("pi-natives", () => {
 			type BackpressureProbe = {
 				outputBytes: number;
 				deliveredBytes: number;
-				producerFinishedDuringStall: boolean;
+				producerFinishedDuringCallbackStall: boolean;
 				producerMarkerExistsAfterDrain: boolean;
 				callbackError: string | null;
 				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
 			};
-			const outputBytes = 64 * 1024 * 1024;
+			const outputBytes = 8 * 1024 * 1024;
 			const markerPath = path.join(testDir, "pty-backpressure-producer.done");
 			await fs.rm(markerPath, { force: true });
 			const producerScript = [
@@ -842,6 +842,8 @@ const session = new PtySession();
 const started = Promise.withResolvers();
 let deliveredBytes = 0;
 let callbackError = null;
+let outputCallbackStalled = false;
+let producerFinishedDuringCallbackStall = null;
 const run = session.startArgv(
 	{
 		application: process.execPath,
@@ -852,6 +854,11 @@ const run = session.startArgv(
 	},
 	(error, chunk) => {
 		callbackError = error;
+		if (!outputCallbackStalled) {
+			outputCallbackStalled = true;
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000);
+			producerFinishedDuringCallbackStall = existsSync(markerPath);
+		}
 		deliveredBytes += Buffer.byteLength(chunk);
 	},
 	(error) => {
@@ -860,13 +867,11 @@ const run = session.startArgv(
 	},
 );
 await started.promise;
-Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000);
-const producerFinishedDuringStall = existsSync(markerPath);
 const result = await run;
 console.log(JSON.stringify({
 	outputBytes,
 	deliveredBytes,
-	producerFinishedDuringStall,
+	producerFinishedDuringCallbackStall,
 	producerMarkerExistsAfterDrain: existsSync(markerPath),
 	callbackError: callbackError?.message ?? null,
 	result,
@@ -896,7 +901,7 @@ console.log(JSON.stringify({
 				);
 			}
 			const probe = JSON.parse(stdout) as BackpressureProbe;
-			expect(probe.producerFinishedDuringStall).toBeFalse();
+			expect(probe.producerFinishedDuringCallbackStall).toBeFalse();
 			expect(probe.producerMarkerExistsAfterDrain).toBeTrue();
 			expect(probe.deliveredBytes).toBe(probe.outputBytes);
 			expect(probe.callbackError).toBeNull();
