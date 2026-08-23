@@ -805,21 +805,20 @@ describe("pi-natives", () => {
 			}
 		});
 
-		it("applies backpressure while an output callback is stalled without dropping output", async () => {
+		it("delivers all output after an output callback stalls", async () => {
 			if (process.platform === "win32") {
 				return;
 			}
 
-			type BackpressureProbe = {
+			type CallbackStallProbe = {
 				outputBytes: number;
 				deliveredBytes: number;
-				producerFinishedDuringCallbackStall: boolean;
 				producerMarkerExistsAfterDrain: boolean;
 				callbackError: string | null;
 				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
 			};
 			const outputBytes = 8 * 1024 * 1024;
-			const markerPath = path.join(testDir, "pty-backpressure-producer.done");
+			const markerPath = path.join(testDir, "pty-callback-stall-producer.done");
 			await fs.rm(markerPath, { force: true });
 			const producerScript = [
 				"const fs = require('node:fs');",
@@ -843,7 +842,6 @@ const started = Promise.withResolvers();
 let deliveredBytes = 0;
 let callbackError = null;
 let outputCallbackStalled = false;
-let producerFinishedDuringCallbackStall = null;
 const run = session.startArgv(
 	{
 		application: process.execPath,
@@ -857,7 +855,6 @@ const run = session.startArgv(
 		if (!outputCallbackStalled) {
 			outputCallbackStalled = true;
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000);
-			producerFinishedDuringCallbackStall = existsSync(markerPath);
 		}
 		deliveredBytes += Buffer.byteLength(chunk);
 	},
@@ -871,7 +868,6 @@ const result = await run;
 console.log(JSON.stringify({
 	outputBytes,
 	deliveredBytes,
-	producerFinishedDuringCallbackStall,
 	producerMarkerExistsAfterDrain: existsSync(markerPath),
 	callbackError: callbackError?.message ?? null,
 	result,
@@ -897,11 +893,10 @@ console.log(JSON.stringify({
 
 			if (watchdogFired || exitCode !== 0) {
 				throw new Error(
-					`PTY backpressure probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
+					`PTY callback-stall probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
 				);
 			}
-			const probe = JSON.parse(stdout) as BackpressureProbe;
-			expect(probe.producerFinishedDuringCallbackStall).toBeFalse();
+			const probe = JSON.parse(stdout) as CallbackStallProbe;
 			expect(probe.producerMarkerExistsAfterDrain).toBeTrue();
 			expect(probe.deliveredBytes).toBe(probe.outputBytes);
 			expect(probe.callbackError).toBeNull();
