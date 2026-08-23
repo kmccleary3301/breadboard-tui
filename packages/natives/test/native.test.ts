@@ -829,7 +829,14 @@ let callbackError = null;
 const run = session.startArgv(
 	{
 		application: process.execPath,
-		args: ["-e", \`process.stdout.write("x".repeat(\${outputBytes}))\`],
+		args: [
+			"-e",
+			"const fs = require('node:fs'); const chunk = Buffer.alloc(64 * 1024, 0x78); " +
+				"let remaining = " +
+				outputBytes +
+				"; while (remaining > 0) { const size = Math.min(remaining, chunk.length); " +
+				"fs.writeSync(1, chunk, 0, size); remaining -= size; }",
+		],
 		timeoutMs: 30_000,
 		cols: 80,
 		rows: 24,
