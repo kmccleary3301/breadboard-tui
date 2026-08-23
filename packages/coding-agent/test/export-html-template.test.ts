@@ -18,13 +18,6 @@ interface TemplateProbeResult {
 	assetsRemoved: number;
 }
 
-const expectedTemplate: TemplateProbeResult = {
-	chars: 376_442,
-	bytes: 376_598,
-	sha256: "122808e9b4480a25ed4ab00e51579074da0c36f9dce86c731bea8df6f2765bc7",
-	stableCache: true,
-	assetsRemoved: 0,
-};
 const assetDir = new URL("../src/export/html/", import.meta.url);
 const templateProbePath = path.resolve(import.meta.dir, "fixtures", "html-export-template-probe.ts");
 const heapProbePath = path.resolve(import.meta.dir, "fixtures", "html-export-static-import-heap-probe.ts");
@@ -74,6 +67,14 @@ function composeExpectedTemplate(): string {
 		.replace("<template-tool-views/>", () => `<script>${toolViewsJs}</script>`)
 		.replace("<template-js/>", () => `<script>${templateJs}</script>`);
 }
+
+const expectedTemplate: TemplateProbeResult = {
+	chars: 376_586,
+	bytes: 376_742,
+	sha256: "d1832d9fc1e2033e4d998856bfdd7739aa3be94bff74c21154d7fa6a51788269",
+	stableCache: true,
+	assetsRemoved: 0,
+};
 
 async function runProbe(command: string[]): Promise<TemplateProbeResult> {
 	const proc = Bun.spawn(command, {

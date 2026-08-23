@@ -23,7 +23,7 @@ Current product identity:
 
 ## Build
 
-Prerequisites: Bun `1.3.14`, the platform's OMP native addon, and a checkout of the exact backend commit recorded in `packages/coding-agent/breadboard-sdk-provenance.json`.
+Prerequisites: Bun `>=1.3.14` (the repository package manager and primary CI lane use Bun 1.4), the platform's OMP native addon, and a checkout of the exact backend commit recorded in `packages/coding-agent/breadboard-sdk-provenance.json`.
 
 ```sh
 bun install --frozen-lockfile
@@ -61,4 +61,4 @@ BreadBoard changes should remain concentrated in owned adapters, product entrypo
 
 ## Upstream documentation and attribution
 
-OMP's original README is preserved at [`docs/README.omp-upstream.md`](docs/README.omp-upstream.md). Upstream package names, source links, license, and attribution remain intact so upstream lineage stays reviewable and mergeable.
+OMP's original README is preserved at [`README.omp-upstream.md`](README.omp-upstream.md). Upstream package names, source links, license, and attribution remain intact so upstream lineage stays reviewable and mergeable.

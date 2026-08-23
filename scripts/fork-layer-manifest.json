@@ -8,6 +8,11 @@
   },
   "paths": [
     {
+      "path": ".github/actions/setup-product-backend/action.yml",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": ".github/ISSUE_TEMPLATE/config.yml",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
@@ -18,7 +23,17 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": ".github/workflows/ci.yml",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": ".github/workflows/fork-delta-audit.yml",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "CONTRIBUTING.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -28,7 +43,7 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
-      "path": "docs/README.omp-upstream.md",
+      "path": "README.omp-upstream.md",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -446,6 +461,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/src/modes/shared.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
@@ -586,6 +606,11 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/test/export-html-template.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/test/fixtures/breadboard-drain-controller.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
@@ -621,6 +646,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/test/plugin-extensions-discovery.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
       "path": "packages/coding-agent/test/retry-ambiguous-replay.test.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
@@ -632,6 +662,11 @@
     },
     {
       "path": "packages/coding-agent/test/streaming-preview-height.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/test/status-text-sanitization.test.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
     },
@@ -721,6 +756,16 @@
       "path": "scripts/inspect-upstream-sync.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "scripts/install-tests/binary.dockerfile",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "scripts/install-tests/run-ci.sh",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "scripts/p31/upstream-sync-policy.json",

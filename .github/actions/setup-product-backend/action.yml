@@ -1,0 +1,27 @@
+name: Setup product backend
+description: >-
+   Check out the backend revision pinned by the packaged SDK provenance and
+   prepare its Python runtime for real-backend integration tests.
+
+runs:
+   using: composite
+   steps:
+      - name: Read pinned backend provenance
+        id: provenance
+        shell: bash
+        run: echo "commit=$(jq -r .backendCommit packages/coding-agent/breadboard-sdk-provenance.json)" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned backend provenance
+        uses: actions/checkout@v4
+        with:
+           repository: kmccleary3301/breadboard
+           ref: ${{ steps.provenance.outputs.commit }}
+           path: breadboard-backend
+      - uses: actions/setup-python@v5
+        with:
+           python-version: "3.11"
+      - name: Prepare pinned backend runtime
+        shell: bash
+        run: |
+           python -m venv breadboard-backend/.venv
+           breadboard-backend/.venv/bin/pip install --disable-pip-version-check --editable breadboard-backend
+           echo "BREADBOARD_P30_BACKEND_ROOT=$GITHUB_WORKSPACE/breadboard-backend" >> "$GITHUB_ENV"
