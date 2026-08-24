@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EngineDistributionInstallError, installEngineDistributionAtomically } from "./engine-distribution-installer";
@@ -136,6 +136,62 @@ describe("engine distribution installer", () => {
 		expect(await readFile(first.bundlePath)).toEqual(await readFile(firstSource.sourceBundlePath));
 		expect(await readFile(second.bundlePath)).toEqual(await readFile(secondSource.sourceBundlePath));
 		expect((await readdir(installationRoot)).some(name => name.startsWith(".stage-"))).toBe(false);
+	});
+
+	test("rejects unsafe existing manifest identities", async () => {
+		const tempRoot = await temporaryRoot("breadboard-engine-install-manifest-");
+		const cases: ReadonlyArray<{
+			readonly version: string;
+			readonly mutate: (manifestPath: string, distributionPath: string) => Promise<void>;
+		}> = [
+			{
+				version: "0.1.2",
+				mutate: async (manifestPath, distributionPath) => {
+					await chmod(distributionPath, 0o700);
+					await chmod(manifestPath, 0o600);
+					await chmod(distributionPath, 0o500);
+				},
+			},
+			{
+				version: "0.1.3",
+				mutate: async (manifestPath, distributionPath) => {
+					await chmod(distributionPath, 0o700);
+					await link(manifestPath, join(tempRoot, "manifest-hardlink.json"));
+					await chmod(distributionPath, 0o500);
+				},
+			},
+			{
+				version: "0.1.4",
+				mutate: async (manifestPath, distributionPath) => {
+					const bytes = await readFile(manifestPath);
+					const target = join(tempRoot, "manifest-symlink-target.json");
+					await Bun.write(target, bytes);
+					await chmod(target, 0o400);
+					await chmod(distributionPath, 0o700);
+					await rm(manifestPath);
+					await symlink(target, manifestPath);
+					await chmod(distributionPath, 0o500);
+				},
+			},
+		];
+		for (const [index, scenario] of cases.entries()) {
+			const installationRoot = join(tempRoot, `installed-${index}`);
+			const source = await createDistribution(tempRoot, scenario.version, String.fromCharCode(100 + index));
+			const installed = await installEngineDistributionAtomically({
+				root: installationRoot,
+				manifest: source.manifest,
+				bundlePath: source.sourceBundlePath,
+			});
+			await scenario.mutate(installed.manifestPath, installed.distributionPath);
+			await expect(
+				installEngineDistributionAtomically({
+					root: installationRoot,
+					manifest: source.manifest,
+					bundlePath: source.sourceBundlePath,
+				}),
+			).rejects.toBeInstanceOf(EngineDistributionInstallError);
+			expect((await readdir(installationRoot)).some(name => name.startsWith(".stage-"))).toBe(false);
+		}
 	});
 
 	test("refuses to replace a tampered or partial content-addressed object", async () => {

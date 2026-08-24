@@ -485,4 +485,34 @@ describe.skipIf(process.platform !== "darwin")("Darwin native verified spawn", (
 		});
 		expect(await child.exited).toBe(0);
 	});
+
+	test("delivers fd3 when the spawning process has no standard descriptors", async () => {
+		const moduleUrl = new URL("./darwin-verified-spawn.ts", import.meta.url).href;
+		const script = `
+			import { dlopen, FFIType } from "bun:ffi";
+			import { readFile } from "node:fs/promises";
+			import { spawnDarwinVerified } from ${JSON.stringify(moduleUrl)};
+
+			const executablePath = "/bin/sh";
+			const executableBytes = await readFile(executablePath);
+			const system = dlopen("/usr/lib/libSystem.B.dylib", {
+				close: { args: [FFIType.i32], returns: FFIType.i32 },
+			});
+			for (const descriptor of [0, 1, 2]) system.symbols.close(descriptor);
+			const child = await spawnDarwinVerified({
+				executablePath,
+				executableBytes,
+				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				env: { PATH: "/usr/bin:/bin" },
+				bootstrap: Buffer.from("fixture\\n", "utf8"),
+				bindIdentity: async () => undefined,
+			});
+			if ((await child.exited) !== 0) process.exit(97);
+		`;
+		const runner = Bun.spawn(
+			["/bin/sh", "-c", 'exec 0<&- 1>&- 2>&-; exec "$1" -e "$2"', "closed-stdio", process.execPath, script],
+			{ stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+		);
+		expect(await runner.exited).toBe(0);
+	});
 });

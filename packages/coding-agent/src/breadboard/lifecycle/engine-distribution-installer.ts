@@ -1,7 +1,7 @@
 import { dlopen, FFIType, type Library, ptr, read } from "bun:ffi";
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rm } from "node:fs/promises";
+import { chmod, type FileHandle, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
 	canonicalEngineDistributionManifest,
@@ -172,22 +172,35 @@ async function verifyExistingDistribution(input: {
 		return fail("existing content-addressed engine distribution is partial or contains unknown files");
 	}
 	const manifestPath = join(canonicalDistribution, ENGINE_DISTRIBUTION_MANIFEST_FILENAME);
-	if (!(await readFile(manifestPath)).equals(input.manifestBytes)) {
-		return fail("existing content-addressed engine distribution manifest differs");
+	const manifestSource = await open(manifestPath, READ_FLAGS);
+	try {
+		const manifestMetadata = await manifestSource.stat();
+		if (
+			!manifestMetadata.isFile() ||
+			manifestMetadata.nlink !== 1 ||
+			(manifestMetadata.mode & 0o777) !== 0o400 ||
+			manifestMetadata.size !== input.manifestBytes.byteLength
+		) {
+			return fail("existing content-addressed engine distribution manifest identity differs");
+		}
+		if (!(await manifestSource.readFile()).equals(input.manifestBytes)) {
+			return fail("existing content-addressed engine distribution manifest differs");
+		}
+	} finally {
+		await manifestSource.close();
 	}
 	const bundlePath = join(canonicalDistribution, input.manifest.engine.runtimeBundle.path);
-	const bundleMetadata = await lstat(bundlePath);
-	if (
-		!bundleMetadata.isFile() ||
-		bundleMetadata.isSymbolicLink() ||
-		bundleMetadata.nlink !== 1 ||
-		(bundleMetadata.mode & 0o777) !== 0o400 ||
-		bundleMetadata.size !== input.manifest.engine.runtimeBundle.sizeBytes
-	) {
-		return fail("existing content-addressed engine runtime bundle identity differs");
-	}
 	const source = await open(bundlePath, READ_FLAGS);
 	try {
+		const bundleMetadata = await source.stat();
+		if (
+			!bundleMetadata.isFile() ||
+			bundleMetadata.nlink !== 1 ||
+			(bundleMetadata.mode & 0o777) !== 0o400 ||
+			bundleMetadata.size !== input.manifest.engine.runtimeBundle.sizeBytes
+		) {
+			return fail("existing content-addressed engine runtime bundle identity differs");
+		}
 		const digest = createHash("sha256");
 		const buffer = Buffer.allocUnsafe(IO_CHUNK_BYTES);
 		let position = 0;

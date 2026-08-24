@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash, randomBytes } from "node:crypto";
+import { constants } from "node:fs";
 import { chmod, link, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -21,6 +22,7 @@ import {
 } from "../src/breadboard/lifecycle/installed-engine-manifest";
 
 const PYTHON_VERSION = "3.11.15";
+const UV_VERSION = "0.11.21";
 const PYINSTALLER_VERSION = "6.22.2";
 const ENGINE_INTERFACE_VERSION = "0.3.0";
 const ENGINE_INTERFACE_RANGE = ">=0.1.0 <0.4.0";
@@ -280,44 +282,106 @@ function parseExactJsonObject<T>(text: string, keys: readonly string[], label: s
 	return value as T;
 }
 
-async function writePinnedFile(path: string, content: string): Promise<void> {
+async function verifyPinnedFile(path: string, expected: Buffer): Promise<void> {
+	const input = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(error => {
+		throw new Error(`existing pinned file identity is invalid: ${path}`, { cause: error });
+	});
+	try {
+		const metadata = await input.stat();
+		const currentUid = process.getuid?.();
+		if (
+			!metadata.isFile() ||
+			metadata.nlink !== 1 ||
+			currentUid === undefined ||
+			metadata.uid !== currentUid ||
+			(metadata.mode & 0o777) !== 0o400 ||
+			metadata.size !== expected.byteLength
+		) {
+			throw new Error(`existing pinned file identity is invalid: ${path}`);
+		}
+		if (!(await input.readFile()).equals(expected)) {
+			throw new Error(`existing pinned file differs: ${path}`);
+		}
+	} finally {
+		await input.close();
+	}
+}
+
+export async function writePinnedFile(path: string, content: string): Promise<void> {
 	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	const expected = Buffer.from(content, "utf8");
 	const temporary = `${path}.tmp-${randomBytes(12).toString("hex")}`;
 	const output = await open(temporary, "wx", 0o600);
 	try {
-		await output.writeFile(content, "utf8");
-		await output.sync();
-		await output.chmod(0o400);
+		try {
+			await output.writeFile(expected);
+			await output.sync();
+			await output.chmod(0o400);
+		} finally {
+			await output.close();
+		}
+		try {
+			await link(temporary, path);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
 	} finally {
-		await output.close();
+		await unlink(temporary);
 	}
+	const directory = await open(dirname(path), constants.O_RDONLY);
 	try {
-		await link(temporary, path);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-		if ((await readFile(path, "utf8")) !== content) throw new Error(`existing pinned file differs: ${path}`);
+		await directory.sync();
 	} finally {
-		await unlink(temporary).catch(() => undefined);
+		await directory.close();
 	}
+	await verifyPinnedFile(path, expected);
 }
 
 async function main(options: BuildOptions): Promise<void> {
 	if (process.platform !== "darwin" || process.arch !== "arm64") {
 		throw new Error(`D2 currently supports only darwin-arm64, not ${process.platform}-${process.arch}`);
 	}
+	const uvOutput = (await run(["uv", "--version"], options.backendRoot)).stdout;
+	const actualUv = /^uv ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)/.exec(uvOutput)?.[1];
+	if (actualUv !== UV_VERSION) throw new Error(`engine uv changed: expected ${UV_VERSION}, got ${uvOutput}`);
 	const backend = await readBackendIdentity(options.backendRoot);
 	await verifyDependencyInputs(backend);
 	await mkdir(options.outputRoot, { recursive: true, mode: 0o700 });
+	const outputMetadata = await lstat(options.outputRoot);
+	if (!outputMetadata.isDirectory() || outputMetadata.isSymbolicLink() || (outputMetadata.mode & 0o777) !== 0o700) {
+		throw new Error("engine distribution output root must be one private directory");
+	}
+	const outputRoot = await realpath(options.outputRoot);
 	const workRoot = await mkdtemp(join(tmpdir(), "breadboard-engine-build-"));
 	try {
 		const sourceRoot = await materializeBackendSource(backend, join(workRoot, "backend-source"), workRoot);
 		const wheelhouse = join(workRoot, "wheelhouse");
 		const virtualEnvironment = join(workRoot, "venv");
 		await mkdir(wheelhouse, { mode: 0o700 });
-		await run(["uv", "build", "--wheel", "--out-dir", wheelhouse, sourceRoot], sourceRoot);
+		await run(
+			[
+				"uv",
+				"build",
+				"--wheel",
+				"--out-dir",
+				wheelhouse,
+				"--build-constraints",
+				REQUIREMENTS_LOCK_PATH,
+				"--require-hashes",
+				"--python",
+				PYTHON_VERSION,
+				"--no-python-downloads",
+				"--no-sources",
+				sourceRoot,
+			],
+			sourceRoot,
+		);
 		const wheels = (await readdir(wheelhouse)).filter(name => name.endsWith(".whl"));
 		if (wheels.length !== 1) throw new Error("backend build did not produce exactly one wheel");
-		await run(["uv", "venv", "--python", PYTHON_VERSION, "--no-project", virtualEnvironment], workRoot);
+		await run(
+			["uv", "venv", "--python", PYTHON_VERSION, "--no-python-downloads", "--no-project", virtualEnvironment],
+			workRoot,
+		);
 		const python = join(virtualEnvironment, "bin", "python");
 		await run(
 			["uv", "pip", "install", "--python", python, "--require-hashes", "--no-deps", "-r", REQUIREMENTS_LOCK_PATH],
@@ -472,11 +536,6 @@ async function main(options: BuildOptions): Promise<void> {
 			},
 			signature: { kind: "unsigned-development" },
 		});
-		const installed = await installEngineDistributionAtomically({
-			root: options.outputRoot,
-			manifest,
-			bundlePath: createdBundle.bundle.path,
-		});
 		const manifestBytes = Buffer.from(canonicalEngineDistributionManifest(manifest), "utf8");
 		const trust: EngineDistributionTrustRoot = {
 			schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
@@ -491,8 +550,14 @@ async function main(options: BuildOptions): Promise<void> {
 			signature: { kind: "unsigned-development" },
 		};
 		const distributionName = manifest.distributionId.slice("sha256:".length);
-		const trustPath = join(options.outputRoot, `${distributionName}.trust.json`);
+		const trustPath = join(outputRoot, `${distributionName}.trust.json`);
+		// Publish and validate the detached verifier before exposing the content-addressed distribution.
 		await writePinnedFile(trustPath, `${JSON.stringify(trust)}\n`);
+		const installed = await installEngineDistributionAtomically({
+			root: outputRoot,
+			manifest,
+			bundlePath: createdBundle.bundle.path,
+		});
 		const receipt = {
 			schemaVersion: "bb.engine_distribution_build_receipt.v1",
 			classification: "prepared_not_approved",
@@ -503,6 +568,7 @@ async function main(options: BuildOptions): Promise<void> {
 			backendCommit: backend.commit,
 			backendTree: backend.tree,
 			pythonVersion: actualPython,
+			uvVersion: actualUv,
 			pyinstallerVersion: PYINSTALLER_VERSION,
 			engineSourceSha256,
 			buildRecipeSha256,

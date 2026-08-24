@@ -401,6 +401,7 @@ const SYSTEM_SYMBOLS = {
 		returns: FFIType.i32,
 	},
 	posix_spawn_file_actions_addclose: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+	open: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	pipe: { args: [FFIType.ptr], returns: FFIType.i32 },
 	close: { args: [FFIType.i32], returns: FFIType.i32 },
 	write: { args: [FFIType.i32, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
@@ -518,6 +519,7 @@ class BunDarwinVerifiedSpawnNative implements DarwinVerifiedSpawnNative {
 			"env",
 		);
 		const pipeFds = new Int32Array(2);
+		const reservedFds = new Int32Array(3).fill(-1);
 		const attributes = new BigUint64Array(1);
 		const actions = new BigUint64Array(1);
 		let attributesInitialized = false;
@@ -525,9 +527,27 @@ class BunDarwinVerifiedSpawnNative implements DarwinVerifiedSpawnNative {
 		let pipeOpen = false;
 		let spawned = false;
 		try {
+			for (let index = 0; index < reservedFds.length; index += 1) {
+				const descriptor = Number(this.#libraries.system.symbols.open(ptr(nullPathBytes), O_RDONLY));
+				if (descriptor < 0) {
+					throw new DarwinVerifiedSpawnError(
+						`open(descriptor reservation) failed with errno ${errno(this.#libraries.system)}`,
+					);
+				}
+				reservedFds[index] = descriptor;
+			}
 			if (Number(this.#libraries.system.symbols.pipe(ptr(pipeFds))) !== 0)
 				throw new DarwinVerifiedSpawnError(`pipe failed with errno ${errno(this.#libraries.system)}`);
 			pipeOpen = true;
+			for (let index = 0; index < reservedFds.length; index += 1) {
+				const descriptor = reservedFds[index] as number;
+				if (Number(this.#libraries.system.symbols.close(descriptor)) !== 0) {
+					throw new DarwinVerifiedSpawnError(
+						`close(descriptor reservation) failed with errno ${errno(this.#libraries.system)}`,
+					);
+				}
+				reservedFds[index] = -1;
+			}
 			checkDirectError(
 				"posix_spawnattr_init",
 				Number(this.#libraries.system.symbols.posix_spawnattr_init(ptr(attributes))),
@@ -610,6 +630,7 @@ class BunDarwinVerifiedSpawnNative implements DarwinVerifiedSpawnNative {
 		} finally {
 			if (actionsInitialized) this.#libraries.system.symbols.posix_spawn_file_actions_destroy(ptr(actions));
 			if (attributesInitialized) this.#libraries.system.symbols.posix_spawnattr_destroy(ptr(attributes));
+			for (const descriptor of reservedFds) if (descriptor >= 0) this.#libraries.system.symbols.close(descriptor);
 			if (pipeOpen && pipeFds[0] >= 0) this.#libraries.system.symbols.close(pipeFds[0] as number);
 			if (pipeOpen && !spawned && pipeFds[1] >= 0) this.#libraries.system.symbols.close(pipeFds[1] as number);
 		}

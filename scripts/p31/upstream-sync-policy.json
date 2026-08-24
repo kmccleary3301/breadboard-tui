@@ -12,7 +12,7 @@
     "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 180,
+    "maxTotalChangedPaths": 183,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
@@ -53,6 +53,10 @@
         "packages/natives/native/loader-state.d.ts",
         "packages/natives/test/issue-823-repro.test.ts",
         "packages/coding-agent/scripts/build-binary.ts",
+        "packages/coding-agent/scripts/build-engine-distribution.ts",
+        "packages/coding-agent/scripts/build-engine-distribution.test.ts",
+        "packages/coding-agent/scripts/engine-build-requirements.darwin-arm64-py311.txt",
+        "packages/coding-agent/scripts/engine-build-requirements.in",
         "scripts/generate-third-party-notices.ts",
         "scripts/generate-third-party-notices.test.ts",
         "scripts/inspect-upstream-sync.ts",
@@ -299,6 +303,8 @@
       "packages/coding-agent/src/product-entrypoint.test.ts",
       "packages/utils/src/dirs.ts",
       "packages/coding-agent/scripts/build-binary.ts",
+      "packages/coding-agent/scripts/build-engine-distribution.ts",
+      "packages/coding-agent/scripts/build-engine-distribution.test.ts",
       "packages/coding-agent/test/breadboard/**",
       "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
       "scripts/audit-fork-delta.ts",
