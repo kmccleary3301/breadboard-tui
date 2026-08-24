@@ -152,19 +152,21 @@ async function verifyExistingDistribution(input: {
 	readonly manifest: EngineDistributionManifest;
 }): Promise<void> {
 	const canonicalRoot = await realpath(input.root);
-	const canonicalDistribution = await realpath(input.distributionPath).catch(error =>
+	const distributionMetadata = await lstat(input.distributionPath).catch(error =>
 		fail("existing content-addressed engine distribution is unavailable", error),
 	);
-	if (!containedChild(canonicalRoot, canonicalDistribution)) {
-		return fail("existing content-addressed engine distribution escapes its root");
-	}
-	const distributionMetadata = await lstat(canonicalDistribution);
 	if (
 		!distributionMetadata.isDirectory() ||
 		distributionMetadata.isSymbolicLink() ||
 		(distributionMetadata.mode & 0o777) !== 0o500
 	) {
 		return fail("existing content-addressed engine distribution directory is invalid");
+	}
+	const canonicalDistribution = await realpath(input.distributionPath).catch(error =>
+		fail("existing content-addressed engine distribution is unavailable", error),
+	);
+	if (!containedChild(canonicalRoot, canonicalDistribution)) {
+		return fail("existing content-addressed engine distribution escapes its root");
 	}
 	const expectedNames = [ENGINE_DISTRIBUTION_MANIFEST_FILENAME, input.manifest.engine.runtimeBundle.path].sort();
 	const actualNames = (await readdir(canonicalDistribution)).sort();

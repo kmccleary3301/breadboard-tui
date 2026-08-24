@@ -22,6 +22,7 @@ import {
 } from "../src/breadboard/lifecycle/installed-engine-manifest";
 
 const PYTHON_VERSION = "3.11.15";
+const BUN_VERSION = "1.3.14";
 const UV_VERSION = "0.11.21";
 const PYINSTALLER_VERSION = "6.22.2";
 const ENGINE_INTERFACE_VERSION = "0.3.0";
@@ -41,6 +42,21 @@ const COLLECT_PACKAGES = [
 ] as const;
 const REQUIREMENTS_INPUT_PATH = join(import.meta.dir, "engine-build-requirements.in");
 const REQUIREMENTS_LOCK_PATH = join(import.meta.dir, "engine-build-requirements.darwin-arm64-py311.txt");
+const BUILD_RECIPE_SOURCE_PATHS = [
+	["scripts/build-engine-distribution.ts", import.meta.path],
+	[
+		"src/breadboard/lifecycle/engine-distribution-installer.ts",
+		join(import.meta.dir, "../src/breadboard/lifecycle/engine-distribution-installer.ts"),
+	],
+	[
+		"src/breadboard/lifecycle/engine-runtime-bundle.ts",
+		join(import.meta.dir, "../src/breadboard/lifecycle/engine-runtime-bundle.ts"),
+	],
+	[
+		"src/breadboard/lifecycle/installed-engine-manifest.ts",
+		join(import.meta.dir, "../src/breadboard/lifecycle/installed-engine-manifest.ts"),
+	],
+] as const;
 const BUILD_PROVENANCE_FILENAME = "engine-build-provenance.v1.json";
 const BUILD_PROVENANCE_SCHEMA = "bb.engine_build_provenance.v1";
 
@@ -49,6 +65,11 @@ interface BuildOptions {
 	readonly outputRoot: string;
 	readonly productVersion: string;
 	readonly keepWork: boolean;
+}
+
+interface RecipeInput {
+	readonly label: string;
+	readonly bytes: Uint8Array;
 }
 
 interface CommandResult {
@@ -249,18 +270,20 @@ async function normalizeInstalledMetadata(sitePackages: string): Promise<void> {
 	}
 }
 
-function recipeSha256(
-	scriptBytes: Uint8Array,
-	inputBytes: Uint8Array,
-	lockBytes: Uint8Array,
-): EngineDistributionSha256 {
+function recipeSha256(inputs: readonly RecipeInput[]): EngineDistributionSha256 {
 	const digest = createHash("sha256");
-	digest.update("breadboard-engine-build-recipe-v1\0");
-	for (const bytes of [scriptBytes, inputBytes, lockBytes, Buffer.from(ENGINE_ENTRY_SOURCE, "utf8")]) {
-		const length = Buffer.allocUnsafe(8);
-		length.writeBigUInt64BE(BigInt(bytes.byteLength));
-		digest.update(length);
-		digest.update(bytes);
+	digest.update("breadboard-engine-build-recipe-v2\0");
+	const count = Buffer.allocUnsafe(4);
+	count.writeUInt32BE(inputs.length);
+	digest.update(count);
+	for (const input of inputs) {
+		const label = Buffer.from(input.label, "utf8");
+		for (const bytes of [label, input.bytes]) {
+			const length = Buffer.allocUnsafe(8);
+			length.writeBigUInt64BE(BigInt(bytes.byteLength));
+			digest.update(length);
+			digest.update(bytes);
+		}
 	}
 	return `sha256:${digest.digest("hex")}`;
 }
@@ -341,6 +364,7 @@ async function main(options: BuildOptions): Promise<void> {
 	if (process.platform !== "darwin" || process.arch !== "arm64") {
 		throw new Error(`D2 currently supports only darwin-arm64, not ${process.platform}-${process.arch}`);
 	}
+	if (Bun.version !== BUN_VERSION) throw new Error(`engine Bun changed: expected ${BUN_VERSION}, got ${Bun.version}`);
 	const uvOutput = (await run(["uv", "--version"], options.backendRoot)).stdout;
 	const actualUv = /^uv ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)/.exec(uvOutput)?.[1];
 	if (actualUv !== UV_VERSION) throw new Error(`engine uv changed: expected ${UV_VERSION}, got ${uvOutput}`);
@@ -425,11 +449,24 @@ async function main(options: BuildOptions): Promise<void> {
 		if (!/^sha256:[0-9a-f]{64}$/.test(engineSourceSha256))
 			throw new Error("installed engine source digest is invalid");
 		const dependencyLockSha256 = await sha256File(REQUIREMENTS_LOCK_PATH);
-		const buildRecipeSha256 = recipeSha256(
-			new Uint8Array(await Bun.file(import.meta.path).arrayBuffer()),
-			new Uint8Array(await Bun.file(REQUIREMENTS_INPUT_PATH).arrayBuffer()),
-			new Uint8Array(await Bun.file(REQUIREMENTS_LOCK_PATH).arrayBuffer()),
+		const recipeSources = await Promise.all(
+			BUILD_RECIPE_SOURCE_PATHS.map(async ([label, path]) => ({
+				label,
+				bytes: new Uint8Array(await Bun.file(path).arrayBuffer()),
+			})),
 		);
+		const buildRecipeSha256 = recipeSha256([
+			...recipeSources,
+			{
+				label: "scripts/engine-build-requirements.in",
+				bytes: new Uint8Array(await Bun.file(REQUIREMENTS_INPUT_PATH).arrayBuffer()),
+			},
+			{
+				label: "scripts/engine-build-requirements.darwin-arm64-py311.txt",
+				bytes: new Uint8Array(await Bun.file(REQUIREMENTS_LOCK_PATH).arrayBuffer()),
+			},
+			{ label: "engine_entry.py", bytes: Buffer.from(ENGINE_ENTRY_SOURCE, "utf8") },
+		]);
 		const buildProvenance = {
 			schemaVersion: BUILD_PROVENANCE_SCHEMA,
 			sourceRepository: backend.repository,
@@ -568,6 +605,7 @@ async function main(options: BuildOptions): Promise<void> {
 			backendCommit: backend.commit,
 			backendTree: backend.tree,
 			pythonVersion: actualPython,
+			bunVersion: BUN_VERSION,
 			uvVersion: actualUv,
 			pyinstallerVersion: PYINSTALLER_VERSION,
 			engineSourceSha256,

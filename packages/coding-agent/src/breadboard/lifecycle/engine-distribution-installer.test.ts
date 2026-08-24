@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EngineDistributionInstallError, installEngineDistributionAtomically } from "./engine-distribution-installer";
@@ -192,6 +192,29 @@ describe("engine distribution installer", () => {
 			).rejects.toBeInstanceOf(EngineDistributionInstallError);
 			expect((await readdir(installationRoot)).some(name => name.startsWith(".stage-"))).toBe(false);
 		}
+	});
+
+	test("rejects a symlink at the content-addressed distribution path", async () => {
+		const tempRoot = await temporaryRoot("breadboard-engine-install-directory-link-");
+		const installationRoot = join(tempRoot, "installed");
+		const source = await createDistribution(tempRoot, "0.1.5", "7");
+		const installed = await installEngineDistributionAtomically({
+			root: installationRoot,
+			manifest: source.manifest,
+			bundlePath: source.sourceBundlePath,
+		});
+		const movedDistribution = join(installationRoot, ".symlink-target");
+		await rename(installed.distributionPath, movedDistribution);
+		await symlink(movedDistribution, installed.distributionPath);
+
+		await expect(
+			installEngineDistributionAtomically({
+				root: installationRoot,
+				manifest: source.manifest,
+				bundlePath: source.sourceBundlePath,
+			}),
+		).rejects.toBeInstanceOf(EngineDistributionInstallError);
+		expect((await readdir(installationRoot)).some(name => name.startsWith(".stage-"))).toBe(false);
 	});
 
 	test("refuses to replace a tampered or partial content-addressed object", async () => {
