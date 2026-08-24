@@ -449,10 +449,10 @@ describe("spawnDarwinVerified", () => {
 		const executableBytes = thinArm64MachO([{ slot: 0, bytes: codeDirectory(2, 0x17) }]);
 		const expected = parseDarwinArm64CodeIdentity(executableBytes);
 		const events: string[] = [];
-		const bootstrap = Buffer.alloc(33, 0x5a);
+		const bootstrap = Buffer.alloc(44, 0x5a);
 		await expect(
 			spawnDarwinVerified(spawnOptions(executableBytes, bootstrap, scenarioNative(expected, events), events)),
-		).rejects.toThrow("1..32 bytes");
+		).rejects.toThrow("1..43 bytes");
 		expect(events).toEqual([]);
 		expect(bootstrap.every(byte => byte === 0)).toBe(true);
 	});

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
+import { ENGINE_RUNTIME_BUNDLE_SCHEMA } from "./engine-runtime-bundle";
 import {
 	canonicalEngineDistributionManifest,
 	createEngineDistributionManifest,
@@ -18,7 +19,7 @@ import {
 	installedEngineManifestPath,
 	interfaceRangeContains,
 	parseTrustedEngineDistributionManifest,
-	resolveInstalledEngineExecutablePath,
+	resolveInstalledEngineBundlePath,
 } from "./installed-engine-manifest";
 
 function sha256(value: string | Uint8Array): EngineDistributionSha256 {
@@ -32,6 +33,12 @@ const payload: EngineDistributionManifestPayload = {
 	pathStrategy: ENGINE_DISTRIBUTION_PATH_STRATEGY,
 	target: { platform: "darwin", architecture: "arm64" },
 	engine: {
+		runtimeBundle: {
+			schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
+			path: "breadboard-engine-runtime.v1.bundle",
+			sizeBytes: 125_000_000,
+			sha256: sha256("engine runtime bundle"),
+		},
 		executablePath: "payload/venv/bin/python",
 		argv: ["-I", "-m", "breadboard_engine.api.cli_bridge.server"],
 		executableSizeBytes: 42_000_000,
@@ -82,7 +89,7 @@ const manifest = createEngineDistributionManifest(payload);
 const canonical = canonicalEngineDistributionManifest(manifest);
 const trust = Object.freeze({
 	schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
-	expectedManifestSha256: "sha256:9488a963d57ceffd978b22e611a1c513757264137ec0bea094441a8fb3342692",
+	expectedManifestSha256: "sha256:298457bd3d30e46be5243d1ff72122a774b07771fc971a101e9ec8521a1b38dc",
 	productVersion: "0.1.0-rc.3",
 	target: { platform: "darwin", architecture: "arm64" },
 	interfaceRange: ">=0.1.0 <0.4.0",
@@ -270,7 +277,7 @@ describe("installed engine distribution contract", () => {
 		const releaseRaw = canonicalEngineDistributionManifest(releaseManifest);
 		const releaseTrust: EngineDistributionTrustRoot = {
 			...trust,
-			expectedManifestSha256: "sha256:a17290014d05355658b23ee412458c7e617daa5e6b608743dc85b33ef3d10148",
+			expectedManifestSha256: "sha256:1a19b3ced0bb4a321a726b8fa4194b366793273365d2999d98ce49db0220dda4",
 			signature: {
 				kind: "release-envelope",
 				keyId: "breadboard-release-1",
@@ -300,32 +307,32 @@ describe("installed engine distribution contract", () => {
 		);
 	});
 
-	test("resolves only a canonical executable contained by the manifest directory", () => {
+	test("resolves only a canonical runtime bundle contained by the manifest directory", () => {
 		const manifestPath = resolve("bundle", "engine", ENGINE_DISTRIBUTION_MANIFEST_FILENAME);
 		const root = dirname(manifestPath);
-		const expected = resolve(root, manifest.engine.executablePath);
-		expect(resolveInstalledEngineExecutablePath(manifestPath, manifest, path => path)).toBe(expected);
+		const expected = resolve(root, manifest.engine.runtimeBundle.path);
+		expect(resolveInstalledEngineBundlePath(manifestPath, manifest, path => path)).toBe(expected);
 
 		const escaped = discoveryError(() =>
-			resolveInstalledEngineExecutablePath(manifestPath, manifest, path =>
-				path === root ? path : resolve(root, "..", "outside", "python"),
+			resolveInstalledEngineBundlePath(manifestPath, manifest, path =>
+				path === root ? path : resolve(root, "..", "outside", "engine.bundle"),
 			),
 		);
 		expect(escaped.code).toBe("engine_artifact_mismatch");
 		expect(
-			discoveryError(() => resolveInstalledEngineExecutablePath(manifestPath, manifest, () => "relative")).code,
+			discoveryError(() => resolveInstalledEngineBundlePath(manifestPath, manifest, () => "relative")).code,
 		).toBe("engine_artifact_mismatch");
 
 		let calls = 0;
 		const unavailable = discoveryError(() =>
-			resolveInstalledEngineExecutablePath(manifestPath, manifest, path => {
+			resolveInstalledEngineBundlePath(manifestPath, manifest, path => {
 				calls++;
 				if (calls === 1) return path;
 				throw new Error("missing");
 			}),
 		);
 		expect(unavailable.code).toBe("engine_artifact_unavailable");
-		expect(discoveryError(() => resolveInstalledEngineExecutablePath("relative/manifest.json", manifest)).code).toBe(
+		expect(discoveryError(() => resolveInstalledEngineBundlePath("relative/manifest.json", manifest)).code).toBe(
 			"engine_manifest_invalid",
 		);
 	});

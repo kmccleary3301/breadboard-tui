@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { extname, isAbsolute, resolve } from "node:path";
 import { JSONC, YAML } from "bun";
+import {
+	ENGINE_RUNTIME_BUNDLE_SCHEMA,
+	type EngineRuntimeBundleReference,
+	parseEngineRuntimeBundleRelativePath,
+} from "./engine-runtime-bundle";
 
 export const BREADBOARD_ENGINE_MODES = ["local-owned", "local-external", "remote", "off"] as const;
 export type BreadboardEngineMode = (typeof BREADBOARD_ENGINE_MODES)[number];
@@ -17,14 +22,27 @@ export type BreadboardTls =
 	| { readonly kind: "local-loopback" }
 	| { readonly kind: "system-trust"; readonly spkiPin?: string };
 
-export interface EngineArtifact {
-	readonly executablePath: string;
+interface EngineArtifactIdentity {
 	readonly argv: readonly string[];
 	readonly argvSha256: `sha256:${string}`;
 	readonly executableSha256: `sha256:${string}`;
 	readonly engineSourceSha256: `sha256:${string}`;
 	readonly servedBackendCommit: string;
 }
+
+export interface DirectEngineArtifact extends EngineArtifactIdentity {
+	readonly kind: "direct-executable";
+	readonly executablePath: string;
+}
+
+export interface BundledEngineArtifact extends EngineArtifactIdentity {
+	readonly kind: "runtime-bundle";
+	readonly runtimeBundle: EngineRuntimeBundleReference;
+	readonly executablePath: string;
+	readonly executableSizeBytes: number;
+}
+
+export type EngineArtifact = DirectEngineArtifact | BundledEngineArtifact;
 
 export interface BreadboardRunConfig {
 	readonly mode: BreadboardEngineMode;
@@ -273,11 +291,95 @@ export function executablePathSha256(canonicalPath: string): `sha256:${string}` 
 	return `sha256:${createHash("sha256").update("breadboard-engine-executable-path-v1\0").update(canonicalPath).digest("hex")}`;
 }
 
+export function engineArtifactLocationSha256(artifact: EngineArtifact): `sha256:${string}` {
+	if (artifact.kind === "direct-executable") return executablePathSha256(artifact.executablePath);
+	return `sha256:${createHash("sha256")
+		.update("breadboard-engine-runtime-bundle-location-v1\0")
+		.update(
+			JSON.stringify({
+				bundlePath: artifact.runtimeBundle.path,
+				bundleSha256: artifact.runtimeBundle.sha256,
+				bundleSizeBytes: artifact.runtimeBundle.sizeBytes,
+				executablePath: artifact.executablePath,
+			}),
+		)
+		.digest("hex")}`;
+}
+
 function parseArtifact(value: unknown): EngineArtifact | undefined {
 	if (value === undefined) return undefined;
-	if (typeof value !== "object" || value === null || Array.isArray(value))
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		fail("invalid_artifact", "engineArtifact", "engine artifact must be an object");
+	}
 	const record = value as Record<string, unknown>;
+	if (!Array.isArray(record.argv) || record.argv.some(arg => typeof arg !== "string" || arg.includes("\0"))) {
+		fail("invalid_artifact", "engineArtifact", "engine artifact argv must be an array of strings");
+	}
+	if (typeof record.executableSha256 !== "string" || !SHA256.test(record.executableSha256)) {
+		fail("invalid_artifact", "engineArtifact", "engine executable digest is invalid");
+	}
+	if (typeof record.engineSourceSha256 !== "string" || !SHA256.test(record.engineSourceSha256)) {
+		fail("invalid_artifact", "engineArtifact", "engine source digest is invalid");
+	}
+	if (typeof record.servedBackendCommit !== "string" || !COMMIT_ID.test(record.servedBackendCommit)) {
+		fail("invalid_artifact", "engineArtifact", "served backend commit is invalid");
+	}
+	const argv = Object.freeze([...(record.argv as string[])]);
+	const argvSha256 =
+		`sha256:${createHash("sha256").update("breadboard-engine-argv-v1\0").update(JSON.stringify(argv)).digest("hex")}` as const;
+	const identity = {
+		argv,
+		argvSha256,
+		executableSha256: record.executableSha256 as `sha256:${string}`,
+		engineSourceSha256: record.engineSourceSha256 as `sha256:${string}`,
+		servedBackendCommit: record.servedBackendCommit,
+	};
+	if (record.kind === "runtime-bundle") {
+		const rawBundle = record.runtimeBundle;
+		if (typeof rawBundle !== "object" || rawBundle === null || Array.isArray(rawBundle)) {
+			fail("invalid_artifact", "engineArtifact", "engine runtime bundle identity must be an object");
+		}
+		const bundle = rawBundle as Record<string, unknown>;
+		if (
+			Object.keys(bundle).sort().join("\0") !== ["path", "schemaVersion", "sha256", "sizeBytes"].sort().join("\0") ||
+			bundle.schemaVersion !== ENGINE_RUNTIME_BUNDLE_SCHEMA ||
+			typeof bundle.path !== "string" ||
+			!isAbsolute(bundle.path) ||
+			bundle.path.includes("\0") ||
+			!Number.isSafeInteger(bundle.sizeBytes) ||
+			(bundle.sizeBytes as number) <= 0 ||
+			typeof bundle.sha256 !== "string" ||
+			!SHA256.test(bundle.sha256)
+		) {
+			fail("invalid_artifact", "engineArtifact", "engine runtime bundle identity is invalid");
+		}
+		let bundlePath: string;
+		let executablePath: string;
+		try {
+			bundlePath = realpathSync(bundle.path);
+			executablePath = parseEngineRuntimeBundleRelativePath(record.executablePath);
+		} catch {
+			fail("invalid_artifact", "engineArtifact", "engine runtime bundle path cannot be canonicalized");
+		}
+		if (!Number.isSafeInteger(record.executableSizeBytes) || (record.executableSizeBytes as number) <= 0) {
+			fail("invalid_artifact", "engineArtifact", "engine executable size is invalid");
+		}
+		return Object.freeze({
+			kind: "runtime-bundle",
+			runtimeBundle: Object.freeze({
+				schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
+				path: bundlePath,
+				sizeBytes: bundle.sizeBytes as number,
+				sha256: bundle.sha256 as `sha256:${string}`,
+			}),
+			executablePath,
+			executableSizeBytes: record.executableSizeBytes as number,
+			...identity,
+		});
+	}
+	if (record.kind !== undefined && record.kind !== "direct-executable") {
+		fail("invalid_artifact", "engineArtifact", "engine artifact kind is invalid");
+	}
 	if (
 		typeof record.executablePath !== "string" ||
 		!isAbsolute(record.executablePath) ||
@@ -285,31 +387,16 @@ function parseArtifact(value: unknown): EngineArtifact | undefined {
 	) {
 		fail("invalid_artifact", "engineArtifact", "engine artifact executable path must be absolute");
 	}
-	if (!Array.isArray(record.argv) || record.argv.some(arg => typeof arg !== "string" || arg.includes("\0"))) {
-		fail("invalid_artifact", "engineArtifact", "engine artifact argv must be an array of strings");
-	}
-	if (typeof record.executableSha256 !== "string" || !SHA256.test(record.executableSha256))
-		fail("invalid_artifact", "engineArtifact", "engine executable digest is invalid");
-	if (typeof record.engineSourceSha256 !== "string" || !SHA256.test(record.engineSourceSha256))
-		fail("invalid_artifact", "engineArtifact", "engine source digest is invalid");
-	if (typeof record.servedBackendCommit !== "string" || !COMMIT_ID.test(record.servedBackendCommit))
-		fail("invalid_artifact", "engineArtifact", "served backend commit is invalid");
 	let executablePath: string;
 	try {
 		executablePath = realpathSync(record.executablePath);
 	} catch {
 		fail("invalid_artifact", "engineArtifact", "engine artifact executable path cannot be canonicalized");
 	}
-	const argv = Object.freeze([...(record.argv as string[])]);
-	const argvSha256 =
-		`sha256:${createHash("sha256").update("breadboard-engine-argv-v1\0").update(JSON.stringify(argv)).digest("hex")}` as const;
 	return Object.freeze({
+		kind: "direct-executable",
 		executablePath,
-		argv,
-		argvSha256,
-		executableSha256: record.executableSha256 as `sha256:${string}`,
-		engineSourceSha256: record.engineSourceSha256 as `sha256:${string}`,
-		servedBackendCommit: record.servedBackendCommit,
+		...identity,
 	});
 }
 
@@ -538,7 +625,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 			artifactChoice.value === undefined
 				? undefined
 				: {
-						executablePathSha256: executablePathSha256(artifactChoice.value.executablePath),
+						artifactLocationSha256: engineArtifactLocationSha256(artifactChoice.value),
 						argvSha256: artifactChoice.value.argvSha256,
 						executableSha256: artifactChoice.value.executableSha256,
 						engineSourceSha256: artifactChoice.value.engineSourceSha256,

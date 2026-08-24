@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { ENGINE_RUNTIME_BUNDLE_SCHEMA } from "./engine-runtime-bundle";
 import type { EngineArtifact } from "./run-config";
 import {
 	BreadboardRunConfigError,
+	engineArtifactLocationSha256,
 	loadSelectedBreadboardConfig,
 	parseSelectedBreadboardConfig,
 	resolveBreadboardRunConfig,
@@ -10,6 +13,7 @@ import {
 
 const workspaceId: `workspace:v1:sha256:${string}` = `workspace:v1:sha256:${"a".repeat(64)}`;
 const artifact: EngineArtifact = {
+	kind: "direct-executable",
 	executablePath: "/usr/bin/false",
 	argv: ["--serve"],
 	argvSha256: "sha256:b76470afe32d50ae8194866d39a872e4dc846e89ac409f390884db522242a6b4",
@@ -190,6 +194,58 @@ describe("resolveBreadboardRunConfig", () => {
 		expect(config.engineArtifact).toEqual(artifact);
 		expect(Object.isFrozen(config)).toBe(true);
 		expect(Object.isFrozen(config.engineArtifact?.argv)).toBe(true);
+	});
+
+	test("binds one canonical runtime bundle location without weakening direct artifact overrides", async () => {
+		using tempDir = TempDir.createSync("@breadboard-run-config-bundle-");
+		const bundlePath = `${tempDir.path()}/engine.bundle`;
+		await Bun.write(bundlePath, "bundle bytes");
+		const bundledInput = {
+			...artifact,
+			kind: "runtime-bundle",
+			executablePath: "breadboard-engine/breadboard-engine",
+			executableSizeBytes: 42,
+			runtimeBundle: {
+				schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
+				path: bundlePath,
+				sizeBytes: 12,
+				sha256: `sha256:${"e".repeat(64)}`,
+			},
+		};
+		const config = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig: { engineArtifact: bundledInput },
+		});
+		expect(config.engineArtifact).toMatchObject({
+			kind: "runtime-bundle",
+			executablePath: "breadboard-engine/breadboard-engine",
+			runtimeBundle: { path: realpathSync(bundlePath) },
+		});
+		expect(Object.isFrozen(config.engineArtifact)).toBe(true);
+		expect(
+			Object.isFrozen(config.engineArtifact?.kind === "runtime-bundle" && config.engineArtifact.runtimeBundle),
+		).toBe(true);
+		const changed = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig: {
+				engineArtifact: {
+					...bundledInput,
+					runtimeBundle: { ...bundledInput.runtimeBundle, sha256: `sha256:${"f".repeat(64)}` },
+				},
+			},
+		});
+		expect(engineArtifactLocationSha256(config.engineArtifact as EngineArtifact)).not.toBe(
+			engineArtifactLocationSha256(changed.engineArtifact as EngineArtifact),
+		);
+		expect(config.configDigest).not.toBe(changed.configDigest);
+		expect(
+			configError(() =>
+				resolveBreadboardRunConfig({
+					...baseInput,
+					selectedConfig: { engineArtifact: { ...bundledInput, executablePath: "../escape" } },
+				}),
+			).code,
+		).toBe("invalid_artifact");
 	});
 
 	test("rejects aliases, URL credentials, conflicts, and wrong field types", () => {

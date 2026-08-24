@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { ENGINE_RUNTIME_BUNDLE_SCHEMA, parseEngineRuntimeBundleRelativePath } from "./engine-runtime-bundle";
 
 export const ENGINE_DISTRIBUTION_MANIFEST_SCHEMA = "bb.engine_distribution_manifest.v1" as const;
 export const ENGINE_DISTRIBUTION_TRUST_SCHEMA = "bb.engine_distribution_trust.v1" as const;
-export const ENGINE_DISTRIBUTION_PATH_STRATEGY = "manifest-relative-v1" as const;
+export const ENGINE_DISTRIBUTION_PATH_STRATEGY = "manifest-bundle-relative-v1" as const;
 export const ENGINE_DISTRIBUTION_MANIFEST_FILENAME = "breadboard-engine-manifest.v1.json" as const;
 export const ENGINE_DISTRIBUTION_DIRECTORY = "engine" as const;
 /** Explicit operator configuration always wins; discovery is a product-only final fallback. */
@@ -40,7 +41,15 @@ export const INSTALLED_ENGINE_SUPPORTED_TARGET = Object.freeze({
 	architecture: "arm64",
 } as const);
 
+export interface EngineDistributionRuntimeBundle {
+	readonly schemaVersion: typeof ENGINE_RUNTIME_BUNDLE_SCHEMA;
+	readonly path: string;
+	readonly sizeBytes: number;
+	readonly sha256: EngineDistributionSha256;
+}
+
 export interface EngineDistributionEngine {
+	readonly runtimeBundle: EngineDistributionRuntimeBundle;
 	readonly executablePath: string;
 	readonly argv: readonly string[];
 	readonly executableSizeBytes: number;
@@ -246,8 +255,29 @@ function decodeTarget(value: unknown): EngineDistributionTarget {
 	return Object.freeze({ platform: record.platform, architecture: record.architecture });
 }
 
+function expectRuntimeBundlePath(value: unknown): string {
+	try {
+		return parseEngineRuntimeBundleRelativePath(value);
+	} catch {
+		return fail("engine_manifest_invalid");
+	}
+}
+
+function decodeRuntimeBundle(value: unknown): EngineDistributionRuntimeBundle {
+	const record = expectRecord(value, ["schemaVersion", "path", "sizeBytes", "sha256"]);
+	if (record.schemaVersion !== ENGINE_RUNTIME_BUNDLE_SCHEMA) fail("engine_manifest_invalid");
+	const path = expectRuntimeBundlePath(record.path);
+	return Object.freeze({
+		schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
+		path,
+		sizeBytes: expectPositiveInteger(record.sizeBytes),
+		sha256: expectSha256(record.sha256),
+	});
+}
+
 function decodeEngine(value: unknown): EngineDistributionEngine {
 	const record = expectRecord(value, [
+		"runtimeBundle",
 		"executablePath",
 		"argv",
 		"executableSizeBytes",
@@ -262,7 +292,8 @@ function decodeEngine(value: unknown): EngineDistributionEngine {
 	const interfaceRange = expectInterfaceRange(record.interfaceRange);
 	if (!interfaceRangeContains(interfaceRange, interfaceVersion)) fail("engine_interface_mismatch");
 	return Object.freeze({
-		executablePath: expectRelativePath(record.executablePath),
+		runtimeBundle: decodeRuntimeBundle(record.runtimeBundle),
+		executablePath: expectRuntimeBundlePath(record.executablePath),
 		argv: expectArgv(record.argv),
 		executableSizeBytes: expectPositiveInteger(record.executableSizeBytes),
 		executableSha256: expectSha256(record.executableSha256),
@@ -588,26 +619,26 @@ export function installedEngineManifestPath(
 	return resolve(dirname(executable), ENGINE_DISTRIBUTION_DIRECTORY, ENGINE_DISTRIBUTION_MANIFEST_FILENAME);
 }
 
-export function resolveInstalledEngineExecutablePath(
+export function resolveInstalledEngineBundlePath(
 	manifestPath: string,
 	manifest: EngineDistributionManifest,
 	canonicalize: (path: string) => string = realpathSync,
 ): string {
 	if (!isAbsolute(manifestPath) || manifestPath.includes("\0")) fail("engine_manifest_invalid");
 	let root: string;
-	let executable: string;
+	let bundle: string;
 	try {
 		root = canonicalize(dirname(manifestPath));
-		executable = canonicalize(resolve(root, manifest.engine.executablePath));
+		bundle = canonicalize(resolve(root, manifest.engine.runtimeBundle.path));
 	} catch {
 		return fail("engine_artifact_unavailable");
 	}
-	if (!isAbsolute(root) || !isAbsolute(executable) || root.includes("\0") || executable.includes("\0")) {
+	if (!isAbsolute(root) || !isAbsolute(bundle) || root.includes("\0") || bundle.includes("\0")) {
 		fail("engine_artifact_mismatch");
 	}
-	const child = relative(root, executable);
+	const child = relative(root, bundle);
 	if (child === "" || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
 		fail("engine_artifact_mismatch");
 	}
-	return executable;
+	return bundle;
 }

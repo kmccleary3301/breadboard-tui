@@ -34,6 +34,7 @@
   "scripts": {
     "build": "bun run gate:distribution && bun scripts/build-binary.ts",
     "build:bb": "bun run gate:distribution && BUILD_PRODUCT=bb bun scripts/build-binary.ts",
+    "build:engine": "bun scripts/build-engine-distribution.ts",
     "build:omp": "bun run gate:distribution && BUILD_PRODUCT=omp bun scripts/build-binary.ts",
     "check": "biome check . && bun run check:types",
     "check:types": "tsgo -p tsconfig.json --noEmit",

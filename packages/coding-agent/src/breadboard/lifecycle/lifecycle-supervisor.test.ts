@@ -42,6 +42,7 @@ const executableSha256 = `sha256:${"a".repeat(64)}` as const;
 const engineSourceSha256 = `sha256:${"b".repeat(64)}` as const;
 const backendCommit = "c".repeat(40);
 const artifact: EngineArtifact = {
+	kind: "direct-executable",
 	executablePath: "/usr/bin/false",
 	argv: ["--serve"],
 	argvSha256: "sha256:b76470afe32d50ae8194866d39a872e4dc846e89ac409f390884db522242a6b4",
@@ -159,7 +160,7 @@ function boundClient(
 			if (
 				!("bootstrapCredential" in input) ||
 				!ArrayBuffer.isView(input.bootstrapCredential) ||
-				input.bootstrapCredential.byteLength !== 32
+				input.bootstrapCredential.byteLength !== 43
 			)
 				throw new Error("bootstrap rotation missing");
 			return { result: "acquired", ownerGeneration: 1 } as never;
@@ -508,6 +509,18 @@ describe("LifecycleSupervisor mode authority", () => {
 				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+			});
+			expect(
+				lifecycleChildEnvironment(
+					"launch_environment_abcdefghijklmnopqrstuvwxyz",
+					"/private/engine/runtime-records",
+				),
+			).toEqual({
+				PATH: "/usr/bin:/bin",
+				BREADBOARD_LEGACY_ROUTES: "1",
+				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
+				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				BREADBOARD_RUNTIME_RECORD_ROOT: "/private/engine/runtime-records",
 			});
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
 				"BREADBOARD_HOSTILE_PARENT_SECRET",

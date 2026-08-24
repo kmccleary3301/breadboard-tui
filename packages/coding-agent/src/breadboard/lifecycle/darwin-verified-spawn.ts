@@ -14,6 +14,8 @@ const CSSLOT_ALTERNATE_CODEDIRECTORIES = 0x1000;
 const CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT = 0x1005;
 const POSIX_SPAWN_START_SUSPENDED = 0x0080;
 const POSIX_SPAWN_CLOEXEC_DEFAULT = 0x4000;
+const O_RDONLY = 0;
+const O_WRONLY = 1;
 const CS_OPS_CDHASH_WITH_INFO = 18;
 const SIGKILL = 9;
 const SIGCONT = 19;
@@ -24,7 +26,7 @@ const ECHILD = 10;
 const PROC_PIDTBSDINFO = 3;
 const PROC_PIDTBSDINFO_SIZE = 136;
 const BOOTSTRAP_FD = 3;
-const MAX_BOOTSTRAP_BYTES = 32;
+const MAX_BOOTSTRAP_BYTES = 43;
 const MAX_ARGUMENTS = 64;
 const MAX_ENVIRONMENT_ENTRIES = 64;
 const MAX_C_STRING_BYTES = 64 * 1024;
@@ -65,7 +67,7 @@ export interface DarwinVerifiedSpawnOptions {
 	readonly argv: readonly string[];
 	/** Complete child environment. The parent environment is never inherited. */
 	readonly env: Readonly<Record<string, string>>;
-	/** At most 32 bytes. This buffer is zeroed on every return path. */
+	/** At most one 43-byte base64url credential. This buffer is zeroed on every return path. */
 	readonly bootstrap: Uint8Array;
 	readonly bindIdentity: (pid: number, startToken: string) => Promise<void>;
 	readonly native?: DarwinVerifiedSpawnNative;
@@ -394,6 +396,10 @@ const SYSTEM_SYMBOLS = {
 	posix_spawn_file_actions_init: { args: [FFIType.ptr], returns: FFIType.i32 },
 	posix_spawn_file_actions_destroy: { args: [FFIType.ptr], returns: FFIType.i32 },
 	posix_spawn_file_actions_adddup2: { args: [FFIType.ptr, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+	posix_spawn_file_actions_addopen: {
+		args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.u16],
+		returns: FFIType.i32,
+	},
 	posix_spawn_file_actions_addclose: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	pipe: { args: [FFIType.ptr], returns: FFIType.i32 },
 	close: { args: [FFIType.i32], returns: FFIType.i32 },
@@ -505,6 +511,7 @@ class BunDarwinVerifiedSpawnNative implements DarwinVerifiedSpawnNative {
 			if (key.length === 0 || key.includes("=") || key.includes("\0"))
 				throw new DarwinVerifiedSpawnError("environment contains an invalid key");
 		const pathBytes = cString(path, "executable path");
+		const nullPathBytes = cString("/dev/null", "null device path");
 		const argvVector = new CStringVector([path, ...argv], "argv");
 		const envVector = new CStringVector(
 			entries.map(([key, value]) => `${key}=${value}`),
@@ -540,6 +547,24 @@ class BunDarwinVerifiedSpawnNative implements DarwinVerifiedSpawnNative {
 				Number(this.#libraries.system.symbols.posix_spawn_file_actions_init(ptr(actions))),
 			);
 			actionsInitialized = true;
+			for (const [descriptor, flags] of [
+				[0, O_RDONLY],
+				[1, O_WRONLY],
+				[2, O_WRONLY],
+			] as const) {
+				checkDirectError(
+					`posix_spawn_file_actions_addopen(${descriptor})`,
+					Number(
+						this.#libraries.system.symbols.posix_spawn_file_actions_addopen(
+							ptr(actions),
+							descriptor,
+							ptr(nullPathBytes),
+							flags,
+							0,
+						),
+					),
+				);
+			}
 			checkDirectError(
 				"posix_spawn_file_actions_adddup2",
 				Number(

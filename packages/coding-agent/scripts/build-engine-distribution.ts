@@ -1,0 +1,519 @@
+#!/usr/bin/env bun
+
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, link, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
+import { TOML } from "bun";
+import { installEngineDistributionAtomically } from "../src/breadboard/lifecycle/engine-distribution-installer";
+import {
+	createEngineRuntimeBundle,
+	ENGINE_RUNTIME_BUNDLE_SCHEMA,
+	sha256File,
+} from "../src/breadboard/lifecycle/engine-runtime-bundle";
+import {
+	canonicalEngineDistributionManifest,
+	createEngineDistributionManifest,
+	ENGINE_DISTRIBUTION_PATH_STRATEGY,
+	ENGINE_DISTRIBUTION_TRUST_SCHEMA,
+	type EngineDistributionSha256,
+	type EngineDistributionTrustRoot,
+} from "../src/breadboard/lifecycle/installed-engine-manifest";
+
+const PYTHON_VERSION = "3.11.15";
+const PYINSTALLER_VERSION = "6.22.2";
+const ENGINE_INTERFACE_VERSION = "0.3.0";
+const ENGINE_INTERFACE_RANGE = ">=0.1.0 <0.4.0";
+const ENGINE_BUNDLE_FILENAME = "breadboard-engine-runtime.v1.bundle";
+const ENGINE_ENTRY_SOURCE = `from multiprocessing import freeze_support\n\nfrom breadboard_engine.api.cli_bridge.server import main\n\nif __name__ == "__main__":\n    freeze_support()\n    main()\n`;
+const COLLECT_PACKAGES = [
+	"breadboard_engine",
+	"breadboard",
+	"breadboard_sdk",
+	"agent_configs",
+	"config",
+	"conformance",
+	"contracts",
+	"implementations",
+	"agentic_coder_prototype",
+] as const;
+const REQUIREMENTS_INPUT_PATH = join(import.meta.dir, "engine-build-requirements.in");
+const REQUIREMENTS_LOCK_PATH = join(import.meta.dir, "engine-build-requirements.darwin-arm64-py311.txt");
+const BUILD_PROVENANCE_FILENAME = "engine-build-provenance.v1.json";
+const BUILD_PROVENANCE_SCHEMA = "bb.engine_build_provenance.v1";
+
+interface BuildOptions {
+	readonly backendRoot: string;
+	readonly outputRoot: string;
+	readonly productVersion: string;
+	readonly keepWork: boolean;
+}
+
+interface CommandResult {
+	readonly stdout: string;
+	readonly stderr: string;
+}
+
+interface BackendIdentity {
+	readonly root: string;
+	readonly commit: string;
+	readonly tree: string;
+	readonly repository: string;
+}
+
+interface ProfileIdentity {
+	readonly profile_id: string;
+	readonly definition_ref: string;
+	readonly schema_version: string;
+	readonly source_sha256: EngineDistributionSha256;
+	readonly effective_lock_schema_version: string;
+	readonly effective_lock_hash: EngineDistributionSha256;
+}
+
+function usage(): never {
+	throw new Error(
+		"Usage: bun scripts/build-engine-distribution.ts --backend-root <clean-checkout> --output-root <directory> --product-version <semver> [--keep-work]",
+	);
+}
+
+export function parseBuildOptions(argv: readonly string[]): BuildOptions {
+	const values: Record<string, string> = {};
+	let keepWork = false;
+	for (let index = 0; index < argv.length; index++) {
+		const argument = argv[index];
+		if (argument === "--keep-work") {
+			if (keepWork) return usage();
+			keepWork = true;
+			continue;
+		}
+		if (argument !== "--backend-root" && argument !== "--output-root" && argument !== "--product-version") {
+			return usage();
+		}
+		const value = argv[++index];
+		if (!value || value.includes("\0") || values[argument] !== undefined) return usage();
+		values[argument] = value;
+	}
+	const backendRoot = values["--backend-root"];
+	const outputRoot = values["--output-root"];
+	const productVersion = values["--product-version"];
+	if (!backendRoot || !outputRoot || !productVersion || !isAbsolute(backendRoot) || !isAbsolute(outputRoot))
+		return usage();
+	return Object.freeze({ backendRoot, outputRoot, productVersion, keepWork });
+}
+
+async function run(command: readonly string[], cwd: string): Promise<CommandResult> {
+	const process = Bun.spawn([...command], {
+		cwd,
+		env: {
+			...Bun.env,
+			LC_ALL: "C",
+			PIP_DISABLE_PIP_VERSION_CHECK: "1",
+			PYTHONHASHSEED: "0",
+			PYTHONNOUSERSITE: "1",
+			SOURCE_DATE_EPOCH: "315532800",
+			TZ: "UTC",
+		},
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [exitCode, stdout, stderr] = await Promise.all([
+		process.exited,
+		new Response(process.stdout).text(),
+		new Response(process.stderr).text(),
+	]);
+	if (exitCode !== 0) {
+		throw new Error(
+			`Command failed (${exitCode}): ${command.join(" ")}\n${stderr.slice(-16_384)}${stdout.slice(-16_384)}`,
+		);
+	}
+	return { stdout: stdout.trim(), stderr: stderr.trim() };
+}
+
+function expectGitObject(value: string, label: string): string {
+	if (!/^[0-9a-f]{40}$/.test(value)) throw new Error(`${label} is not one full SHA-1 object ID`);
+	return value;
+}
+
+async function readBackendIdentity(root: string): Promise<BackendIdentity> {
+	const canonicalRoot = await realpath(root);
+	const metadata = await lstat(canonicalRoot);
+	if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("backend root is not one real directory");
+	const status = await run(["git", "status", "--porcelain=v1", "--untracked-files=all"], canonicalRoot);
+	if (status.stdout !== "") throw new Error("backend root must be clean, including untracked files");
+	const commit = expectGitObject((await run(["git", "rev-parse", "HEAD"], canonicalRoot)).stdout, "backend commit");
+	const tree = expectGitObject((await run(["git", "rev-parse", "HEAD^{tree}"], canonicalRoot)).stdout, "backend tree");
+	const repository = (await run(["git", "remote", "get-url", "origin"], canonicalRoot)).stdout;
+	let parsed: URL;
+	try {
+		parsed = new URL(repository);
+	} catch {
+		throw new Error("backend origin must be one HTTPS repository URL");
+	}
+	if (
+		parsed.protocol !== "https:" ||
+		parsed.username ||
+		parsed.password ||
+		parsed.search ||
+		parsed.hash ||
+		parsed.pathname === "/"
+	) {
+		throw new Error("backend origin must be one credential-free HTTPS repository URL");
+	}
+	return Object.freeze({ root: canonicalRoot, commit, tree, repository });
+}
+async function materializeBackendSource(backend: BackendIdentity, destination: string, cwd: string): Promise<string> {
+	await run(["git", "clone", "--shared", "--no-checkout", backend.root, destination], cwd);
+	await run(["git", "checkout", "--detach", backend.commit], destination);
+	const commit = expectGitObject((await run(["git", "rev-parse", "HEAD"], destination)).stdout, "build source commit");
+	const tree = expectGitObject(
+		(await run(["git", "rev-parse", "HEAD^{tree}"], destination)).stdout,
+		"build source tree",
+	);
+	const status = await run(["git", "status", "--porcelain=v1", "--untracked-files=all"], destination);
+	if (commit !== backend.commit || tree !== backend.tree || status.stdout !== "") {
+		throw new Error("materialized backend source does not exactly match the approved build input");
+	}
+	return realpath(destination);
+}
+
+function parseRequirementsInput(input: string): readonly string[] {
+	return Object.freeze(
+		input
+			.split(/\r?\n/)
+			.map(line => line.trim())
+			.filter(line => line !== "" && !line.startsWith("#")),
+	);
+}
+
+async function verifyDependencyInputs(backend: BackendIdentity): Promise<void> {
+	const pyproject = TOML.parse(await Bun.file(join(backend.root, "pyproject.toml")).text()) as {
+		readonly project?: { readonly dependencies?: unknown };
+		readonly "build-system"?: { readonly requires?: unknown };
+	};
+	const runtimeRequirements = pyproject.project?.dependencies;
+	if (!Array.isArray(runtimeRequirements) || runtimeRequirements.some(value => typeof value !== "string")) {
+		throw new Error("backend pyproject runtime dependencies are invalid");
+	}
+	const buildRequirements = pyproject["build-system"]?.requires;
+	if (JSON.stringify(buildRequirements) !== JSON.stringify(["setuptools==84.0.0"])) {
+		throw new Error("backend build-system dependency is not exactly pinned");
+	}
+	const declared = parseRequirementsInput(await Bun.file(REQUIREMENTS_INPUT_PATH).text());
+	const expected = [
+		...(runtimeRequirements as string[]),
+		`pyinstaller==${PYINSTALLER_VERSION}`,
+		"setuptools==84.0.0",
+	].sort((left, right) => left.localeCompare(right));
+	if (JSON.stringify([...declared].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(expected)) {
+		throw new Error("engine build requirements do not exactly match backend runtime and build dependencies");
+	}
+	const lock = await Bun.file(REQUIREMENTS_LOCK_PATH).text();
+	if (!lock.includes("--hash=sha256:") || !lock.includes(`pyinstaller==${PYINSTALLER_VERSION}`)) {
+		throw new Error("engine dependency lock is missing hashes or the exact freezer version");
+	}
+}
+async function normalizeInstalledMetadata(sitePackages: string): Promise<void> {
+	for (const entry of await readdir(sitePackages, { withFileTypes: true })) {
+		if (!entry.name.endsWith(".dist-info")) continue;
+		if (!entry.isDirectory() || entry.isSymbolicLink()) {
+			throw new Error(`installed distribution metadata is not one directory: ${entry.name}`);
+		}
+		const metadataRoot = join(sitePackages, entry.name);
+		const recordPath = join(metadataRoot, "RECORD");
+		let record: string;
+		try {
+			record = await readFile(recordPath, "utf8");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw error;
+		}
+		const normalized = record
+			.split("\n")
+			.flatMap(line => {
+				const separator = line.indexOf(",");
+				const path = separator === -1 ? line : line.slice(0, separator);
+				if (path.endsWith("/direct_url.json") || path.endsWith("/uv_cache.json")) return [];
+				if (path.startsWith("../../../bin/")) return [`${path},,`];
+				return [line];
+			})
+			.join("\n");
+		await Bun.write(recordPath, normalized);
+		for (const volatileName of ["direct_url.json", "uv_cache.json"]) {
+			await unlink(join(metadataRoot, volatileName)).catch(error => {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			});
+		}
+	}
+}
+
+function recipeSha256(
+	scriptBytes: Uint8Array,
+	inputBytes: Uint8Array,
+	lockBytes: Uint8Array,
+): EngineDistributionSha256 {
+	const digest = createHash("sha256");
+	digest.update("breadboard-engine-build-recipe-v1\0");
+	for (const bytes of [scriptBytes, inputBytes, lockBytes, Buffer.from(ENGINE_ENTRY_SOURCE, "utf8")]) {
+		const length = Buffer.allocUnsafe(8);
+		length.writeBigUInt64BE(BigInt(bytes.byteLength));
+		digest.update(length);
+		digest.update(bytes);
+	}
+	return `sha256:${digest.digest("hex")}`;
+}
+
+function parseExactJsonObject<T>(text: string, keys: readonly string[], label: string): T {
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		throw new Error(`${label} is not JSON`);
+	}
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new Error(`${label} is not an object`);
+	const actual = Object.keys(value).sort();
+	const expected = [...keys].sort();
+	if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+		throw new Error(`${label} has unknown or missing fields`);
+	}
+	return value as T;
+}
+
+async function writePinnedFile(path: string, content: string): Promise<void> {
+	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	const temporary = `${path}.tmp-${randomBytes(12).toString("hex")}`;
+	const output = await open(temporary, "wx", 0o600);
+	try {
+		await output.writeFile(content, "utf8");
+		await output.sync();
+		await output.chmod(0o400);
+	} finally {
+		await output.close();
+	}
+	try {
+		await link(temporary, path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		if ((await readFile(path, "utf8")) !== content) throw new Error(`existing pinned file differs: ${path}`);
+	} finally {
+		await unlink(temporary).catch(() => undefined);
+	}
+}
+
+async function main(options: BuildOptions): Promise<void> {
+	if (process.platform !== "darwin" || process.arch !== "arm64") {
+		throw new Error(`D2 currently supports only darwin-arm64, not ${process.platform}-${process.arch}`);
+	}
+	const backend = await readBackendIdentity(options.backendRoot);
+	await verifyDependencyInputs(backend);
+	await mkdir(options.outputRoot, { recursive: true, mode: 0o700 });
+	const workRoot = await mkdtemp(join(tmpdir(), "breadboard-engine-build-"));
+	try {
+		const sourceRoot = await materializeBackendSource(backend, join(workRoot, "backend-source"), workRoot);
+		const wheelhouse = join(workRoot, "wheelhouse");
+		const virtualEnvironment = join(workRoot, "venv");
+		await mkdir(wheelhouse, { mode: 0o700 });
+		await run(["uv", "build", "--wheel", "--out-dir", wheelhouse, sourceRoot], sourceRoot);
+		const wheels = (await readdir(wheelhouse)).filter(name => name.endsWith(".whl"));
+		if (wheels.length !== 1) throw new Error("backend build did not produce exactly one wheel");
+		await run(["uv", "venv", "--python", PYTHON_VERSION, "--no-project", virtualEnvironment], workRoot);
+		const python = join(virtualEnvironment, "bin", "python");
+		await run(
+			["uv", "pip", "install", "--python", python, "--require-hashes", "--no-deps", "-r", REQUIREMENTS_LOCK_PATH],
+			workRoot,
+		);
+		await run(
+			["uv", "pip", "install", "--python", python, "--no-deps", join(wheelhouse, wheels[0] as string)],
+			workRoot,
+		);
+		const sitePackages = (await run([python, "-c", "import site; print(site.getsitepackages()[0])"], workRoot))
+			.stdout;
+		await normalizeInstalledMetadata(sitePackages);
+		const actualPyinstaller = (await run([python, "-m", "PyInstaller", "--version"], workRoot)).stdout;
+		if (actualPyinstaller !== PYINSTALLER_VERSION) {
+			throw new Error(`engine PyInstaller changed: expected ${PYINSTALLER_VERSION}, got ${actualPyinstaller}`);
+		}
+		const actualPython = (await run([python, "-c", "import platform; print(platform.python_version())"], workRoot))
+			.stdout;
+		if (actualPython !== PYTHON_VERSION)
+			throw new Error(`engine Python changed: expected ${PYTHON_VERSION}, got ${actualPython}`);
+		const packageRoot = (
+			await run(
+				[
+					python,
+					"-c",
+					"from pathlib import Path; import breadboard_engine; print(Path(breadboard_engine.__file__).resolve().parent)",
+				],
+				workRoot,
+			)
+		).stdout;
+		const engineSourceSha256 = (
+			await run(
+				[
+					python,
+					"-c",
+					"from pathlib import Path; from breadboard_engine.api.cli_bridge.engine_identity_config import engine_source_artifact_sha256; import breadboard_engine; print(engine_source_artifact_sha256(Path(breadboard_engine.__file__).resolve().parent))",
+				],
+				workRoot,
+			)
+		).stdout as EngineDistributionSha256;
+		if (!/^sha256:[0-9a-f]{64}$/.test(engineSourceSha256))
+			throw new Error("installed engine source digest is invalid");
+		const dependencyLockSha256 = await sha256File(REQUIREMENTS_LOCK_PATH);
+		const buildRecipeSha256 = recipeSha256(
+			new Uint8Array(await Bun.file(import.meta.path).arrayBuffer()),
+			new Uint8Array(await Bun.file(REQUIREMENTS_INPUT_PATH).arrayBuffer()),
+			new Uint8Array(await Bun.file(REQUIREMENTS_LOCK_PATH).arrayBuffer()),
+		);
+		const buildProvenance = {
+			schemaVersion: BUILD_PROVENANCE_SCHEMA,
+			sourceRepository: backend.repository,
+			sourceCommit: backend.commit,
+			sourceTree: backend.tree,
+			engineSourceSha256,
+			dependencyLockSha256,
+			buildRecipeSha256,
+			target: { platform: "darwin", architecture: "arm64" },
+		};
+		const provenancePath = join(packageRoot, BUILD_PROVENANCE_FILENAME);
+		await Bun.write(provenancePath, `${JSON.stringify(buildProvenance)}\n`);
+		await chmod(provenancePath, 0o444);
+		const profile = parseExactJsonObject<ProfileIdentity>(
+			(
+				await run(
+					[
+						python,
+						"-c",
+						"import json; from breadboard.product.cli.harness import default_profile_identity; print(json.dumps(default_profile_identity(), sort_keys=True, separators=(',', ':')))",
+					],
+					workRoot,
+				)
+			).stdout,
+			[
+				"profile_id",
+				"definition_ref",
+				"schema_version",
+				"source_sha256",
+				"effective_lock_schema_version",
+				"effective_lock_hash",
+				"resources",
+			],
+			"default profile identity",
+		);
+		if (profile.profile_id !== "daily_driver.v1") throw new Error("backend default profile is not daily_driver.v1");
+
+		const entryPath = join(workRoot, "engine_entry.py");
+		await Bun.write(entryPath, ENGINE_ENTRY_SOURCE);
+		const distPath = join(workRoot, "dist");
+		const pyinstaller = join(virtualEnvironment, "bin", "pyinstaller");
+		const collectArguments = COLLECT_PACKAGES.flatMap(name => ["--collect-all", name]);
+		await run(
+			[
+				pyinstaller,
+				"--noconfirm",
+				"--clean",
+				"--name",
+				"breadboard-engine",
+				"--distpath",
+				distPath,
+				"--workpath",
+				join(workRoot, "pyinstaller-work"),
+				"--specpath",
+				join(workRoot, "pyinstaller-spec"),
+				...collectArguments,
+				entryPath,
+			],
+			workRoot,
+		);
+		const runtimeRoot = join(distPath, "breadboard-engine");
+		const runtimeExecutable = join(runtimeRoot, "breadboard-engine");
+		await run(["codesign", "--verify", "--deep", "--strict", runtimeExecutable], workRoot);
+		const createdBundle = await createEngineRuntimeBundle({
+			sourceRoot: runtimeRoot,
+			executablePath: "breadboard-engine",
+			outputPath: join(workRoot, ENGINE_BUNDLE_FILENAME),
+		});
+		const manifest = createEngineDistributionManifest({
+			productVersion: options.productVersion,
+			pathStrategy: ENGINE_DISTRIBUTION_PATH_STRATEGY,
+			target: { platform: "darwin", architecture: "arm64" },
+			engine: {
+				runtimeBundle: {
+					schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
+					path: ENGINE_BUNDLE_FILENAME,
+					sizeBytes: createdBundle.bundle.sizeBytes,
+					sha256: createdBundle.bundle.sha256,
+				},
+				executablePath: createdBundle.executablePath,
+				argv: [],
+				executableSizeBytes: createdBundle.executableSizeBytes,
+				executableSha256: createdBundle.executableSha256,
+				engineSourceSha256,
+				servedBackendCommit: backend.commit,
+				servedBackendTree: backend.tree,
+				interfaceVersion: ENGINE_INTERFACE_VERSION,
+				interfaceRange: ENGINE_INTERFACE_RANGE,
+			},
+			profile: {
+				profileId: profile.profile_id,
+				definitionRef: profile.definition_ref,
+				schemaVersion: profile.schema_version,
+				sourceSha256: profile.source_sha256,
+				effectiveLockSchemaVersion: profile.effective_lock_schema_version,
+				effectiveLockSha256: profile.effective_lock_hash,
+			},
+			provenance: {
+				sourceRepository: backend.repository,
+				sourceCommit: backend.commit,
+				sourceTree: backend.tree,
+				buildRecipeSha256,
+				dependencyLockSha256,
+			},
+			signature: { kind: "unsigned-development" },
+		});
+		const installed = await installEngineDistributionAtomically({
+			root: options.outputRoot,
+			manifest,
+			bundlePath: createdBundle.bundle.path,
+		});
+		const manifestBytes = Buffer.from(canonicalEngineDistributionManifest(manifest), "utf8");
+		const trust: EngineDistributionTrustRoot = {
+			schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
+			expectedManifestSha256: `sha256:${createHash("sha256").update(manifestBytes).digest("hex")}`,
+			productVersion: options.productVersion,
+			target: { platform: "darwin", architecture: "arm64" },
+			interfaceRange: ENGINE_INTERFACE_RANGE,
+			profile: {
+				profileId: profile.profile_id,
+				effectiveLockSha256: profile.effective_lock_hash,
+			},
+			signature: { kind: "unsigned-development" },
+		};
+		const distributionName = manifest.distributionId.slice("sha256:".length);
+		const trustPath = join(options.outputRoot, `${distributionName}.trust.json`);
+		await writePinnedFile(trustPath, `${JSON.stringify(trust)}\n`);
+		const receipt = {
+			schemaVersion: "bb.engine_distribution_build_receipt.v1",
+			classification: "prepared_not_approved",
+			distributionId: manifest.distributionId,
+			manifestPath: installed.manifestPath,
+			bundlePath: installed.bundlePath,
+			trustPath,
+			backendCommit: backend.commit,
+			backendTree: backend.tree,
+			pythonVersion: actualPython,
+			pyinstallerVersion: PYINSTALLER_VERSION,
+			engineSourceSha256,
+			buildRecipeSha256,
+			dependencyLockSha256,
+			retainedDistributionPaths: installed.retainedDistributionPaths,
+		};
+		process.stdout.write(`${JSON.stringify(receipt)}\n`);
+	} finally {
+		if (options.keepWork) process.stderr.write(`Retained engine build work root: ${workRoot}\n`);
+		else await rm(workRoot, { recursive: true, force: true });
+	}
+}
+
+if (import.meta.main) await main(parseBuildOptions(Bun.argv.slice(2)));

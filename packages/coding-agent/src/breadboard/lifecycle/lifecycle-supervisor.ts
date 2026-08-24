@@ -1,6 +1,6 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { constants } from "node:fs";
-import { type FileHandle, mkdtemp, open, rm } from "node:fs/promises";
+import { type FileHandle, lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,11 @@ import {
 } from "@breadboard/sdk/internal";
 import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
+	EngineRuntimeBundleError,
+	type ExtractedEngineRuntimeBundle,
+	extractVerifiedEngineRuntimeBundle,
+} from "./engine-runtime-bundle";
+import {
 	type LifecycleReadyHandle,
 	type LifecycleResult,
 	type LifecycleState,
@@ -27,13 +32,18 @@ import {
 	lifecycleFailure,
 	lifecycleState,
 } from "./lifecycle-state";
-import type { LocalAuthorityRecord, LocalStartClaim } from "./local-authority-store";
-import { type LocalAuthorityStore, LocalAuthorityStoreError } from "./local-authority-store";
+import {
+	type LocalAuthorityRecord,
+	LocalAuthorityStore,
+	LocalAuthorityStoreError,
+	type LocalStartClaim,
+} from "./local-authority-store";
 import {
 	type BreadboardAuth,
 	type BreadboardRunConfig,
+	type BundledEngineArtifact,
 	type EngineArtifact,
-	executablePathSha256,
+	engineArtifactLocationSha256,
 	type OwnerExitPolicy,
 } from "./run-config";
 
@@ -140,6 +150,7 @@ interface ReadyContext {
 class EngineArtifactValidationError extends Error {}
 class ProcessIdentityValidationError extends Error {}
 
+const TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000] as const;
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
 function randomOwnerCredential(): Buffer {
 	const source = randomBytes(32);
@@ -160,6 +171,53 @@ function randomOwnerCredential(): Buffer {
 function credentialText(credential: Uint8Array): string {
 	return Buffer.from(credential.buffer, credential.byteOffset, credential.byteLength).toString("utf8");
 }
+const BASE64URL_ALPHABET = Buffer.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "ascii");
+
+function encodeBootstrapCredential(secret: Uint8Array): Buffer {
+	if (secret.byteLength !== 32) {
+		throw new LocalAuthorityStoreError("secret_integrity", "pending launch credential is invalid");
+	}
+	const encoded = Buffer.allocUnsafe(43);
+	let sourceOffset = 0;
+	let outputOffset = 0;
+	while (sourceOffset < 30) {
+		const first = secret[sourceOffset] as number;
+		const second = secret[sourceOffset + 1] as number;
+		const third = secret[sourceOffset + 2] as number;
+		encoded[outputOffset] = BASE64URL_ALPHABET[first >>> 2] as number;
+		encoded[outputOffset + 1] = BASE64URL_ALPHABET[((first & 0x03) << 4) | (second >>> 4)] as number;
+		encoded[outputOffset + 2] = BASE64URL_ALPHABET[((second & 0x0f) << 2) | (third >>> 6)] as number;
+		encoded[outputOffset + 3] = BASE64URL_ALPHABET[third & 0x3f] as number;
+		sourceOffset += 3;
+		outputOffset += 4;
+	}
+	const first = secret[30] as number;
+	const second = secret[31] as number;
+	encoded[40] = BASE64URL_ALPHABET[first >>> 2] as number;
+	encoded[41] = BASE64URL_ALPHABET[((first & 0x03) << 4) | (second >>> 4)] as number;
+	encoded[42] = BASE64URL_ALPHABET[(second & 0x0f) << 2] as number;
+	return encoded;
+}
+
+async function acquireInitialOwner(
+	bound: BoundLifecycleE4Client,
+	secret: Uint8Array,
+	ownerCredential: string,
+	signal: AbortSignal | undefined,
+) {
+	const bootstrapCredential = encodeBootstrapCredential(secret);
+	try {
+		return await bound.acquireOwner({
+			expectedOwnerGeneration: 0,
+			bootstrapCredential,
+			ownerCredential,
+			signal,
+		});
+	} finally {
+		bootstrapCredential.fill(0);
+	}
+}
+
 const RESTART_WINDOW_MS = 60_000;
 const INITIAL_STATES = new Set<LifecycleStateName>(["off", "claiming", "connecting", "backing-off"]);
 const ALLOWED_TRANSITIONS: Readonly<Partial<Record<LifecycleStateName, ReadonlySet<LifecycleStateName>>>> = {
@@ -188,12 +246,16 @@ const ALLOWED_TRANSITIONS: Readonly<Partial<Record<LifecycleStateName, ReadonlyS
 function randomCredential(): string {
 	return randomBytes(32).toString("base64url");
 }
-export function lifecycleChildEnvironment(launchId: string): Readonly<Record<string, string>> {
+export function lifecycleChildEnvironment(
+	launchId: string,
+	runtimeRecordRoot?: string,
+): Readonly<Record<string, string>> {
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 		BREADBOARD_LEGACY_ROUTES: "1",
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+		...(runtimeRecordRoot === undefined ? {} : { BREADBOARD_RUNTIME_RECORD_ROOT: runtimeRecordRoot }),
 	});
 }
 
@@ -262,6 +324,90 @@ function unrefDelay(milliseconds: number): Promise<void> {
 
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
+	readonly #runtimeRecordRoot: string | undefined;
+
+	constructor(runtimeRecordRoot?: string) {
+		this.#runtimeRecordRoot = runtimeRecordRoot;
+	}
+
+	async #childEnvironment(launchId: string): Promise<Readonly<Record<string, string>>> {
+		if (this.#runtimeRecordRoot === undefined) return lifecycleChildEnvironment(launchId);
+		await mkdir(this.#runtimeRecordRoot, { recursive: true, mode: 0o700 });
+		const metadata = await lstat(this.#runtimeRecordRoot);
+		const expectedUid = process.geteuid?.() ?? process.getuid?.() ?? -1;
+		if (
+			!metadata.isDirectory() ||
+			metadata.isSymbolicLink() ||
+			(metadata.mode & 0o777) !== 0o700 ||
+			metadata.uid !== expectedUid
+		) {
+			throw new LocalAuthorityStoreError(
+				"root_integrity",
+				"engine runtime record root is not one private owned directory",
+			);
+		}
+		return lifecycleChildEnvironment(launchId, await realpath(this.#runtimeRecordRoot));
+	}
+
+	async #spawnBundledVerified(
+		artifact: BundledEngineArtifact,
+		launchId: string,
+		bootstrap: Buffer,
+		bindIdentity: (pid: number, startToken: string) => Promise<void>,
+	): Promise<SpawnVerifiedResult> {
+		let extracted: ExtractedEngineRuntimeBundle | undefined;
+		try {
+			extracted = await extractVerifiedEngineRuntimeBundle({
+				bundle: artifact.runtimeBundle,
+				executablePath: artifact.executablePath,
+				executableSizeBytes: artifact.executableSizeBytes,
+				executableSha256: artifact.executableSha256,
+			});
+			const retained = extracted;
+			const verified = await spawnDarwinVerified({
+				executablePath: retained.executablePath,
+				executableBytes: retained.executableBytes,
+				argv: artifact.argv,
+				env: await this.#childEnvironment(launchId),
+				bootstrap,
+				bindIdentity,
+			});
+			const exited = verified.exited.finally(() => retained.cleanup().catch(() => undefined));
+			const handle: SpawnedEngineProcess = {
+				pid: verified.pid,
+				startToken: verified.startToken,
+				exited,
+				unref: () => verified.unref(),
+				sendHardSignal: async authorizationExpiresAtUnix => {
+					if (Date.now() >= authorizationExpiresAtUnix * 1_000) return "authorization_expired";
+					const outcome = await verified.signalIfSame("SIGKILL");
+					if (outcome === "sent") return "sent";
+					if (outcome === "process-exited") return "process_exited";
+					return "abandoned";
+				},
+				waitForExit: async timeoutMs => {
+					const didExit = await verified.waitForExit(timeoutMs);
+					if (didExit) await exited;
+					return didExit;
+				},
+			};
+			extracted = undefined;
+			this.#children.set(verified.pid, handle);
+			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
+			return handle;
+		} catch (error) {
+			if (error instanceof EngineRuntimeBundleError) {
+				throw new EngineArtifactValidationError("engine runtime bundle verification failed", { cause: error });
+			}
+			if (error instanceof DarwinVerifiedSpawnError) {
+				throw new ProcessIdentityValidationError("Darwin verified engine spawn failed", { cause: error });
+			}
+			throw error;
+		} finally {
+			bootstrap.fill(0);
+			await extracted?.cleanup().catch(() => undefined);
+		}
+	}
 
 	async spawnVerified(
 		artifact: EngineArtifact,
@@ -269,6 +415,9 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		bootstrap: Buffer,
 		bindIdentity: (pid: number, startToken: string) => Promise<void>,
 	): Promise<SpawnVerifiedResult> {
+		if (artifact.kind === "runtime-bundle") {
+			return await this.#spawnBundledVerified(artifact, launchId, bootstrap, bindIdentity);
+		}
 		const source = await open(artifact.executablePath, constants.O_RDONLY | constants.O_NOFOLLOW);
 		const snapshotRoot = await mkdtemp(join(tmpdir(), "omp-engine-snapshot-"));
 		const snapshotPath = join(snapshotRoot, "engine");
@@ -316,7 +465,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				executablePath: snapshotPath,
 				executableBytes,
 				argv: artifact.argv,
-				env: lifecycleChildEnvironment(launchId),
+				env: await this.#childEnvironment(launchId),
 				bootstrap,
 				bindIdentity,
 			});
@@ -758,14 +907,14 @@ abstract class ModeStrategy {
 
 	async withReconnect<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
 		let failure: unknown;
-		for (let attempt = 0; attempt < RESTART_DELAYS_MS.length; attempt++) {
+		for (let attempt = 0; attempt <= TRANSPORT_RECONNECT_DELAYS_MS.length; attempt++) {
 			try {
 				return await operation(attempt);
 			} catch (error) {
 				failure = error;
-				if (!this.isRetryableTransport(error) || attempt === RESTART_DELAYS_MS.length - 1) throw error;
+				if (!this.isRetryableTransport(error) || attempt === TRANSPORT_RECONNECT_DELAYS_MS.length) throw error;
 				this.transition("reconnecting", attempt + 1);
-				await this.clock.sleep(RESTART_DELAYS_MS[attempt] as number);
+				await this.clock.sleep(TRANSPORT_RECONNECT_DELAYS_MS[attempt] as number);
 			}
 		}
 		throw failure;
@@ -981,8 +1130,13 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	constructor(config: BreadboardRunConfig, dependencies: LifecycleSupervisorDependencies) {
 		super(config, dependencies);
 		if (!dependencies.store) throw new Error("local-owned requires a local authority store");
+		if (!config.endpoint) throw new Error("local-owned requires one endpoint");
 		this.#store = dependencies.store;
-		this.#process = dependencies.process ?? new DefaultLifecycleProcessAdapter();
+		this.#process =
+			dependencies.process ??
+			new DefaultLifecycleProcessAdapter(
+				join(this.#store.root, "runtime-records", LocalAuthorityStore.endpointKey(config.endpoint)),
+			);
 		this.#endpointAbsent =
 			dependencies.endpointAbsent ??
 			(async client => {
@@ -1174,12 +1328,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			try {
 				const owner =
 					priorAttemptGeneration === 1
-						? await bound.acquireOwner({
-								expectedOwnerGeneration: 0,
-								bootstrapCredential: pending.bootstrapCredential,
+						? await acquireInitialOwner(
+								bound,
+								pending.bootstrapCredential,
 								ownerCredential,
-								signal: this.abortController.signal,
-							})
+								this.abortController.signal,
+							)
 						: await bound.acquireOwner({
 								expectedOwnerGeneration: priorAttemptGeneration - 1,
 								ownerCredential,
@@ -1199,12 +1353,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		const attemptedClaim = await this.#store.withExclusiveLock(endpoint, () =>
 			this.#store.markOwnerAttempt(endpoint, claim),
 		);
-		const owner = await bound.acquireOwner({
-			expectedOwnerGeneration: 0,
-			bootstrapCredential: pending.bootstrapCredential,
+		const owner = await acquireInitialOwner(
+			bound,
+			pending.bootstrapCredential,
 			ownerCredential,
-			signal: this.abortController.signal,
-		});
+			this.abortController.signal,
+		);
 		return { owner, claim: attemptedClaim };
 	}
 	async #resumeUnboundPendingStart(
@@ -1219,7 +1373,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			!endpoint ||
 			claim.launchId === undefined ||
 			claim.executableSha256 !== artifact.executableSha256 ||
-			claim.executablePathSha256 !== executablePathSha256(artifact.executablePath) ||
+			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
 			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
 			claim.servedBackendCommit !== artifact.servedBackendCommit
@@ -1305,7 +1459,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			claim.engineProcessStartToken === undefined ||
 			claim.launchId === undefined ||
 			claim.executableSha256 !== artifact.executableSha256 ||
-			claim.executablePathSha256 !== executablePathSha256(artifact.executablePath) ||
+			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
 			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
 			claim.servedBackendCommit !== artifact.servedBackendCommit
@@ -1358,7 +1512,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						osProcessStartToken: claim.engineProcessStartToken as string,
 						normalizedEndpoint: endpoint,
 						executableSha256: artifact.executableSha256,
-						executablePathSha256: executablePathSha256(artifact.executablePath),
+						executablePathSha256: engineArtifactLocationSha256(artifact),
 						argvSha256: artifact.argvSha256,
 						engineArtifactSha256: artifact.engineSourceSha256,
 						servedBackendCommit: artifact.servedBackendCommit,
@@ -1567,7 +1721,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				{
 					launchId,
 					executableSha256: artifact.executableSha256,
-					executablePathSha256: executablePathSha256(artifact.executablePath),
+					executablePathSha256: engineArtifactLocationSha256(artifact),
 					argvSha256: artifact.argvSha256,
 					engineArtifactSha256: artifact.engineSourceSha256,
 					servedBackendCommit: artifact.servedBackendCommit,
@@ -1579,7 +1733,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			bootstrapCredential.fill(0);
 			return await this.#abortUnspawnedStart(prepared, attempt);
 		}
-		const bootstrap = Buffer.from(bootstrapCredential);
+		const bootstrap = encodeBootstrapCredential(bootstrapCredential);
 		let child: SpawnedEngineProcess;
 		try {
 			const spawned = await this.#process.spawnVerified(artifact, launchId, bootstrap, async (pid, startToken) => {
@@ -1626,7 +1780,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		let bound: BoundLifecycleE4Client | undefined;
 		for (
 			let reconnectAttempt = 0;
-			reconnectAttempt < RESTART_DELAYS_MS.length && this.clock.now() < deadline;
+			reconnectAttempt <= TRANSPORT_RECONNECT_DELAYS_MS.length && this.clock.now() < deadline;
 			reconnectAttempt++
 		) {
 			this.transition("connecting", reconnectAttempt);
@@ -1652,9 +1806,9 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				bootstrapCredential.fill(0);
 				return mappedFailure("local-owned", raced.error, attempt);
 			}
-			if (reconnectAttempt < RESTART_DELAYS_MS.length - 1) {
+			if (reconnectAttempt < TRANSPORT_RECONNECT_DELAYS_MS.length) {
 				this.transition("reconnecting", reconnectAttempt + 1);
-				await this.clock.sleep(RESTART_DELAYS_MS[reconnectAttempt] as number);
+				await this.clock.sleep(TRANSPORT_RECONNECT_DELAYS_MS[reconnectAttempt] as number);
 			}
 		}
 		if (!bound) {
@@ -1679,12 +1833,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		this.transition("acquiring-owner", attempt);
 		let owner: Awaited<ReturnType<BoundLifecycleE4Client["acquireOwner"]>>;
 		try {
-			owner = await bound.acquireOwner({
-				expectedOwnerGeneration: 0,
+			owner = await acquireInitialOwner(
+				bound,
 				bootstrapCredential,
-				ownerCredential: credentialText(ownerCredential),
-				signal: this.abortController.signal,
-			});
+				credentialText(ownerCredential),
+				this.abortController.signal,
+			);
 		} catch (error) {
 			if (this.abortController.signal.aborted) {
 				return lifecycleFailure("local-owned", "request-aborted", "request_aborted", attempt);
@@ -1710,7 +1864,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						osProcessStartToken: observation.startToken,
 						normalizedEndpoint: endpoint,
 						executableSha256: artifact.executableSha256,
-						executablePathSha256: executablePathSha256(artifact.executablePath),
+						executablePathSha256: engineArtifactLocationSha256(artifact),
 						argvSha256: artifact.argvSha256,
 						engineArtifactSha256: artifact.engineSourceSha256,
 						servedBackendCommit: artifact.servedBackendCommit,
@@ -1790,7 +1944,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		return (
 			artifact !== undefined &&
 			record.executableSha256 === artifact.executableSha256 &&
-			record.executablePathSha256 === executablePathSha256(artifact.executablePath) &&
+			record.executablePathSha256 === engineArtifactLocationSha256(artifact) &&
 			record.argvSha256 === artifact.argvSha256 &&
 			record.engineArtifactSha256 === artifact.engineSourceSha256 &&
 			record.servedBackendCommit === artifact.servedBackendCommit
