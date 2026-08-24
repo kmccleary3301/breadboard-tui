@@ -46,9 +46,9 @@ const payload: EngineDistributionManifestPayload = {
 		profileId: "daily_driver.v1",
 		definitionRef: "agent_configs/templates/daily_driver.v1.yaml",
 		schemaVersion: "bb.harness_definition.v1",
-		sourceSha256: sha256("daily-driver source"),
+		sourceSha256: "sha256:155e9db1dabee3975739a221324215993002438dc33dd73402959dc4649709f5",
 		effectiveLockSchemaVersion: "bb.effective_config_graph.v1",
-		effectiveLockSha256: sha256("daily-driver effective lock"),
+		effectiveLockSha256: "sha256:165d34c5ed177005fa289544da0b451294c89bb51b0d289f2372c4bd081eff43",
 	},
 	provenance: {
 		sourceRepository: "https://github.com/kmccleary3301/breadboard",
@@ -82,13 +82,13 @@ const manifest = createEngineDistributionManifest(payload);
 const canonical = canonicalEngineDistributionManifest(manifest);
 const trust = Object.freeze({
 	schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
-	expectedManifestSha256: "sha256:832f50470a8d9726cb71fa372e4e994ed8c659feab575bd3c75f43d03f9f1d7c",
+	expectedManifestSha256: "sha256:9488a963d57ceffd978b22e611a1c513757264137ec0bea094441a8fb3342692",
 	productVersion: "0.1.0-rc.3",
 	target: { platform: "darwin", architecture: "arm64" },
 	interfaceRange: ">=0.1.0 <0.4.0",
 	profile: {
 		profileId: "daily_driver.v1",
-		effectiveLockSha256: "sha256:aa08cc237925cdcf65a9f67e92b0ff1af0ede3bd1de29e7d6e1b73a21a020c22",
+		effectiveLockSha256: "sha256:165d34c5ed177005fa289544da0b451294c89bb51b0d289f2372c4bd081eff43",
 	},
 	signature: { kind: "unsigned-development" },
 } satisfies EngineDistributionTrustRoot);
@@ -270,7 +270,7 @@ describe("installed engine distribution contract", () => {
 		const releaseRaw = canonicalEngineDistributionManifest(releaseManifest);
 		const releaseTrust: EngineDistributionTrustRoot = {
 			...trust,
-			expectedManifestSha256: "sha256:21c445542993cee9b93d0aaf930516b6c98fc00682ff278dbabb20374790cc1c",
+			expectedManifestSha256: "sha256:a17290014d05355658b23ee412458c7e617daa5e6b608743dc85b33ef3d10148",
 			signature: {
 				kind: "release-envelope",
 				keyId: "breadboard-release-1",
