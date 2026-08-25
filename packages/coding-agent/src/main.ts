@@ -10,7 +10,6 @@ import { createInterface } from "node:readline/promises";
 import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk/internal";
 import { type AgentEvent, EventLoopKeepalive, type StreamFn, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	$env,
 	directoryExists,
@@ -52,6 +51,7 @@ import {
 } from "./breadboard/lifecycle/run-config";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
+import { createBreadboardProviderFreeModel } from "./breadboard/provider-free-model";
 import type { OpenedSession, OpenSession } from "./breadboard/session-port";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -1729,28 +1729,6 @@ const BREADBOARD_MODEL_PROVIDER_ALIASES: Readonly<Record<string, string>> = {
 	// BreadBoard's engine owns the runtime id; OMP owns the catalog id.
 	codex: "openai-codex",
 };
-
-const BREADBOARD_PROVIDER_FREE_MODEL_PROVIDERS = new Set(["mock", "cli_mock", "smoke", "replay"]);
-
-function createBreadboardProviderFreeModel(selector: string): Model | undefined {
-	const separator = selector.indexOf("/");
-	if (separator <= 0 || separator === selector.length - 1) return undefined;
-	const provider = selector.slice(0, separator);
-	if (!BREADBOARD_PROVIDER_FREE_MODEL_PROVIDERS.has(provider)) return undefined;
-	const id = selector.slice(separator + 1);
-	return buildModel({
-		id,
-		name: selector,
-		api: "openai-completions",
-		provider,
-		baseUrl: "http://127.0.0.1:9/v1",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 8192,
-		maxTokens: 2048,
-	});
-}
 
 export function resolveBreadboardBackendModel(
 	backendModel: string | null | undefined,
