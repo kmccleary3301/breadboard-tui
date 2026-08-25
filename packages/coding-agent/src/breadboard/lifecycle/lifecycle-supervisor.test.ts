@@ -3722,6 +3722,31 @@ describe("CLI lifecycle composition boundary", () => {
 		expect(result.stderr).not.toContain("missing_engine_artifact");
 	});
 
+	test("native default and explicit off preserve print, RPC, RPC UI, and ACP surfaces", async () => {
+		const home = await temporaryLifecycleHome();
+		const missingModel = "definitely-missing-native-model";
+		const surfaces = [
+			{
+				args: ["--print", "hello", "--model", missingModel],
+				exitCode: 1,
+				output: `Model "${missingModel}" not found`,
+			},
+			{ args: ["--mode", "rpc"], exitCode: 0, output: '"type":"ready"' },
+			{ args: ["--mode", "rpc-ui"], exitCode: 0, output: '"type":"ready"' },
+			{ args: ["--mode", "acp"], exitCode: 0 },
+		] as const;
+		for (const engineSelection of [[], ["--engine-mode", "off"]] as const) {
+			for (const surface of surfaces) {
+				const result = await runLifecycleCli(["launch", ...engineSelection, ...surface.args], home);
+				const output = `${result.stdout}${result.stderr}`;
+				expect(result.exitCode).toBe(surface.exitCode);
+				if ("output" in surface) expect(output).toContain(surface.output);
+				expect(output).not.toContain("BreadBoard engine:");
+				expect(output).not.toContain("missing_engine_artifact");
+			}
+		}
+	}, 30_000);
+
 	test("explicit BreadBoard engine selection rejects native surfaces on stderr only", async () => {
 		const home = await temporaryLifecycleHome();
 		const endpoint = "http://127.0.0.1:1";
