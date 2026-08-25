@@ -89,7 +89,7 @@ const manifest = createEngineDistributionManifest(payload);
 const canonical = canonicalEngineDistributionManifest(manifest);
 const trust = Object.freeze({
 	schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
-	expectedManifestSha256: "sha256:298457bd3d30e46be5243d1ff72122a774b07771fc971a101e9ec8521a1b38dc",
+	expectedManifestSha256: "sha256:af444ed482e19b1245c09e63f8ef7108bba406f6fa6f2308b84c0e602d076ab8",
 	productVersion: "0.1.0-rc.3",
 	target: { platform: "darwin", architecture: "arm64" },
 	interfaceRange: ">=0.1.0 <0.4.0",
@@ -277,7 +277,7 @@ describe("installed engine distribution contract", () => {
 		const releaseRaw = canonicalEngineDistributionManifest(releaseManifest);
 		const releaseTrust: EngineDistributionTrustRoot = {
 			...trust,
-			expectedManifestSha256: "sha256:1a19b3ced0bb4a321a726b8fa4194b366793273365d2999d98ce49db0220dda4",
+			expectedManifestSha256: "sha256:f6afef7074d7fe03305201418419a21c9fff112fcd4c7b8ceda8138b4b1b57b6",
 			signature: {
 				kind: "release-envelope",
 				keyId: "breadboard-release-1",
