@@ -287,6 +287,27 @@ class PtyChild:
         except OSError:
             pass
 
+    def close(self) -> None:
+        if self.exit_status is None:
+            try:
+                os.kill(self.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + 5
+            while self.exit_status is None and time.monotonic() < deadline:
+                self.pump(0.1)
+            if self.exit_status is None:
+                try:
+                    os.kill(self.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    _, status = os.waitpid(self.pid, 0)
+                    self.exit_status = os.waitstatus_to_exitcode(status)
+                except ChildProcessError:
+                    self._observe_exit()
+        self.close_fd()
+
 
 @dataclass(frozen=True)
 class BindingSnapshot:
@@ -611,14 +632,14 @@ def main() -> int:
 
     initial = PtyChild([str(bb)], roots["workspace"], environment)
     try:
-        ready = initial.wait_until(
-            lambda: binding_snapshot(roots["agent"]), options.startup_timeout, "initial session binding"
+        initial.wait_until(
+            lambda: "mock/reference" in initial.screen.text() and "No LSP servers" in initial.screen.text(),
+            options.startup_timeout,
+            "initial TUI readiness",
         )
-        assert isinstance(ready, BindingSnapshot)
-        initial_binding = ready.data
-        if owned_submissions(initial_binding):
-            raise JourneyFailure("new session binding already owns submissions")
-        initial_cursor = cursor_sequence(initial_binding)
+        write_capture(output, "initial-ready", initial)
+        if binding_snapshot(roots["agent"]) is not None:
+            raise JourneyFailure("new TUI created a session binding before the first submitted turn")
         authority_path, first_authority = initial.wait_until(
             lambda: active_authority(roots["agent"]), options.startup_timeout, "initial engine authority"
         )
@@ -658,7 +679,7 @@ def main() -> int:
             if snapshot is None or len(owned_submissions(snapshot.data)) != 2:
                 return None
             facts = transcript_facts(snapshot.rows)
-            if facts["sentinelCount"] < 2 or cursor_sequence(snapshot.data) <= initial_cursor:
+            if facts["sentinelCount"] < 2 or cursor_sequence(snapshot.data) <= first_cursor:
                 return None
             return snapshot
 
@@ -681,7 +702,7 @@ def main() -> int:
         if initial_exit != 0:
             raise JourneyFailure(f"initial bb exit was {initial_exit}")
     finally:
-        initial.close_fd()
+        initial.close()
 
     final_initial = binding_snapshot(roots["agent"])
     if final_initial is None:
@@ -794,7 +815,7 @@ def main() -> int:
         if resume_exit != 0:
             raise JourneyFailure(f"resumed bb exit was {resume_exit}")
     finally:
-        resume.close_fd()
+        resume.close()
 
     final_resume = binding_snapshot(roots["agent"])
     if final_resume is None or final_resume.data != final_initial.data:
@@ -867,7 +888,7 @@ def main() -> int:
         "environmentKeys": sorted(environment),
         "sessionFile": str(final_resume.session_file),
         "sessionId": final_resume.data["sessionId"],
-        "initialCursor": initial_cursor,
+        "preTurnBindingPresent": False,
         "firstObservedCursor": first_cursor,
         "secondObservedCursor": cursor_sequence(second.data),
         "finalCursor": final_initial_cursor,
