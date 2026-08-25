@@ -110,10 +110,38 @@ export interface EngineDistributionManifest extends EngineDistributionManifestPa
 	readonly schemaVersion: typeof ENGINE_DISTRIBUTION_MANIFEST_SCHEMA;
 	readonly distributionId: EngineDistributionSha256;
 }
+export const INSTALLED_ENGINE_IDENTITY_SCHEMA = "bb.installed_engine_identity.v1" as const;
+
+export interface InstalledEngineIdentity {
+	readonly schemaVersion: typeof INSTALLED_ENGINE_IDENTITY_SCHEMA;
+	readonly distributionId: EngineDistributionSha256;
+	readonly productVersion: string;
+	readonly target: EngineDistributionTarget;
+	readonly signature: {
+		readonly kind: EngineDistributionSignature["kind"];
+	};
+	readonly engine: {
+		readonly runtimeBundleSha256: EngineDistributionSha256;
+		readonly executableSha256: EngineDistributionSha256;
+		readonly engineSourceSha256: EngineDistributionSha256;
+		readonly servedBackendCommit: string;
+		readonly servedBackendTree: string;
+		readonly interfaceVersion: string;
+		readonly interfaceRange: string;
+	};
+	readonly profile: {
+		readonly profileId: string;
+		readonly schemaVersion: string;
+		readonly sourceSha256: EngineDistributionSha256;
+		readonly effectiveLockSchemaVersion: string;
+		readonly effectiveLockSha256: EngineDistributionSha256;
+	};
+}
 
 /** Build-generated facts embedded with `bb`; never load this value from settings, environment, or the manifest. */
 export interface EngineDistributionTrustRoot {
 	readonly schemaVersion: typeof ENGINE_DISTRIBUTION_TRUST_SCHEMA;
+	readonly distributionId: EngineDistributionSha256;
 	readonly expectedManifestSha256: EngineDistributionSha256;
 	readonly productVersion: string;
 	readonly target: EngineDistributionTarget;
@@ -516,6 +544,7 @@ export function interfaceRangeContains(range: string, version: string): boolean 
 function decodeTrustRoot(value: unknown): EngineDistributionTrustRoot {
 	const record = expectRecord(value, [
 		"schemaVersion",
+		"distributionId",
 		"expectedManifestSha256",
 		"productVersion",
 		"target",
@@ -534,6 +563,7 @@ function decodeTrustRoot(value: unknown): EngineDistributionTrustRoot {
 	}
 	return Object.freeze({
 		schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
+		distributionId: expectSha256(record.distributionId),
 		expectedManifestSha256: expectSha256(record.expectedManifestSha256),
 		productVersion: expectString(record.productVersion, PRODUCT_VERSION),
 		target,
@@ -585,6 +615,7 @@ export function parseTrustedEngineDistributionManifest(
 	) {
 		fail("engine_target_mismatch");
 	}
+	if (manifest.distributionId !== trust.distributionId) fail("engine_manifest_untrusted");
 	if (
 		manifest.engine.interfaceRange !== trust.interfaceRange ||
 		!interfaceRangeContains(trust.interfaceRange, manifest.engine.interfaceVersion)
@@ -602,14 +633,52 @@ export function parseTrustedEngineDistributionManifest(
 	return manifest;
 }
 
-/** The bundled layout is `<canonical bb directory>/engine/<manifest>`, with no startup network lookup. */
+export function createInstalledEngineIdentity(
+	manifest: EngineDistributionManifest,
+	trustRoot: EngineDistributionTrustRoot,
+): InstalledEngineIdentity {
+	const trust = decodeTrustRoot(trustRoot);
+	if (manifest.distributionId !== trust.distributionId) fail("engine_manifest_untrusted");
+	if (!signatureMatchesTrust(manifest.signature, trust.signature)) fail("engine_signature_untrusted");
+	return Object.freeze({
+		schemaVersion: INSTALLED_ENGINE_IDENTITY_SCHEMA,
+		distributionId: manifest.distributionId,
+		productVersion: manifest.productVersion,
+		target: manifest.target,
+		signature: Object.freeze({ kind: manifest.signature.kind }),
+		engine: Object.freeze({
+			runtimeBundleSha256: manifest.engine.runtimeBundle.sha256,
+			executableSha256: manifest.engine.executableSha256,
+			engineSourceSha256: manifest.engine.engineSourceSha256,
+			servedBackendCommit: manifest.engine.servedBackendCommit,
+			servedBackendTree: manifest.engine.servedBackendTree,
+			interfaceVersion: manifest.engine.interfaceVersion,
+			interfaceRange: manifest.engine.interfaceRange,
+		}),
+		profile: Object.freeze({
+			profileId: manifest.profile.profileId,
+			schemaVersion: manifest.profile.schemaVersion,
+			sourceSha256: manifest.profile.sourceSha256,
+			effectiveLockSchemaVersion: manifest.profile.effectiveLockSchemaVersion,
+			effectiveLockSha256: manifest.profile.effectiveLockSha256,
+		}),
+	});
+}
+
+export function formatInstalledEngineIdentity(identity: InstalledEngineIdentity): string {
+	return JSON.stringify(identity);
+}
+
+/** The bundled layout is `<canonical bb directory>/engine/<64hex>/<manifest>`, with no startup network lookup. */
 export function installedEngineManifestPath(
 	productExecutablePath: string,
+	trustRoot: EngineDistributionTrustRoot,
 	canonicalize: (path: string) => string = realpathSync,
 ): string {
 	if (!isAbsolute(productExecutablePath) || productExecutablePath.includes("\0")) {
 		fail("engine_manifest_unavailable");
 	}
+	const trust = decodeTrustRoot(trustRoot);
 	let executable: string;
 	try {
 		executable = canonicalize(productExecutablePath);
@@ -617,7 +686,12 @@ export function installedEngineManifestPath(
 		return fail("engine_manifest_unavailable");
 	}
 	if (!isAbsolute(executable) || executable.includes("\0")) fail("engine_manifest_unavailable");
-	return resolve(dirname(executable), ENGINE_DISTRIBUTION_DIRECTORY, ENGINE_DISTRIBUTION_MANIFEST_FILENAME);
+	return resolve(
+		dirname(executable),
+		ENGINE_DISTRIBUTION_DIRECTORY,
+		trust.distributionId.slice("sha256:".length),
+		ENGINE_DISTRIBUTION_MANIFEST_FILENAME,
+	);
 }
 
 export function resolveInstalledEngineBundlePath(

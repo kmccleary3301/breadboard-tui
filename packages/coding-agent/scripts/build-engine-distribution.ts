@@ -576,6 +576,7 @@ async function main(options: BuildOptions): Promise<void> {
 		const manifestBytes = Buffer.from(canonicalEngineDistributionManifest(manifest), "utf8");
 		const trust: EngineDistributionTrustRoot = {
 			schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
+			distributionId: manifest.distributionId,
 			expectedManifestSha256: `sha256:${createHash("sha256").update(manifestBytes).digest("hex")}`,
 			productVersion: options.productVersion,
 			target: { platform: "darwin", architecture: "arm64" },

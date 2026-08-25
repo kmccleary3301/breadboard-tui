@@ -1,10 +1,12 @@
 import { dirname } from "node:path";
 import {
+	createInstalledEngineIdentity,
 	ENGINE_DISTRIBUTION_MANIFEST_FILENAME,
 	ENGINE_DISTRIBUTION_MAX_MANIFEST_BYTES,
 	type EngineDistributionManifest,
 	type EngineDistributionTrustRoot,
 	InstalledEngineDiscoveryError,
+	type InstalledEngineIdentity,
 	installedEngineManifestPath,
 	parseTrustedEngineDistributionManifest,
 	resolveInstalledEngineBundlePath,
@@ -32,6 +34,7 @@ export interface InstalledEngineArtifactInput {
 export interface InstalledEngineSelection {
 	readonly artifact: InstalledEngineArtifactInput;
 	readonly manifest: EngineDistributionManifest;
+	readonly identity: InstalledEngineIdentity;
 	readonly manifestPath: string;
 }
 
@@ -120,7 +123,7 @@ export async function resolveInstalledEngineSelection(input: {
 	readonly trustRoot: EngineDistributionTrustRoot | undefined;
 }): Promise<InstalledEngineSelection> {
 	if (input.trustRoot === undefined) discoveryFailure("engine_manifest_untrusted");
-	const manifestPath = installedEngineManifestPath(input.productExecutablePath);
+	const manifestPath = installedEngineManifestPath(input.productExecutablePath, input.trustRoot);
 	let directory: PinnedDirectory;
 	try {
 		directory = await openPinnedDirectory(dirname(manifestPath));
@@ -153,7 +156,12 @@ export async function resolveInstalledEngineSelection(input: {
 			engineSourceSha256: manifest.engine.engineSourceSha256,
 			servedBackendCommit: manifest.engine.servedBackendCommit,
 		});
-		return Object.freeze({ artifact, manifest, manifestPath });
+		return Object.freeze({
+			artifact,
+			manifest,
+			identity: createInstalledEngineIdentity(manifest, input.trustRoot),
+			manifestPath,
+		});
 	} catch (error) {
 		mapDiscoveryFailure(error, "engine_manifest_unavailable");
 	} finally {

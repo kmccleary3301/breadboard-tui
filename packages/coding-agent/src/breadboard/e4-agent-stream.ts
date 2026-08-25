@@ -1156,7 +1156,6 @@ export class E4AgentStreamBridge {
 		event: Extract<LoggedSessionEvent, { readonly kind: "turn_completed" }>,
 	): Promise<void> {
 		this.#ensureStarted(sink);
-		if (sink.turnId !== undefined) this.#ownedSubmissions.delete(String(sink.turnId));
 		if (sink.adopted) {
 			if (sink.messageText) {
 				if (!sink.pendingTextCompletion) {

@@ -2,7 +2,10 @@ import { join } from "node:path";
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { getAgentDir } from "@oh-my-pi/pi-utils/dirs";
-import { InstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-manifest";
+import {
+	formatInstalledEngineIdentity,
+	InstalledEngineDiscoveryError,
+} from "../breadboard/lifecycle/installed-engine-manifest";
 import { formatInstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-selection";
 import { restoreLifecycleTerminal, writeLifecyclePresentation } from "../breadboard/lifecycle/lifecycle-presenter";
 import { type LifecycleResult, lifecycleFailure, lifecycleState } from "../breadboard/lifecycle/lifecycle-state";
@@ -64,6 +67,11 @@ export default class Engine extends Command {
 				workspacePath: process.cwd(),
 				isBreadboardProduct: IS_BREADBOARD_PRODUCT,
 			});
+			if (action === "status" && config.mode === "local-owned" && config.installedEngineIdentity) {
+				process.stdout.write(`${formatInstalledEngineIdentity(config.installedEngineIdentity)}\n`);
+				process.exitCode = 0;
+				return;
+			}
 			let execution: LifecycleActionExecution;
 			if (config.mode === "off") {
 				const result: LifecycleResult =

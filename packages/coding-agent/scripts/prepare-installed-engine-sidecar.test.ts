@@ -80,6 +80,7 @@ async function createDistribution(root: string): Promise<DistributionFixture> {
 	const distributionId = manifest.distributionId.slice("sha256:".length);
 	const trustRoot = {
 		schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
+		distributionId: manifest.distributionId,
 		expectedManifestSha256: sha256(canonicalManifest),
 		productVersion: payload.productVersion,
 		target: payload.target,
@@ -149,11 +150,13 @@ describe("installed engine sidecar build preparation", () => {
 			expect(await readFile(stagedManifest, "utf8")).toBe(fixture.canonicalManifest);
 			expect((await readFile(stagedBundle)).equals(fixture.bundleBytes)).toBe(true);
 			expect((await stat(sidecarRoot)).mode & 0o777).toBe(0o500);
+			expect((await stat(join(tempRoot, "output", "engine"))).mode & 0o777).toBe(0o500);
 			expect((await stat(stagedManifest)).mode & 0o777).toBe(0o400);
 			expect((await stat(stagedBundle)).mode & 0o777).toBe(0o400);
 			const manifestInode = (await stat(stagedManifest)).ino;
 			expect(await stageInstalledEngineSidecar(productExecutablePath, distribution)).toBe(sidecarRoot);
 			expect((await stat(stagedManifest)).ino).toBe(manifestInode);
+			expect(await readdir(join(tempRoot, "output", "engine"))).toEqual([fixture.distributionId]);
 			expect(await readdir(join(tempRoot, "output"))).toEqual(["engine"]);
 		});
 	});
@@ -179,12 +182,14 @@ describe("installed engine sidecar build preparation", () => {
 		await withDistribution(async (fixture, tempRoot) => {
 			const distribution = await loadBuildEngineDistribution(fixture.root);
 			const productExecutablePath = join(tempRoot, "output", "bb");
-			const sidecarRoot = join(tempRoot, "output", "engine");
+			const engineParent = join(tempRoot, "output", "engine");
+			const sidecarRoot = join(engineParent, fixture.distributionId);
 			await mkdir(sidecarRoot, { recursive: true, mode: 0o700 });
 			await chmod(sidecarRoot, 0o500);
 			expect(
 				(await buildError(() => stageInstalledEngineSidecar(productExecutablePath, distribution))).message,
 			).toContain("file is unavailable");
+			expect(await readdir(engineParent)).toEqual([fixture.distributionId]);
 			expect(await readdir(sidecarRoot)).toEqual([]);
 		});
 	});

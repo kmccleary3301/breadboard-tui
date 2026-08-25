@@ -12,10 +12,34 @@ const artifact: EngineArtifact = {
 	engineSourceSha256: `sha256:${"c".repeat(64)}`,
 	servedBackendCommit: "d".repeat(40),
 };
+const installedIdentity: InstalledEngineSelection["identity"] = {
+	schemaVersion: "bb.installed_engine_identity.v1",
+	distributionId: `sha256:${"a".repeat(64)}`,
+	productVersion: "0.1.0-rc.3",
+	target: { platform: "darwin", architecture: "arm64" },
+	signature: { kind: "unsigned-development" },
+	engine: {
+		runtimeBundleSha256: `sha256:${"1".repeat(64)}`,
+		executableSha256: artifact.executableSha256,
+		engineSourceSha256: artifact.engineSourceSha256,
+		servedBackendCommit: artifact.servedBackendCommit,
+		servedBackendTree: "e".repeat(40),
+		interfaceVersion: "0.3.0",
+		interfaceRange: ">=0.3.0 <0.4.0",
+	},
+	profile: {
+		profileId: "bb.default",
+		schemaVersion: "bb.profile.v1",
+		sourceSha256: `sha256:${"2".repeat(64)}`,
+		effectiveLockSchemaVersion: "bb.profile_lock.v1",
+		effectiveLockSha256: `sha256:${"3".repeat(64)}`,
+	},
+};
 const installedSelection = {
 	artifact,
+	identity: installedIdentity,
 	manifest: {},
-	manifestPath: "/Applications/BreadBoard.app/Contents/MacOS/engine/breadboard-engine-manifest.v1.json",
+	manifestPath: `/Applications/BreadBoard.app/Contents/MacOS/engine/${"a".repeat(64)}/breadboard-engine-manifest.v1.json`,
 } as unknown as InstalledEngineSelection;
 const baseInput = {
 	workspacePath: "/workspace",
@@ -56,6 +80,29 @@ describe("resolveProductBreadboardRunConfig", () => {
 			endpoint: "http://127.0.0.1:9099",
 			sources: { endpoint: "derived-default", engineArtifact: "derived-installed-artifact" },
 		});
+		expect(config.installedEngineIdentity).toBe(installedIdentity);
+	});
+
+	test("binds the trusted installed identity into the safe config digest", async () => {
+		const changedIdentity: InstalledEngineSelection["identity"] = {
+			...installedIdentity,
+			profile: {
+				...installedIdentity.profile,
+				effectiveLockSha256: `sha256:${"4".repeat(64)}`,
+			},
+		};
+		const resolve = async (identity: InstalledEngineSelection["identity"]) =>
+			resolveProductBreadboardRunConfig({
+				...baseInput,
+				isBreadboardProduct: true,
+				resolveInstalledSelection: async () => ({ ...installedSelection, identity }),
+			});
+
+		const first = await resolve(installedIdentity);
+		const changed = await resolve(changedIdentity);
+		expect(first.installedEngineIdentity).toBe(installedIdentity);
+		expect(changed.installedEngineIdentity).toBe(changedIdentity);
+		expect(changed.configDigest).not.toBe(first.configDigest);
 	});
 
 	test("preserves CLI, environment, and selected artifact precedence without discovery", async () => {
@@ -72,6 +119,7 @@ describe("resolveProductBreadboardRunConfig", () => {
 			resolveInstalledSelection,
 		});
 		expect(fromEnvironment.sources.engineArtifact).toBe("environment");
+		expect(fromEnvironment.installedEngineIdentity).toBeUndefined();
 		const fromSelected = await resolveProductBreadboardRunConfig({
 			...baseInput,
 			isBreadboardProduct: true,
@@ -79,6 +127,7 @@ describe("resolveProductBreadboardRunConfig", () => {
 			resolveInstalledSelection,
 		});
 		expect(fromSelected.sources.engineArtifact).toBe("selected-config");
+		expect(fromSelected.installedEngineIdentity).toBeUndefined();
 		expect(calls).toBe(0);
 	});
 

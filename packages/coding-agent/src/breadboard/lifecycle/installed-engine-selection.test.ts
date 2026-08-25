@@ -77,9 +77,11 @@ async function createFixture(root: string): Promise<InstalledFixture> {
 		},
 		signature: { kind: "unsigned-development" },
 	};
-	const canonicalManifest = canonicalEngineDistributionManifest(createEngineDistributionManifest(payload));
+	const manifest = createEngineDistributionManifest(payload);
+	const canonicalManifest = canonicalEngineDistributionManifest(manifest);
 	const trustRoot = Object.freeze({
 		schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
+		distributionId: manifest.distributionId,
 		expectedManifestSha256: sha256(canonicalManifest),
 		productVersion: payload.productVersion,
 		target: payload.target,
@@ -91,7 +93,11 @@ async function createFixture(root: string): Promise<InstalledFixture> {
 		signature: { kind: "unsigned-development" },
 	} satisfies EngineDistributionTrustRoot);
 	const appDirectory = join(root, "app");
-	const engineDirectory = join(appDirectory, ENGINE_DISTRIBUTION_DIRECTORY);
+	const engineDirectory = join(
+		appDirectory,
+		ENGINE_DISTRIBUTION_DIRECTORY,
+		manifest.distributionId.slice("sha256:".length),
+	);
 	const manifestPath = join(engineDirectory, ENGINE_DISTRIBUTION_MANIFEST_FILENAME);
 	const bundlePath = join(engineDirectory, bundleName);
 	const productExecutablePath = join(appDirectory, "bb");
@@ -154,6 +160,19 @@ describe("resolveInstalledEngineSelection", () => {
 			expect(Object.isFrozen(selection)).toBe(true);
 			expect(Object.isFrozen(selection.artifact)).toBe(true);
 			expect(Object.isFrozen(selection.artifact.runtimeBundle)).toBe(true);
+			expect(selection.identity).toMatchObject({
+				schemaVersion: "bb.installed_engine_identity.v1",
+				distributionId: fixture.trustRoot.distributionId,
+				engine: {
+					runtimeBundleSha256: sha256(fixture.bundleBytes),
+					executableSha256: sha256("python executable"),
+					engineSourceSha256: sha256("engine source"),
+				},
+			});
+			expect(Object.isFrozen(selection.identity)).toBe(true);
+			expect(Object.isFrozen(selection.identity.engine)).toBe(true);
+			expect(JSON.stringify(selection.identity)).not.toContain("github.com");
+			expect(JSON.stringify(selection.identity)).not.toContain("/");
 		});
 	});
 

@@ -868,7 +868,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(retryResult.stopReason).toBe("error");
 			expect(retryResult.errorMessage).toContain("already in the transcript");
 			expect(ownershipCalls).toEqual([String(receipt.turnId)]);
-			expect(ownershipSnapshots.at(-1)).toEqual([]);
+			expect(ownershipSnapshots.at(-1)).toEqual([String(receipt.turnId)]);
 
 			const lateAbort = new AbortController();
 			const lateStream = await startBridgeStream(bridge, model, context, { signal: lateAbort.signal });
@@ -1341,7 +1341,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(secondResult.content).toEqual([{ type: "text", text: "healthy" }]);
 			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "timeout" }]);
 			await bridge.close();
-			expect(ownershipSnapshots.at(-1)).toEqual([]);
+			expect(ownershipSnapshots.at(-1)).toEqual([String(secondReceipt.turnId)]);
 		} finally {
 			await bridge.close();
 		}
@@ -1462,7 +1462,7 @@ describe("E4AgentStreamBridge", () => {
 				yield started;
 				yield wireEvent(3, "assistant.message.delta", { text: "partial" });
 				runtimeErrorObserved.resolve();
-				yield wireEvent(4, "error", { code: "engine_crash", message: "sensitive backend detail" }, null);
+				yield wireEvent(4, "error", { code: "runtime_failure", message: "sensitive backend detail" }, null);
 				await releaseSecondSubmit.promise;
 				if (request?.signal?.aborted) return;
 				yield wireEvent(5, "turn_completed", {});
@@ -1496,14 +1496,14 @@ describe("E4AgentStreamBridge", () => {
 
 			expect(activeResult.stopReason).toBe("error");
 			expect(activeResult.content).toEqual([{ type: "text", text: "partial" }]);
-			expect(activeResult.errorMessage).toBe("BreadBoard runtime error [engine_crash]: [redacted]");
+			expect(activeResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
 			expect(activeResult.errorMessage).not.toContain("sensitive backend detail");
 			expect(submittingResult.stopReason).toBe("error");
-			expect(submittingResult.errorMessage).toBe("BreadBoard runtime error [engine_crash]: [redacted]");
+			expect(submittingResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
 
 			const laterResult = await (await startBridgeStream(bridge, model, laterContext)).result();
 			expect(laterResult.stopReason).toBe("error");
-			expect(laterResult.errorMessage).toBe("BreadBoard runtime error [engine_crash]: [redacted]");
+			expect(laterResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
 			expect(submissionCount).toBe(2);
 			expect(cancelled).toEqual([
 				{ turnId: receipt.turnId, reason: "timeout" },
@@ -1517,9 +1517,9 @@ describe("E4AgentStreamBridge", () => {
 
 	for (const runtimeFamily of [
 		{
-			label: "an unsupported backend runtime family",
-			event: wireEvent(4, "error", { code: "unsupported_runtime_event_family" }),
-			expectedMessage: "BreadBoard runtime error [unsupported_runtime_event_family]: [redacted]",
+			label: "a session-scoped runtime protocol error",
+			event: wireEvent(4, "error", { code: "runtime_protocol_error" }),
+			expectedMessage: "BreadBoard runtime error [runtime_protocol_error]: [redacted]",
 		},
 		{
 			label: "an unknown canonical runtime family",

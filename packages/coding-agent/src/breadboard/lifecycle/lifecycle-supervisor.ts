@@ -248,14 +248,14 @@ function randomCredential(): string {
 }
 export function lifecycleChildEnvironment(
 	launchId: string,
-	runtimeRecordRoot?: string,
+	engineStateRoot?: string,
 ): Readonly<Record<string, string>> {
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 		BREADBOARD_LEGACY_ROUTES: "1",
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
-		...(runtimeRecordRoot === undefined ? {} : { BREADBOARD_RUNTIME_RECORD_ROOT: runtimeRecordRoot }),
+		...(engineStateRoot === undefined ? {} : { BREADBOARD_ENGINE_STATE_ROOT: engineStateRoot }),
 	});
 }
 
@@ -324,16 +324,16 @@ function unrefDelay(milliseconds: number): Promise<void> {
 
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
-	readonly #runtimeRecordRoot: string | undefined;
+	readonly #engineStateRoot: string | undefined;
 
-	constructor(runtimeRecordRoot?: string) {
-		this.#runtimeRecordRoot = runtimeRecordRoot;
+	constructor(engineStateRoot?: string) {
+		this.#engineStateRoot = engineStateRoot;
 	}
 
 	async #childEnvironment(launchId: string): Promise<Readonly<Record<string, string>>> {
-		if (this.#runtimeRecordRoot === undefined) return lifecycleChildEnvironment(launchId);
-		await mkdir(this.#runtimeRecordRoot, { recursive: true, mode: 0o700 });
-		const metadata = await lstat(this.#runtimeRecordRoot);
+		if (this.#engineStateRoot === undefined) return lifecycleChildEnvironment(launchId);
+		await mkdir(this.#engineStateRoot, { recursive: true, mode: 0o700 });
+		const metadata = await lstat(this.#engineStateRoot);
 		const expectedUid = process.geteuid?.() ?? process.getuid?.() ?? -1;
 		if (
 			!metadata.isDirectory() ||
@@ -341,12 +341,9 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			(metadata.mode & 0o777) !== 0o700 ||
 			metadata.uid !== expectedUid
 		) {
-			throw new LocalAuthorityStoreError(
-				"root_integrity",
-				"engine runtime record root is not one private owned directory",
-			);
+			throw new LocalAuthorityStoreError("root_integrity", "engine state root is not one private owned directory");
 		}
-		return lifecycleChildEnvironment(launchId, await realpath(this.#runtimeRecordRoot));
+		return lifecycleChildEnvironment(launchId, await realpath(this.#engineStateRoot));
 	}
 
 	async #spawnBundledVerified(
@@ -1135,7 +1132,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		this.#process =
 			dependencies.process ??
 			new DefaultLifecycleProcessAdapter(
-				join(this.#store.root, "runtime-records", LocalAuthorityStore.endpointKey(config.endpoint)),
+				join(this.#store.root, "engine-state", LocalAuthorityStore.endpointKey(config.endpoint)),
 			);
 		this.#endpointAbsent =
 			dependencies.endpointAbsent ??

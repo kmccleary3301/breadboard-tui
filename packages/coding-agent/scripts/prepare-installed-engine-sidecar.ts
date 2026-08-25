@@ -176,7 +176,14 @@ export async function stageInstalledEngineSidecar(
 ): Promise<string> {
 	const outputRoot = dirname(productExecutablePath);
 	await mkdir(outputRoot, { recursive: true });
-	const finalRoot = join(outputRoot, ENGINE_DISTRIBUTION_DIRECTORY);
+	const finalParent = join(outputRoot, ENGINE_DISTRIBUTION_DIRECTORY);
+	await mkdir(finalParent, { recursive: true });
+	const parentMetadata = await lstat(finalParent);
+	if (!parentMetadata.isDirectory() || parentMetadata.isSymbolicLink()) {
+		fail("installed engine sidecar is unavailable");
+	}
+	await chmod(finalParent, 0o700);
+	const finalRoot = join(finalParent, distribution.manifest.distributionId.slice("sha256:".length));
 	const finalExists = await lstat(finalRoot).then(
 		() => true,
 		error => {
@@ -186,9 +193,10 @@ export async function stageInstalledEngineSidecar(
 	);
 	if (finalExists) {
 		await verifyStagedSidecar(finalRoot, distribution);
+		await chmod(finalParent, 0o500);
 		return finalRoot;
 	}
-	const temporaryRoot = await mkdtemp(join(outputRoot, ".engine-stage-"));
+	const temporaryRoot = await mkdtemp(join(finalParent, ".engine-stage-"));
 	try {
 		await chmod(temporaryRoot, 0o700);
 		const manifestPath = join(temporaryRoot, ENGINE_DISTRIBUTION_MANIFEST_FILENAME);
@@ -209,6 +217,8 @@ export async function stageInstalledEngineSidecar(
 				throw error;
 			});
 		}
+		await syncPath(finalParent);
+		await chmod(finalParent, 0o500);
 		await syncPath(outputRoot);
 		await verifyStagedSidecar(finalRoot, distribution);
 		return finalRoot;

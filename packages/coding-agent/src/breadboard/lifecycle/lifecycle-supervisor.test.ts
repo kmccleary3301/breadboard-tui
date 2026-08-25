@@ -511,16 +511,13 @@ describe("LifecycleSupervisor mode authority", () => {
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 			});
 			expect(
-				lifecycleChildEnvironment(
-					"launch_environment_abcdefghijklmnopqrstuvwxyz",
-					"/private/engine/runtime-records",
-				),
+				lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz", "/private/engine/state"),
 			).toEqual({
 				PATH: "/usr/bin:/bin",
 				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
-				BREADBOARD_RUNTIME_RECORD_ROOT: "/private/engine/runtime-records",
+				BREADBOARD_ENGINE_STATE_ROOT: "/private/engine/state",
 			});
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
 				"BREADBOARD_HOSTILE_PARENT_SECRET",

@@ -7,7 +7,7 @@ import {
 	type EngineRuntimeBundleReference,
 	parseEngineRuntimeBundleRelativePath,
 } from "./engine-runtime-bundle";
-
+import type { InstalledEngineIdentity } from "./installed-engine-manifest";
 export const BREADBOARD_ENGINE_MODES = ["local-owned", "local-external", "remote", "off"] as const;
 export type BreadboardEngineMode = (typeof BREADBOARD_ENGINE_MODES)[number];
 export type ConfigSource = "cli" | "environment" | "selected-config" | "derived-installed-artifact" | "derived-default";
@@ -50,6 +50,7 @@ export interface BreadboardRunConfig {
 	readonly auth?: BreadboardAuth;
 	readonly tls?: BreadboardTls;
 	readonly engineArtifact?: EngineArtifact;
+	readonly installedEngineIdentity?: InstalledEngineIdentity;
 	readonly sessionConfigPath?: string;
 	readonly workspaceId: `workspace:v1:sha256:${string}`;
 	readonly startupTimeoutMs: number;
@@ -92,6 +93,7 @@ export interface ResolveBreadboardRunConfigInput {
 	readonly derivedOwnerExitPolicy?: OwnerExitPolicy;
 	readonly canonicalizeWorkspace?: (path: string) => string;
 	readonly installedEngineArtifact?: unknown;
+	readonly installedEngineIdentity?: InstalledEngineIdentity;
 }
 
 export type RunConfigErrorCode =
@@ -559,6 +561,8 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 				: installedArtifact !== undefined
 					? { value: parseArtifact(installedArtifact), source: "derived-installed-artifact" as const }
 					: { value: undefined, source: "derived-default" as const };
+	const installedEngineIdentity =
+		artifactChoice.source === "derived-installed-artifact" ? input.installedEngineIdentity : undefined;
 
 	const workspaceChoice =
 		environment.BREADBOARD_WORKSPACE_ID !== undefined
@@ -668,6 +672,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 						engineSourceSha256: artifactChoice.value.engineSourceSha256,
 						servedBackendCommit: artifactChoice.value.servedBackendCommit,
 					},
+		installedEngineIdentity,
 		workspaceId: workspaceChoice.value,
 		startupTimeoutMs,
 		requestTimeoutMs,
@@ -685,11 +690,12 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 		...(authChoice.value === undefined ? {} : { auth: authChoice.value }),
 		...(tls === undefined ? {} : { tls }),
 		...(artifactChoice.value === undefined ? {} : { engineArtifact: artifactChoice.value }),
-		...(sessionConfigPath === undefined ? {} : { sessionConfigPath }),
+		...(installedEngineIdentity === undefined ? {} : { installedEngineIdentity }),
 		workspaceId: workspaceChoice.value as `workspace:v1:sha256:${string}`,
 		startupTimeoutMs,
 		requestTimeoutMs,
 		...(mode === "local-owned" ? { ownerExitPolicy } : {}),
+		...(sessionConfigPath === undefined ? {} : { sessionConfigPath }),
 		sources,
 		configDigest: `sha256:${configHash.digest("hex")}`,
 	});

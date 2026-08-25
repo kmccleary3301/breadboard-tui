@@ -208,7 +208,17 @@ describe("BreadBoard provider auth port integration", () => {
 		const client = {
 			async listProviders() {
 				return [
-					{ provider_id: "openai", display_name: "OpenAI", auth_schemes: ["api_key"], login_available: false },
+					{
+						provider_id: "openai",
+						aliases: [],
+						display_name: "OpenAI",
+						support_tier: "core" as const,
+						auth_owner: "broker" as const,
+						auth_schemes: ["api_key"],
+						available: true,
+						login_available: false,
+						model_discovery: "configured_only" as const,
+					},
 				];
 			},
 			async listCredentials() {

@@ -110,4 +110,42 @@ describe("BreadBoard backend model authority", () => {
 			}),
 		).toBe(model);
 	});
+
+	it.each(["mock", "cli_mock", "smoke", "replay"])(
+		"builds a provider-free %s model only for BreadBoard's custom stream",
+		provider => {
+			const model = resolveBreadboardBackendModel(`${provider}/reference`, {
+				getAll: () => [],
+			});
+
+			expect(model).toMatchObject({
+				provider,
+				id: "reference",
+				name: `${provider}/reference`,
+				api: "openai-completions",
+				baseUrl: "http://127.0.0.1:9/v1",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			});
+		},
+	);
+
+	it("prefers an exact configured model over the provider-free fallback", () => {
+		const model = { provider: "mock", id: "reference" } as Model;
+
+		expect(
+			resolveBreadboardBackendModel("mock/reference", {
+				getAll: () => [model],
+			}),
+		).toBe(model);
+	});
+
+	it("rejects provider-free model ids outside the explicit local allowlist", () => {
+		expect(() =>
+			resolveBreadboardBackendModel("openai/reference", {
+				getAll: () => [],
+			}),
+		).toThrow("BreadBoard backend model openai/reference is not present in the loaded OMP model registry.");
+	});
 });

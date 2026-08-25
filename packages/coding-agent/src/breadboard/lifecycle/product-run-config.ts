@@ -45,5 +45,9 @@ export async function resolveProductBreadboardRunConfig(
 		productExecutablePath: input.productExecutablePath ?? process.execPath,
 		trustRoot: input.installedTrustRoot ?? compiledInstalledEngineTrustRoot(),
 	});
-	return resolveBreadboardRunConfig({ ...effectiveInput, installedEngineArtifact: selection.artifact });
+	return resolveBreadboardRunConfig({
+		...effectiveInput,
+		installedEngineArtifact: selection.artifact,
+		installedEngineIdentity: selection.identity,
+	});
 }
