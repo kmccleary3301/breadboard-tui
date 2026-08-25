@@ -3,6 +3,7 @@
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { compileCodingAgent } from "./compile-binary";
+import { loadBuildEngineDistribution, stageInstalledEngineSidecar } from "./prepare-installed-engine-sidecar";
 
 const packageDir = path.join(import.meta.dir, "..");
 const repoRoot = path.join(packageDir, "..", "..");
@@ -16,6 +17,7 @@ export interface CrossBuild {
 }
 
 export type BinaryProduct = "bb" | "omp";
+export const BREADBOARD_ENGINE_DISTRIBUTION_ROOT_ENV = "BREADBOARD_ENGINE_DISTRIBUTION_ROOT";
 
 /** Resolve the local binary product, defaulting to the BreadBoard release candidate. */
 export function resolveBinaryProduct(value: string | undefined): BinaryProduct {
@@ -86,6 +88,25 @@ async function main(): Promise<void> {
 	const outName = crossBuild ? `${product}-${crossBuild.id}` : product;
 	const entrypointName = product === "bb" ? "bb.ts" : "omp.ts";
 	const outputPath = path.join(packageDir, "dist", outName);
+	const engineDistribution = await (async () => {
+		if (product !== "bb") return undefined;
+		const distributionRoot = Bun.env[BREADBOARD_ENGINE_DISTRIBUTION_ROOT_ENV];
+		if (!distributionRoot) {
+			throw new Error(`${BREADBOARD_ENGINE_DISTRIBUTION_ROOT_ENV} is required to build a complete bb artifact`);
+		}
+		const distribution = await loadBuildEngineDistribution(distributionRoot);
+		const targetPlatform = crossBuild?.platform ?? process.platform;
+		const targetArchitecture = crossBuild?.arch ?? process.arch;
+		if (
+			distribution.manifest.target.platform !== targetPlatform ||
+			distribution.manifest.target.architecture !== targetArchitecture
+		) {
+			throw new Error(
+				`bb engine distribution target ${distribution.manifest.target.platform}/${distribution.manifest.target.architecture} does not match ${targetPlatform}/${targetArchitecture}`,
+			);
+		}
+		return distribution;
+	})();
 	// Generate inside the try so the finally always restores generated placeholders
 	// (stats client archive, docs index) even on failure.
 	try {
@@ -108,11 +129,13 @@ async function main(): Promise<void> {
 				target: crossBuild?.target,
 				executablePath: Bun.env.BUN_COMPILE_EXECUTABLE_PATH || undefined,
 				skipBuiltinCodesign: shouldAdhocSign,
+				breadboardEngineTrustRoot: engineDistribution?.trustRoot,
 			});
 
 			if (shouldAdhocSign) {
 				await runCommand(["codesign", "--force", "--sign", "-", outputPath]);
 			}
+			if (engineDistribution) await stageInstalledEngineSidecar(outputPath, engineDistribution);
 		} finally {
 			await runCommand(["bun", "--cwd=../natives", "run", "gen:native:reset"]);
 		}

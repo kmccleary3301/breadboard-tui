@@ -16,7 +16,7 @@ export const INSTALLED_ENGINE_SELECTION_PRECEDENCE = [
 	"installed-distribution",
 ] as const;
 
-const MAX_MANIFEST_BYTES = 64 * 1024;
+export const ENGINE_DISTRIBUTION_MAX_MANIFEST_BYTES = 64 * 1024;
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
@@ -563,7 +563,8 @@ export function parseTrustedEngineDistributionManifest(
 	trustRoot: EngineDistributionTrustRoot,
 ): EngineDistributionManifest {
 	const bytes = typeof input === "string" ? Buffer.from(input, "utf8") : input;
-	if (bytes.byteLength === 0 || bytes.byteLength > MAX_MANIFEST_BYTES) fail("engine_manifest_invalid");
+	if (bytes.byteLength === 0 || bytes.byteLength > ENGINE_DISTRIBUTION_MAX_MANIFEST_BYTES)
+		fail("engine_manifest_invalid");
 	const trust = decodeTrustRoot(trustRoot);
 	const actualManifestSha256 = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 	if (actualManifestSha256 !== trust.expectedManifestSha256) fail("engine_manifest_untrusted");

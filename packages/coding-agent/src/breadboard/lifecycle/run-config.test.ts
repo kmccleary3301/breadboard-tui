@@ -152,12 +152,22 @@ describe("resolveBreadboardRunConfig", () => {
 		).toBe("missing_endpoint");
 	});
 
-	test("uses the BreadBoard endpoint default while preserving explicit engine precedence", () => {
+	test("uses an installed artifact with the BreadBoard endpoint default while preserving explicit endpoints", () => {
 		const productEnvironment = { BREADBOARD_PRODUCT: "1" };
-		const derived = resolveBreadboardRunConfig({ ...baseInput, environment: productEnvironment });
-		expect(derived.mode).toBe("local-external");
+		expect(
+			configError(() => resolveBreadboardRunConfig({ ...baseInput, environment: productEnvironment })).code,
+		).toBe("missing_engine_artifact");
+		const derived = resolveBreadboardRunConfig({
+			...baseInput,
+			environment: productEnvironment,
+			installedEngineArtifact: artifact,
+		});
+		expect(derived.mode).toBe("local-owned");
 		expect(derived.endpoint).toBe("http://127.0.0.1:9099");
-		expect(derived.sources.endpoint).toBe("derived-default");
+		expect(derived.sources).toMatchObject({
+			endpoint: "derived-default",
+			engineArtifact: "derived-installed-artifact",
+		});
 
 		const selected = resolveBreadboardRunConfig({
 			...baseInput,

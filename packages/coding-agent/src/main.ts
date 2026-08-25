@@ -39,7 +39,10 @@ import {
 	connectCanonicalBreadboardEnginePort,
 	type BreadboardLifecycleFailureResult as EngineLifecycleFailureResult,
 } from "./breadboard/engine-port";
+import { InstalledEngineDiscoveryError } from "./breadboard/lifecycle/installed-engine-manifest";
+import { formatInstalledEngineDiscoveryError } from "./breadboard/lifecycle/installed-engine-selection";
 import { writeLifecyclePresentation } from "./breadboard/lifecycle/lifecycle-presenter";
+import { resolveProductBreadboardRunConfig } from "./breadboard/lifecycle/product-run-config";
 import {
 	BreadboardRunConfigError,
 	parseSelectedBreadboardConfig,
@@ -1524,16 +1527,17 @@ export class BreadboardLifecycleStartupError extends Error {
 
 export type BreadboardLifecycleFailureResult = EngineLifecycleFailureResult;
 
-function resolveEffectiveBreadboardRunConfig(
+async function resolveEffectiveBreadboardRunConfig(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
 	activeSettings: Settings,
 	workspacePath: string,
 ) {
 	const selectedConfig = parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard"));
-	return resolveBreadboardRunConfig({
+	return await resolveProductBreadboardRunConfig({
 		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
 		selectedConfig,
 		workspacePath,
+		isBreadboardProduct: IS_BREADBOARD_PRODUCT,
 	});
 }
 
@@ -1579,8 +1583,15 @@ export function createBreadboardStartupForkPolicy(
 	if (!canPrepareBreadboardRuntime) return ALLOW_STARTUP_FORK;
 	return () => {
 		const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
-		const config = resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
-		if (config.mode === "off") return;
+		const config =
+			IS_BREADBOARD_PRODUCT && selected.engineMode === undefined && selected.engineUrl === undefined
+				? undefined
+				: resolveBreadboardRunConfig({
+						cli: { engineMode: selected.engineMode, engineUrl: selected.engineUrl },
+						selectedConfig: parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard")),
+						workspacePath,
+					});
+		if (config?.mode === "off") return;
 		throw new BreadboardSessionTransitionError(
 			"BreadBoard cannot fork an OMP session at startup because the current E4 SDK cannot atomically rebind the bridge to the forked transcript. Start a new OMP session or run with BreadBoard mode off.",
 		);
@@ -1686,6 +1697,9 @@ export class BreadboardModelAuthorityError extends Error {
 function formatBreadboardStartupError(error: unknown): string | undefined {
 	if (error instanceof BreadboardRunConfigError) {
 		return `BreadBoard configuration error [${error.code}/${error.field}]: ${error.message}`;
+	}
+	if (error instanceof InstalledEngineDiscoveryError) {
+		return formatInstalledEngineDiscoveryError(error);
 	}
 	if (error instanceof BreadboardSessionTransitionError) {
 		return `BreadBoard session transition error [${error.code}]: ${error.message}`;
@@ -2105,7 +2119,7 @@ export async function prepareBreadboardRuntime(
 	},
 ): Promise<PreparedBreadboardRuntime | null> {
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, getProjectDir());
-	const config = resolveEffectiveBreadboardRunConfig(selected, activeSettings, getProjectDir());
+	const config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, getProjectDir());
 	if (config.mode === "off") return null;
 	const sessionBinding =
 		parsed.continue || parsed.resume === true || typeof parsed.resume === "string"

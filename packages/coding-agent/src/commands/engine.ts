@@ -1,6 +1,9 @@
 import { join } from "node:path";
+import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { getAgentDir } from "@oh-my-pi/pi-utils/dirs";
+import { InstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-manifest";
+import { formatInstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-selection";
 import { restoreLifecycleTerminal, writeLifecyclePresentation } from "../breadboard/lifecycle/lifecycle-presenter";
 import { type LifecycleResult, lifecycleFailure, lifecycleState } from "../breadboard/lifecycle/lifecycle-state";
 import {
@@ -9,11 +12,11 @@ import {
 	LifecycleSupervisor,
 } from "../breadboard/lifecycle/lifecycle-supervisor";
 import { LocalAuthorityStore } from "../breadboard/lifecycle/local-authority-store";
+import { resolveProductBreadboardRunConfig } from "../breadboard/lifecycle/product-run-config";
 import {
 	BREADBOARD_ENGINE_MODES,
 	BreadboardRunConfigError,
 	parseSelectedBreadboardConfig,
-	resolveBreadboardRunConfig,
 } from "../breadboard/lifecycle/run-config";
 import { engineHelp as commandHelp } from "../cli/command-help";
 import { Settings } from "../config/settings";
@@ -51,7 +54,7 @@ export default class Engine extends Command {
 			const action = (args.action ?? "status") as EngineAction;
 			const activeSettings = await Settings.init({ cwd: process.cwd(), configFiles: flags.config });
 			const selectedConfig = parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard"));
-			const config = resolveBreadboardRunConfig({
+			const config = await resolveProductBreadboardRunConfig({
 				cli: {
 					engineMode: flags["engine-mode"],
 					engineUrl: flags["engine-url"],
@@ -59,6 +62,7 @@ export default class Engine extends Command {
 				derivedOwnerExitPolicy: action === "start" || action === "restart" ? "detached" : "attached",
 				selectedConfig,
 				workspacePath: process.cwd(),
+				isBreadboardProduct: IS_BREADBOARD_PRODUCT,
 			});
 			let execution: LifecycleActionExecution;
 			if (config.mode === "off") {
@@ -94,9 +98,11 @@ export default class Engine extends Command {
 			const message =
 				error instanceof BreadboardRunConfigError
 					? `BreadBoard configuration error [${error.code}/${error.field}]: ${error.message}`
-					: error instanceof Error
-						? error.message
-						: String(error);
+					: error instanceof InstalledEngineDiscoveryError
+						? formatInstalledEngineDiscoveryError(error)
+						: error instanceof Error
+							? error.message
+							: String(error);
 			process.stderr.write(`${message}\n`);
 			process.exitCode = 1;
 		} finally {

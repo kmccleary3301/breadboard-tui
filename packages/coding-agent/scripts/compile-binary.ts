@@ -1,3 +1,4 @@
+import type { EngineDistributionTrustRoot } from "../src/breadboard/lifecycle/installed-engine-manifest";
 import { buildDocsIndexPayload } from "./generate-docs-index";
 import { createLegacyPiVirtualModulePlugin } from "./legacy-pi-virtual-module";
 
@@ -22,6 +23,8 @@ export interface CodingAgentCompileOptions {
 	readonly minifyIdentifiers?: boolean;
 	/** Disable Bun's built-in Darwin signing before the caller re-signs. */
 	readonly skipBuiltinCodesign?: boolean;
+	/** Build-verified trust embedded only in a complete BreadBoard product binary. */
+	readonly breadboardEngineTrustRoot?: EngineDistributionTrustRoot;
 }
 
 /**
@@ -42,6 +45,10 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 				"process.env.PI_COMPILED": JSON.stringify("true"),
 				"process.env.PI_TINY_TRANSFORMERS_VERSION": JSON.stringify(options.transformersVersion),
 				"process.env.PI_DOCS_EMBED": JSON.stringify((await buildDocsIndexPayload()).payload),
+				__BREADBOARD_ENGINE_TRUST_ROOT_JSON__:
+					options.breadboardEngineTrustRoot === undefined
+						? "undefined"
+						: JSON.stringify(JSON.stringify(options.breadboardEngineTrustRoot)),
 			},
 			minify: {
 				identifiers: options.minifyIdentifiers ?? false,

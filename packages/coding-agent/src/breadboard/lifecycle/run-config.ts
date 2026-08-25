@@ -10,7 +10,7 @@ import {
 
 export const BREADBOARD_ENGINE_MODES = ["local-owned", "local-external", "remote", "off"] as const;
 export type BreadboardEngineMode = (typeof BREADBOARD_ENGINE_MODES)[number];
-export type ConfigSource = "cli" | "environment" | "selected-config" | "derived-default";
+export type ConfigSource = "cli" | "environment" | "selected-config" | "derived-installed-artifact" | "derived-default";
 export type OwnerExitPolicy = "attached" | "detached";
 
 export type BreadboardAuth =
@@ -91,6 +91,7 @@ export interface ResolveBreadboardRunConfigInput {
 	readonly workspacePath: string;
 	readonly derivedOwnerExitPolicy?: OwnerExitPolicy;
 	readonly canonicalizeWorkspace?: (path: string) => string;
+	readonly installedEngineArtifact?: unknown;
 }
 
 export type RunConfigErrorCode =
@@ -487,7 +488,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 	else if (envMode !== undefined) modeChoice = { value: parseMode(envMode), source: "environment", explicit: true };
 	else if (selectedMode !== undefined)
 		modeChoice = { value: parseMode(selectedMode), source: "selected-config", explicit: true };
-	else if (normalizedEndpoint === undefined)
+	else if (normalizedEndpoint === undefined || (environment.BREADBOARD_PRODUCT === "1" && !endpointChoice.explicit))
 		modeChoice = { value: "local-owned", source: "derived-default", explicit: false };
 	else
 		modeChoice = {
@@ -516,12 +517,15 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 				: { value: undefined, source: "derived-default" as const };
 
 	const envArtifact = environmentArtifact(environment);
+	const installedArtifact = modeChoice.value === "local-owned" ? input.installedEngineArtifact : undefined;
 	const artifactChoice =
 		envArtifact !== undefined
 			? { value: parseArtifact(envArtifact), source: "environment" as const }
 			: hasOwn(selected, "engineArtifact")
 				? { value: parseArtifact(selected.engineArtifact), source: "selected-config" as const }
-				: { value: undefined, source: "derived-default" as const };
+				: installedArtifact !== undefined
+					? { value: parseArtifact(installedArtifact), source: "derived-installed-artifact" as const }
+					: { value: undefined, source: "derived-default" as const };
 
 	const workspaceChoice =
 		environment.BREADBOARD_WORKSPACE_ID !== undefined
@@ -574,7 +578,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 		if (authChoice.value !== undefined)
 			fail("mode_auth_conflict", "auth", "local-owned does not accept endpoint authentication");
 		if (!artifactChoice.value)
-			fail("missing_engine_artifact", "engineArtifact", "local-owned requires an explicit engine artifact identity");
+			fail("missing_engine_artifact", "engineArtifact", "local-owned requires an engine artifact identity");
 		tls = { kind: "local-loopback" };
 	} else if (mode === "local-external") {
 		if ((!endpointChoice.explicit && environment.BREADBOARD_PRODUCT !== "1") || endpoint === undefined)
