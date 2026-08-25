@@ -210,7 +210,7 @@ describe("BBOMP-CORE-52 — SDK event envelope, decoding, ordering, and cursor b
 
 describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)", () => {
 	test("[fast] creates a session through the canonical port without changing the request", async () => {
-		const request = { configPath: "agent.yaml", task: "task" };
+		const request = { configPath: "agent.yaml", task: "task", workspace: "/canonical/project" };
 		let received: unknown;
 		const runtime = openedSession([]);
 		const port = new CanonicalE4SessionPort(
@@ -258,7 +258,10 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 		const abort = new AbortController();
 		abort.abort();
 		await expect(
-			port.open({ kind: "create", request: { configPath: "agent.yaml" } }, abort.signal),
+			port.open(
+				{ kind: "create", request: { configPath: "agent.yaml", workspace: "/canonical/project" } },
+				abort.signal,
+			),
 		).rejects.toThrow();
 		expect(calls).toBe(0);
 	});
@@ -271,7 +274,10 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 			{ onLateCloseError: () => {} },
 		);
 		const abort = new AbortController();
-		const opening = port.open({ kind: "create", request: { configPath: "agent.yaml" } }, abort.signal);
+		const opening = port.open(
+			{ kind: "create", request: { configPath: "agent.yaml", workspace: "/canonical/project" } },
+			abort.signal,
+		);
 		abort.abort();
 		resolve({
 			...openedSession([]),
@@ -362,7 +368,10 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 			{ create: async () => runtime, attach: async () => runtime },
 			{ onLateCloseError: () => {} },
 		);
-		const opened = await port.open({ kind: "create", request: { configPath: "agent.yaml" } });
+		const opened = await port.open({
+			kind: "create",
+			request: { configPath: "agent.yaml", workspace: "/canonical/project" },
+		});
 		await Promise.all([opened.close(), opened.close()]);
 		expect(closes).toBe(1);
 	});

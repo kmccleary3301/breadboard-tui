@@ -3,9 +3,12 @@ import {
 	CanonicalE4ClientError,
 	type OpenedSession as CanonicalOpenedSession,
 } from "@breadboard/sdk/internal";
-import type { BreadboardSessionPort, OpenedSession, OpenSession } from "./session-port";
+import type { BreadboardCreateSessionRequest, BreadboardSessionPort, OpenedSession, OpenSession } from "./session-port";
 
-type CanonicalSessionClient = Pick<CanonicalE4Client, "attach" | "create">;
+interface CanonicalSessionClient {
+	readonly attach: CanonicalE4Client["attach"];
+	create(request: BreadboardCreateSessionRequest): ReturnType<CanonicalE4Client["create"]>;
+}
 
 type CanonicalSession = CanonicalOpenedSession;
 

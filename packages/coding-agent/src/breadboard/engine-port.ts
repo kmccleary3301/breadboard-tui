@@ -30,7 +30,7 @@ import type { ModelRolePort } from "./model-role-port";
 import { createBreadboardModelRolePort } from "./model-role-port";
 import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
 import type { ProviderAuthPort } from "./provider-auth-port";
-import type { OpenedSession, OpenSession } from "./session-port";
+import type { BreadboardCreateSessionRequest, OpenedSession, OpenSession } from "./session-port";
 
 type BreadboardEngineReadyHandle = Pick<
 	LifecycleReadyHandle,
@@ -152,6 +152,38 @@ function visibleAssistantText(payload: unknown): string {
 	return typeof text === "string" ? text.replace(/\n*>>>>>> END RESPONSE\s*$/, "") : "";
 }
 
+interface BreadboardSessionCreatePayload {
+	readonly config_path?: string;
+	readonly task: string;
+	readonly overrides?: BreadboardCreateSessionRequest["overrides"];
+	readonly metadata?: BreadboardCreateSessionRequest["metadata"];
+	readonly workspace: string;
+	readonly max_steps?: BreadboardCreateSessionRequest["maxSteps"];
+	readonly permission_mode?: BreadboardCreateSessionRequest["permissionMode"];
+	readonly stream?: BreadboardCreateSessionRequest["stream"];
+}
+
+export function buildBreadboardSessionCreatePayload(
+	request: BreadboardCreateSessionRequest,
+): BreadboardSessionCreatePayload {
+	if (request.workspace.length === 0) {
+		throw new Error("BreadBoard session create request requires a workspace");
+	}
+	if (request.configPath !== undefined && request.configPath.length === 0) {
+		throw new Error("BreadBoard session create request contains an empty config path");
+	}
+	return {
+		...(request.configPath === undefined ? {} : { config_path: request.configPath }),
+		task: request.task ?? "",
+		...(request.overrides === undefined ? {} : { overrides: request.overrides }),
+		...(request.metadata === undefined ? {} : { metadata: request.metadata }),
+		workspace: request.workspace,
+		...(request.maxSteps === undefined ? {} : { max_steps: request.maxSteps }),
+		...(request.permissionMode === undefined ? {} : { permission_mode: request.permissionMode }),
+		...(request.stream === undefined ? {} : { stream: request.stream }),
+	};
+}
+
 export function filterUncorrelatedCanonicalEvents(response: Response): Response {
 	if (!response.body) return response;
 	const decoder = new TextDecoder();
@@ -252,12 +284,9 @@ function createConnectedPort(
 	const controlClient = createBreadboardClient(clientConfig);
 	const sessionClient = {
 		...canonicalClient,
-		async create(request: Parameters<typeof canonicalClient.create>[0]) {
-			if (request.task === undefined) {
-				const created = await controlClient.createSession({ config_path: request.configPath } as never);
-				return await canonicalClient.attach({ sessionId: created.session_id });
-			}
-			return await canonicalClient.create(request);
+		async create(request: BreadboardCreateSessionRequest) {
+			const created = await controlClient.createSession(buildBreadboardSessionCreatePayload(request) as never);
+			return await canonicalClient.attach({ sessionId: created.session_id });
 		},
 	};
 	const sessionPort = new CanonicalE4SessionPort(sessionClient, {

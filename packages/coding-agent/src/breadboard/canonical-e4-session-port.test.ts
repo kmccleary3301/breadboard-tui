@@ -35,7 +35,7 @@ describe("CanonicalE4SessionPort", () => {
 		const create = mock(async () => runtime);
 		const attach = mock(async () => runtime);
 		const port = new CanonicalE4SessionPort({ create, attach }, { onLateCloseError: ignoreLateCloseError });
-		const request = { configPath: "agent_configs/session.yaml" };
+		const request = { configPath: "agent_configs/session.yaml", workspace: "/canonical/project" };
 
 		await expect(port.open({ kind: "create", request })).resolves.toMatchObject({ sessionId: runtime.sessionId });
 		expect(create).toHaveBeenCalledTimes(1);
@@ -65,7 +65,13 @@ describe("CanonicalE4SessionPort", () => {
 		abort.abort();
 
 		await expect(
-			port.open({ kind: "create", request: { configPath: "agent_configs/session.yaml" } }, abort.signal),
+			port.open(
+				{
+					kind: "create",
+					request: { configPath: "agent_configs/session.yaml", workspace: "/canonical/project" },
+				},
+				abort.signal,
+			),
 		).rejects.toMatchObject({ failure: { kind: "caller-abort" } });
 		expect(create).not.toHaveBeenCalled();
 		expect(attach).not.toHaveBeenCalled();
@@ -85,7 +91,10 @@ describe("CanonicalE4SessionPort", () => {
 		const abort = new AbortController();
 
 		const opening = port.open(
-			{ kind: "create", request: { configPath: "agent_configs/session.yaml" } },
+			{
+				kind: "create",
+				request: { configPath: "agent_configs/session.yaml", workspace: "/canonical/project" },
+			},
 			abort.signal,
 		);
 		abort.abort();
@@ -113,7 +122,10 @@ describe("CanonicalE4SessionPort", () => {
 		const abort = new AbortController();
 
 		const opening = port.open(
-			{ kind: "create", request: { configPath: "agent_configs/session.yaml" } },
+			{
+				kind: "create",
+				request: { configPath: "agent_configs/session.yaml", workspace: "/canonical/project" },
+			},
 			abort.signal,
 		);
 		abort.abort();

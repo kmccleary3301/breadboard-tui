@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { connectCanonicalBreadboardEnginePort, filterUncorrelatedCanonicalEvents } from "./engine-port";
+import {
+	buildBreadboardSessionCreatePayload,
+	connectCanonicalBreadboardEnginePort,
+	filterUncorrelatedCanonicalEvents,
+} from "./engine-port";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
 
 const offConfig = {
@@ -106,5 +110,53 @@ describe("filterUncorrelatedCanonicalEvents", () => {
 		expect(filtered).toContain('"type":"run_finished"');
 		expect(filtered).toContain('"seq":10');
 		expect(filtered).toContain('"type":"turn_completed"');
+	});
+});
+
+describe("taskless session create adapter", () => {
+	test("omits config_path from the JSON payload for the bundled default", () => {
+		const payload = buildBreadboardSessionCreatePayload({ workspace: "/canonical/project" });
+		expect(JSON.stringify(payload)).toBe('{"task":"","workspace":"/canonical/project"}');
+		expect("config_path" in JSON.parse(JSON.stringify(payload))).toBe(false);
+	});
+
+	test("retains an explicit config path byte-for-byte", () => {
+		const configPath = "/profiles/daily_driver.v1.yaml";
+		const payload = buildBreadboardSessionCreatePayload({ workspace: "/canonical/project", configPath });
+		expect(JSON.parse(JSON.stringify(payload))).toEqual({
+			config_path: configPath,
+			task: "",
+			workspace: "/canonical/project",
+		});
+	});
+
+	test("preserves every canonical create option through the legacy payload boundary", () => {
+		expect(
+			buildBreadboardSessionCreatePayload({
+				configPath: "/profiles/custom.yaml",
+				task: "ship it",
+				overrides: { "providers.default_model": "mock/reference" },
+				metadata: { source: "tui" },
+				workspace: "/canonical/project",
+				maxSteps: 7,
+				permissionMode: "prompt",
+				stream: false,
+			}),
+		).toEqual({
+			config_path: "/profiles/custom.yaml",
+			task: "ship it",
+			overrides: { "providers.default_model": "mock/reference" },
+			metadata: { source: "tui" },
+			workspace: "/canonical/project",
+			max_steps: 7,
+			permission_mode: "prompt",
+			stream: false,
+		});
+	});
+
+	test("rejects an empty explicit config path instead of treating it as the bundled default", () => {
+		expect(() => buildBreadboardSessionCreatePayload({ configPath: "", workspace: "/canonical/project" })).toThrow(
+			"empty config path",
+		);
 	});
 });

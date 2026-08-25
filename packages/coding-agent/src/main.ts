@@ -1642,6 +1642,8 @@ export function resolveBreadboardSessionTarget(
 	parsed: Pick<Args, "continue" | "resume">,
 	sessionManager: BreadboardSessionBindingManager | undefined,
 	sessionConfigPath: string | undefined,
+	workspacePath: string = getProjectDir(),
+	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
 ): OpenSession {
 	if (parsed.continue || parsed.resume === true || typeof parsed.resume === "string") {
 		const binding = sessionManager && readBreadboardSessionBinding(sessionManager);
@@ -1652,14 +1654,20 @@ export function resolveBreadboardSessionTarget(
 		}
 		return { kind: "attach", sessionId: binding.sessionId };
 	}
-	if (sessionConfigPath !== undefined) {
-		return { kind: "create", request: { configPath: sessionConfigPath } };
+	if (!isBreadboardProduct && sessionConfigPath === undefined) {
+		throw new BreadboardRunConfigError(
+			"invalid_session_config",
+			"sessionConfigPath",
+			"a selected sessionConfigPath is required to create a session",
+		);
 	}
-	throw new BreadboardRunConfigError(
-		"invalid_session_config",
-		"sessionConfigPath",
-		"a selected sessionConfigPath is required to create a session",
-	);
+	return {
+		kind: "create",
+		request: {
+			workspace: workspacePath,
+			...(sessionConfigPath === undefined ? {} : { configPath: sessionConfigPath }),
+		},
+	};
 }
 
 export interface PreparedBreadboardRuntime {
@@ -2134,14 +2142,21 @@ export async function prepareBreadboardRuntime(
 		throw new Error("BreadBoard released an agent event without an active AgentSession binding");
 	},
 ): Promise<PreparedBreadboardRuntime | null> {
-	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, getProjectDir());
-	const config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, getProjectDir());
+	const workspacePath = fsSync.realpathSync(getProjectDir());
+	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
+	const config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
 	if (config.mode === "off") return null;
 	const sessionBinding =
 		parsed.continue || parsed.resume === true || typeof parsed.resume === "string"
 			? sessionManager && readBreadboardSessionBinding(sessionManager)
 			: undefined;
-	const target = resolveBreadboardSessionTarget(parsed, sessionManager, config.sessionConfigPath);
+	const target = resolveBreadboardSessionTarget(
+		parsed,
+		sessionManager,
+		config.sessionConfigPath,
+		workspacePath,
+		IS_BREADBOARD_PRODUCT,
+	);
 
 	const connected = await connectCanonicalBreadboardEnginePort(config, {
 		onLateSessionCloseError: () => {

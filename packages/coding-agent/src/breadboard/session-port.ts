@@ -3,7 +3,6 @@ import type {
 	CancelReceipt,
 	CancelTurnRequest,
 	CreateSessionRequest,
-	EventId,
 	LoggedSessionEvent,
 	ObserveEvents,
 	PermissionDecisionReceipt,
@@ -20,7 +19,6 @@ export type {
 	CancelReceipt,
 	CancelTurnRequest,
 	CreateSessionRequest,
-	EventId,
 	LoggedSessionEvent,
 	ObserveEvents,
 	PermissionDecisionReceipt,
@@ -32,8 +30,18 @@ export type {
 	TurnId,
 };
 
+/**
+ * Product session creation keeps the generated canonical contract at the
+ * adapter boundary while allowing the packaged backend profile to be selected
+ * by omission.
+ */
+export type BreadboardCreateSessionRequest = Omit<CreateSessionRequest, "configPath"> & {
+	readonly configPath?: string;
+	readonly workspace: string;
+};
+
 export type OpenSession =
-	| { readonly kind: "create"; readonly request: CreateSessionRequest }
+	| { readonly kind: "create"; readonly request: BreadboardCreateSessionRequest }
 	| { readonly kind: "attach"; readonly sessionId: AttachSessionRequest["sessionId"] };
 
 /**
