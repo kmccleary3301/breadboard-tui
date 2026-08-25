@@ -12,6 +12,7 @@ import * as path from "node:path";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
+	BreadboardSessionTransitionError,
 	createBreadboardStartupForkPolicy,
 	createSessionManager,
 	SessionResolutionError,
@@ -204,6 +205,37 @@ describe("createSessionManager — missing session (#2084)", () => {
 
 	it("keeps unconfigured startup forks on the native OMP path", () => {
 		const policy = createBreadboardStartupForkPolicy({}, stubSettings, os.tmpdir());
+		expect(policy).not.toThrow();
+	});
+
+	it("rejects product startup forks without forcing installed artifact resolution", () => {
+		const selectedLocalOwned = {
+			get: () => undefined,
+			getRaw: (key: string) => (key === "breadboard" ? { engineMode: "local-owned" } : undefined),
+		} as unknown as Settings;
+		const cases: Array<{
+			readonly parsed: Pick<Args, "engineMode" | "engineUrl">;
+			readonly settings: Settings;
+		}> = [
+			{ parsed: {}, settings: stubSettings },
+			{ parsed: { engineMode: "local-owned" }, settings: stubSettings },
+			{ parsed: {}, settings: selectedLocalOwned },
+		];
+		for (const testCase of cases) {
+			const policy = createBreadboardStartupForkPolicy(testCase.parsed, testCase.settings, os.tmpdir(), true, true);
+			let thrown: unknown;
+			try {
+				policy();
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown).toBeInstanceOf(BreadboardSessionTransitionError);
+			expect(thrown).toMatchObject({ code: "unsupported_resume_transition" });
+		}
+	});
+
+	it("allows an explicit product off mode startup fork", () => {
+		const policy = createBreadboardStartupForkPolicy({ engineMode: "off" }, stubSettings, os.tmpdir(), true, true);
 		expect(policy).not.toThrow();
 	});
 });

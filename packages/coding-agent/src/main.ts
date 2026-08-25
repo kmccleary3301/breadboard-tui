@@ -1545,10 +1545,11 @@ function resolveNativeSurfaceEngineSelection(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
 	activeSettings: Settings,
 	workspacePath: string,
+	isBreadboardProduct = IS_BREADBOARD_PRODUCT,
 ): Pick<Args, "engineMode" | "engineUrl"> {
-	const selected = parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard"));
+	const selectedConfig = parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard"));
 	const selectedExplicit = ["engineMode", "baseUrl", "auth", "tls", "engineArtifact"].some(key =>
-		Object.hasOwn(selected, key),
+		Object.hasOwn(selectedConfig, key),
 	);
 	const environmentExplicit = [
 		process.env.BREADBOARD_ENGINE_MODE,
@@ -1564,14 +1565,37 @@ function resolveNativeSurfaceEngineSelection(
 		process.env.BREADBOARD_ENGINE_BACKEND_COMMIT,
 	].some(value => value !== undefined);
 	if (parsed.engineMode === undefined && parsed.engineUrl === undefined && !selectedExplicit && !environmentExplicit) {
-		return IS_BREADBOARD_PRODUCT ? {} : { engineMode: "off" };
+		return isBreadboardProduct ? {} : { engineMode: "off" };
 	}
-	const effective = resolveBreadboardRunConfig({
-		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
-		selectedConfig: selected,
-		workspacePath,
-	});
-	return { engineMode: effective.mode, engineUrl: effective.endpoint };
+	try {
+		const effective = resolveBreadboardRunConfig({
+			cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
+			selectedConfig,
+			workspacePath,
+		});
+		return { engineMode: effective.mode, engineUrl: effective.endpoint };
+	} catch (error) {
+		if (
+			isBreadboardProduct &&
+			error instanceof BreadboardRunConfigError &&
+			error.code === "missing_engine_artifact"
+		) {
+			return { engineMode: "local-owned", engineUrl: parsed.engineUrl };
+		}
+		throw error;
+	}
+}
+
+function startupBreadboardModeIsOff(
+	parsed: Pick<Args, "engineMode" | "engineUrl">,
+	activeSettings: Settings,
+	workspacePath: string,
+	isBreadboardProduct: boolean,
+): boolean {
+	return (
+		resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath, isBreadboardProduct).engineMode ===
+		"off"
+	);
 }
 
 export function createBreadboardStartupForkPolicy(
@@ -1579,19 +1603,11 @@ export function createBreadboardStartupForkPolicy(
 	activeSettings: Settings = settings,
 	workspacePath: string = getProjectDir(),
 	canPrepareBreadboardRuntime = true,
+	isBreadboardProduct = IS_BREADBOARD_PRODUCT,
 ): StartupForkPolicy {
 	if (!canPrepareBreadboardRuntime) return ALLOW_STARTUP_FORK;
 	return () => {
-		const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
-		const config =
-			IS_BREADBOARD_PRODUCT && selected.engineMode === undefined && selected.engineUrl === undefined
-				? undefined
-				: resolveBreadboardRunConfig({
-						cli: { engineMode: selected.engineMode, engineUrl: selected.engineUrl },
-						selectedConfig: parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard")),
-						workspacePath,
-					});
-		if (config?.mode === "off") return;
+		if (startupBreadboardModeIsOff(parsed, activeSettings, workspacePath, isBreadboardProduct)) return;
 		throw new BreadboardSessionTransitionError(
 			"BreadBoard cannot fork an OMP session at startup because the current E4 SDK cannot atomically rebind the bridge to the forked transcript. Start a new OMP session or run with BreadBoard mode off.",
 		);
