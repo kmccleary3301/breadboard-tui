@@ -7,6 +7,7 @@ import {
 import {
 	type BreadboardRunConfig,
 	BreadboardRunConfigError,
+	hasExplicitEngineSelection,
 	type ResolveBreadboardRunConfigInput,
 	resolveBreadboardRunConfig,
 } from "./run-config";
@@ -33,7 +34,8 @@ export async function resolveProductBreadboardRunConfig(
 		if (
 			!input.isBreadboardProduct ||
 			!(error instanceof BreadboardRunConfigError) ||
-			error.code !== "missing_engine_artifact"
+			error.code !== "missing_engine_artifact" ||
+			hasExplicitEngineSelection(effectiveInput)
 		) {
 			throw error;
 		}

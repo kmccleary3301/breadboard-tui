@@ -143,6 +143,39 @@ const SELECTED_CONFIG_FIELDS = new Set([
 	"ownerExitPolicy",
 	"sessionConfigPath",
 ]);
+const SELECTED_ENGINE_SELECTION_FIELDS = ["engineMode", "baseUrl", "auth", "tls", "engineArtifact"] as const;
+const ENGINE_SELECTION_ENVIRONMENT_FIELDS = [
+	"BREADBOARD_ENGINE_MODE",
+	"BREADBOARD_API_URL",
+	"BREADBOARD_API_TOKEN",
+	"BREADBOARD_API_TOKEN_REF",
+	"BREADBOARD_MTLS_IDENTITY_REF",
+	"BREADBOARD_TLS_SPKI_PIN",
+	"BREADBOARD_ENGINE_EXECUTABLE",
+	"BREADBOARD_ENGINE_ARGV_JSON",
+	"BREADBOARD_ENGINE_EXECUTABLE_SHA256",
+	"BREADBOARD_ENGINE_SOURCE_SHA256",
+	"BREADBOARD_ENGINE_BACKEND_COMMIT",
+] as const;
+
+export function hasExplicitEngineSelection(
+	input: Pick<ResolveBreadboardRunConfigInput, "cli" | "environment" | "selectedConfig">,
+): boolean {
+	if (input.cli?.engineMode !== undefined || input.cli?.engineUrl !== undefined) return true;
+	if (
+		input.selectedConfig !== undefined &&
+		typeof input.selectedConfig === "object" &&
+		input.selectedConfig !== null &&
+		!Array.isArray(input.selectedConfig) &&
+		SELECTED_ENGINE_SELECTION_FIELDS.some(field => hasOwn(input.selectedConfig as object, field))
+	) {
+		return true;
+	}
+	return (
+		input.environment !== undefined &&
+		ENGINE_SELECTION_ENVIRONMENT_FIELDS.some(field => input.environment?.[field] !== undefined)
+	);
+}
 
 function fail(code: RunConfigErrorCode, field: RunConfigField, message: string): never {
 	throw new BreadboardRunConfigError(code, field, message);

@@ -45,6 +45,7 @@ import { writeLifecyclePresentation } from "./breadboard/lifecycle/lifecycle-pre
 import { resolveProductBreadboardRunConfig } from "./breadboard/lifecycle/product-run-config";
 import {
 	BreadboardRunConfigError,
+	hasExplicitEngineSelection,
 	parseSelectedBreadboardConfig,
 	resolveBreadboardRunConfig,
 } from "./breadboard/lifecycle/run-config";
@@ -1548,23 +1549,12 @@ function resolveNativeSurfaceEngineSelection(
 	isBreadboardProduct = IS_BREADBOARD_PRODUCT,
 ): Pick<Args, "engineMode" | "engineUrl"> {
 	const selectedConfig = parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard"));
-	const selectedExplicit = ["engineMode", "baseUrl", "auth", "tls", "engineArtifact"].some(key =>
-		Object.hasOwn(selectedConfig, key),
-	);
-	const environmentExplicit = [
-		process.env.BREADBOARD_ENGINE_MODE,
-		process.env.BREADBOARD_API_URL,
-		process.env.BREADBOARD_API_TOKEN,
-		process.env.BREADBOARD_API_TOKEN_REF,
-		process.env.BREADBOARD_MTLS_IDENTITY_REF,
-		process.env.BREADBOARD_TLS_SPKI_PIN,
-		process.env.BREADBOARD_ENGINE_EXECUTABLE,
-		process.env.BREADBOARD_ENGINE_ARGV_JSON,
-		process.env.BREADBOARD_ENGINE_EXECUTABLE_SHA256,
-		process.env.BREADBOARD_ENGINE_SOURCE_SHA256,
-		process.env.BREADBOARD_ENGINE_BACKEND_COMMIT,
-	].some(value => value !== undefined);
-	if (parsed.engineMode === undefined && parsed.engineUrl === undefined && !selectedExplicit && !environmentExplicit) {
+	const explicitSelection = hasExplicitEngineSelection({
+		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
+		environment: process.env,
+		selectedConfig,
+	});
+	if (!explicitSelection) {
 		return isBreadboardProduct ? {} : { engineMode: "off" };
 	}
 	try {

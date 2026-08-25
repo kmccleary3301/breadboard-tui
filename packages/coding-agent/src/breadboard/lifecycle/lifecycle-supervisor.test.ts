@@ -571,7 +571,7 @@ describe("LifecycleSupervisor mode authority", () => {
 		}
 	});
 
-	test("typed transport failures remain distinct", async () => {
+	test("typed remote transport failures remain distinct without local fallback", async () => {
 		const cases = [
 			[
 				new LifecycleE4ClientError({
@@ -596,14 +596,32 @@ describe("LifecycleSupervisor mode authority", () => {
 			],
 		] as const;
 		for (const [failure, state] of cases) {
-			const supervisor = new LifecycleSupervisor(resolved("remote"), {
-				createClient: () => ({
-					handshake: async () => {
-						throw failure;
+			let clientCreations = 0;
+			let localDependencyTouches = 0;
+			const forbiddenLocalDependency = new Proxy(
+				{},
+				{
+					get() {
+						localDependencyTouches++;
+						throw new Error("remote mode touched a local lifecycle dependency");
 					},
-				}),
+				},
+			);
+			const supervisor = new LifecycleSupervisor(resolved("remote"), {
+				store: forbiddenLocalDependency as never,
+				process: forbiddenLocalDependency as never,
+				createClient: () => {
+					clientCreations++;
+					return {
+						handshake: async () => {
+							throw failure;
+						},
+					};
+				},
 			});
 			expect((await supervisor.connect()).state.name).toBe(state);
+			expect(clientCreations).toBe(1);
+			expect(localDependencyTouches).toBe(0);
 		}
 	});
 });
