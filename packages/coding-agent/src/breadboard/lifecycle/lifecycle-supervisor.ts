@@ -152,6 +152,8 @@ class ProcessIdentityValidationError extends Error {}
 
 const TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000] as const;
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
+// Reserve the global process-cleanup deadline for governed hard-signal authorization and authority retirement.
+const LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS = 2_000;
 function randomOwnerCredential(): Buffer {
 	const source = randomBytes(32);
 	const encoded = Buffer.allocUnsafe(source.byteLength * 2);
@@ -2277,7 +2279,11 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			let exited =
 				controlAttempt.phase === "hard-signal-pending" || controlAttempt.phase === "hard-signal-commit-pending"
 					? false
-					: await this.#waitForExactExit(record, control, this.config.requestTimeoutMs);
+					: await this.#waitForExactExit(
+							record,
+							control,
+							Math.min(this.config.requestTimeoutMs, LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS),
+						);
 			if (!exited) {
 				if (
 					controlAttempt.phase !== "hard-signal-pending" &&

@@ -636,6 +636,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const exitResolvers = new Map<number, (code: number | null) => void>();
 		const processTokens = new Map<number, string>();
 		const waitResults: boolean[] = [];
+		const waitTimeouts: number[] = [];
 		let gracefulExitOnWait = false;
 		let suppressNextExitNotification = false;
 		let returnUnbound = false;
@@ -665,6 +666,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 						return "sent";
 					},
 					waitForExit: async timeoutMs => {
+						waitTimeouts.push(timeoutMs);
 						if (timeoutMs > 0 && gracefulExitOnWait) {
 							gracefulExitOnWait = false;
 							dead.add(pid);
@@ -707,6 +709,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			dead,
 			events,
 			waitResults,
+			waitTimeouts,
 			bootstrapBuffers,
 			current: () => ({ pid: currentPid, launchId: currentLaunch }),
 			spawnCount: () => spawnCount,
@@ -2119,6 +2122,23 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls).not.toContain("rollback");
 		expect(process.events).not.toContain("hard-control");
 		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+
+	test("bounds attached graceful exit wait before governed hard-signal cleanup", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.waitResults.push(false);
+		const calls: string[] = [];
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(process.waitTimeouts.filter(timeout => timeout > 0)[0]).toBe(2_000);
+		expect(calls).toContain("graceful:timeout");
+		expect(calls).toContain("hard-signal:sent");
 	});
 
 	test("hard signal delivery never rolls back when exit observation times out", async () => {

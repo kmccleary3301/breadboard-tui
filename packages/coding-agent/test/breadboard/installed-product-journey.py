@@ -670,6 +670,15 @@ def main() -> int:
         first = initial.wait_until(first_turn_ready, options.turn_timeout, "first terminal turn")
         assert isinstance(first, BindingSnapshot)
         write_capture(output, "initial-turn-1", initial)
+        first_facts = transcript_facts(first.rows)
+        if first_facts["userTexts"] != [FIRST_PROMPT]:
+            raise JourneyFailure(f"first turn has unexpected user messages: {first_facts['userTexts']}")
+        if first_facts["assistantTexts"].count(ASSISTANT_SENTINEL) != 1:
+            raise JourneyFailure("first turn does not contain exactly one terminal assistant sentinel")
+        if first_facts["toolCalls"] != ["list_dir", "apply_unified_patch"]:
+            raise JourneyFailure(f"first turn has unexpected tool calls: {first_facts['toolCalls']}")
+        if first_facts["toolResults"] != ["list_dir", "apply_unified_patch"]:
+            raise JourneyFailure(f"first turn has unexpected tool results: {first_facts['toolResults']}")
         first_cursor = cursor_sequence(first.data)
 
         initial.send_line(SECOND_PROMPT)
@@ -709,8 +718,8 @@ def main() -> int:
         raise JourneyFailure("binding disappeared after initial exit")
     final_initial_cursor = cursor_sequence(final_initial.data)
     initial_owned = owned_submissions(final_initial.data)
-    if len(initial_owned) != 2 or final_initial_cursor <= cursor_sequence(second.data):
-        raise JourneyFailure("initial close did not durably commit the second terminal turn")
+    if len(initial_owned) != 2 or final_initial_cursor < cursor_sequence(second.data):
+        raise JourneyFailure("initial close regressed the durable second-turn cursor")
     if len({item.get("clientMessageId") for item in initial_owned}) != 2:
         raise JourneyFailure("owned submissions do not have two unique client identities")
     if len({item.get("inputId") for item in initial_owned}) != 2:
@@ -875,9 +884,10 @@ def main() -> int:
         )
     if facts["assistantTexts"].count(ASSISTANT_SENTINEL) != 2:
         raise JourneyFailure("OMP transcript does not contain exactly two terminal assistant sentinels")
-    if facts["toolCalls"] != ["list_dir", "apply_unified_patch"]:
+    expected_mock_tools = ["list_dir", "apply_unified_patch"] * 2
+    if facts["toolCalls"] != expected_mock_tools:
         raise JourneyFailure(f"OMP transcript has unexpected tool calls: {facts['toolCalls']}")
-    if facts["toolResults"] != ["list_dir", "apply_unified_patch"]:
+    if facts["toolResults"] != expected_mock_tools:
         raise JourneyFailure(f"OMP transcript has unexpected tool results: {facts['toolResults']}")
     session_text = final_resume.session_file.read_text(encoding="utf-8")
     assert_no_forbidden_paths(session_text, [*forbidden_roots, bb.parent], "OMP JSONL")
