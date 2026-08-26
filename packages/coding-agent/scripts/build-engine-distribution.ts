@@ -31,7 +31,40 @@ const ENGINE_BUNDLE_FILENAME = "breadboard-engine-runtime.v1.bundle";
 const ENGINE_SELF_TEST_ARGUMENT = "--self-test-import-agent";
 const ENGINE_SELF_TEST_OUTPUT = "breadboard-engine-import-ok";
 const ENGINE_ENTRY_SOURCE = `from multiprocessing import freeze_support
+from pathlib import Path
+import runpy
 import sys
+
+
+def _run_frozen_ray_child() -> bool:
+    arguments = sys.argv[1:]
+    while arguments[:1] and arguments[0] in {"-B", "-E", "-I", "-S", "-s", "-u"}:
+        arguments = arguments[1:]
+    if arguments[:1] == ["-m"] and len(arguments) >= 2:
+        module_name = arguments[1]
+        if module_name != "ray" and not module_name.startswith("ray."):
+            return False
+        sys.argv = [module_name, *arguments[2:]]
+        runpy.run_module(module_name, run_name="__main__")
+        return True
+    if not arguments:
+        return False
+    extraction_root = getattr(sys, "_MEIPASS", None)
+    script_path = Path(arguments[0])
+    if extraction_root is None or not script_path.is_absolute():
+        return False
+    try:
+        relative_script = script_path.resolve().relative_to((Path(extraction_root) / "ray").resolve())
+    except (OSError, ValueError):
+        return False
+    if relative_script.suffix != ".py":
+        return False
+    module_parts = ["ray", *relative_script.with_suffix("").parts]
+    if module_parts[-1] == "__init__":
+        module_parts.pop()
+    sys.argv = [str(script_path), *arguments[1:]]
+    runpy.run_module(".".join(module_parts), run_name="__main__")
+    return True
 
 
 def _main() -> None:
@@ -39,6 +72,8 @@ def _main() -> None:
         import breadboard_engine.agent
 
         print("${ENGINE_SELF_TEST_OUTPUT}")
+        return
+    if _run_frozen_ray_child():
         return
     from breadboard_engine.api.cli_bridge.server import main
 
