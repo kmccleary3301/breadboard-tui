@@ -30,10 +30,14 @@ const ENGINE_INTERFACE_RANGE = ">=0.1.0 <0.4.0";
 const ENGINE_BUNDLE_FILENAME = "breadboard-engine-runtime.v1.bundle";
 const ENGINE_SELF_TEST_ARGUMENT = "--self-test-import-agent";
 const ENGINE_SELF_TEST_OUTPUT = "breadboard-engine-import-ok";
+const ENGINE_RAY_SELF_TEST_ARGUMENT = "--self-test-ray-runtime";
+const ENGINE_RAY_SELF_TEST_OUTPUT = "breadboard-engine-ray-runtime-ok";
 const ENGINE_ENTRY_SOURCE = `from multiprocessing import freeze_support
 from pathlib import Path
 import os
 import runpy
+import shutil
+import tempfile
 import sys
 
 
@@ -68,34 +72,69 @@ def _run_frozen_ray_child() -> bool:
     return True
 
 
-def _configure_ray_runtime() -> None:
-    extraction_root = getattr(sys, "_MEIPASS", None)
-    if extraction_root is None:
-        return
-    os.environ.update(
-        {
-            "RAY_BACKEND_LOG_LEVEL": "error",
-            "RAY_LOG_TO_DRIVER": "0",
-            "RAY_LOG_TO_STDERR": "1",
-            "RAY_ROTATION_BACKUP_COUNT": "1",
-            "RAY_ROTATION_MAX_BYTES": "262144",
-            "RAY_TMPDIR": str(Path(extraction_root).parent / ".ray-runtime"),
-        }
+def _configure_ray_runtime() -> tuple[Path, bool]:
+    configured_root = os.environ.get("RAY_TMPDIR")
+    owns_root = not configured_root
+    ray_runtime_root = (
+        Path(configured_root)
+        if configured_root
+        else Path(tempfile.mkdtemp(prefix="bb-ray-", dir="/tmp"))
     )
+    defaults = {
+        "RAY_BACKEND_LOG_LEVEL": "error",
+        "RAY_LOG_TO_DRIVER": "0",
+        "RAY_LOGGER_LEVEL": "error",
+        "RAY_LOG_TO_STDERR": "0",
+        "RAY_ROTATION_BACKUP_COUNT": "1",
+        "RAY_ROTATION_MAX_BYTES": "262144",
+        "RAY_TMPDIR": str(ray_runtime_root),
+    }
+    for name, value in defaults.items():
+        os.environ.setdefault(name, value)
+    return ray_runtime_root, owns_root
 
 
 def _main() -> None:
-    _configure_ray_runtime()
-    if sys.argv[1:] == ["${ENGINE_SELF_TEST_ARGUMENT}"]:
-        import breadboard_engine.agent
+    ray_runtime_root, owns_ray_runtime_root = _configure_ray_runtime()
+    try:
+        if sys.argv[1:] == ["${ENGINE_SELF_TEST_ARGUMENT}"]:
+            import breadboard_engine.agent
 
-        print("${ENGINE_SELF_TEST_OUTPUT}")
-        return
-    if _run_frozen_ray_child():
-        return
-    from breadboard_engine.api.cli_bridge.server import main
+            print("${ENGINE_SELF_TEST_OUTPUT}")
+            return
+        if sys.argv[1:] == ["${ENGINE_RAY_SELF_TEST_ARGUMENT}"]:
+            import ray
 
-    main()
+            try:
+                ray.init(
+                    address="local",
+                    include_dashboard=False,
+                    logging_level="ERROR",
+                    log_to_driver=False,
+                )
+
+                @ray.remote
+                def _worker_probe() -> str:
+                    return "${ENGINE_RAY_SELF_TEST_OUTPUT}"
+
+                if ray.get(_worker_probe.remote(), timeout=30) != "${ENGINE_RAY_SELF_TEST_OUTPUT}":
+                    raise RuntimeError("frozen Ray worker returned an unexpected result")
+                node = ray._private.worker._global_node
+                if node is None or Path(node.get_temp_dir_path()).resolve() != (ray_runtime_root / "ray").resolve():
+                    raise RuntimeError("frozen Ray runtime ignored its ephemeral temp root")
+                print("${ENGINE_RAY_SELF_TEST_OUTPUT}")
+            finally:
+                if ray.is_initialized():
+                    ray.shutdown()
+            return
+        if _run_frozen_ray_child():
+            return
+        from breadboard_engine.api.cli_bridge.server import main
+
+        main()
+    finally:
+        if owns_ray_runtime_root:
+            shutil.rmtree(ray_runtime_root, ignore_errors=True)
 
 
 if __name__ == "__main__":
@@ -112,8 +151,8 @@ const COLLECT_PACKAGES = [
 	"contracts",
 	"implementations",
 	"agentic_coder_prototype",
+	"ray",
 ] as const;
-const COLLECT_SUBMODULE_PACKAGES = ["ray"] as const;
 const FREEZER_RUNTIME_REQUIREMENTS = ["colorama>=0.4.6", "psutil>=5.9"] as const;
 const REQUIREMENTS_INPUT_PATH = join(import.meta.dir, "engine-build-requirements.in");
 const REQUIREMENTS_LOCK_PATH = join(import.meta.dir, "engine-build-requirements.darwin-arm64-py311.txt");
@@ -587,7 +626,6 @@ async function main(options: BuildOptions): Promise<void> {
 		const distPath = join(workRoot, "dist");
 		const pyinstaller = join(virtualEnvironment, "bin", "pyinstaller");
 		const collectArguments = COLLECT_PACKAGES.flatMap(name => ["--collect-all", name]);
-		const collectSubmoduleArguments = COLLECT_SUBMODULE_PACKAGES.flatMap(name => ["--collect-submodules", name]);
 		await run(
 			[
 				pyinstaller,
@@ -602,17 +640,33 @@ async function main(options: BuildOptions): Promise<void> {
 				"--specpath",
 				join(workRoot, "pyinstaller-spec"),
 				...collectArguments,
-				...collectSubmoduleArguments,
 				entryPath,
 			],
 			workRoot,
 		);
 		const runtimeRoot = join(distPath, "breadboard-engine");
+		const rayThirdPartyRoot = join(runtimeRoot, "_internal", "ray", "thirdparty_files");
+		for (const name of await readdir(rayThirdPartyRoot)) {
+			if (name === "psutil" || (name.startsWith("psutil-") && name.endsWith(".dist-info"))) {
+				await rm(join(rayThirdPartyRoot, name), { recursive: true, force: true });
+			}
+		}
 		const runtimeExecutable = join(runtimeRoot, "breadboard-engine");
 		await run(["codesign", "--verify", "--deep", "--strict", runtimeExecutable], workRoot);
 		const selfTest = await run([runtimeExecutable, ENGINE_SELF_TEST_ARGUMENT], workRoot);
 		if (selfTest.stdout !== ENGINE_SELF_TEST_OUTPUT || selfTest.stderr !== "") {
 			throw new Error("frozen engine agent import self-test returned unexpected output");
+		}
+		const raySelfTest = await run([runtimeExecutable, ENGINE_RAY_SELF_TEST_ARGUMENT], workRoot);
+		const raySelfTestStderrLines = raySelfTest.stderr.split("\n").filter(Boolean);
+		if (
+			raySelfTest.stdout !== ENGINE_RAY_SELF_TEST_OUTPUT ||
+			raySelfTestStderrLines.length > 1 ||
+			raySelfTestStderrLines.some(
+				line => !line.endsWith("Set ray log level from environment variable RAY_BACKEND_LOG_LEVEL to 2"),
+			)
+		) {
+			throw new Error("frozen engine Ray runtime self-test returned unexpected output");
 		}
 		const createdBundle = await createEngineRuntimeBundle({
 			sourceRoot: runtimeRoot,

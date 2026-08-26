@@ -509,15 +509,32 @@ describe("LifecycleSupervisor mode authority", () => {
 				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				RAY_BACKEND_LOG_LEVEL: "error",
+				RAY_LOG_TO_DRIVER: "0",
+				RAY_LOGGER_LEVEL: "error",
+				RAY_LOG_TO_STDERR: "0",
+				RAY_ROTATION_BACKUP_COUNT: "1",
+				RAY_ROTATION_MAX_BYTES: "262144",
 			});
 			expect(
-				lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz", "/private/engine/state"),
+				lifecycleChildEnvironment(
+					"launch_environment_abcdefghijklmnopqrstuvwxyz",
+					"/private/engine/state",
+					"/tmp/bb-ray-private",
+				),
 			).toEqual({
 				PATH: "/usr/bin:/bin",
 				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				RAY_BACKEND_LOG_LEVEL: "error",
+				RAY_LOG_TO_DRIVER: "0",
+				RAY_LOGGER_LEVEL: "error",
+				RAY_LOG_TO_STDERR: "0",
+				RAY_ROTATION_BACKUP_COUNT: "1",
+				RAY_ROTATION_MAX_BYTES: "262144",
 				BREADBOARD_ENGINE_STATE_ROOT: "/private/engine/state",
+				RAY_TMPDIR: "/tmp/bb-ray-private",
 			});
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
 				"BREADBOARD_HOSTILE_PARENT_SECRET",

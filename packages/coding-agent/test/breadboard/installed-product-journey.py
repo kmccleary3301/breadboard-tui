@@ -487,8 +487,16 @@ def extraction_roots(temp_root: Path) -> list[str]:
     return sorted(str(path.resolve()) for path in temp_root.glob("bb-engine-runtime-*") if path.is_dir())
 
 
-def ray_runtime_snapshot(extraction_root: str) -> dict[str, Any]:
-    ray_root = Path(extraction_root) / ".ray-runtime" / "ray"
+def ray_runtime_roots() -> set[str]:
+    return {
+        str(path.resolve())
+        for path in Path("/tmp").glob("bb-ray-*")
+        if path.is_dir() and not path.is_symlink()
+    }
+
+
+def ray_runtime_snapshot(runtime_root: str) -> dict[str, Any]:
+    ray_root = Path(runtime_root) / "ray"
     sessions = sorted(
         path.resolve()
         for path in ray_root.glob("session_*")
@@ -497,16 +505,21 @@ def ray_runtime_snapshot(extraction_root: str) -> dict[str, Any]:
     if len(sessions) != 1:
         raise JourneyFailure(f"expected one ephemeral Ray session, found {sessions}")
     logs_root = sessions[0] / "logs"
-    log_files = [
-        path
-        for path in logs_root.rglob("*")
-        if path.is_file() and not path.is_symlink()
-    ] if logs_root.is_dir() else []
+    log_files = (
+        [
+            path
+            for path in logs_root.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        ]
+        if logs_root.is_dir()
+        else []
+    )
     log_bytes = sum(path.stat().st_size for path in log_files)
     log_byte_limit = 1_048_576
     if log_bytes > log_byte_limit:
         raise JourneyFailure(f"ephemeral Ray logs exceed {log_byte_limit} bytes: {log_bytes}")
     return {
+        "runtimeRoot": str(Path(runtime_root).resolve()),
         "rayRoot": str(ray_root.resolve()),
         "sessionPath": str(sessions[0]),
         "logFileCount": len(log_files),
@@ -658,6 +671,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
+    baseline_ray_runtime_roots = ray_runtime_roots()
     initial = PtyChild([str(bb)], roots["workspace"], environment)
     try:
         initial.wait_until(
@@ -726,7 +740,10 @@ def main() -> int:
         during_initial_extractions = extraction_roots(roots["temp"])
         if len(during_initial_extractions) != 1:
             raise JourneyFailure(f"expected one live extraction root, found {during_initial_extractions}")
-        initial_ray_runtime = ray_runtime_snapshot(during_initial_extractions[0])
+        during_initial_ray_roots = ray_runtime_roots() - baseline_ray_runtime_roots
+        if len(during_initial_ray_roots) != 1:
+            raise JourneyFailure(f"expected one live ephemeral Ray root, found {sorted(during_initial_ray_roots)}")
+        initial_ray_runtime = ray_runtime_snapshot(next(iter(during_initial_ray_roots)))
         first_processes = {
             "bb": process_snapshot(initial.pid),
             "engine": process_snapshot(int(first_authority["pid"])),
@@ -763,6 +780,8 @@ def main() -> int:
         raise JourneyFailure("active authority remains after initial close")
     if extraction_roots(roots["temp"]):
         raise JourneyFailure("initial engine extraction root remains after close")
+    if ray_runtime_roots() - baseline_ray_runtime_roots:
+        raise JourneyFailure("initial ephemeral Ray runtime root remains after close")
 
     state_path, retained_state, retained_bytes_before_restart = load_retained_state(roots["agent"])
     if retained_state.get("schema_version") != "bb.cli_bridge.session_state.v1":
@@ -842,7 +861,10 @@ def main() -> int:
         during_resume_extractions = extraction_roots(roots["temp"])
         if len(during_resume_extractions) != 1 or during_resume_extractions == during_initial_extractions:
             raise JourneyFailure("restart did not use one new extraction identity")
-        resume_ray_runtime = ray_runtime_snapshot(during_resume_extractions[0])
+        during_resume_ray_roots = ray_runtime_roots() - baseline_ray_runtime_roots
+        if len(during_resume_ray_roots) != 1 or during_resume_ray_roots == during_initial_ray_roots:
+            raise JourneyFailure("restart did not use one new ephemeral Ray root")
+        resume_ray_runtime = ray_runtime_snapshot(next(iter(during_resume_ray_roots)))
         second_processes = {
             "bb": process_snapshot(resume.pid),
             "engine": process_snapshot(int(second_authority["pid"])),
@@ -871,6 +893,8 @@ def main() -> int:
         raise JourneyFailure("active authority remains after resumed close")
     if extraction_roots(roots["temp"]):
         raise JourneyFailure("resumed engine extraction root remains after close")
+    if ray_runtime_roots() - baseline_ray_runtime_roots:
+        raise JourneyFailure("resumed ephemeral Ray runtime root remains after close")
 
     restart_status = subprocess.run(
         [str(bb), "engine", "status"],
@@ -954,9 +978,11 @@ def main() -> int:
             "initialPidDead": True,
             "initialListenerClosed": True,
             "initialExtractionRemoved": True,
+            "initialRayRuntimeRemoved": True,
             "resumePidDead": True,
             "resumeListenerClosed": True,
             "resumeExtractionRemoved": True,
+            "resumeRayRuntimeRemoved": True,
             "durableStateRetained": True,
         },
         "sourceCheckoutPathsAbsent": True,

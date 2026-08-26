@@ -251,13 +251,21 @@ function randomCredential(): string {
 export function lifecycleChildEnvironment(
 	launchId: string,
 	engineStateRoot?: string,
+	rayRuntimeRoot?: string,
 ): Readonly<Record<string, string>> {
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 		BREADBOARD_LEGACY_ROUTES: "1",
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+		RAY_BACKEND_LOG_LEVEL: "error",
+		RAY_LOG_TO_DRIVER: "0",
+		RAY_LOGGER_LEVEL: "error",
+		RAY_LOG_TO_STDERR: "0",
+		RAY_ROTATION_BACKUP_COUNT: "1",
+		RAY_ROTATION_MAX_BYTES: "262144",
 		...(engineStateRoot === undefined ? {} : { BREADBOARD_ENGINE_STATE_ROOT: engineStateRoot }),
+		...(rayRuntimeRoot === undefined ? {} : { RAY_TMPDIR: rayRuntimeRoot }),
 	});
 }
 
@@ -332,8 +340,8 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		this.#engineStateRoot = engineStateRoot;
 	}
 
-	async #childEnvironment(launchId: string): Promise<Readonly<Record<string, string>>> {
-		if (this.#engineStateRoot === undefined) return lifecycleChildEnvironment(launchId);
+	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
+		if (this.#engineStateRoot === undefined) return lifecycleChildEnvironment(launchId, undefined, rayRuntimeRoot);
 		await mkdir(this.#engineStateRoot, { recursive: true, mode: 0o700 });
 		const metadata = await lstat(this.#engineStateRoot);
 		const expectedUid = process.geteuid?.() ?? process.getuid?.() ?? -1;
@@ -345,7 +353,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		) {
 			throw new LocalAuthorityStoreError("root_integrity", "engine state root is not one private owned directory");
 		}
-		return lifecycleChildEnvironment(launchId, await realpath(this.#engineStateRoot));
+		return lifecycleChildEnvironment(launchId, await realpath(this.#engineStateRoot), rayRuntimeRoot);
 	}
 
 	async #spawnBundledVerified(
@@ -355,6 +363,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		bindIdentity: (pid: number, startToken: string) => Promise<void>,
 	): Promise<SpawnVerifiedResult> {
 		let extracted: ExtractedEngineRuntimeBundle | undefined;
+		let rayRuntimeRoot: string | undefined;
 		try {
 			extracted = await extractVerifiedEngineRuntimeBundle({
 				bundle: artifact.runtimeBundle,
@@ -362,16 +371,25 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				executableSizeBytes: artifact.executableSizeBytes,
 				executableSha256: artifact.executableSha256,
 			});
+			rayRuntimeRoot = await mkdtemp("/tmp/bb-ray-");
+			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const retained = extracted;
 			const verified = await spawnDarwinVerified({
 				executablePath: retained.executablePath,
 				executableBytes: retained.executableBytes,
 				argv: artifact.argv,
-				env: await this.#childEnvironment(launchId),
+				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
 				bootstrap,
 				bindIdentity,
 			});
-			const exited = verified.exited.finally(() => retained.cleanup().catch(() => undefined));
+			const exited = verified.exited.finally(async () => {
+				await Promise.allSettled([
+					retained.cleanup(),
+					rm(retainedRayRuntimeRoot, { recursive: true, force: true }),
+				]);
+			});
+			extracted = undefined;
+			rayRuntimeRoot = undefined;
 			const handle: SpawnedEngineProcess = {
 				pid: verified.pid,
 				startToken: verified.startToken,
@@ -390,7 +408,6 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 					return didExit;
 				},
 			};
-			extracted = undefined;
 			this.#children.set(verified.pid, handle);
 			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
@@ -405,6 +422,9 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		} finally {
 			bootstrap.fill(0);
 			await extracted?.cleanup().catch(() => undefined);
+			if (rayRuntimeRoot !== undefined) {
+				await rm(rayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+			}
 		}
 	}
 
@@ -422,6 +442,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		const snapshotPath = join(snapshotRoot, "engine");
 		let snapshot: FileHandle | undefined;
 		let execution: FileHandle | undefined;
+		let rayRuntimeRoot: string | undefined;
 		try {
 			const sourceMetadata = await source.stat();
 			if (!sourceMetadata.isFile() || sourceMetadata.nlink !== 1) {
@@ -460,18 +481,24 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			await execution.close();
 			execution = undefined;
 
+			rayRuntimeRoot = await mkdtemp("/tmp/bb-ray-");
+			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const verified = await spawnDarwinVerified({
 				executablePath: snapshotPath,
 				executableBytes,
 				argv: artifact.argv,
-				env: await this.#childEnvironment(launchId),
+				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
 				bootstrap,
 				bindIdentity,
 			});
+			const exited = verified.exited.finally(() =>
+				rm(retainedRayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined),
+			);
+			rayRuntimeRoot = undefined;
 			const handle: SpawnedEngineProcess = {
 				pid: verified.pid,
 				startToken: verified.startToken,
-				exited: verified.exited,
+				exited,
 				unref: () => verified.unref(),
 				sendHardSignal: async authorizationExpiresAtUnix => {
 					if (Date.now() >= authorizationExpiresAtUnix * 1_000) return "authorization_expired";
@@ -480,10 +507,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 					if (outcome === "process-exited") return "process_exited";
 					return "abandoned";
 				},
-				waitForExit: timeoutMs => verified.waitForExit(timeoutMs),
+				waitForExit: async timeoutMs => {
+					const didExit = await verified.waitForExit(timeoutMs);
+					if (didExit) await exited;
+					return didExit;
+				},
 			};
 			this.#children.set(verified.pid, handle);
-			void verified.exited.finally(() => this.#children.delete(verified.pid));
+			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
 		} catch (error) {
 			if (error instanceof DarwinVerifiedSpawnError) {
@@ -498,6 +529,9 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				execution?.close(),
 				rm(snapshotRoot, { recursive: true, force: true }),
 			]);
+			if (rayRuntimeRoot !== undefined) {
+				await rm(rayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+			}
 		}
 	}
 
