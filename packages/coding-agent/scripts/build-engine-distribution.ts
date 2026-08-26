@@ -28,7 +28,27 @@ const PYINSTALLER_VERSION = "6.22.2";
 const ENGINE_INTERFACE_VERSION = "0.3.0";
 const ENGINE_INTERFACE_RANGE = ">=0.1.0 <0.4.0";
 const ENGINE_BUNDLE_FILENAME = "breadboard-engine-runtime.v1.bundle";
-const ENGINE_ENTRY_SOURCE = `from multiprocessing import freeze_support\n\nfrom breadboard_engine.api.cli_bridge.server import main\n\nif __name__ == "__main__":\n    freeze_support()\n    main()\n`;
+const ENGINE_SELF_TEST_ARGUMENT = "--self-test-import-agent";
+const ENGINE_SELF_TEST_OUTPUT = "breadboard-engine-import-ok";
+const ENGINE_ENTRY_SOURCE = `from multiprocessing import freeze_support
+import sys
+
+
+def _main() -> None:
+    if sys.argv[1:] == ["${ENGINE_SELF_TEST_ARGUMENT}"]:
+        import breadboard_engine.agent
+
+        print("${ENGINE_SELF_TEST_OUTPUT}")
+        return
+    from breadboard_engine.api.cli_bridge.server import main
+
+    main()
+
+
+if __name__ == "__main__":
+    freeze_support()
+    _main()
+`;
 const COLLECT_PACKAGES = [
 	"breadboard_engine",
 	"breadboard",
@@ -40,6 +60,8 @@ const COLLECT_PACKAGES = [
 	"implementations",
 	"agentic_coder_prototype",
 ] as const;
+const COLLECT_SUBMODULE_PACKAGES = ["ray"] as const;
+const FREEZER_RUNTIME_REQUIREMENTS = ["colorama>=0.4.6", "psutil>=5.9"] as const;
 const REQUIREMENTS_INPUT_PATH = join(import.meta.dir, "engine-build-requirements.in");
 const REQUIREMENTS_LOCK_PATH = join(import.meta.dir, "engine-build-requirements.darwin-arm64-py311.txt");
 const BUILD_RECIPE_SOURCE_PATHS = [
@@ -225,11 +247,14 @@ async function verifyDependencyInputs(backend: BackendIdentity): Promise<void> {
 	const declared = parseRequirementsInput(await Bun.file(REQUIREMENTS_INPUT_PATH).text());
 	const expected = [
 		...(runtimeRequirements as string[]),
+		...FREEZER_RUNTIME_REQUIREMENTS,
 		`pyinstaller==${PYINSTALLER_VERSION}`,
 		"setuptools==84.0.0",
 	].sort((left, right) => left.localeCompare(right));
 	if (JSON.stringify([...declared].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(expected)) {
-		throw new Error("engine build requirements do not exactly match backend runtime and build dependencies");
+		throw new Error(
+			"engine build requirements do not exactly match backend runtime, build, and freezer support dependencies",
+		);
 	}
 	const lock = await Bun.file(REQUIREMENTS_LOCK_PATH).text();
 	if (!lock.includes("--hash=sha256:") || !lock.includes(`pyinstaller==${PYINSTALLER_VERSION}`)) {
@@ -509,6 +534,7 @@ async function main(options: BuildOptions): Promise<void> {
 		const distPath = join(workRoot, "dist");
 		const pyinstaller = join(virtualEnvironment, "bin", "pyinstaller");
 		const collectArguments = COLLECT_PACKAGES.flatMap(name => ["--collect-all", name]);
+		const collectSubmoduleArguments = COLLECT_SUBMODULE_PACKAGES.flatMap(name => ["--collect-submodules", name]);
 		await run(
 			[
 				pyinstaller,
@@ -523,6 +549,7 @@ async function main(options: BuildOptions): Promise<void> {
 				"--specpath",
 				join(workRoot, "pyinstaller-spec"),
 				...collectArguments,
+				...collectSubmoduleArguments,
 				entryPath,
 			],
 			workRoot,
@@ -530,6 +557,10 @@ async function main(options: BuildOptions): Promise<void> {
 		const runtimeRoot = join(distPath, "breadboard-engine");
 		const runtimeExecutable = join(runtimeRoot, "breadboard-engine");
 		await run(["codesign", "--verify", "--deep", "--strict", runtimeExecutable], workRoot);
+		const selfTest = await run([runtimeExecutable, ENGINE_SELF_TEST_ARGUMENT], workRoot);
+		if (selfTest.stdout !== ENGINE_SELF_TEST_OUTPUT || selfTest.stderr !== "") {
+			throw new Error("frozen engine agent import self-test returned unexpected output");
+		}
 		const createdBundle = await createEngineRuntimeBundle({
 			sourceRoot: runtimeRoot,
 			executablePath: "breadboard-engine",

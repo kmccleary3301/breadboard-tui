@@ -19,8 +19,8 @@ export function createBreadboardProviderFreeModel(selector: string): Model | und
 		reasoning: false,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 8192,
-		maxTokens: 2048,
+		contextWindow: 1_000_000,
+		maxTokens: 32_768,
 	});
 	providerFreeModels.add(model);
 	return model;
