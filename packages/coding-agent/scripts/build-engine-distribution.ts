@@ -32,6 +32,7 @@ const ENGINE_SELF_TEST_ARGUMENT = "--self-test-import-agent";
 const ENGINE_SELF_TEST_OUTPUT = "breadboard-engine-import-ok";
 const ENGINE_ENTRY_SOURCE = `from multiprocessing import freeze_support
 from pathlib import Path
+import os
 import runpy
 import sys
 
@@ -67,7 +68,24 @@ def _run_frozen_ray_child() -> bool:
     return True
 
 
+def _configure_ray_runtime() -> None:
+    extraction_root = getattr(sys, "_MEIPASS", None)
+    if extraction_root is None:
+        return
+    os.environ.update(
+        {
+            "RAY_BACKEND_LOG_LEVEL": "error",
+            "RAY_LOG_TO_DRIVER": "0",
+            "RAY_LOG_TO_STDERR": "1",
+            "RAY_ROTATION_BACKUP_COUNT": "1",
+            "RAY_ROTATION_MAX_BYTES": "262144",
+            "RAY_TMPDIR": str(Path(extraction_root).parent / ".ray-runtime"),
+        }
+    )
+
+
 def _main() -> None:
+    _configure_ray_runtime()
     if sys.argv[1:] == ["${ENGINE_SELF_TEST_ARGUMENT}"]:
         import breadboard_engine.agent
 

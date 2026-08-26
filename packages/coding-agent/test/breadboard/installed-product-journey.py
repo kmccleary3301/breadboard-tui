@@ -487,6 +487,34 @@ def extraction_roots(temp_root: Path) -> list[str]:
     return sorted(str(path.resolve()) for path in temp_root.glob("bb-engine-runtime-*") if path.is_dir())
 
 
+def ray_runtime_snapshot(extraction_root: str) -> dict[str, Any]:
+    ray_root = Path(extraction_root) / ".ray-runtime" / "ray"
+    sessions = sorted(
+        path.resolve()
+        for path in ray_root.glob("session_*")
+        if path.is_dir() and not path.is_symlink()
+    )
+    if len(sessions) != 1:
+        raise JourneyFailure(f"expected one ephemeral Ray session, found {sessions}")
+    logs_root = sessions[0] / "logs"
+    log_files = [
+        path
+        for path in logs_root.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    ] if logs_root.is_dir() else []
+    log_bytes = sum(path.stat().st_size for path in log_files)
+    log_byte_limit = 1_048_576
+    if log_bytes > log_byte_limit:
+        raise JourneyFailure(f"ephemeral Ray logs exceed {log_byte_limit} bytes: {log_bytes}")
+    return {
+        "rayRoot": str(ray_root.resolve()),
+        "sessionPath": str(sessions[0]),
+        "logFileCount": len(log_files),
+        "logBytes": log_bytes,
+        "logByteLimit": log_byte_limit,
+    }
+
+
 def load_retained_state(agent_root: Path) -> tuple[Path, dict[str, Any], bytes]:
     candidates = sorted(agent_root.rglob("session-state/*.json")) if agent_root.exists() else []
     if len(candidates) != 1:
@@ -698,6 +726,7 @@ def main() -> int:
         during_initial_extractions = extraction_roots(roots["temp"])
         if len(during_initial_extractions) != 1:
             raise JourneyFailure(f"expected one live extraction root, found {during_initial_extractions}")
+        initial_ray_runtime = ray_runtime_snapshot(during_initial_extractions[0])
         first_processes = {
             "bb": process_snapshot(initial.pid),
             "engine": process_snapshot(int(first_authority["pid"])),
@@ -813,6 +842,7 @@ def main() -> int:
         during_resume_extractions = extraction_roots(roots["temp"])
         if len(during_resume_extractions) != 1 or during_resume_extractions == during_initial_extractions:
             raise JourneyFailure("restart did not use one new extraction identity")
+        resume_ray_runtime = ray_runtime_snapshot(during_resume_extractions[0])
         second_processes = {
             "bb": process_snapshot(resume.pid),
             "engine": process_snapshot(int(second_authority["pid"])),
@@ -916,6 +946,8 @@ def main() -> int:
         "secondAuthority": second_authority,
         "initialExtractionRoots": during_initial_extractions,
         "resumeExtractionRoots": during_resume_extractions,
+        "initialRayRuntime": initial_ray_runtime,
+        "resumeRayRuntime": resume_ray_runtime,
         "initialProcesses": first_processes,
         "resumeProcesses": second_processes,
         "cleanup": {
