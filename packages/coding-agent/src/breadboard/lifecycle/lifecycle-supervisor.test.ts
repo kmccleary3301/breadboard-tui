@@ -815,6 +815,41 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			elapsed: 9_250,
 		});
 	});
+	test("reports installed bundle digest drift as a complete-distribution failure before spawn", async () => {
+		const root = await mkdtemp(join(tmpdir(), "bb-installed-bundle-tamper-"));
+		roots.push(root);
+		const bundlePath = join(root, "breadboard-engine-runtime.v1.bundle");
+		const bundleBytes = Buffer.alloc(256, 0x41);
+		await writeFile(bundlePath, bundleBytes, { mode: 0o400 });
+		const installedArtifact = {
+			...artifact,
+			kind: "runtime-bundle" as const,
+			executablePath: "breadboard-engine",
+			executableSizeBytes: 1,
+			runtimeBundle: {
+				schemaVersion: "bb.engine_runtime_bundle.v1" as const,
+				path: bundlePath,
+				sizeBytes: bundleBytes.byteLength,
+				sha256: `sha256:${"e".repeat(64)}` as const,
+			},
+		};
+		const config = resolveBreadboardRunConfig({
+			...common,
+			environment: { BREADBOARD_PRODUCT: "1" },
+			installedEngineArtifact: installedArtifact,
+			installedEngineIdentity: {} as NonNullable<BreadboardRunConfig["installedEngineIdentity"]>,
+		});
+		const store = await temporaryStore();
+		const supervisor = new LifecycleSupervisor(config, { store });
+
+		await expect(supervisor.connect()).rejects.toMatchObject({
+			name: "InstalledEngineDiscoveryError",
+			code: "engine_artifact_mismatch",
+			remediation:
+				"Reinstall BreadBoard from one complete trusted distribution; do not edit the manifest or supply replacement hashes.",
+		});
+		expect(await store.readCurrent(config.endpoint as string)).toBeNull();
+	});
 	test("shares one same-object local-owned initial connect", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();

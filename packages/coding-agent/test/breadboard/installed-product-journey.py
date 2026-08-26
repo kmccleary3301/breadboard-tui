@@ -7,12 +7,15 @@ import argparse
 import codecs
 import errno
 import fcntl
+import hashlib
+import ipaddress
 import json
 import os
 import pty
 import pwd
 import re
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -204,6 +207,7 @@ class PtyChild:
             try:
                 os.chdir(cwd)
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0))
+                os.closerange(3, os.sysconf("SC_OPEN_MAX"))
                 os.execve(argv[0], argv, env)
             except BaseException as error:
                 os.write(2, f"PTY exec failed: {error}\n".encode())
@@ -459,6 +463,30 @@ def process_snapshot(pid: int) -> dict[str, Any]:
         }
     return result
 
+def assert_loopback_network(processes: dict[str, Any], label: str) -> None:
+    violations: list[str] = []
+    for process_name, snapshot in processes.items():
+        lsof = snapshot.get("lsof")
+        output = lsof.get("stdout") if isinstance(lsof, dict) else None
+        if not isinstance(output, str):
+            raise JourneyFailure(f"{label} has no lsof output for {process_name}")
+        for transport, address in re.findall(r"\b(TCP|UDP) ([^\s]+)", output):
+            for endpoint in address.split("->"):
+                if endpoint.startswith("[") and "]:" in endpoint:
+                    host = endpoint[1 : endpoint.index("]")]
+                else:
+                    host, separator, _ = endpoint.rpartition(":")
+                    if not separator:
+                        host = ""
+                try:
+                    loopback = ipaddress.ip_address(host).is_loopback
+                except ValueError:
+                    loopback = False
+                if not loopback:
+                    violations.append(f"{process_name}:{transport}:{endpoint}")
+    if violations:
+        raise JourneyFailure(f"{label} opened non-loopback network endpoints: {violations}")
+
 
 def endpoint_open(endpoint: str) -> bool:
     parsed = urlsplit(endpoint)
@@ -632,6 +660,223 @@ def assert_no_forbidden_paths(value: str, roots: list[Path], label: str) -> None
         raise JourneyFailure(f"{label} contains source checkout paths: {matches}")
 
 
+TAMPER_REMEDIATION = (
+    "Reinstall BreadBoard from one complete trusted distribution; "
+    "do not edit the manifest or supply replacement hashes."
+)
+TAMPER_MESSAGES = {
+    "engine_artifact_mismatch": (
+        "The installed BreadBoard engine executable does not match its trusted distribution."
+    ),
+    "engine_manifest_untrusted": (
+        "The installed BreadBoard engine manifest is not trusted by this bb build."
+    ),
+}
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def mutate_sealed_byte(path: Path, offset: int, replacement: int) -> tuple[int, int]:
+    if path.is_symlink() or not path.is_file():
+        raise JourneyFailure(f"tamper target is not one regular file: {path}")
+    if offset < 0 or offset >= path.stat().st_size:
+        raise JourneyFailure(f"tamper offset is outside target: {offset}")
+    parent = path.parent
+    os.chmod(parent, 0o700)
+    os.chmod(path, 0o600)
+    descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        original = os.pread(descriptor, 1, offset)
+        if len(original) != 1 or original[0] == replacement:
+            raise JourneyFailure("tamper mutation did not replace exactly one byte")
+        if os.pwrite(descriptor, bytes((replacement,)), offset) != 1:
+            raise JourneyFailure("tamper mutation did not write exactly one byte")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+        os.chmod(path, 0o400)
+        os.chmod(parent, 0o500)
+    return original[0], replacement
+
+
+def remove_readonly_tree(path: Path) -> None:
+    if not path.exists():
+        return
+    for root, directories, files in os.walk(path, topdown=False):
+        for name in files:
+            candidate = Path(root) / name
+            if not candidate.is_symlink():
+                os.chmod(candidate, 0o600)
+        for name in directories:
+            candidate = Path(root) / name
+            if not candidate.is_symlink():
+                os.chmod(candidate, 0o700)
+        os.chmod(root, 0o700)
+    shutil.rmtree(path)
+
+
+def run_tamper_failure(
+    bb: Path,
+    output: Path,
+    case: str,
+    expected_code: str,
+    forbidden_roots: list[Path],
+) -> dict[str, Any]:
+    install_copy = output / f"{case}-installed"
+    isolated = output / f"{case}-isolated"
+    if install_copy.exists() or isolated.exists():
+        raise JourneyFailure(f"tamper case path already exists: {case}")
+    shutil.copytree(bb.parent, install_copy, copy_function=shutil.copy2)
+    try:
+        engine_root = install_copy / "engine"
+        distributions = [
+            path
+            for path in engine_root.iterdir()
+            if path.is_dir() and not path.is_symlink()
+        ]
+        if len(distributions) != 1:
+            raise JourneyFailure(
+                f"tamper copy has unexpected distributions: {distributions}"
+            )
+        distribution = distributions[0]
+        manifest_path = distribution / "breadboard-engine-manifest.v1.json"
+        manifest_bytes = manifest_path.read_bytes()
+        try:
+            manifest = json.loads(manifest_bytes)
+        except json.JSONDecodeError as error:
+            raise JourneyFailure("trusted manifest copy is not JSON") from error
+
+        if case == "bundle-tamper":
+            target = distribution / manifest["engine"]["runtimeBundle"]["path"]
+            offset = target.stat().st_size // 2
+            with target.open("rb") as handle:
+                handle.seek(offset)
+                original = handle.read(1)
+            if len(original) != 1:
+                raise JourneyFailure("runtime bundle mutation offset is unreadable")
+            replacement = original[0] ^ 1
+        elif case == "manifest-profile-tamper":
+            target = manifest_path
+            profile = b"daily_driver.v1"
+            profile_offset = manifest_bytes.find(profile)
+            if profile_offset < 0:
+                raise JourneyFailure(
+                    "trusted manifest has no daily_driver.v1 profile identity"
+                )
+            offset = profile_offset + len(profile) - 1
+            replacement = ord("2")
+        else:
+            raise JourneyFailure(f"unknown tamper case: {case}")
+
+        before_sha256 = sha256_file(target)
+        original_byte, replacement_byte = mutate_sealed_byte(
+            target, offset, replacement
+        )
+        after_sha256 = sha256_file(target)
+        if before_sha256 == after_sha256:
+            raise JourneyFailure(f"{case} did not change the target digest")
+
+        roots = {
+            label: isolated / label
+            for label in ("home", "config", "agent", "workspace", "temp")
+        }
+        for root in roots.values():
+            root.mkdir(parents=True, mode=0o700)
+            ensure_empty_directory(root, f"{case} {root.name}")
+        environment = exact_environment(
+            roots["home"], roots["config"], roots["agent"], roots["temp"]
+        )
+        baseline_ray_roots = ray_runtime_roots()
+        if endpoint_open("http://127.0.0.1:9099"):
+            raise JourneyFailure(
+                "port 9099 is unexpectedly occupied before tamper failure"
+            )
+        completed = subprocess.run(
+            [str(install_copy / "bb"), "engine", "start"],
+            cwd=roots["workspace"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        expected_stderr = (
+            f"BreadBoard installed engine error [{expected_code}]: "
+            f"{TAMPER_MESSAGES[expected_code]}\n{TAMPER_REMEDIATION}\n"
+        )
+        if completed.returncode != 1:
+            raise JourneyFailure(f"{case} exited {completed.returncode}, expected 1")
+        if completed.stdout != "" or completed.stderr != expected_stderr:
+            raise JourneyFailure(
+                f"{case} emitted unexpected output: {completed.stdout!r} {completed.stderr!r}"
+            )
+        assert_no_forbidden_paths(completed.stderr, forbidden_roots, f"{case} output")
+        support_files = sorted(
+            str(path.relative_to(roots["agent"]))
+            for path in roots["agent"].rglob("*")
+            if path.is_file() or path.is_symlink()
+        )
+        publications = [
+            path
+            for path in support_files
+            if path.endswith(".authority.json")
+            or path.endswith(".jsonl")
+            or "session-state/" in path
+        ]
+        if publications:
+            raise JourneyFailure(
+                f"{case} published engine or session state: {publications}"
+            )
+        if active_authority(roots["agent"]) is not None:
+            raise JourneyFailure(f"{case} published an engine authority")
+        if binding_snapshot(roots["agent"]) is not None:
+            raise JourneyFailure(f"{case} published a session binding")
+        if extraction_roots(roots["temp"]):
+            raise JourneyFailure(f"{case} extracted an engine runtime")
+        if ray_runtime_roots() != baseline_ray_roots:
+            raise JourneyFailure(f"{case} created a Ray runtime root")
+        if endpoint_open("http://127.0.0.1:9099"):
+            raise JourneyFailure(f"{case} opened port 9099")
+
+        result = {
+            "case": case,
+            "status": "pass",
+            "expectedCode": expected_code,
+            "exitCode": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "targetRelativePath": str(target.relative_to(install_copy)),
+            "supportFiles": support_files,
+            "targetSizeBytes": target.stat().st_size,
+            "targetSha256Before": before_sha256,
+            "targetSha256After": after_sha256,
+            "mutation": {
+                "offset": offset,
+                "originalByte": original_byte,
+                "replacementByte": replacement_byte,
+            },
+            "environmentKeys": sorted(environment),
+            "preSpawnFailure": True,
+            "listenerPublished": False,
+            "authorityPublished": False,
+            "bindingPublished": False,
+            "sessionStatePublished": False,
+            "runtimeExtracted": False,
+            "rayRuntimeCreated": False,
+            "fallbackUsed": False,
+        }
+    finally:
+        remove_readonly_tree(install_copy)
+        remove_readonly_tree(isolated)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bb", type=Path, required=True)
@@ -656,6 +901,7 @@ def main() -> int:
     }
     output = options.output.resolve(strict=True)
     forbidden_roots = [path.resolve(strict=True) for path in options.forbid_root]
+    host_agent_root = Path.home().resolve() / ".omp" / "agent"
     if not bb.is_file() or not os.access(bb, os.X_OK):
         raise JourneyFailure(f"bb is not executable: {bb}")
     for label, root in roots.items():
@@ -749,7 +995,12 @@ def main() -> int:
             "engine": process_snapshot(int(first_authority["pid"])),
         }
         process_text = json.dumps(first_processes, sort_keys=True)
-        assert_no_forbidden_paths(process_text, forbidden_roots, "initial process snapshot")
+        assert_no_forbidden_paths(
+            process_text,
+            [*forbidden_roots, host_agent_root],
+            "initial process snapshot",
+        )
+        assert_loopback_network(first_processes, "initial process snapshot")
 
         initial.send_line("/exit")
         initial_exit = initial.wait_for_exit(60)
@@ -869,7 +1120,12 @@ def main() -> int:
             "bb": process_snapshot(resume.pid),
             "engine": process_snapshot(int(second_authority["pid"])),
         }
-        assert_no_forbidden_paths(json.dumps(second_processes, sort_keys=True), forbidden_roots, "resume process snapshot")
+        assert_no_forbidden_paths(
+            json.dumps(second_processes, sort_keys=True),
+            [*forbidden_roots, host_agent_root],
+            "resume process snapshot",
+        )
+        assert_loopback_network(second_processes, "resume process snapshot")
         write_capture(output, "resume-readback", resume)
         resume.send_line("/exit")
         resume_exit = resume.wait_for_exit(60)
@@ -931,6 +1187,35 @@ def main() -> int:
         raise JourneyFailure("engine status changed the durable session binding")
     if active_authority(roots["agent"]) is not None or extraction_roots(roots["temp"]):
         raise JourneyFailure("engine status spawned managed engine state")
+    tamper_results = [
+        run_tamper_failure(
+            bb,
+            output,
+            "bundle-tamper",
+            "engine_artifact_mismatch",
+            forbidden_roots,
+        ),
+        run_tamper_failure(
+            bb,
+            output,
+            "manifest-profile-tamper",
+            "engine_manifest_untrusted",
+            forbidden_roots,
+        ),
+    ]
+    (output / "tamper-failures.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "bb.installed_tamper_failures.v1",
+                "status": "pass",
+                "cases": tamper_results,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     facts = transcript_facts(final_resume.rows)
     if facts["userTexts"] != [FIRST_PROMPT, SECOND_PROMPT]:
@@ -986,8 +1271,11 @@ def main() -> int:
             "durableStateRetained": True,
         },
         "sourceCheckoutPathsAbsent": True,
+        "hostAgentPathsAbsent": True,
         "thirdTurnSubmitted": False,
         "providerCalls": False,
+        "tamperFailures": tamper_results,
+        "loopbackOnlyNetwork": True,
     }
     (output / "journey-summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"

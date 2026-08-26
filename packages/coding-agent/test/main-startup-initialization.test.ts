@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
-import { resolveBreadboardBackendModel, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
+import {
+	resolveBreadboardBackendModel,
+	resolveStartupNetworkPolicy,
+	runRootCommand,
+} from "@oh-my-pi/pi-coding-agent/main";
 import { getConfigRootDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 
 const SESSION_FIXTURE = path.join(import.meta.dir, "fixtures", "large-session.jsonl");
@@ -97,6 +101,19 @@ describe("runRootCommand — startup early exits", () => {
 		expect(result.discoverCalls).toBe(0);
 		expect(fs.existsSync(outputPath)).toBe(true);
 		expect(result.stdout).toContain(`Exported to: ${outputPath}`);
+	});
+});
+
+describe("BreadBoard startup network policy", () => {
+	it("keeps BreadBoard startup offline without changing native OMP policy", () => {
+		expect(resolveStartupNetworkPolicy(true)).toEqual({
+			backgroundUpdates: false,
+			modelRefreshStrategy: "offline",
+		});
+		expect(resolveStartupNetworkPolicy(false)).toEqual({
+			backgroundUpdates: true,
+			modelRefreshStrategy: "online-if-uncached",
+		});
 	});
 });
 

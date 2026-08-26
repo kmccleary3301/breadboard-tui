@@ -837,6 +837,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		eventBus?: EventBus,
 		composer?: Composer,
 		providerAuthPort?: ProviderAuthPort,
+		private readonly beforeSessionDispose?: () => Promise<void>,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -1103,6 +1104,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			getDraftText: () => this.#inputController.getDraftText(),
 			beginDispose: () => this.session.beginDispose(),
 			saveDraft: text => this.sessionManager.saveDraft(text),
+			beforeDispose: this.beforeSessionDispose,
 			disposeSession: reason =>
 				this.session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS, reason }),
 		});

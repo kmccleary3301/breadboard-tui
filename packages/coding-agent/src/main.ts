@@ -151,10 +151,28 @@ export function writeStartupNotice(parsedArgs: Pick<Args, "mode">, text: string)
 	(parsedArgs.mode === "json" ? process.stderr : process.stdout).write(text);
 }
 
+export interface StartupNetworkPolicy {
+	readonly backgroundUpdates: boolean;
+	readonly modelRefreshStrategy: "offline" | "online-if-uncached";
+}
+
+const BREADBOARD_STARTUP_NETWORK_POLICY: StartupNetworkPolicy = Object.freeze({
+	backgroundUpdates: false,
+	modelRefreshStrategy: "offline",
+});
+const OMP_STARTUP_NETWORK_POLICY: StartupNetworkPolicy = Object.freeze({
+	backgroundUpdates: true,
+	modelRefreshStrategy: "online-if-uncached",
+});
+
+export function resolveStartupNetworkPolicy(
+	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
+): StartupNetworkPolicy {
+	return isBreadboardProduct ? BREADBOARD_STARTUP_NETWORK_POLICY : OMP_STARTUP_NETWORK_POLICY;
+}
+
 async function checkForNewVersion(currentVersion: string): Promise<string | undefined> {
-	if (!settings.get("startup.checkUpdate")) {
-		return;
-	}
+	if (!resolveStartupNetworkPolicy().backgroundUpdates || !settings.get("startup.checkUpdate")) return;
 	try {
 		const release = await getLatestRelease({ timeoutMs: 5_000 });
 		return Bun.semver.order(release.version, currentVersion) > 0 ? release.version : undefined;
@@ -526,6 +544,7 @@ async function runInteractiveMode(
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
 	providerAuthPort?: ProviderAuthPort,
+	beforeSessionDispose?: () => Promise<void>,
 ): Promise<void> {
 	let mode: InteractiveMode;
 	try {
@@ -539,6 +558,7 @@ async function runInteractiveMode(
 			eventBus,
 			startupLease?.composer,
 			providerAuthPort,
+			beforeSessionDispose,
 		);
 		startupLease?.adopt();
 	} catch (error) {
@@ -2603,11 +2623,13 @@ export async function runRootCommand(
 			await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
 		}
 
-		scheduleMarketplaceAutoUpdate({
-			autoUpdate: settingsInstance.get("marketplace.autoUpdate"),
-			resolveActiveProjectRegistryPath,
-			clearPluginRootsCache: clearPluginRootsAndCaches,
-		});
+		if (resolveStartupNetworkPolicy().backgroundUpdates) {
+			scheduleMarketplaceAutoUpdate({
+				autoUpdate: settingsInstance.get("marketplace.autoUpdate"),
+				resolveActiveProjectRegistryPath,
+				clearPluginRootsCache: clearPluginRootsAndCaches,
+			});
+		}
 
 		const sessionOptions = await logger.time(
 			"buildSessionOptions",
@@ -2651,7 +2673,7 @@ export async function runRootCommand(
 			// Kick off background model discovery only after createAgentSession finishes its parallel
 			// discovery arms; running these concurrently contends for the event loop and stretches
 			// every parallel arm by ~30ms.
-			modelRegistry.refreshInBackground();
+			modelRegistry.refreshInBackground(resolveStartupNetworkPolicy().modelRefreshStrategy);
 			return result;
 		};
 
@@ -2960,6 +2982,7 @@ export async function runRootCommand(
 						startBackgroundModelDiscovery,
 						startupLease,
 						preparedBreadboardRuntime?.providerAuth,
+						preparedBreadboardRuntime?.close,
 					);
 				} finally {
 					startupLease?.dispose();

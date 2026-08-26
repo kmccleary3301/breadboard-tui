@@ -24,6 +24,7 @@ import {
 	type ExtractedEngineRuntimeBundle,
 	extractVerifiedEngineRuntimeBundle,
 } from "./engine-runtime-bundle";
+import { InstalledEngineDiscoveryError } from "./installed-engine-manifest";
 import {
 	type LifecycleReadyHandle,
 	type LifecycleResult,
@@ -271,6 +272,7 @@ export function lifecycleChildEnvironment(
 }
 
 function mappedFailure(mode: BreadboardRunConfig["mode"], error: unknown, attempt = 0): LifecycleResult {
+	if (error instanceof InstalledEngineDiscoveryError) throw error;
 	if (error instanceof EngineArtifactValidationError)
 		return lifecycleFailure(mode, "failed", "engine_artifact_mismatch", attempt);
 	if (error instanceof ProcessIdentityValidationError)
@@ -336,9 +338,11 @@ function unrefDelay(milliseconds: number): Promise<void> {
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
 	readonly #engineStateRoot: string | undefined;
+	readonly #installedEngine: boolean;
 
-	constructor(engineStateRoot?: string) {
+	constructor(engineStateRoot?: string, installedEngine = false) {
 		this.#engineStateRoot = engineStateRoot;
+		this.#installedEngine = installedEngine;
 	}
 
 	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
@@ -414,6 +418,9 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			return handle;
 		} catch (error) {
 			if (error instanceof EngineRuntimeBundleError) {
+				if (this.#installedEngine) {
+					throw new InstalledEngineDiscoveryError("engine_artifact_mismatch");
+				}
 				throw new EngineArtifactValidationError("engine runtime bundle verification failed", { cause: error });
 			}
 			if (error instanceof DarwinVerifiedSpawnError) {
@@ -1170,6 +1177,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			dependencies.process ??
 			new DefaultLifecycleProcessAdapter(
 				join(this.#store.root, "engine-state", LocalAuthorityStore.endpointKey(config.endpoint)),
+				config.installedEngineIdentity !== undefined,
 			);
 		this.#endpointAbsent =
 			dependencies.endpointAbsent ??
