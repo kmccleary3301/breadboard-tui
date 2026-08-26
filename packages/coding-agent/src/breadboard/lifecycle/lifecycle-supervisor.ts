@@ -151,6 +151,7 @@ class EngineArtifactValidationError extends Error {}
 class ProcessIdentityValidationError extends Error {}
 
 const TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000] as const;
+const STARTUP_TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000, 4_000] as const;
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
 // Reserve the global process-cleanup deadline for governed hard-signal authorization and authority retirement.
 const LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS = 2_000;
@@ -1813,7 +1814,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		let bound: BoundLifecycleE4Client | undefined;
 		for (
 			let reconnectAttempt = 0;
-			reconnectAttempt <= TRANSPORT_RECONNECT_DELAYS_MS.length && this.clock.now() < deadline;
+			reconnectAttempt <= STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length && this.clock.now() < deadline;
 			reconnectAttempt++
 		) {
 			this.transition("connecting", reconnectAttempt);
@@ -1839,9 +1840,9 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				bootstrapCredential.fill(0);
 				return mappedFailure("local-owned", raced.error, attempt);
 			}
-			if (reconnectAttempt < TRANSPORT_RECONNECT_DELAYS_MS.length) {
+			if (reconnectAttempt < STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length) {
 				this.transition("reconnecting", reconnectAttempt + 1);
-				await this.clock.sleep(TRANSPORT_RECONNECT_DELAYS_MS[reconnectAttempt] as number);
+				await this.clock.sleep(STARTUP_TRANSPORT_RECONNECT_DELAYS_MS[reconnectAttempt] as number);
 			}
 		}
 		if (!bound) {
