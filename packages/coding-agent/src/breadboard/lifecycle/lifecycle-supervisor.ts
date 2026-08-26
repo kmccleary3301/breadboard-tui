@@ -2116,12 +2116,19 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		this.transition("draining");
 		let drainGeneration: number | undefined;
 		let hardDecisionRecorded = false;
+		const refreshedRegistration = await context.client.renewClient({
+			registrationId: context.registration.registrationId,
+			registrationGeneration: context.registration.registrationGeneration,
+			clientInstanceId: context.clientInstanceId,
+			registrationCredential: context.registrationCredential,
+			signal: this.abortController.signal,
+		});
 		const currentRequester = {
 			registrationId: context.registration.registrationId,
 			registrationGeneration: context.registration.registrationGeneration,
 			clientInstanceId: context.clientInstanceId,
 			registrationCredential: context.registrationCredential,
-			admissionEpoch: context.registration.admissionEpoch,
+			admissionEpoch: refreshedRegistration.admissionEpoch,
 		};
 		let controlAttempt = await this.#store.withExclusiveLock(record.normalizedEndpoint, () =>
 			this.#store.prepareControlAttempt(

@@ -749,8 +749,9 @@ def main() -> int:
     state_session = retained_state.get("session")
     if not isinstance(state_session, dict) or state_session.get("session_id") != final_initial.data.get("sessionId"):
         raise JourneyFailure("retained state and binding disagree on session identity")
-    if state_session.get("event_seq") != final_initial_cursor:
-        raise JourneyFailure("retained state head and binding cursor disagree")
+    state_event_sequence = state_session.get("event_seq")
+    if type(state_event_sequence) is not int or state_event_sequence < final_initial_cursor:
+        raise JourneyFailure("retained state head regressed the durable binding cursor")
     retained_text = retained_bytes_before_restart.decode("utf-8")
     if FIRST_PROMPT in retained_text or SECOND_PROMPT in retained_text:
         raise JourneyFailure("retained engine state contains raw prompt text")

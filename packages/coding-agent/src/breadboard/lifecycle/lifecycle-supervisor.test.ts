@@ -185,7 +185,7 @@ function boundClient(
 				expiresAtUnix: 100,
 			} as never;
 		},
-		renewClient: async () => ({ result: "renewed" }) as never,
+		renewClient: async () => ({ result: "renewed", admissionEpoch: 7 }) as never,
 		detachClient: async () => {
 			calls.push("detach-client");
 			return { result: "detached" } as never;
@@ -1457,6 +1457,11 @@ describe("LifecycleSupervisor local-owned authority", () => {
 								expiresAtUnix: 100,
 							} as never;
 						},
+						renewClient: async input => {
+							const registration = registrations.find(item => item.registrationId === input.registrationId);
+							if (!registration) throw new Error("renewed registration missing");
+							return { result: "renewed", admissionEpoch: registration.admissionEpoch } as never;
+						},
 						beginControlDrain: async input => {
 							const { signal: _, ...request } = input;
 							beginRequests.push(request);
@@ -1567,6 +1572,11 @@ describe("LifecycleSupervisor local-owned authority", () => {
 							admissionEpoch,
 							expiresAtUnix: 100,
 						} as never;
+					},
+					renewClient: async input => {
+						const registration = registrations.find(item => item.registrationId === input.registrationId);
+						if (!registration) throw new Error("renewed registration missing");
+						return { result: "renewed", admissionEpoch: registration.admissionEpoch } as never;
 					},
 					beginControlDrain: async input => {
 						const { signal: _, ...request } = input;
@@ -2122,6 +2132,35 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls).not.toContain("rollback");
 		expect(process.events).not.toContain("hard-control");
 		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+
+	test("refreshes the admission epoch before beginning an attached control drain", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.exitOnNextWait();
+		const calls: string[] = [];
+		let observedAdmissionEpoch: number | undefined;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: () => ({
+				handshake: async () => {
+					const current = process.current();
+					const base = boundClient(bindingFor(current.pid, current.launchId), calls);
+					return {
+						...base,
+						renewClient: async () => ({ result: "renewed", admissionEpoch: 8 }) as never,
+						beginControlDrain: async input => {
+							observedAdmissionEpoch = input.expectedAdmissionEpoch;
+							return await base.beginControlDrain(input);
+						},
+					};
+				},
+			}),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(observedAdmissionEpoch).toBe(8);
 	});
 
 	test("bounds attached graceful exit wait before governed hard-signal cleanup", async () => {
