@@ -1,6 +1,6 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { constants } from "node:fs";
-import { type FileHandle, lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { type FileHandle, mkdtemp, open, rm } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +47,7 @@ import {
 	engineArtifactLocationSha256,
 	type OwnerExitPolicy,
 } from "./run-config";
+import { type ExitedEngineIdentity, RuntimeCleanupStore } from "./runtime-cleanup-store";
 
 export interface SpawnedEngineProcess {
 	readonly pid: number;
@@ -73,6 +74,7 @@ export interface LifecycleProcessAdapter {
 	): Promise<SpawnVerifiedResult>;
 	observe(pid: number): Promise<ProcessObservation>;
 	controlFor(pid: number, expectedStartToken: string): Promise<SpawnedEngineProcess | null>;
+	cleanupExited(identity: ExitedEngineIdentity): Promise<void>;
 }
 
 export interface LifecycleClock {
@@ -337,28 +339,23 @@ function unrefDelay(milliseconds: number): Promise<void> {
 
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
-	readonly #engineStateRoot: string | undefined;
+	readonly #runtimeCleanup: RuntimeCleanupStore;
 	readonly #installedEngine: boolean;
 
 	constructor(engineStateRoot?: string, installedEngine = false) {
-		this.#engineStateRoot = engineStateRoot;
+		this.#runtimeCleanup = new RuntimeCleanupStore(engineStateRoot);
 		this.#installedEngine = installedEngine;
 	}
 
-	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
-		if (this.#engineStateRoot === undefined) return lifecycleChildEnvironment(launchId, undefined, rayRuntimeRoot);
-		await mkdir(this.#engineStateRoot, { recursive: true, mode: 0o700 });
-		const metadata = await lstat(this.#engineStateRoot);
-		const expectedUid = process.geteuid?.() ?? process.getuid?.() ?? -1;
-		if (
-			!metadata.isDirectory() ||
-			metadata.isSymbolicLink() ||
-			(metadata.mode & 0o777) !== 0o700 ||
-			metadata.uid !== expectedUid
-		) {
-			throw new LocalAuthorityStoreError("root_integrity", "engine state root is not one private owned directory");
+	async cleanupExited(identity: ExitedEngineIdentity): Promise<void> {
+		if ((await this.observe(identity.pid)).kind !== "dead") {
+			throw new ProcessIdentityValidationError("engine runtime cleanup requires confirmed process death");
 		}
-		return lifecycleChildEnvironment(launchId, await realpath(this.#engineStateRoot), rayRuntimeRoot);
+		await this.#runtimeCleanup.remove(identity);
+	}
+
+	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
+		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot);
 	}
 
 	async #spawnBundledVerified(
@@ -387,7 +384,24 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				bootstrap,
 				bindIdentity,
 			});
+			const identity: ExitedEngineIdentity = {
+				launchId,
+				pid: verified.pid,
+				startToken: verified.startToken,
+			};
+			let cleanupPersisted = false;
+			try {
+				cleanupPersisted = await this.#runtimeCleanup.persist(identity, retained.rootPath, retainedRayRuntimeRoot);
+			} catch (error) {
+				await verified.signalIfSame("SIGKILL").catch(() => undefined);
+				await verified.waitForExit(5_000).catch(() => false);
+				throw error;
+			}
 			const exited = verified.exited.finally(async () => {
+				if (cleanupPersisted) {
+					await this.#runtimeCleanup.remove(identity);
+					return;
+				}
 				await Promise.allSettled([
 					retained.cleanup(),
 					rm(retainedRayRuntimeRoot, { recursive: true, force: true }),
@@ -499,9 +513,26 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				bootstrap,
 				bindIdentity,
 			});
-			const exited = verified.exited.finally(() =>
-				rm(retainedRayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined),
-			);
+			const identity: ExitedEngineIdentity = {
+				launchId,
+				pid: verified.pid,
+				startToken: verified.startToken,
+			};
+			let cleanupPersisted = false;
+			try {
+				cleanupPersisted = await this.#runtimeCleanup.persist(identity, undefined, retainedRayRuntimeRoot);
+			} catch (error) {
+				await verified.signalIfSame("SIGKILL").catch(() => undefined);
+				await verified.waitForExit(5_000).catch(() => false);
+				throw error;
+			}
+			const exited = verified.exited.finally(async () => {
+				if (cleanupPersisted) {
+					await this.#runtimeCleanup.remove(identity);
+					return;
+				}
+				await rm(retainedRayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+			});
 			rayRuntimeRoot = undefined;
 			const handle: SpawnedEngineProcess = {
 				pid: verified.pid,
@@ -1647,6 +1678,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				if (lockedObservation.kind !== "dead") return false;
 				const absent = await this.#endpointAbsent(await this.unboundClient());
 				if (absent !== true) return false;
+				await this.#cleanupExitedRuntime(current);
 				await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
 				return true;
 			});
@@ -1974,6 +2006,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			if (observation.kind !== "dead") return false;
 			const absent = await this.#endpointAbsent(await this.unboundClient());
 			if (absent !== true) return false;
+			await this.#cleanupExitedRuntime(current);
 			await this.#store.retireDeadGeneration(record.normalizedEndpoint, record);
 			return true;
 		});
@@ -2132,11 +2165,20 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		return false;
 	}
 
+	async #cleanupExitedRuntime(record: LocalAuthorityRecord): Promise<void> {
+		await this.#process.cleanupExited({
+			launchId: record.launchId,
+			pid: record.pid,
+			startToken: record.osProcessStartToken,
+		});
+	}
+
 	async #retireObservedExit(record: LocalAuthorityRecord): Promise<boolean> {
 		return await this.#store.withExclusiveLock(record.normalizedEndpoint, async () => {
 			const current = await this.#store.readCurrentForRecovery(record.normalizedEndpoint);
 			if (!current || !this.#sameAuthorityRecord(current, record)) return false;
 			if ((await this.#process.observe(current.pid)).kind !== "dead") return false;
+			await this.#cleanupExitedRuntime(current);
 			await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
 			return true;
 		});

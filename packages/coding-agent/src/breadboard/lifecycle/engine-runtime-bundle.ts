@@ -445,7 +445,7 @@ async function makeTreeWritable(path: string): Promise<void> {
 	}
 }
 
-async function removePrivateTree(path: string): Promise<void> {
+export async function removePrivateEngineRuntimeTree(path: string): Promise<void> {
 	await makeTreeWritable(path);
 	await rm(path, { recursive: true, force: true });
 }
@@ -569,7 +569,7 @@ export async function extractVerifiedEngineRuntimeBundle(input: {
 			cleanup: async () => {
 				if (cleaned) return;
 				cleaned = true;
-				await removePrivateTree(retainedRoot);
+				await removePrivateEngineRuntimeTree(retainedRoot);
 			},
 		});
 	} catch (error) {
@@ -577,6 +577,6 @@ export async function extractVerifiedEngineRuntimeBundle(input: {
 		return fail("bundle_extraction_failed", "trusted engine bundle extraction failed", error);
 	} finally {
 		await bundle.close();
-		if (rootPath !== undefined) await removePrivateTree(rootPath).catch(() => undefined);
+		if (rootPath !== undefined) await removePrivateEngineRuntimeTree(rootPath).catch(() => undefined);
 	}
 }

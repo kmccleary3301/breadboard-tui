@@ -654,6 +654,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const processTokens = new Map<number, string>();
 		const waitResults: boolean[] = [];
 		const waitTimeouts: number[] = [];
+		const cleanups: Array<{ readonly launchId: string; readonly pid: number; readonly startToken: string }> = [];
 		let gracefulExitOnWait = false;
 		let suppressNextExitNotification = false;
 		let returnUnbound = false;
@@ -720,6 +721,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 							startToken: processTokens.get(pid) ?? `darwin:${pid}:unknown`,
 						} as ProcessObservation),
 			controlFor: async (pid, token) => (token === processTokens.get(pid) ? (handles.get(pid) ?? null) : null),
+			cleanupExited: async identity => {
+				cleanups.push(identity);
+			},
 		};
 		return {
 			adapter,
@@ -728,6 +732,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			waitResults,
 			waitTimeouts,
 			bootstrapBuffers,
+			cleanups,
 			current: () => ({ pid: currentPid, launchId: currentLaunch }),
 			spawnCount: () => spawnCount,
 			crash: (pid = currentPid) => {
@@ -2217,7 +2222,33 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls.some(call => call.startsWith("hard-signal:"))).toBe(false);
 		expect(calls).not.toContain("rollback");
 		expect(process.events).not.toContain("hard-control");
+		expect(process.cleanups).toEqual([
+			{
+				launchId: process.current().launchId,
+				pid: process.current().pid,
+				startToken: `darwin:${process.current().pid}:1`,
+			},
+		]);
 		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+	test("fails closed without retiring dead authority when runtime cleanup fails", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.exitOnNextWait();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: {
+				...process.adapter,
+				cleanupExited: async () => {
+					throw new Error("synthetic runtime cleanup failure");
+				},
+			},
+			createClient: clientFactory(process, []),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const result = await supervisor.stop({ consumerClosed: true });
+		expect(result).toMatchObject({ kind: "failure", state: { reason: "drain_recovery_failed" } });
+		expect(await store.readCurrent("http://127.0.0.1:7777")).not.toBeNull();
 	});
 
 	test("refreshes the admission epoch before beginning an attached control drain", async () => {
