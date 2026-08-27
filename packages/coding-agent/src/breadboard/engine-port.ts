@@ -285,7 +285,7 @@ function createConnectedPort(
 	const sessionClient = {
 		...canonicalClient,
 		async create(request: BreadboardCreateSessionRequest) {
-			const created = await controlClient.createSession(buildBreadboardSessionCreatePayload(request) as never);
+			const created = await controlClient.createSession(buildBreadboardSessionCreatePayload(request));
 			return await canonicalClient.attach({ sessionId: created.session_id });
 		},
 	};
