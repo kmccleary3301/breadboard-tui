@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
 import {
 	chmod,
 	constants,
@@ -14,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { removePinnedDirectoryTree } from "./pinned-directory";
 
 export const ENGINE_RUNTIME_BUNDLE_SCHEMA = "bb.engine_runtime_bundle.v1" as const;
 
@@ -432,42 +432,11 @@ function containedPath(root: string, path: string): string {
 	return destination;
 }
 
-async function makeTreeWritable(path: string): Promise<void> {
-	let handle: FileHandle;
-	try {
-		handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-		throw error;
-	}
-	try {
-		const before = await handle.stat();
-		if (!before.isDirectory() || before.isSymbolicLink()) {
-			throw new Error("private engine runtime cleanup encountered a non-directory");
-		}
-		await handle.chmod(0o700);
-		const after = await handle.stat();
-		if (!after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
-			throw new Error("private engine runtime cleanup directory identity changed");
-		}
-		let children: Dirent[];
-		try {
-			children = await readdir(path, { withFileTypes: true });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-			throw error;
-		}
-		for (const child of children) {
-			if (child.isDirectory() && !child.isSymbolicLink()) await makeTreeWritable(join(path, child.name));
-		}
-	} finally {
-		await handle.close();
-	}
-}
-
-export async function removePrivateEngineRuntimeTree(path: string): Promise<void> {
-	await makeTreeWritable(path);
-	await rm(path, { recursive: true, force: true });
+export async function removePrivateEngineRuntimeTree(
+	path: string,
+	expected?: { readonly device: number | bigint; readonly inode: number | bigint },
+): Promise<void> {
+	await removePinnedDirectoryTree(path, expected);
 }
 
 export async function extractVerifiedEngineRuntimeBundle(input: {

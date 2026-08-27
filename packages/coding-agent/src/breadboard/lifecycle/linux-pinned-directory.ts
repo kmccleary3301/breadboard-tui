@@ -16,6 +16,13 @@ const O_NOFOLLOW = 0x00020000;
 const O_CLOEXEC = 0x00080000;
 const O_PATH = 0x00200000;
 const EINTR = 4;
+const EPERM = 1;
+const ENOENT = 2;
+const ENOTDIR = 20;
+const EISDIR = 21;
+const ENOTEMPTY = 39;
+const ELOOP = 40;
+const AT_REMOVEDIR = 0x200;
 
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
@@ -53,6 +60,8 @@ const SYSTEM_SYMBOLS = {
 	openat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 	readlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
 	getdents64: { args: [FFIType.i32, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
+	fchmod: { args: [FFIType.i32, FFIType.u32], returns: FFIType.i32 },
+	unlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	close: { args: [FFIType.i32], returns: FFIType.i32 },
 	__errno_location: { args: [], returns: FFIType.ptr },
 } as const;
@@ -439,6 +448,111 @@ function directoryEntries(lib: SystemLibrary, fd: number, remainingEntries: numb
 	return entries;
 }
 
+interface RemovalBudget {
+	remainingEntries: number;
+	rootDev?: bigint;
+}
+
+function makeDirectoryWritable(lib: SystemLibrary, fd: number, relativePath: string): void {
+	for (;;) {
+		if (Number(lib.symbols.fchmod(fd, 0o700)) === 0) break;
+		const code = currentErrno(lib);
+		if (code !== EINTR) throw nativeError(lib, "fchmod", relativePath, code);
+	}
+	if (fstatFd(fd, "fstat", relativePath).type !== "directory") {
+		throw invalid("directory identity changed while making cleanup writable", relativePath);
+	}
+}
+
+function unlinkAtErrno(lib: SystemLibrary, directoryFd: number, name: string, flags: number): number | undefined {
+	const encoded = cString(name);
+	for (;;) {
+		if (Number(lib.symbols.unlinkat(directoryFd, ptr(encoded), flags)) === 0) return undefined;
+		const code = currentErrno(lib);
+		if (code !== EINTR) return code;
+	}
+}
+
+function removeDirectoryContents(lib: SystemLibrary, directoryFd: number, prefix: string, budget: RemovalBudget): void {
+	makeDirectoryWritable(lib, directoryFd, prefix);
+	for (;;) {
+		const enumerationFd = openDirectoryAt(lib, directoryFd, ".", prefix);
+		let entries: readonly DirectoryEntry[];
+		try {
+			entries = directoryEntries(lib, enumerationFd, budget.remainingEntries);
+		} finally {
+			closeQuietly(lib, enumerationFd);
+		}
+		if (entries.length === 0) return;
+		for (const entry of entries) {
+			if (budget.remainingEntries-- <= 0) {
+				throw invalid("directory cleanup exceeds its entry limit", prefix);
+			}
+			const relativePath = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+			removeDirectoryEntry(lib, directoryFd, entry.name, relativePath, budget);
+		}
+	}
+}
+
+// Recursive mutation stays on opened descriptors. The final name operation is
+// nonrecursive and follows an identity check, so a race cannot redirect traversal.
+function removeDirectoryEntry(
+	lib: SystemLibrary,
+	parentFd: number,
+	name: string,
+	relativePath: string,
+	budget: RemovalBudget,
+	expected?: Readonly<Pick<PinnedStat, "dev" | "ino">>,
+	requireDirectory = false,
+): void {
+	for (;;) {
+		let childFd: number;
+		try {
+			childFd = openDirectoryAt(lib, parentFd, name, relativePath);
+		} catch (error) {
+			const code = error instanceof LinuxPinnedDirectoryError ? error.errno : undefined;
+			if (code === ENOENT) return;
+			if (!requireDirectory && (code === ENOTDIR || code === ELOOP)) {
+				const unlinkCode = unlinkAtErrno(lib, parentFd, name, 0);
+				if (unlinkCode === undefined || unlinkCode === ENOENT) return;
+				if (unlinkCode === EPERM || unlinkCode === EISDIR) continue;
+				throw nativeError(lib, "unlinkat", relativePath, unlinkCode);
+			}
+			throw error;
+		}
+		try {
+			const identity = fstatFd(childFd, "fstat", relativePath);
+			if (budget.rootDev === undefined) budget.rootDev = identity.dev;
+			else if (identity.dev !== budget.rootDev) {
+				throw invalid("cleanup refuses to cross a filesystem boundary", relativePath);
+			}
+			if (expected !== undefined && !sameIdentity(identity, expected)) {
+				throw invalid("cleanup directory identity changed", relativePath);
+			}
+			removeDirectoryContents(lib, childFd, relativePath, budget);
+			for (;;) {
+				const currentFd = openDirectoryAt(lib, parentFd, name, relativePath);
+				try {
+					if (!sameIdentity(fstatFd(currentFd, "fstat", relativePath), identity)) {
+						throw invalid("cleanup directory name no longer identifies its descriptor", relativePath);
+					}
+				} finally {
+					closeQuietly(lib, currentFd);
+				}
+				const unlinkCode = unlinkAtErrno(lib, parentFd, name, AT_REMOVEDIR);
+				if (unlinkCode === undefined) return;
+				if (unlinkCode === ENOTEMPTY) {
+					removeDirectoryContents(lib, childFd, relativePath, budget);
+					continue;
+				}
+				throw nativeError(lib, "unlinkat", relativePath, unlinkCode);
+			}
+		} finally {
+			closeQuietly(lib, childFd);
+		}
+	}
+}
+
 class NativePinnedFile implements PinnedFile {
 	readonly fd: number;
 	readonly #identity: Readonly<Pick<PinnedStat, "dev" | "ino">>;
@@ -596,6 +710,25 @@ class NativePinnedDirectory implements PinnedDirectory {
 		}
 		leaves.sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
 		return Object.freeze(leaves);
+	}
+
+	async removeDirectoryTree(
+		relativePath: string,
+		expected?: Readonly<Pick<PinnedStat, "dev" | "ino">>,
+	): Promise<void> {
+		this.#assertRoot();
+		const components = relativeComponents(relativePath);
+		if (components.length !== 1) throw invalid("directory cleanup requires one direct child", relativePath);
+		removeDirectoryEntry(
+			this.#lib,
+			this.fd,
+			components[0] as string,
+			relativePath,
+			{ remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries, rootDev: expected?.dev },
+			expected,
+			true,
+		);
+		this.#assertRoot();
 	}
 
 	async close(): Promise<void> {

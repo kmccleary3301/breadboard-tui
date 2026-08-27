@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { fstatSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LinuxPinnedDirectoryError, normalizeNodeErrno, openLinuxPinnedDirectory } from "./linux-pinned-directory";
@@ -60,6 +60,51 @@ describe.skipIf(process.platform !== "linux" || process.arch !== "x64")("Linux p
 		await writeFile(join(root, "nested", "replacement"), "replacement");
 		expect(await pinned.readFile("nested/original", 64)).toEqual(Buffer.from("original"));
 		expect(await pinned.listLeaves({ maxEntries: 8, maxPathBytes: 128 })).toEqual(["nested/original"]);
+	});
+
+	test("removes only one inode-bound direct-child tree through directory descriptors", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const outside = join(root, "outside.txt");
+		await mkdir(join(target, "nested"), { recursive: true });
+		await writeFile(join(target, "nested", "value"), "remove");
+		await writeFile(outside, "retain");
+		await symlink("../outside.txt", join(target, "escape"));
+		await chmod(join(target, "nested"), 0o500);
+		await chmod(target, 0o500);
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+
+		await pinned.removeDirectoryTree("target", {
+			dev: BigInt(targetMetadata.dev),
+			ino: BigInt(targetMetadata.ino),
+		});
+		await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await Bun.file(outside).text()).toBe("retain");
+	});
+
+	test("rejects a substituted cleanup root without deleting either tree", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const parked = join(root, "parked");
+		await mkdir(target);
+		await writeFile(join(target, "original"), "original");
+		const targetMetadata = await lstat(target);
+		await rename(target, parked);
+		await mkdir(target);
+		await writeFile(join(target, "replacement"), "replacement");
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toBeInstanceOf(LinuxPinnedDirectoryError);
+		expect(await Bun.file(join(parked, "original")).text()).toBe("original");
+		expect(await Bun.file(join(target, "replacement")).text()).toBe("replacement");
 	});
 
 	test("rejects unsafe paths, symlink traversal, and oversized values", async () => {

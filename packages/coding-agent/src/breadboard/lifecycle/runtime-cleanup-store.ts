@@ -284,7 +284,7 @@ export class RuntimeCleanupStore {
 				}
 			} else {
 				await this.#matchRuntimeRoot(quarantined, root, movedMetadata, false);
-				await removePrivateEngineRuntimeTree(quarantined);
+				await removePrivateEngineRuntimeTree(quarantined, { device: root.device, inode: root.inode });
 			}
 		} finally {
 			await rmdir(quarantineRoot).catch(error => {
