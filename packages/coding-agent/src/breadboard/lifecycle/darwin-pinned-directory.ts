@@ -8,11 +8,14 @@ const O_CLOEXEC = 0x01000000;
 const EINTR = 4;
 const EPERM = 1;
 const ENOENT = 2;
+const EEXIST = 17;
 const ENOTDIR = 20;
 const EISDIR = 21;
 const ELOOP = 62;
 const ENOTEMPTY = 66;
 const AT_REMOVEDIR = 0x80;
+const RENAME_EXCL = 0x04;
+const RENAME_NOFOLLOW_ANY = 0x10;
 
 const S_IFMT = 0xf000;
 const S_IFREG = 0x8000;
@@ -118,6 +121,10 @@ const SYSTEM_SYMBOLS = {
 	readlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
 	__getdirentries64: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
 	fchmod: { args: [FFIType.i32, FFIType.u16], returns: FFIType.i32 },
+	renameatx_np: {
+		args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32],
+		returns: FFIType.i32,
+	},
 	unlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	close: { args: [FFIType.i32], returns: FFIType.i32 },
 	__error: { args: [], returns: FFIType.ptr },
@@ -223,6 +230,7 @@ function fstatFd(lib: SystemLibrary, fd: number, operation: string, relativePath
 
 type MountIdentityReader = (fd: number, relativePath: string) => string;
 type MountIdentityTransform = (fd: number, relativePath: string, actualIdentity: string) => string;
+type BeforeRetirementRename = (parentFd: number, name: string, relativePath: string) => void;
 
 function mountIdentityFd(lib: SystemLibrary, fd: number, relativePath: string, bytes: Buffer): string {
 	for (;;) {
@@ -459,6 +467,7 @@ interface RemovalBudget {
 	rootDev?: bigint;
 	rootMountIdentity?: string;
 	readonly readMountIdentity: MountIdentityReader;
+	readonly beforeRetirementRename?: BeforeRetirementRename;
 }
 
 function assertCleanupMount(directoryFd: number, relativePath: string, budget: RemovalBudget): void {
@@ -488,6 +497,32 @@ function unlinkAtErrno(lib: SystemLibrary, directoryFd: number, name: string, fl
 	}
 }
 
+function renameAtExclusiveErrno(lib: SystemLibrary, parentFd: number, from: string, to: string): number | undefined {
+	const encodedFrom = cString(from);
+	const encodedTo = cString(to);
+	for (;;) {
+		if (
+			Number(
+				lib.symbols.renameatx_np(
+					parentFd,
+					ptr(encodedFrom),
+					parentFd,
+					ptr(encodedTo),
+					RENAME_EXCL | RENAME_NOFOLLOW_ANY,
+				),
+			) === 0
+		) {
+			return undefined;
+		}
+		const code = currentErrno(lib);
+		if (code !== EINTR) return code;
+	}
+}
+
+function retirementName(identity: Readonly<Pick<PinnedStat, "dev" | "ino">>): string {
+	return `.bb-retire-${BigInt.asUintN(64, identity.dev).toString(16)}-${BigInt.asUintN(64, identity.ino).toString(16)}`;
+}
+
 function removeDirectoryContents(lib: SystemLibrary, directoryFd: number, prefix: string, budget: RemovalBudget): void {
 	assertCleanupMount(directoryFd, prefix, budget);
 	makeDirectoryWritable(lib, directoryFd, prefix);
@@ -510,8 +545,8 @@ function removeDirectoryContents(lib: SystemLibrary, directoryFd: number, prefix
 	}
 }
 
-// Recursive mutation stays on same-mount opened descriptors. The final name
-// operation is nonrecursive and follows mount and inode identity checks.
+// Recursive mutation stays on same-mount opened descriptors. Empty directories
+// move atomically to an exclusive retirement name before identity verification.
 function removeDirectoryEntry(
 	lib: SystemLibrary,
 	parentFd: number,
@@ -546,23 +581,57 @@ function removeDirectoryEntry(
 				throw invalid("cleanup directory identity changed", relativePath);
 			}
 			removeDirectoryContents(lib, childFd, relativePath, budget);
+			const retiredName = retirementName(identity);
+			if (name !== retiredName) {
+				budget.beforeRetirementRename?.(parentFd, name, relativePath);
+				const renameCode = renameAtExclusiveErrno(lib, parentFd, name, retiredName);
+				if (renameCode !== undefined) {
+					if (renameCode === EEXIST) {
+						throw invalid("cleanup retirement name already exists", relativePath);
+					}
+					throw nativeError(lib, "renameatx_np", relativePath, renameCode);
+				}
+				let movedMatches = false;
+				let movedVerificationFailed = false;
+				let movedVerificationError: unknown;
+				try {
+					const movedFd = openDirectoryAt(lib, parentFd, retiredName, relativePath);
+					try {
+						assertCleanupMount(movedFd, relativePath, budget);
+						movedMatches = sameIdentity(fstatFd(lib, movedFd, "fstat", relativePath), identity);
+					} finally {
+						closeQuietly(lib, movedFd);
+					}
+				} catch (error) {
+					movedVerificationFailed = true;
+					movedVerificationError = error;
+				}
+				if (movedVerificationFailed || !movedMatches) {
+					const restoreCode = renameAtExclusiveErrno(lib, parentFd, retiredName, name);
+					if (restoreCode !== undefined) {
+						throw invalid("cleanup preserved an unverified directory under its retirement name", relativePath);
+					}
+					if (movedVerificationFailed) throw movedVerificationError;
+					throw invalid("cleanup directory identity changed during atomic retirement", relativePath);
+				}
+			}
 			for (;;) {
-				const currentFd = openDirectoryAt(lib, parentFd, name, relativePath);
+				const currentFd = openDirectoryAt(lib, parentFd, retiredName, relativePath);
 				try {
 					assertCleanupMount(currentFd, relativePath, budget);
 					if (!sameIdentity(fstatFd(lib, currentFd, "fstat", relativePath), identity)) {
-						throw invalid("cleanup directory name no longer identifies its descriptor", relativePath);
+						throw invalid("cleanup retirement name no longer identifies its descriptor", relativePath);
 					}
+					const unlinkCode = unlinkAtErrno(lib, parentFd, retiredName, AT_REMOVEDIR);
+					if (unlinkCode === undefined) return;
+					if (unlinkCode === ENOTEMPTY) {
+						removeDirectoryContents(lib, childFd, relativePath, budget);
+						continue;
+					}
+					throw nativeError(lib, "unlinkat", relativePath, unlinkCode);
 				} finally {
 					closeQuietly(lib, currentFd);
 				}
-				const unlinkCode = unlinkAtErrno(lib, parentFd, name, AT_REMOVEDIR);
-				if (unlinkCode === undefined) return;
-				if (unlinkCode === ENOTEMPTY) {
-					removeDirectoryContents(lib, childFd, relativePath, budget);
-					continue;
-				}
-				throw nativeError(lib, "unlinkat", relativePath, unlinkCode);
 			}
 		} finally {
 			closeQuietly(lib, childFd);
@@ -664,11 +733,19 @@ class NativePinnedDirectory implements PinnedDirectory {
 	readonly identity: Readonly<Pick<PinnedStat, "dev" | "ino">>;
 	readonly #lib: SystemLibrary;
 	readonly #readMountIdentity: MountIdentityReader;
+	readonly #beforeRetirementRename?: BeforeRetirementRename;
 	#closed = false;
 
-	constructor(lib: SystemLibrary, fd: number, stat: PinnedStat, readMountIdentity: MountIdentityReader) {
+	constructor(
+		lib: SystemLibrary,
+		fd: number,
+		stat: PinnedStat,
+		readMountIdentity: MountIdentityReader,
+		beforeRetirementRename?: BeforeRetirementRename,
+	) {
 		this.#lib = lib;
 		this.#readMountIdentity = readMountIdentity;
+		this.#beforeRetirementRename = beforeRetirementRename;
 		this.fd = fd;
 		this.identity = Object.freeze({ dev: stat.dev, ino: stat.ino });
 	}
@@ -765,19 +842,20 @@ class NativePinnedDirectory implements PinnedDirectory {
 		this.#assertRoot();
 		const components = relativeComponents(relativePath);
 		if (components.length !== 1) throw invalid("directory cleanup requires one direct child", relativePath);
-		removeDirectoryEntry(
-			this.#lib,
-			this.fd,
-			components[0] as string,
-			relativePath,
-			{
-				remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries,
-				rootDev: expected?.dev,
-				readMountIdentity: this.#readMountIdentity,
-			},
-			expected,
-			true,
-		);
+		const name = components[0] as string;
+		const budget: RemovalBudget = {
+			remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries,
+			rootDev: expected?.dev,
+			readMountIdentity: this.#readMountIdentity,
+			beforeRetirementRename: this.#beforeRetirementRename,
+		};
+		removeDirectoryEntry(this.#lib, this.fd, name, relativePath, budget, expected, true);
+		if (expected !== undefined) {
+			const retainedName = retirementName(expected);
+			if (retainedName !== name) {
+				removeDirectoryEntry(this.#lib, this.fd, retainedName, relativePath, budget, expected, true);
+			}
+		}
 		this.#assertRoot();
 	}
 
@@ -799,6 +877,7 @@ class NativePinnedDirectory implements PinnedDirectory {
 async function openPinnedDirectoryInternal(
 	rootPath: string,
 	transformMountIdentity?: MountIdentityTransform,
+	beforeRetirementRename?: BeforeRetirementRename,
 ): Promise<PinnedDirectory> {
 	validateRootPath(rootPath);
 	const lib = system();
@@ -813,7 +892,7 @@ async function openPinnedDirectoryInternal(
 			const actualIdentity = mountIdentityFd(lib, descriptor, relativePath, mountIdentityBytes);
 			return transformMountIdentity?.(descriptor, relativePath, actualIdentity) ?? actualIdentity;
 		};
-		return new NativePinnedDirectory(lib, fd, stat, readMountIdentity);
+		return new NativePinnedDirectory(lib, fd, stat, readMountIdentity, beforeRetirementRename);
 	} catch (error) {
 		closeQuietly(lib, fd);
 		throw error;
@@ -824,10 +903,11 @@ export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirec
 	return openPinnedDirectoryInternal(rootPath);
 }
 
-/** @internal Deterministic fault injection for mount-transition regression tests. */
+/** @internal Deterministic fault injection for cleanup regression tests. */
 export async function openPinnedDirectoryWithMountIdentityForTesting(
 	rootPath: string,
 	transformMountIdentity: MountIdentityTransform,
+	beforeRetirementRename?: BeforeRetirementRename,
 ): Promise<PinnedDirectory> {
-	return openPinnedDirectoryInternal(rootPath, transformMountIdentity);
+	return openPinnedDirectoryInternal(rootPath, transformMountIdentity, beforeRetirementRename);
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
@@ -50,6 +50,20 @@ afterEach(async () => {
 });
 
 describe("RuntimeCleanupStore", () => {
+	test("rejects a symlinked engine-state root before canonicalization", async () => {
+		const parent = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-state-parent-"));
+		const target = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-state-target-"));
+		roots.push(parent, target);
+		await writeFile(join(target, "unrelated"), "retain");
+		await symlink(target, join(parent, "engine-state"));
+		const store = new RuntimeCleanupStore(join(parent, "engine-state"));
+
+		const error = await store.stateRoot().catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await Bun.file(join(target, "unrelated")).text()).toBe("retain");
+	});
+
 	test("durably binds bundle and Ray roots to one process identity and removes them after exit", async () => {
 		const { store, engineRoot, rayRoot, recordPath } = await fixture();
 		expect(await store.persist(identity, engineRoot, rayRoot)).toBeTrue();

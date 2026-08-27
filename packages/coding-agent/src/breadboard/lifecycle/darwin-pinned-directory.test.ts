@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { fstatSync, watch } from "node:fs";
+import { fstatSync, lstatSync, mkdirSync, renameSync, watch } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -75,6 +75,24 @@ describe.skipIf(process.platform !== "darwin")("Darwin pinned directory", () => 
 		});
 		await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
 		expect(await Bun.file(outside).text()).toBe("retain");
+	});
+
+	test("resumes deletion from a verified crash-retirement name", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		await mkdir(target);
+		const targetMetadata = await lstat(target);
+		const expected = {
+			dev: BigInt(targetMetadata.dev),
+			ino: BigInt(targetMetadata.ino),
+		};
+		const retainedName = `.bb-retire-${BigInt.asUintN(64, expected.dev).toString(16)}-${BigInt.asUintN(64, expected.ino).toString(16)}`;
+		await rename(target, join(root, retainedName));
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+
+		await pinned.removeDirectoryTree("target", expected);
+		await expect(lstat(join(root, retainedName))).rejects.toMatchObject({ code: "ENOENT" });
 	});
 
 	test("rejects a substituted cleanup root without deleting either tree", async () => {
@@ -156,6 +174,41 @@ describe.skipIf(process.platform !== "darwin")("Darwin pinned directory", () => 
 		expect((await lstat(nested)).isDirectory()).toBeTrue();
 		await expect(lstat(join(nested, "value"))).rejects.toMatchObject({ code: "ENOENT" });
 		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
+	});
+
+	test("restores an empty replacement swapped immediately before atomic retirement", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const parked = join(root, "parked");
+		await mkdir(target);
+		const targetMetadata = await lstat(target);
+		const replacementIdentity: { value?: { readonly dev: bigint; readonly ino: bigint } } = {};
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(
+			root,
+			(_fd, _relativePath, actualIdentity) => actualIdentity,
+			(_parentFd, name, relativePath) => {
+				if (relativePath !== "target" || replacementIdentity.value !== undefined) return;
+				renameSync(join(root, name), parked);
+				mkdirSync(join(root, name));
+				const replacement = lstatSync(join(root, name), { bigint: true });
+				replacementIdentity.value = { dev: replacement.dev, ino: replacement.ino };
+			},
+		);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup directory identity changed during atomic retirement");
+		expect(replacementIdentity.value).toBeDefined();
+		const expectedReplacement = replacementIdentity.value;
+		if (expectedReplacement === undefined) throw new Error("replacement hook did not run");
+		const restoredReplacement = await lstat(target);
+		expect(BigInt(restoredReplacement.dev)).toBe(expectedReplacement.dev);
+		expect(BigInt(restoredReplacement.ino)).toBe(expectedReplacement.ino);
+		expect((await lstat(parked)).isDirectory()).toBeTrue();
 	});
 
 	test("fails closed when the cleanup root name is replaced after descriptor traversal starts", async () => {

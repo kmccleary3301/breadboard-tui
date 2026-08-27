@@ -29,8 +29,10 @@ interface RuntimeCleanupRecord extends ExitedEngineIdentity {
 	readonly rayRuntime: RuntimeRootIdentity;
 }
 
-export class RuntimeCleanupStoreError extends Error {
-	override readonly name = "RuntimeCleanupStoreError";
+export class RuntimeCleanupStoreError extends LocalAuthorityStoreError {
+	constructor(message: string) {
+		super("root_integrity", message);
+	}
 }
 
 export class RuntimeCleanupStore {
@@ -95,8 +97,36 @@ export class RuntimeCleanupStore {
 
 	async #ensureDurablePrivateDirectory(path: string, label: string): Promise<string> {
 		const createdPath = await mkdir(path, { recursive: true, mode: 0o700 });
-		const canonicalPath = await realpath(path);
-		await this.#requirePrivateOwnedDirectory(canonicalPath, 0o700, label);
+		let handle: FileHandle;
+		try {
+			handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+		} catch {
+			throw new RuntimeCleanupStoreError(`${label} is not one private owned directory`);
+		}
+		let canonicalPath: string;
+		try {
+			const descriptor = await handle.stat();
+			await this.#requirePrivateOwnedDirectory(path, 0o700, label, descriptor);
+			canonicalPath = await realpath(path);
+			const [named, canonical, after] = await Promise.all([lstat(path), lstat(canonicalPath), handle.stat()]);
+			if (
+				named.isSymbolicLink() ||
+				!named.isDirectory() ||
+				named.dev !== descriptor.dev ||
+				named.ino !== descriptor.ino ||
+				canonical.isSymbolicLink() ||
+				!canonical.isDirectory() ||
+				canonical.dev !== descriptor.dev ||
+				canonical.ino !== descriptor.ino ||
+				after.dev !== descriptor.dev ||
+				after.ino !== descriptor.ino ||
+				!after.isDirectory()
+			) {
+				throw new RuntimeCleanupStoreError(`${label} identity changed while canonicalizing`);
+			}
+		} finally {
+			await handle.close();
+		}
 		if (createdPath !== undefined) {
 			const firstCreated = await realpath(createdPath);
 			const tail = relative(firstCreated, canonicalPath);
@@ -113,6 +143,7 @@ export class RuntimeCleanupStore {
 			}
 			for (const created of createdDirectories) {
 				await this.#requirePrivateOwnedDirectory(created, 0o700, label);
+				await this.#syncPrivateDirectory(created, label);
 				await this.#syncPrivateDirectory(dirname(created), `${label} parent`);
 			}
 		}
@@ -120,13 +151,26 @@ export class RuntimeCleanupStore {
 	}
 
 	async #syncPrivateDirectory(path: string, label: string): Promise<void> {
-		const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+		let handle: FileHandle;
+		try {
+			handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+		} catch {
+			throw new RuntimeCleanupStoreError(`${label} is not one private owned directory`);
+		}
 		try {
 			const before = await handle.stat();
 			await this.#requirePrivateOwnedDirectory(path, 0o700, label, before);
 			await handle.sync();
-			const after = await handle.stat();
-			if (after.dev !== before.dev || after.ino !== before.ino || !after.isDirectory()) {
+			const [after, named] = await Promise.all([handle.stat(), lstat(path)]);
+			if (
+				after.dev !== before.dev ||
+				after.ino !== before.ino ||
+				!after.isDirectory() ||
+				named.dev !== before.dev ||
+				named.ino !== before.ino ||
+				!named.isDirectory() ||
+				named.isSymbolicLink()
+			) {
 				throw new LocalAuthorityStoreError("root_integrity", `${label} identity changed while synchronizing`);
 			}
 		} finally {
