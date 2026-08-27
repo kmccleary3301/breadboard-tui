@@ -472,14 +472,31 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 						error,
 					);
 				}
+				const removeLocallyOwnedRoots = async (): Promise<void> => {
+					const outcomes = await Promise.allSettled([
+						ownership.extracted.cleanup(),
+						rm(ownership.rayRuntimeRoot, { recursive: true, force: true }),
+					]);
+					for (const outcome of outcomes) {
+						if (outcome.status === "rejected") throw outcome.reason;
+					}
+				};
 				let cleanupOutcome: "death_unconfirmed" | "record_absent" | "removed";
 				try {
 					cleanupOutcome = await this.#failedSpawnCleanupRecord(cleanupIdentity);
 				} catch (cleanupError) {
+					try {
+						await removeLocallyOwnedRoots();
+					} catch (rootCleanupError) {
+						throw new RuntimeCleanupReconciliationError(
+							"failed bundled-engine spawn roots could not be removed after cleanup record reconciliation failed",
+							rootCleanupError,
+						);
+					}
 					extracted = undefined;
 					rayRuntimeRoot = undefined;
 					throw new RuntimeCleanupReconciliationError(
-						"failed bundled-engine spawn cleanup could not be reconciled",
+						"failed bundled-engine spawn cleanup record could not be reconciled after locally owned roots were removed",
 						cleanupError,
 					);
 				}
@@ -493,10 +510,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				}
 				if (cleanupOutcome === "record_absent") {
 					try {
-						await Promise.all([
-							ownership.extracted.cleanup(),
-							rm(ownership.rayRuntimeRoot, { recursive: true, force: true }),
-						]);
+						await removeLocallyOwnedRoots();
 					} catch (cleanupError) {
 						extracted = undefined;
 						rayRuntimeRoot = undefined;
@@ -651,13 +665,24 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 						error,
 					);
 				}
+				const removeLocallyOwnedRoot = async (): Promise<void> => {
+					await rm(retainedRayRuntimeRoot, { recursive: true, force: true });
+				};
 				let cleanupOutcome: "death_unconfirmed" | "record_absent" | "removed";
 				try {
 					cleanupOutcome = await this.#failedSpawnCleanupRecord(cleanupIdentity);
 				} catch (cleanupError) {
+					try {
+						await removeLocallyOwnedRoot();
+					} catch (rootCleanupError) {
+						throw new RuntimeCleanupReconciliationError(
+							"failed direct-engine spawn root could not be removed after cleanup record reconciliation failed",
+							rootCleanupError,
+						);
+					}
 					rayRuntimeRoot = undefined;
 					throw new RuntimeCleanupReconciliationError(
-						"failed direct-engine spawn cleanup could not be reconciled",
+						"failed direct-engine spawn cleanup record could not be reconciled after locally owned root was removed",
 						cleanupError,
 					);
 				}
@@ -670,7 +695,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				}
 				if (cleanupOutcome === "record_absent") {
 					try {
-						await rm(retainedRayRuntimeRoot, { recursive: true, force: true });
+						await removeLocallyOwnedRoot();
 					} catch (cleanupError) {
 						rayRuntimeRoot = undefined;
 						throw new RuntimeCleanupReconciliationError(

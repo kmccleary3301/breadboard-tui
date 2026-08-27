@@ -285,11 +285,16 @@ async function pathExists(path: string): Promise<boolean> {
 	}
 }
 
-async function exerciseRejectedCleanupPersistence(artifact: EngineArtifact): Promise<void> {
+async function exerciseRejectedCleanupPersistence(
+	artifact: EngineArtifact,
+	obstructRecordReadback = false,
+): Promise<void> {
 	const authorityRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-fault-"));
 	roots.push(authorityRoot);
 	const authority = new LocalAuthorityStore(authorityRoot);
 	const stateRootRelativePath = join("engine-state", "fault-endpoint");
+	const launchId = "l".repeat(43);
+	const cleanupRecordPath = join(authorityRoot, stateRootRelativePath, "runtime-cleanup", `${launchId}.json`);
 	let cleanupRoots: CleanupRecordRootPaths | undefined;
 	const adapter = createDefaultLifecycleProcessAdapter(
 		{
@@ -303,6 +308,10 @@ async function exerciseRejectedCleanupPersistence(artifact: EngineArtifact): Pro
 		{
 			writeRecord: async (_handle, contents) => {
 				cleanupRoots = cleanupRecordRootPaths(contents);
+				if (obstructRecordReadback) {
+					await rm(cleanupRecordPath);
+					await mkdir(cleanupRecordPath);
+				}
 				throw new Error("synthetic cleanup persistence failure");
 			},
 		},
@@ -310,12 +319,13 @@ async function exerciseRejectedCleanupPersistence(artifact: EngineArtifact): Pro
 	const bound = Promise.withResolvers<{ readonly pid: number; readonly startToken: string }>();
 	const bootstrap = Buffer.from("fixture\n", "utf8");
 	const error = await adapter
-		.spawnVerified(artifact, "l".repeat(43), bootstrap, async (pid, startToken) => {
+		.spawnVerified(artifact, launchId, bootstrap, async (pid, startToken) => {
 			bound.resolve({ pid, startToken });
 		})
 		.catch(cause => cause);
 
-	expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+	if (obstructRecordReadback) expect(error).toBeInstanceOf(RuntimeCleanupReconciliationError);
+	else expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
 	const identity = await bound.promise;
 	expect(await adapter.observe(identity.pid)).toEqual({ kind: "dead" });
 	expect(bootstrap.every(byte => byte === 0)).toBeTrue();
@@ -324,14 +334,15 @@ async function exerciseRejectedCleanupPersistence(artifact: EngineArtifact): Pro
 	if (cleanupRoots.engineRuntimeRoot !== undefined) {
 		expect(await pathExists(cleanupRoots.engineRuntimeRoot)).toBeFalse();
 	}
-	expect(await readdir(join(authorityRoot, stateRootRelativePath, "runtime-cleanup"))).toEqual([]);
+	if (obstructRecordReadback) expect((await stat(cleanupRecordPath)).isDirectory()).toBeTrue();
+	else expect(await readdir(join(authorityRoot, stateRootRelativePath, "runtime-cleanup"))).toEqual([]);
 }
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
 describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter persistence faults", () => {
-	test("kills the suspended direct engine and removes its Ray root when record persistence rejects", async () => {
+	test("kills the suspended direct engine and removes its Ray root across rejected record states", async () => {
 		const executableBytes = await readFile("/bin/sh");
 		const executableDigest = `sha256:${createHash("sha256").update(executableBytes).digest("hex")}` as const;
 		await exerciseRejectedCleanupPersistence({
@@ -343,9 +354,21 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 			engineSourceSha256: executableDigest,
 			servedBackendCommit: backendCommit,
 		});
+		await exerciseRejectedCleanupPersistence(
+			{
+				kind: "direct-executable",
+				executablePath: "/bin/sh",
+				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				argvSha256: artifact.argvSha256,
+				executableSha256: executableDigest,
+				engineSourceSha256: executableDigest,
+				servedBackendCommit: backendCommit,
+			},
+			true,
+		);
 	});
 
-	test("kills the suspended bundled engine and removes both runtime roots when record persistence rejects", async () => {
+	test("kills the suspended bundled engine and removes both runtime roots across rejected record states", async () => {
 		const bundleRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-bundle-"));
 		roots.push(bundleRoot);
 		const sourceRoot = join(bundleRoot, "source");
@@ -368,6 +391,20 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 			engineSourceSha256: created.bundle.sha256,
 			servedBackendCommit: backendCommit,
 		});
+		await exerciseRejectedCleanupPersistence(
+			{
+				kind: "runtime-bundle",
+				runtimeBundle: created.bundle,
+				executablePath: created.executablePath,
+				executableSizeBytes: created.executableSizeBytes,
+				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				argvSha256: artifact.argvSha256,
+				executableSha256: created.executableSha256,
+				engineSourceSha256: created.bundle.sha256,
+				servedBackendCommit: backendCommit,
+			},
+			true,
+		);
 	});
 });
 
