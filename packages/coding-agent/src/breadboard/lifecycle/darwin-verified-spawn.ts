@@ -723,18 +723,18 @@ async function cleanupFailedSpawn(
 		try {
 			native.signal(child.pid, "SIGKILL");
 		} catch {
-			// The direct stopped child is still reaped below.
+			// The direct child is still reaped below.
 		}
 	}
 	if (!(await child.waitForExit(CLEANUP_TIMEOUT_MS))) {
-		throw new DarwinVerifiedSpawnError("failed to reap stopped child after verified spawn failure");
+		throw new DarwinVerifiedSpawnError("failed to reap child after verified spawn failure");
 	}
 }
 
 /**
  * Spawn an arm64 Mach-O stopped before user code, attest the kernel-loaded
- * CodeDirectory, bind its stable process token, deliver fd3 bootstrap bytes,
- * and send SIGCONT as the final operation.
+ * CodeDirectory, resume it into the inherited-fd bootstrap gate, bind its
+ * stable process token, and deliver fd3 bootstrap bytes as the final authority.
  */
 export async function spawnDarwinVerified(options: DarwinVerifiedSpawnOptions): Promise<DarwinVerifiedProcess> {
 	if (options.bootstrap.byteLength === 0 || options.bootstrap.byteLength > MAX_BOOTSTRAP_BYTES) {
@@ -745,7 +745,7 @@ export async function spawnDarwinVerified(options: DarwinVerifiedSpawnOptions): 
 	let child: DarwinSuspendedChild | undefined;
 	let startToken: string | undefined;
 	let pipeOpen = false;
-	let resumed = false;
+	let completed = false;
 	try {
 		const expectedIdentity = parseDarwinArm64CodeIdentity(options.executableBytes);
 		child = native.spawnSuspended(options.executablePath, options.argv, options.env);
@@ -758,15 +758,15 @@ export async function spawnDarwinVerified(options: DarwinVerifiedSpawnOptions): 
 			throw new DarwinVerifiedSpawnError("spawned process identity changed during attestation");
 		if (!identitiesEqual(expectedIdentity, loadedIdentity))
 			throw new DarwinVerifiedSpawnError("spawned process code identity does not match verified bytes");
+		if (native.processStartToken(child.pid) !== startToken)
+			throw new DarwinVerifiedSpawnError("spawned process identity changed before bootstrap gate");
+		if (!native.signal(child.pid, "SIGCONT"))
+			throw new DarwinVerifiedSpawnError("spawned process exited before bootstrap gate");
 		await options.bindIdentity(child.pid, startToken);
 		native.writeAll(child.bootstrapFd, options.bootstrap);
 		native.close(child.bootstrapFd);
 		pipeOpen = false;
-		if (native.processStartToken(child.pid) !== startToken)
-			throw new DarwinVerifiedSpawnError("spawned process identity changed before resume");
-		if (!native.signal(child.pid, "SIGCONT"))
-			throw new DarwinVerifiedSpawnError("spawned process exited before resume");
-		resumed = true;
+		completed = true;
 		const verifiedChild = child;
 		const verifiedStartToken = startToken;
 		return {
@@ -784,7 +784,7 @@ export async function spawnDarwinVerified(options: DarwinVerifiedSpawnOptions): 
 			},
 		};
 	} catch (error) {
-		if (child !== undefined && !resumed) await cleanupFailedSpawn(native, child, pipeOpen);
+		if (child !== undefined && !completed) await cleanupFailedSpawn(native, child, pipeOpen);
 		if (error instanceof DarwinVerifiedSpawnError) throw error;
 		throw new DarwinVerifiedSpawnError("Darwin verified spawn failed", { cause: error });
 	} finally {

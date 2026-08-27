@@ -12,7 +12,7 @@ import {
 	rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { removePinnedDirectoryTree } from "./pinned-directory";
 
 export const ENGINE_RUNTIME_BUNDLE_SCHEMA = "bb.engine_runtime_bundle.v1" as const;
@@ -26,6 +26,7 @@ const MAX_RELATIVE_PATH_BYTES = 4095;
 const IO_CHUNK_BYTES = 1024 * 1024;
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const SAFE_COMPONENT = /^[A-Za-z0-9._+@-](?:[A-Za-z0-9._+@ -]*[A-Za-z0-9._+@-])?$/;
+const ENGINE_RUNTIME_ROOT_PATTERN = /^bb-engine-runtime-[A-Za-z0-9_-]+$/;
 const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
 const WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 
@@ -432,6 +433,22 @@ function containedPath(root: string, path: string): string {
 	return destination;
 }
 
+async function createExtractionRoot(requested: string | undefined): Promise<string> {
+	const temporaryRoot = await realpath(tmpdir());
+	if (requested === undefined) return await mkdtemp(join(temporaryRoot, "bb-engine-runtime-"));
+	if (
+		!isAbsolute(requested) ||
+		dirname(requested) !== temporaryRoot ||
+		join(temporaryRoot, basename(requested)) !== requested ||
+		!ENGINE_RUNTIME_ROOT_PATTERN.test(basename(requested))
+	) {
+		return fail("bundle_mismatch", "requested engine runtime root is outside the private temporary scope");
+	}
+	await mkdir(requested, { mode: 0o700 });
+	await chmod(requested, 0o700);
+	return requested;
+}
+
 export async function removePrivateEngineRuntimeTree(
 	path: string,
 	expected?: { readonly device: number | bigint; readonly inode: number | bigint },
@@ -444,6 +461,7 @@ export async function extractVerifiedEngineRuntimeBundle(input: {
 	readonly executablePath: string;
 	readonly executableSizeBytes: number;
 	readonly executableSha256: `sha256:${string}`;
+	readonly runtimeRootPath?: string;
 }): Promise<ExtractedEngineRuntimeBundle> {
 	if (
 		input.bundle.schemaVersion !== ENGINE_RUNTIME_BUNDLE_SCHEMA ||
@@ -487,7 +505,7 @@ export async function extractVerifiedEngineRuntimeBundle(input: {
 			return fail("bundle_mismatch", "trusted engine executable identity differs from its bundle index");
 		}
 
-		rootPath = await mkdtemp(join(tmpdir(), "bb-engine-runtime-"));
+		rootPath = await createExtractionRoot(input.runtimeRootPath);
 		const directories = new Set<string>();
 		let sourcePosition = dataOffset;
 		const buffer = Buffer.allocUnsafe(IO_CHUNK_BYTES);

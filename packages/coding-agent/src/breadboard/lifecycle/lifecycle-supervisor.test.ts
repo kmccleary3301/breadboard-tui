@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -293,7 +293,7 @@ async function exerciseRejectedCleanupPersistence(
 	roots.push(authorityRoot);
 	const authority = new LocalAuthorityStore(authorityRoot);
 	const stateRootRelativePath = join("engine-state", "fault-endpoint");
-	const launchId = "l".repeat(43);
+	const launchId = "f".repeat(43);
 	const cleanupRecordPath = join(authorityRoot, stateRootRelativePath, "runtime-cleanup", `${launchId}.json`);
 	let cleanupRoots: CleanupRecordRootPaths | undefined;
 	const adapter = createDefaultLifecycleProcessAdapter(
@@ -330,6 +330,11 @@ async function exerciseRejectedCleanupPersistence(
 	expect(await adapter.observe(identity.pid)).toEqual({ kind: "dead" });
 	expect(bootstrap.every(byte => byte === 0)).toBeTrue();
 	if (cleanupRoots === undefined) throw new Error("cleanup persistence fixture was not captured");
+	const temporaryRoot = await realpath(tmpdir());
+	expect(cleanupRoots.rayRuntimeRoot).toBe(join(temporaryRoot, `bb-ray-${launchId}`));
+	if (artifact.kind === "runtime-bundle") {
+		expect(cleanupRoots.engineRuntimeRoot).toBe(join(temporaryRoot, `bb-engine-runtime-${launchId}`));
+	} else expect(await pathExists(join(temporaryRoot, `omp-engine-snapshot-${launchId}`))).toBeFalse();
 	expect(await pathExists(cleanupRoots.rayRuntimeRoot)).toBeFalse();
 	if (cleanupRoots.engineRuntimeRoot !== undefined) {
 		expect(await pathExists(cleanupRoots.engineRuntimeRoot)).toBeFalse();
@@ -342,7 +347,7 @@ afterEach(async () => {
 });
 
 describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter persistence faults", () => {
-	test("kills the suspended direct engine and removes its Ray root across rejected record states", async () => {
+	test("kills the bootstrap-gated direct engine and removes its Ray root across rejected record states", async () => {
 		const executableBytes = await readFile("/bin/sh");
 		const executableDigest = `sha256:${createHash("sha256").update(executableBytes).digest("hex")}` as const;
 		await exerciseRejectedCleanupPersistence({
@@ -368,7 +373,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 		);
 	});
 
-	test("kills the suspended bundled engine and removes both runtime roots across rejected record states", async () => {
+	test("kills the bootstrap-gated bundled engine and removes both runtime roots across rejected record states", async () => {
 		const bundleRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-bundle-"));
 		roots.push(bundleRoot);
 		const sourceRoot = join(bundleRoot, "source");
@@ -405,6 +410,37 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 			},
 			true,
 		);
+	});
+
+	test("removes deterministic prepared roots for a confirmed-dead engine without a cleanup record", async () => {
+		const authorityRoot = await mkdtemp(join(tmpdir(), "omp-dead-engine-cleanup-"));
+		roots.push(authorityRoot);
+		const stateRootRelativePath = join("engine-state", "dead-engine");
+		const authority = new LocalAuthorityStore(authorityRoot);
+		const adapter = createDefaultLifecycleProcessAdapter({
+			stateRootPath: join(authorityRoot, stateRootRelativePath),
+			ensure: relativePath =>
+				authority.ensurePrivateDirectory(
+					relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+				),
+		});
+		const launchId = "d".repeat(43);
+		const temporaryRoot = await realpath(tmpdir());
+		const launchRoots = [
+			join(temporaryRoot, `bb-engine-runtime-${launchId}`),
+			join(temporaryRoot, `bb-ray-${launchId}`),
+			join(temporaryRoot, `omp-engine-snapshot-${launchId}`),
+		];
+		roots.push(...launchRoots);
+		for (const root of launchRoots) await mkdir(root, { mode: 0o700 });
+
+		await adapter.cleanupExited({
+			launchId,
+			pid: 999_999,
+			startToken: "darwin:999999:1",
+		});
+
+		for (const root of launchRoots) expect(await pathExists(root)).toBeFalse();
 	});
 });
 
@@ -815,6 +851,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const waitResults: boolean[] = [];
 		const waitTimeouts: number[] = [];
 		const cleanups: Array<{ readonly launchId: string; readonly pid: number; readonly startToken: string }> = [];
+		const preparedCleanups: string[] = [];
 		let gracefulExitOnWait = false;
 		let suppressNextExitNotification = false;
 		let returnUnbound = false;
@@ -894,6 +931,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			cleanupExited: async identity => {
 				cleanups.push(identity);
 			},
+			cleanupPreparedStart: async launchId => {
+				preparedCleanups.push(launchId);
+			},
 		};
 		return {
 			adapter,
@@ -903,6 +943,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			waitTimeouts,
 			bootstrapBuffers,
 			cleanups,
+			preparedCleanups,
 			current: () => ({ pid: currentPid, launchId: currentLaunch }),
 			spawnCount: () => spawnCount,
 			crash: (pid = currentPid) => {
@@ -1464,6 +1505,8 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(absenceChecks).toBe(1);
 		expect(process.spawnCount()).toBe(1);
 		expect(await store.readCurrent(endpoint)).toMatchObject({ pid: process.current().pid });
+		if (orphaned.launchId === undefined) throw new Error("prepared claim launch identity is unavailable");
+		expect(process.preparedCleanups).toEqual([orphaned.launchId]);
 		await expect(
 			store.withExclusiveLock(endpoint, () =>
 				store.bindStartClaimProcess(endpoint, orphaned.token, 9999, "darwin:9999:late"),

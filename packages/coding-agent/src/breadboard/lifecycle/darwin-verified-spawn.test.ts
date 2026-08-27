@@ -250,7 +250,7 @@ describe("parseDarwinArm64CodeIdentity", () => {
 });
 
 describe("spawnDarwinVerified", () => {
-	test("attests, binds, writes and closes fd3, then resumes in strict order", async () => {
+	test("attests, resumes into the bootstrap gate, binds, writes and closes fd3 in strict order", async () => {
 		const executableBytes = thinArm64MachO([{ slot: 0, bytes: codeDirectory(2, 0x10) }]);
 		const expected = parseDarwinArm64CodeIdentity(executableBytes);
 		const events: string[] = [];
@@ -264,11 +264,11 @@ describe("spawnDarwinVerified", () => {
 			"token",
 			"attest",
 			"token",
+			"token",
+			"SIGCONT",
 			"bind",
 			"write",
 			"eof",
-			"token",
-			"SIGCONT",
 		]);
 		expect(bootstrap.every(byte => byte === 0)).toBe(true);
 	});
@@ -355,29 +355,28 @@ describe("spawnDarwinVerified", () => {
 		expect(events.at(-1)).toBe("reap");
 	});
 
-	test("kills and reaps after binding when the final pre-resume token becomes unavailable", async () => {
+	test("kills and reaps when the final pre-gate token becomes unavailable", async () => {
 		const executableBytes = thinArm64MachO([{ slot: 0, bytes: codeDirectory(2, 0x15) }]);
 		const expected = parseDarwinArm64CodeIdentity(executableBytes);
 		const events: string[] = [];
 		const native = scenarioNative(expected, events, { tokens: ["darwin:1:2", "darwin:1:2", null] });
 		const bootstrap = Buffer.alloc(16, 0x5a);
 		await expect(spawnDarwinVerified(spawnOptions(executableBytes, bootstrap, native, events))).rejects.toThrow(
-			"identity changed before resume",
+			"identity changed before bootstrap gate",
 		);
-		expect(events).toContain("bind");
-		expect(events).toContain("write");
+		expect(events).not.toContain("bind");
+		expect(events).not.toContain("write");
 		expect(events).not.toContain("SIGCONT");
-		expect(events.slice(-3)).toEqual(["token", "SIGKILL", "reap"]);
+		expect(events.slice(-4)).toEqual(["token", "eof", "SIGKILL", "reap"]);
 		expect(bootstrap.every(byte => byte === 0)).toBe(true);
 	});
 
-	test("kills and reaps without writing or resuming when bindIdentity fails", async () => {
+	test("closes, kills, and reaps the bootstrap-gated child when bindIdentity fails", async () => {
 		const executableBytes = thinArm64MachO([{ slot: 0, bytes: codeDirectory(2, 0x15) }]);
 		const expected = parseDarwinArm64CodeIdentity(executableBytes);
 		const events: string[] = [];
 		const scenario = {
 			bindError: new Error("bind failed"),
-			tokens: ["darwin:1:2", "darwin:1:2", null],
 		};
 		const native = scenarioNative(expected, events, scenario);
 		const bootstrap = Buffer.alloc(16, 0x5a);
@@ -385,11 +384,11 @@ describe("spawnDarwinVerified", () => {
 			spawnDarwinVerified(spawnOptions(executableBytes, bootstrap, native, events, scenario)),
 		).rejects.toBeInstanceOf(DarwinVerifiedSpawnError);
 		expect(events).not.toContain("write");
-		expect(events).not.toContain("SIGCONT");
-		expect(events.slice(-3)).toEqual(["eof", "SIGKILL", "reap"]);
+		expect(events).toContain("SIGCONT");
+		expect(events.slice(-5)).toEqual(["SIGCONT", "bind", "eof", "SIGKILL", "reap"]);
 		expect(bootstrap.every(byte => byte === 0)).toBe(true);
 	});
-	test("does not signal a reused PID after the suspended child was reaped during deferred binding", async () => {
+	test("does not signal a reused PID after the bootstrap-gated child was reaped during deferred binding", async () => {
 		const executableBytes = thinArm64MachO([{ slot: 0, bytes: codeDirectory(2, 0x15) }]);
 		const expected = parseDarwinArm64CodeIdentity(executableBytes);
 		const events: string[] = [];
@@ -422,26 +421,26 @@ describe("spawnDarwinVerified", () => {
 				},
 			}),
 		).rejects.toBeInstanceOf(DarwinVerifiedSpawnError);
+		expect(events.indexOf("SIGCONT")).toBeLessThan(events.indexOf("bind"));
 		expect(events).not.toContain("SIGKILL");
 		expect(events.slice(-3)).toEqual(["poll-reaped", "eof", "reap"]);
 		expect(bootstrap.every(byte => byte === 0)).toBe(true);
 	});
 
-	test("closes, kills, and reaps without resume when the bounded write fails", async () => {
+	test("closes, kills, and reaps the bootstrap-gated child when the bounded write fails", async () => {
 		const executableBytes = thinArm64MachO([{ slot: 0, bytes: codeDirectory(2, 0x16) }]);
 		const expected = parseDarwinArm64CodeIdentity(executableBytes);
 		const events: string[] = [];
 		const scenario = {
 			writeError: new Error("write failed"),
-			tokens: ["darwin:1:2", "darwin:1:2", null],
 		};
 		const native = scenarioNative(expected, events, scenario);
 		const bootstrap = Buffer.alloc(16, 0x5a);
 		await expect(
 			spawnDarwinVerified(spawnOptions(executableBytes, bootstrap, native, events)),
 		).rejects.toBeInstanceOf(DarwinVerifiedSpawnError);
-		expect(events).not.toContain("SIGCONT");
-		expect(events.slice(-4)).toEqual(["write", "eof", "SIGKILL", "reap"]);
+		expect(events).toContain("SIGCONT");
+		expect(events.slice(-6)).toEqual(["SIGCONT", "bind", "write", "eof", "SIGKILL", "reap"]);
 		expect(bootstrap.every(byte => byte === 0)).toBe(true);
 	});
 

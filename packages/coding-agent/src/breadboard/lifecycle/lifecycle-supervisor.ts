@@ -1,6 +1,6 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { constants } from "node:fs";
-import { type FileHandle, mkdtemp, open, rm } from "node:fs/promises";
+import { chmod, type FileHandle, mkdir, open, realpath, rm } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,6 +81,7 @@ export interface LifecycleProcessAdapter {
 	observe(pid: number): Promise<ProcessObservation>;
 	controlFor(pid: number, expectedStartToken: string): Promise<SpawnedEngineProcess | null>;
 	cleanupExited(identity: ExitedEngineIdentity): Promise<void>;
+	cleanupPreparedStart(launchId: string): Promise<void>;
 }
 
 export interface LifecycleClock {
@@ -343,6 +344,24 @@ function unrefDelay(milliseconds: number): Promise<void> {
 	return promise;
 }
 
+// The prepared start claim durably records launchId before any of these exact roots can be created.
+const LAUNCH_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+type LaunchRuntimePrefix = "bb-engine-runtime-" | "bb-ray-" | "omp-engine-snapshot-";
+
+async function launchRuntimeRootPath(prefix: LaunchRuntimePrefix, launchId: string): Promise<string> {
+	if (!LAUNCH_ID_PATTERN.test(launchId)) {
+		throw new ProcessIdentityValidationError("engine launch identity is invalid");
+	}
+	return join(await realpath(tmpdir()), `${prefix}${launchId}`);
+}
+
+async function createPrivateLaunchDirectory(prefix: LaunchRuntimePrefix, launchId: string): Promise<string> {
+	const path = await launchRuntimeRootPath(prefix, launchId);
+	await mkdir(path, { mode: 0o700 });
+	await chmod(path, 0o700);
+	return path;
+}
+
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
 	readonly #runtimeCleanup: RuntimeCleanupStore;
@@ -361,7 +380,13 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		if ((await this.observe(identity.pid)).kind !== "dead") {
 			throw new ProcessIdentityValidationError("engine runtime cleanup requires confirmed process death");
 		}
-		await this.#runtimeCleanup.remove(identity);
+		if (!(await this.#runtimeCleanup.remove(identity))) {
+			await this.#runtimeCleanup.removePrepared(identity.launchId);
+		}
+	}
+
+	async cleanupPreparedStart(launchId: string): Promise<void> {
+		await this.#runtimeCleanup.removePrepared(launchId);
 	}
 
 	async #failedSpawnCleanupRecord(
@@ -392,13 +417,15 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		let cleanupPersisted = false;
 		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
+			const runtimeRootPath = await launchRuntimeRootPath("bb-engine-runtime-", launchId);
 			extracted = await extractVerifiedEngineRuntimeBundle({
 				bundle: artifact.runtimeBundle,
 				executablePath: artifact.executablePath,
 				executableSizeBytes: artifact.executableSizeBytes,
 				executableSha256: artifact.executableSha256,
+				runtimeRootPath,
 			});
-			rayRuntimeRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
+			rayRuntimeRoot = await createPrivateLaunchDirectory("bb-ray-", launchId);
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const retained = extracted;
 			failedSpawnOwnership = { extracted: retained, rayRuntimeRoot: retainedRayRuntimeRoot };
@@ -553,9 +580,9 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		if (artifact.kind === "runtime-bundle") {
 			return await this.#spawnBundledVerified(artifact, launchId, bootstrap, bindIdentity);
 		}
-		const source = await open(artifact.executablePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-		const snapshotRoot = await mkdtemp(join(tmpdir(), "omp-engine-snapshot-"));
+		const snapshotRoot = await createPrivateLaunchDirectory("omp-engine-snapshot-", launchId);
 		const snapshotPath = join(snapshotRoot, "engine");
+		let source: FileHandle | undefined;
 		let snapshot: FileHandle | undefined;
 		let execution: FileHandle | undefined;
 		let rayRuntimeRoot: string | undefined;
@@ -563,6 +590,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		let cleanupPersisted = false;
 		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
+			source = await open(artifact.executablePath, constants.O_RDONLY | constants.O_NOFOLLOW);
 			const sourceMetadata = await source.stat();
 			if (!sourceMetadata.isFile() || sourceMetadata.nlink !== 1) {
 				throw new EngineArtifactValidationError("engine executable identity is invalid");
@@ -600,7 +628,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			await execution.close();
 			execution = undefined;
 
-			rayRuntimeRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
+			rayRuntimeRoot = await createPrivateLaunchDirectory("bb-ray-", launchId);
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			failedSpawnRayRuntimeRoot = retainedRayRuntimeRoot;
 			const verified = await spawnDarwinVerified({
@@ -715,7 +743,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		} finally {
 			bootstrap.fill(0);
 			await Promise.allSettled([
-				source.close(),
+				source?.close(),
 				snapshot?.close(),
 				execution?.close(),
 				rm(snapshotRoot, { recursive: true, force: true }),
@@ -1708,19 +1736,38 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		)
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		const control = await this.#process.controlFor(claim.enginePid, claim.engineProcessStartToken);
-		if (!control) return lifecycleFailure("local-owned", "identity-changed", "process_identity_unavailable", attempt);
+		if (!control) {
+			let observation = await this.#process.observe(claim.enginePid);
+			const polls = Math.max(1, Math.ceil(this.config.startupTimeoutMs / 25));
+			for (let poll = 0; poll < polls; poll++) {
+				if (observation.kind === "dead") return await this.#recoverStartupDeath(claim, attempt);
+				if (observation.kind !== "alive" || observation.startToken !== claim.engineProcessStartToken) break;
+				await this.clock.sleep(25);
+				observation = await this.#process.observe(claim.enginePid);
+			}
+			if (observation.kind === "dead") return await this.#recoverStartupDeath(claim, attempt);
+			return lifecycleFailure("local-owned", "identity-changed", "process_identity_unavailable", attempt);
+		}
 		const pending = await this.#store.withExclusiveLock(endpoint, async () => {
 			await this.#store.verifyStartClaim(endpoint, claim);
 			return await this.#store.readPendingSecret(claim);
 		});
 		try {
-			const bound =
-				recoveredBound ??
-				(await this.withReconnect(async reconnectAttempt => {
-					this.transition("connecting", reconnectAttempt);
-					this.transition("handshaking", reconnectAttempt);
-					return await this.handshake();
-				}));
+			let bound: BoundLifecycleE4Client;
+			try {
+				bound =
+					recoveredBound ??
+					(await this.withReconnect(async reconnectAttempt => {
+						this.transition("connecting", reconnectAttempt);
+						this.transition("handshaking", reconnectAttempt);
+						return await this.handshake();
+					}));
+			} catch (error) {
+				if ((await this.#process.observe(claim.enginePid)).kind === "dead") {
+					return await this.#recoverStartupDeath(claim, attempt);
+				}
+				throw error;
+			}
 			if (
 				bound.binding.process.pid !== claim.enginePid ||
 				bound.binding.process.osProcessStartToken !== claim.engineProcessStartToken ||
@@ -2361,7 +2408,10 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async #cleanupExitedStartClaim(claim: LocalStartClaim): Promise<void> {
-		if (claim.enginePid === undefined && claim.engineProcessStartToken === undefined) return;
+		if (claim.enginePid === undefined && claim.engineProcessStartToken === undefined) {
+			if (claim.launchId !== undefined) await this.#process.cleanupPreparedStart(claim.launchId);
+			return;
+		}
 		if (
 			claim.launchId === undefined ||
 			claim.enginePid === undefined ||

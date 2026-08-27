@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
@@ -121,6 +121,53 @@ describe("RuntimeCleanupStore", () => {
 	test("reports when no durable cleanup record exists", async () => {
 		const { store } = await fixture();
 		expect(await store.remove(identity)).toBeFalse();
+	});
+
+	test("removes only deterministic launch roots when a prepared start has no cleanup record", async () => {
+		const root = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-prepared-"));
+		roots.push(root);
+		const store = cleanupStore(root);
+		const launchId = "p".repeat(43);
+		const temporaryRoot = await realpath(tmpdir());
+		const launchRoots = [
+			join(temporaryRoot, `bb-engine-runtime-${launchId}`),
+			join(temporaryRoot, `bb-ray-${launchId}`),
+			join(temporaryRoot, `omp-engine-snapshot-${launchId}`),
+		];
+		const unrelated = join(temporaryRoot, `bb-ray-${"u".repeat(43)}`);
+		roots.push(...launchRoots, unrelated);
+		for (const launchRoot of [...launchRoots, unrelated]) {
+			await mkdir(launchRoot, { mode: 0o700 });
+			await writeFile(join(launchRoot, "owned"), "retain");
+		}
+
+		await store.removePrepared(launchId);
+
+		for (const launchRoot of launchRoots) expect(await exists(launchRoot)).toBeFalse();
+		expect(await readFile(join(unrelated, "owned"), "utf8")).toBe("retain");
+	});
+
+	test("rejects a prepared-root symlink without blocking cleanup of other exact roots", async () => {
+		const root = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-prepared-link-"));
+		const target = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-prepared-target-"));
+		roots.push(root, target);
+		const store = cleanupStore(root);
+		const launchId = "s".repeat(43);
+		const temporaryRoot = await realpath(tmpdir());
+		const engineRoot = join(temporaryRoot, `bb-engine-runtime-${launchId}`);
+		const rayRoot = join(temporaryRoot, `bb-ray-${launchId}`);
+		roots.push(engineRoot);
+		await mkdir(engineRoot, { mode: 0o700 });
+		await writeFile(join(target, "unrelated"), "retain");
+		await symlink(target, rayRoot);
+		try {
+			await expect(store.removePrepared(launchId)).rejects.toBeInstanceOf(RuntimeCleanupStoreError);
+			expect(await exists(engineRoot)).toBeFalse();
+			expect(await readFile(join(target, "unrelated"), "utf8")).toBe("retain");
+			expect((await lstat(rayRoot)).isSymbolicLink()).toBeTrue();
+		} finally {
+			await unlink(rayRoot);
+		}
 	});
 
 	test("maps an exclusive record-open failure to one typed persistence error", async () => {

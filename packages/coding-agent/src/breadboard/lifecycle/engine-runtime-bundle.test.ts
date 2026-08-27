@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, unlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -82,6 +82,31 @@ describe("engine runtime bundle", () => {
 		expect(extracted.executableBytes).toEqual(await readFile(extracted.executablePath));
 		await extracted.cleanup();
 		expect(await Bun.file(extractedRoot).exists()).toBe(false);
+	});
+
+	test("extracts into one exact launch-scoped runtime root", async () => {
+		const tempDir = await temporaryRoot("breadboard-engine-bundle-launch-");
+		const sourceRoot = join(tempDir, "source");
+		await createRuntimeSource(sourceRoot);
+		const created = await createEngineRuntimeBundle({
+			sourceRoot,
+			executablePath: "breadboard-engine",
+			outputPath: join(tempDir, "engine.bundle"),
+		});
+		const runtimeRootPath = join(await realpath(tmpdir()), `bb-engine-runtime-${"b".repeat(43)}`);
+		temporaryRoots.push(runtimeRootPath);
+
+		const extracted = await extractVerifiedEngineRuntimeBundle({
+			bundle: created.bundle,
+			executablePath: created.executablePath,
+			executableSizeBytes: created.executableSizeBytes,
+			executableSha256: created.executableSha256,
+			runtimeRootPath,
+		});
+
+		expect(extracted.rootPath).toBe(runtimeRootPath);
+		await extracted.cleanup();
+		expect(await Bun.file(runtimeRootPath).exists()).toBeFalse();
 	});
 
 	test("rejects tampered and partial bundles before extraction succeeds", async () => {

@@ -9,6 +9,7 @@ const RUNTIME_CLEANUP_SCHEMA = "bb.lifecycle_runtime_cleanup.v2";
 const LAUNCH_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const ENGINE_RUNTIME_ROOT_PATTERN = /^bb-engine-runtime-[A-Za-z0-9_-]+$/;
 const RAY_RUNTIME_ROOT_PATTERN = /^bb-ray-[A-Za-z0-9_-]+$/;
+const SNAPSHOT_RUNTIME_ROOT_PATTERN = /^omp-engine-snapshot-[A-Za-z0-9_-]+$/;
 
 export interface ExitedEngineIdentity {
 	readonly launchId: string;
@@ -166,6 +167,43 @@ export class RuntimeCleanupStore {
 			return true;
 		} catch (error) {
 			throw runtimeCleanupStoreError("engine runtime cleanup failed", error);
+		}
+	}
+
+	// Deterministic roots let a prepared claim remain cleanup authority if the controller dies before persist().
+	async removePrepared(launchId: string): Promise<void> {
+		try {
+			if (!LAUNCH_ID_PATTERN.test(launchId)) {
+				throw new RuntimeCleanupStoreError("prepared engine runtime cleanup launch identity is invalid");
+			}
+			const temporaryRoot = await realpath(tmpdir());
+			const roots = [
+				{ path: join(temporaryRoot, `bb-engine-runtime-${launchId}`), pattern: ENGINE_RUNTIME_ROOT_PATTERN },
+				{ path: join(temporaryRoot, `bb-ray-${launchId}`), pattern: RAY_RUNTIME_ROOT_PATTERN },
+				{ path: join(temporaryRoot, `omp-engine-snapshot-${launchId}`), pattern: SNAPSHOT_RUNTIME_ROOT_PATTERN },
+			];
+			let firstError: unknown;
+			for (const root of roots) {
+				try {
+					if (dirname(root.path) !== temporaryRoot || !root.pattern.test(basename(root.path))) {
+						throw new RuntimeCleanupStoreError("prepared engine runtime cleanup path escaped its namespace");
+					}
+					const metadata = await this.#metadataIfPresent(root.path);
+					if (metadata === undefined) continue;
+					await this.#requirePrivateOwnedDirectory(
+						root.path,
+						undefined,
+						"prepared engine runtime cleanup path",
+						metadata,
+					);
+					await removePrivateEngineRuntimeTree(root.path, { device: metadata.dev, inode: metadata.ino });
+				} catch (error) {
+					firstError ??= error;
+				}
+			}
+			if (firstError !== undefined) throw firstError;
+		} catch (error) {
+			throw runtimeCleanupStoreError("prepared engine runtime cleanup failed", error);
 		}
 	}
 
