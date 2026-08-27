@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -13,10 +13,12 @@ import type {
 	PrepareHardSignalInput,
 } from "@breadboard/sdk/internal";
 import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
+import { createEngineRuntimeBundle } from "./engine-runtime-bundle";
 import { presentLifecycle, writeLifecyclePresentation } from "./lifecycle-presenter";
 import { type LifecycleState, lifecycleFailure } from "./lifecycle-state";
 import * as lifecycleModule from "./lifecycle-supervisor";
 import {
+	createDefaultLifecycleProcessAdapter,
 	dispatchLifecycleAction,
 	type LifecycleController,
 	type LifecycleDispatchResult,
@@ -29,13 +31,14 @@ import {
 	readKeychainReference,
 	type SpawnedEngineProcess,
 } from "./lifecycle-supervisor";
-import { LocalAuthorityStore, LocalAuthorityStoreError } from "./local-authority-store";
+import { LocalAuthorityStore } from "./local-authority-store";
 import {
 	type BreadboardRunConfig,
 	type EngineArtifact,
 	executablePathSha256,
 	resolveBreadboardRunConfig,
 } from "./run-config";
+import { RuntimeCleanupReconciliationError, RuntimeCleanupStoreError } from "./runtime-cleanup-store";
 
 const roots: string[] = [];
 const executableSha256 = `sha256:${"a".repeat(64)}` as const;
@@ -245,8 +248,127 @@ async function temporaryStore(
 	return new LocalAuthorityStore(root, seams);
 }
 
+interface CleanupRecordRootPaths {
+	readonly engineRuntimeRoot?: string;
+	readonly rayRuntimeRoot: string;
+}
+
+function cleanupRecordRootPaths(contents: string): CleanupRecordRootPaths {
+	const parsed: unknown = JSON.parse(contents);
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("cleanup record fixture is not an object");
+	}
+	const record = parsed as Record<string, unknown>;
+	const rayRuntime = record.rayRuntime;
+	if (rayRuntime === null || typeof rayRuntime !== "object" || Array.isArray(rayRuntime)) {
+		throw new Error("cleanup record fixture has no Ray root");
+	}
+	const rayRuntimeRoot = (rayRuntime as Record<string, unknown>).path;
+	if (typeof rayRuntimeRoot !== "string") throw new Error("cleanup record fixture Ray root is invalid");
+	const engineRuntime = record.engineRuntime;
+	if (engineRuntime === undefined) return { rayRuntimeRoot };
+	if (engineRuntime === null || typeof engineRuntime !== "object" || Array.isArray(engineRuntime)) {
+		throw new Error("cleanup record fixture engine root is invalid");
+	}
+	const engineRuntimeRoot = (engineRuntime as Record<string, unknown>).path;
+	if (typeof engineRuntimeRoot !== "string") throw new Error("cleanup record fixture engine root is invalid");
+	return { engineRuntimeRoot, rayRuntimeRoot };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+	try {
+		await stat(path);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+		throw error;
+	}
+}
+
+async function exerciseRejectedCleanupPersistence(artifact: EngineArtifact): Promise<void> {
+	const authorityRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-fault-"));
+	roots.push(authorityRoot);
+	const authority = new LocalAuthorityStore(authorityRoot);
+	const stateRootRelativePath = join("engine-state", "fault-endpoint");
+	let cleanupRoots: CleanupRecordRootPaths | undefined;
+	const adapter = createDefaultLifecycleProcessAdapter(
+		{
+			stateRootPath: join(authorityRoot, stateRootRelativePath),
+			ensure: relativePath =>
+				authority.ensurePrivateDirectory(
+					relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+				),
+		},
+		artifact.kind === "runtime-bundle",
+		{
+			writeRecord: async (_handle, contents) => {
+				cleanupRoots = cleanupRecordRootPaths(contents);
+				throw new Error("synthetic cleanup persistence failure");
+			},
+		},
+	);
+	const bound = Promise.withResolvers<{ readonly pid: number; readonly startToken: string }>();
+	const bootstrap = Buffer.from("fixture\n", "utf8");
+	const error = await adapter
+		.spawnVerified(artifact, "l".repeat(43), bootstrap, async (pid, startToken) => {
+			bound.resolve({ pid, startToken });
+		})
+		.catch(cause => cause);
+
+	expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+	const identity = await bound.promise;
+	expect(await adapter.observe(identity.pid)).toEqual({ kind: "dead" });
+	expect(bootstrap.every(byte => byte === 0)).toBeTrue();
+	if (cleanupRoots === undefined) throw new Error("cleanup persistence fixture was not captured");
+	expect(await pathExists(cleanupRoots.rayRuntimeRoot)).toBeFalse();
+	if (cleanupRoots.engineRuntimeRoot !== undefined) {
+		expect(await pathExists(cleanupRoots.engineRuntimeRoot)).toBeFalse();
+	}
+	expect(await readdir(join(authorityRoot, stateRootRelativePath, "runtime-cleanup"))).toEqual([]);
+}
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+
+describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter persistence faults", () => {
+	test("kills the suspended direct engine and removes its Ray root when record persistence rejects", async () => {
+		const executableBytes = await readFile("/bin/sh");
+		const executableDigest = `sha256:${createHash("sha256").update(executableBytes).digest("hex")}` as const;
+		await exerciseRejectedCleanupPersistence({
+			kind: "direct-executable",
+			executablePath: "/bin/sh",
+			argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+			argvSha256: artifact.argvSha256,
+			executableSha256: executableDigest,
+			engineSourceSha256: executableDigest,
+			servedBackendCommit: backendCommit,
+		});
+	});
+
+	test("kills the suspended bundled engine and removes both runtime roots when record persistence rejects", async () => {
+		const bundleRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-bundle-"));
+		roots.push(bundleRoot);
+		const sourceRoot = join(bundleRoot, "source");
+		await mkdir(sourceRoot, { recursive: true });
+		await writeFile(join(sourceRoot, "breadboard-engine"), await readFile("/bin/sh"), { mode: 0o500 });
+		const created = await createEngineRuntimeBundle({
+			sourceRoot,
+			executablePath: "breadboard-engine",
+			outputPath: join(bundleRoot, "engine.bundle"),
+		});
+
+		await exerciseRejectedCleanupPersistence({
+			kind: "runtime-bundle",
+			runtimeBundle: created.bundle,
+			executablePath: created.executablePath,
+			executableSizeBytes: created.executableSizeBytes,
+			argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+			argvSha256: artifact.argvSha256,
+			executableSha256: created.executableSha256,
+			engineSourceSha256: created.bundle.sha256,
+			servedBackendCommit: backendCommit,
+		});
+	});
 });
 
 describe("LifecycleSupervisor mode authority", () => {
@@ -659,6 +781,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let gracefulExitOnWait = false;
 		let suppressNextExitNotification = false;
 		let returnUnbound = false;
+		let spawnFailure: { readonly error: unknown } | undefined;
 		const adapter: LifecycleProcessAdapter = {
 			spawnVerified: async (_artifact, launchId, bootstrap, bindIdentity) => {
 				spawnCount++;
@@ -704,6 +827,14 @@ describe("LifecycleSupervisor local-owned authority", () => {
 					dead.add(pid);
 					resolve(1);
 					return { kind: "spawn-failed-dead" as const };
+				}
+				if (spawnFailure !== undefined) {
+					const failure = spawnFailure.error;
+					spawnFailure = undefined;
+					bootstrap.fill(0);
+					dead.add(pid);
+					resolve(1);
+					throw failure;
 				}
 				if (returnUnbound) {
 					returnUnbound = false;
@@ -755,6 +886,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 			unboundNext: () => {
 				returnUnbound = true;
+			},
+			failSpawnAfterBinding: (error: unknown) => {
+				spawnFailure = { error };
 			},
 		};
 	}
@@ -1008,6 +1142,47 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const authorityText = await readFile(join(store.root, authorityName as string), "utf8");
 		expect(authorityText).not.toContain(canonicalExecutablePath);
 		expect(authorityText).toContain(expectedPathDigest);
+	});
+
+	test("retains a bound start claim only when failed-spawn cleanup still needs reconciliation", async () => {
+		const cases = [
+			{
+				error: new RuntimeCleanupStoreError("synthetic reconciled persistence failure"),
+				retained: false,
+			},
+			{
+				error: new RuntimeCleanupReconciliationError(
+					"synthetic ambiguous persistence failure",
+					new Error("synthetic cleanup failure"),
+				),
+				retained: true,
+			},
+		] as const;
+		for (const scenario of cases) {
+			const store = await temporaryStore();
+			const process = processHarness();
+			process.failSpawnAfterBinding(scenario.error);
+			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				store,
+				process: process.adapter,
+				createClient: clientFactory(process, []),
+			});
+
+			const result = await supervisor.connect();
+			expect(result.state).toMatchObject({
+				name: "recovery-needed",
+				reason: "authority_store_unavailable",
+			});
+			const claimName = (await readdir(store.root)).find(name => name.endsWith(".starting.json"));
+			expect(claimName !== undefined).toBe(scenario.retained);
+			if (claimName !== undefined) {
+				const claim = JSON.parse(await readFile(join(store.root, claimName), "utf8"));
+				expect(claim).toMatchObject({
+					enginePid: process.current().pid,
+					launchId: process.current().launchId,
+				});
+			}
+		}
 	});
 
 	test("registration failure leaves one adoptable committed engine and never respawns", async () => {
@@ -2246,7 +2421,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			process: {
 				...process.adapter,
 				cleanupExited: async () => {
-					throw new Error("synthetic runtime cleanup failure");
+					throw new RuntimeCleanupStoreError("synthetic runtime cleanup failure");
 				},
 			},
 			createClient: clientFactory(process, []),
@@ -2799,10 +2974,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect((await supervisor.connect()).kind).toBe("ready");
 		const exited = process.current();
 
-		process.cleanupFailure(
-			new LocalAuthorityStoreError("root_integrity", "synthetic runtime cleanup failure"),
-			exited.pid,
-		);
+		process.cleanupFailure(new RuntimeCleanupStoreError("synthetic runtime cleanup failure"), exited.pid);
 		expect(await failed.promise).toMatchObject({
 			name: "recovery-needed",
 			reason: "authority_store_unavailable",

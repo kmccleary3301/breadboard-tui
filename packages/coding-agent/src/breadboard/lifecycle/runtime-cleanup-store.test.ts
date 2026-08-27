@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
 import { LocalAuthorityStore } from "./local-authority-store";
-import { RuntimeCleanupStore, RuntimeCleanupStoreError } from "./runtime-cleanup-store";
+import { RuntimeCleanupStore, RuntimeCleanupStoreError, type RuntimeCleanupStoreSeams } from "./runtime-cleanup-store";
 
 const roots: string[] = [];
 const identity = {
@@ -23,18 +23,25 @@ async function exists(path: string): Promise<boolean> {
 	}
 }
 
-function cleanupStore(root: string, stateRootRelativePath = "engine-state"): RuntimeCleanupStore {
+function cleanupStore(
+	root: string,
+	stateRootRelativePath = "engine-state",
+	seams: RuntimeCleanupStoreSeams = {},
+): RuntimeCleanupStore {
 	const authority = new LocalAuthorityStore(root);
-	return new RuntimeCleanupStore({
-		stateRootPath: join(root, stateRootRelativePath),
-		ensure: relativePath =>
-			authority.ensurePrivateDirectory(
-				relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
-			),
-	});
+	return new RuntimeCleanupStore(
+		{
+			stateRootPath: join(root, stateRootRelativePath),
+			ensure: relativePath =>
+				authority.ensurePrivateDirectory(
+					relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+				),
+		},
+		seams,
+	);
 }
 
-async function fixture(): Promise<{
+async function fixture(seams: RuntimeCleanupStoreSeams = {}): Promise<{
 	readonly store: RuntimeCleanupStore;
 	readonly engineRoot: string;
 	readonly rayRoot: string;
@@ -46,7 +53,7 @@ async function fixture(): Promise<{
 	roots.push(root, engineRoot, rayRoot);
 	await chmod(engineRoot, 0o500);
 	await chmod(rayRoot, 0o700);
-	const store = cleanupStore(root);
+	const store = cleanupStore(root, "engine-state", seams);
 	const stateRoot = await store.stateRoot();
 	if (stateRoot === undefined) throw new Error("expected configured state root");
 	return {
@@ -96,7 +103,7 @@ describe("RuntimeCleanupStore", () => {
 		expect(await store.persist(identity, engineRoot, rayRoot)).toBeTrue();
 		expect((await lstat(recordPath)).mode & 0o777).toBe(0o600);
 
-		await store.remove(identity);
+		expect(await store.remove(identity)).toBeTrue();
 		expect(await exists(engineRoot)).toBeFalse();
 		expect(await exists(rayRoot)).toBeFalse();
 		expect(await exists(recordPath)).toBeFalse();
@@ -106,9 +113,80 @@ describe("RuntimeCleanupStore", () => {
 		const { store, rayRoot, recordPath } = await fixture();
 		expect(await store.persist(identity, undefined, rayRoot)).toBeTrue();
 
-		await store.remove(identity);
+		expect(await store.remove(identity)).toBeTrue();
 		expect(await exists(rayRoot)).toBeFalse();
 		expect(await exists(recordPath)).toBeFalse();
+	});
+
+	test("reports when no durable cleanup record exists", async () => {
+		const { store } = await fixture();
+		expect(await store.remove(identity)).toBeFalse();
+	});
+
+	test("maps an exclusive record-open failure to one typed persistence error", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture();
+		expect(await store.remove(identity)).toBeFalse();
+		await mkdir(recordPath, { mode: 0o700 });
+
+		const error = await store.persist(identity, engineRoot, rayRoot).catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+		expect(await exists(recordPath)).toBeTrue();
+	});
+
+	test("unlinks an incomplete record after a typed write failure", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture({
+			writeRecord: async () => {
+				throw new Error("synthetic record write failure");
+			},
+		});
+
+		const error = await store.persist(identity, engineRoot, rayRoot).catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await exists(recordPath)).toBeFalse();
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+	});
+
+	test("unlinks a complete record when its file sync rejects", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture({
+			syncRecord: async () => {
+				throw new Error("synthetic record sync failure");
+			},
+		});
+
+		const error = await store.persist(identity, engineRoot, rayRoot).catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await exists(recordPath)).toBeFalse();
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+	});
+
+	test("leaves a valid record discoverable when parent-directory sync rejects", async () => {
+		let rejectParentSync = true;
+		const { store, engineRoot, rayRoot, recordPath } = await fixture({
+			syncParent: async handle => {
+				if (rejectParentSync) throw new Error("synthetic parent sync failure");
+				await handle.sync();
+			},
+		});
+
+		const error = await store.persist(identity, engineRoot, rayRoot).catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await exists(recordPath)).toBeTrue();
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+
+		rejectParentSync = false;
+		expect(await store.remove(identity)).toBeTrue();
+		expect(await exists(recordPath)).toBeFalse();
+		expect(await exists(engineRoot)).toBeFalse();
+		expect(await exists(rayRoot)).toBeFalse();
 	});
 
 	test("fails closed on process identity drift and retains cleanup authority", async () => {
@@ -123,6 +201,20 @@ describe("RuntimeCleanupStore", () => {
 		expect(await exists(recordPath)).toBeTrue();
 
 		await store.remove(identity);
+	});
+
+	test("maps a truncated durable record to one typed integrity failure", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture();
+		await store.persist(identity, engineRoot, rayRoot);
+		await writeFile(recordPath, "{\n", "utf8");
+
+		const error = await store.remove(identity).catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect((error as RuntimeCleanupStoreError).cause).toMatchObject({ name: "SyntaxError" });
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+		expect(await exists(recordPath)).toBeTrue();
 	});
 
 	test("fails closed when a tracked runtime directory inode is replaced", async () => {

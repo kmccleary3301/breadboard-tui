@@ -147,12 +147,13 @@ export type AuthorityStoreErrorCode =
 	| "start_claim_integrity";
 
 export class LocalAuthorityStoreError extends Error {
-	override readonly name = "LocalAuthorityStoreError";
+	override readonly name: string = "LocalAuthorityStoreError";
 	constructor(
 		readonly code: AuthorityStoreErrorCode,
 		message: string,
+		options?: ErrorOptions,
 	) {
-		super(message);
+		super(message, options);
 	}
 }
 

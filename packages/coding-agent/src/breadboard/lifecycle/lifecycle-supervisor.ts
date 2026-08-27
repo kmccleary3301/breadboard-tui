@@ -50,7 +50,9 @@ import {
 import {
 	type ExitedEngineIdentity,
 	type RuntimeCleanupDirectoryAuthority,
+	RuntimeCleanupReconciliationError,
 	RuntimeCleanupStore,
+	type RuntimeCleanupStoreSeams,
 } from "./runtime-cleanup-store";
 
 export interface SpawnedEngineProcess {
@@ -346,8 +348,12 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #runtimeCleanup: RuntimeCleanupStore;
 	readonly #installedEngine: boolean;
 
-	constructor(directoryAuthority?: RuntimeCleanupDirectoryAuthority, installedEngine = false) {
-		this.#runtimeCleanup = new RuntimeCleanupStore(directoryAuthority);
+	constructor(
+		directoryAuthority?: RuntimeCleanupDirectoryAuthority,
+		installedEngine = false,
+		cleanupSeams: RuntimeCleanupStoreSeams = {},
+	) {
+		this.#runtimeCleanup = new RuntimeCleanupStore(directoryAuthority, cleanupSeams);
 		this.#installedEngine = installedEngine;
 	}
 
@@ -356,6 +362,13 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			throw new ProcessIdentityValidationError("engine runtime cleanup requires confirmed process death");
 		}
 		await this.#runtimeCleanup.remove(identity);
+	}
+
+	async #failedSpawnCleanupRecord(
+		identity: ExitedEngineIdentity,
+	): Promise<"death_unconfirmed" | "record_absent" | "removed"> {
+		if ((await this.observe(identity.pid)).kind !== "dead") return "death_unconfirmed";
+		return (await this.#runtimeCleanup.remove(identity)) ? "removed" : "record_absent";
 	}
 
 	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
@@ -370,6 +383,12 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	): Promise<SpawnVerifiedResult> {
 		let extracted: ExtractedEngineRuntimeBundle | undefined;
 		let rayRuntimeRoot: string | undefined;
+		let failedSpawnOwnership:
+			| {
+					readonly extracted: ExtractedEngineRuntimeBundle;
+					readonly rayRuntimeRoot: string;
+			  }
+			| undefined;
 		let cleanupPersisted = false;
 		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
@@ -382,6 +401,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			rayRuntimeRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const retained = extracted;
+			failedSpawnOwnership = { extracted: retained, rayRuntimeRoot: retainedRayRuntimeRoot };
 			const verified = await spawnDarwinVerified({
 				executablePath: retained.executablePath,
 				executableBytes: retained.executableBytes,
@@ -391,16 +411,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				bindIdentity: async (pid, startToken) => {
 					await bindIdentity(pid, startToken);
 					cleanupIdentity = { launchId, pid, startToken };
-					extracted = undefined;
-					rayRuntimeRoot = undefined;
 					cleanupPersisted = await this.#runtimeCleanup.persist(
 						cleanupIdentity,
 						retained.rootPath,
 						retainedRayRuntimeRoot,
 					);
-					if (!cleanupPersisted) {
-						extracted = retained;
-						rayRuntimeRoot = retainedRayRuntimeRoot;
+					if (cleanupPersisted) {
+						extracted = undefined;
+						rayRuntimeRoot = undefined;
 					}
 				},
 			});
@@ -444,12 +462,52 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
 		} catch (error) {
-			if (
-				cleanupPersisted &&
-				cleanupIdentity !== undefined &&
-				(await this.observe(cleanupIdentity.pid)).kind === "dead"
-			) {
-				await this.#runtimeCleanup.remove(cleanupIdentity);
+			if (cleanupIdentity !== undefined) {
+				const ownership = failedSpawnOwnership;
+				if (ownership === undefined) {
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed bundled-engine spawn cleanup ownership is unavailable",
+						error,
+					);
+				}
+				let cleanupOutcome: "death_unconfirmed" | "record_absent" | "removed";
+				try {
+					cleanupOutcome = await this.#failedSpawnCleanupRecord(cleanupIdentity);
+				} catch (cleanupError) {
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed bundled-engine spawn cleanup could not be reconciled",
+						cleanupError,
+					);
+				}
+				if (cleanupOutcome === "death_unconfirmed") {
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed bundled-engine spawn death could not be confirmed",
+						error,
+					);
+				}
+				if (cleanupOutcome === "record_absent") {
+					try {
+						await Promise.all([
+							ownership.extracted.cleanup(),
+							rm(ownership.rayRuntimeRoot, { recursive: true, force: true }),
+						]);
+					} catch (cleanupError) {
+						extracted = undefined;
+						rayRuntimeRoot = undefined;
+						throw new RuntimeCleanupReconciliationError(
+							"failed bundled-engine spawn roots could not be removed",
+							cleanupError,
+						);
+					}
+				}
+				extracted = undefined;
+				rayRuntimeRoot = undefined;
 				cleanupPersisted = false;
 			}
 			if (error instanceof EngineRuntimeBundleError) {
@@ -487,6 +545,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		let snapshot: FileHandle | undefined;
 		let execution: FileHandle | undefined;
 		let rayRuntimeRoot: string | undefined;
+		let failedSpawnRayRuntimeRoot: string | undefined;
 		let cleanupPersisted = false;
 		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
@@ -529,6 +588,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 
 			rayRuntimeRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
+			failedSpawnRayRuntimeRoot = retainedRayRuntimeRoot;
 			const verified = await spawnDarwinVerified({
 				executablePath: snapshotPath,
 				executableBytes,
@@ -538,13 +598,12 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				bindIdentity: async (pid, startToken) => {
 					await bindIdentity(pid, startToken);
 					cleanupIdentity = { launchId, pid, startToken };
-					rayRuntimeRoot = undefined;
 					cleanupPersisted = await this.#runtimeCleanup.persist(
 						cleanupIdentity,
 						undefined,
 						retainedRayRuntimeRoot,
 					);
-					if (!cleanupPersisted) rayRuntimeRoot = retainedRayRuntimeRoot;
+					if (cleanupPersisted) rayRuntimeRoot = undefined;
 				},
 			});
 			const identity: ExitedEngineIdentity = {
@@ -583,12 +642,44 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
 		} catch (error) {
-			if (
-				cleanupPersisted &&
-				cleanupIdentity !== undefined &&
-				(await this.observe(cleanupIdentity.pid)).kind === "dead"
-			) {
-				await this.#runtimeCleanup.remove(cleanupIdentity);
+			if (cleanupIdentity !== undefined) {
+				const retainedRayRuntimeRoot = failedSpawnRayRuntimeRoot;
+				if (retainedRayRuntimeRoot === undefined) {
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed direct-engine spawn cleanup ownership is unavailable",
+						error,
+					);
+				}
+				let cleanupOutcome: "death_unconfirmed" | "record_absent" | "removed";
+				try {
+					cleanupOutcome = await this.#failedSpawnCleanupRecord(cleanupIdentity);
+				} catch (cleanupError) {
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed direct-engine spawn cleanup could not be reconciled",
+						cleanupError,
+					);
+				}
+				if (cleanupOutcome === "death_unconfirmed") {
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed direct-engine spawn death could not be confirmed",
+						error,
+					);
+				}
+				if (cleanupOutcome === "record_absent") {
+					try {
+						await rm(retainedRayRuntimeRoot, { recursive: true, force: true });
+					} catch (cleanupError) {
+						rayRuntimeRoot = undefined;
+						throw new RuntimeCleanupReconciliationError(
+							"failed direct-engine spawn root could not be removed",
+							cleanupError,
+						);
+					}
+				}
+				rayRuntimeRoot = undefined;
 				cleanupPersisted = false;
 			}
 			if (error instanceof DarwinVerifiedSpawnError) {
@@ -672,6 +763,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			},
 		};
 	}
+}
+
+export function createDefaultLifecycleProcessAdapter(
+	directoryAuthority?: RuntimeCleanupDirectoryAuthority,
+	installedEngine = false,
+	cleanupSeams: RuntimeCleanupStoreSeams = {},
+): LifecycleProcessAdapter {
+	return new DefaultLifecycleProcessAdapter(directoryAuthority, installedEngine, cleanupSeams);
 }
 
 const KEYCHAIN_OUTPUT_LIMIT = 64 * 1024;
@@ -1243,7 +1342,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		const stateRootRelativePath = join("engine-state", LocalAuthorityStore.endpointKey(config.endpoint));
 		this.#process =
 			dependencies.process ??
-			new DefaultLifecycleProcessAdapter(
+			createDefaultLifecycleProcessAdapter(
 				{
 					stateRootPath: join(this.#store.root, stateRootRelativePath),
 					ensure: relativePath =>
@@ -1876,7 +1975,15 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		} catch (error) {
 			bootstrap.fill(0);
 			bootstrapCredential.fill(0);
-			await this.#store.withExclusiveLock(endpoint, () => this.#store.releaseStartClaim(endpoint, prepared.token));
+			const retainCleanupAuthority =
+				error instanceof RuntimeCleanupReconciliationError &&
+				prepared.enginePid !== undefined &&
+				prepared.engineProcessStartToken !== undefined;
+			if (!retainCleanupAuthority) {
+				await this.#store.withExclusiveLock(endpoint, () =>
+					this.#store.releaseStartClaim(endpoint, prepared.token),
+				);
+			}
 			return mappedFailure("local-owned", error, attempt);
 		} finally {
 			bootstrap.fill(0);

@@ -34,17 +34,47 @@ export interface RuntimeCleanupDirectoryAuthority {
 	ensure(relativePath?: string): Promise<string>;
 }
 
+export interface RuntimeCleanupStoreSeams {
+	writeRecord?(handle: FileHandle, contents: string): Promise<void>;
+	syncRecord?(handle: FileHandle): Promise<void>;
+	syncParent?(handle: FileHandle): Promise<void>;
+}
+
 export class RuntimeCleanupStoreError extends LocalAuthorityStoreError {
-	constructor(message: string) {
-		super("root_integrity", message);
+	override readonly name: string = "RuntimeCleanupStoreError";
+
+	constructor(message: string, options?: ErrorOptions) {
+		super("root_integrity", message, options);
 	}
+}
+
+export class RuntimeCleanupReconciliationError extends RuntimeCleanupStoreError {
+	override readonly name = "RuntimeCleanupReconciliationError";
+
+	constructor(message: string, cause: unknown) {
+		super(message, { cause: sanitizedRuntimeCleanupCause(cause) });
+	}
+}
+
+function sanitizedRuntimeCleanupCause(cause: unknown): Error {
+	if (cause instanceof RuntimeCleanupStoreError) return cause;
+	const sanitized = new Error("runtime cleanup operation rejected");
+	sanitized.name = cause instanceof SyntaxError ? "SyntaxError" : "RuntimeCleanupDependencyError";
+	return sanitized;
+}
+
+function runtimeCleanupStoreError(message: string, cause: unknown): RuntimeCleanupStoreError {
+	if (cause instanceof RuntimeCleanupStoreError) return cause;
+	return new RuntimeCleanupStoreError(message, { cause: sanitizedRuntimeCleanupCause(cause) });
 }
 
 export class RuntimeCleanupStore {
 	readonly #directoryAuthority: RuntimeCleanupDirectoryAuthority | undefined;
+	readonly #seams: RuntimeCleanupStoreSeams;
 
-	constructor(directoryAuthority?: RuntimeCleanupDirectoryAuthority) {
+	constructor(directoryAuthority?: RuntimeCleanupDirectoryAuthority, seams: RuntimeCleanupStoreSeams = {}) {
 		this.#directoryAuthority = directoryAuthority;
+		this.#seams = seams;
 	}
 
 	async stateRoot(): Promise<string | undefined> {
@@ -57,47 +87,86 @@ export class RuntimeCleanupStore {
 		engineRuntimeRoot: string | undefined,
 		rayRuntimeRoot: string,
 	): Promise<boolean> {
-		const path = await this.#recordPath(identity.launchId);
-		if (path === undefined) return false;
-		const temporaryRoot = await realpath(tmpdir());
-		const record: RuntimeCleanupRecord = {
-			schemaVersion: RUNTIME_CLEANUP_SCHEMA,
-			...identity,
-			temporaryRoot,
-			...(engineRuntimeRoot === undefined
-				? {}
-				: {
-						engineRuntime: await this.#captureRuntimeRoot(
-							engineRuntimeRoot,
-							temporaryRoot,
-							ENGINE_RUNTIME_ROOT_PATTERN,
-						),
-					}),
-			rayRuntime: await this.#captureRuntimeRoot(rayRuntimeRoot, temporaryRoot, RAY_RUNTIME_ROOT_PATTERN),
-		};
-		const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-		const handle = await open(path, flags, 0o600);
-		let persisted = false;
 		try {
-			await handle.writeFile(`${JSON.stringify(record)}\n`, "utf8");
-			await handle.sync();
-			persisted = true;
-		} finally {
-			await handle.close();
-			if (!persisted) await this.#unlinkRecord(path);
+			const path = await this.#recordPath(identity.launchId);
+			if (path === undefined) return false;
+			const temporaryRoot = await realpath(tmpdir());
+			const record: RuntimeCleanupRecord = {
+				schemaVersion: RUNTIME_CLEANUP_SCHEMA,
+				...identity,
+				temporaryRoot,
+				...(engineRuntimeRoot === undefined
+					? {}
+					: {
+							engineRuntime: await this.#captureRuntimeRoot(
+								engineRuntimeRoot,
+								temporaryRoot,
+								ENGINE_RUNTIME_ROOT_PATTERN,
+							),
+						}),
+				rayRuntime: await this.#captureRuntimeRoot(rayRuntimeRoot, temporaryRoot, RAY_RUNTIME_ROOT_PATTERN),
+			};
+			const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+			const handle = await open(path, flags, 0o600);
+			let persisted = false;
+			let failed = false;
+			let persistenceError: unknown;
+			try {
+				const contents = `${JSON.stringify(record)}\n`;
+				if (this.#seams.writeRecord === undefined) {
+					await handle.writeFile(contents, "utf8");
+				} else {
+					await this.#seams.writeRecord(handle, contents);
+				}
+				if (this.#seams.syncRecord === undefined) {
+					await handle.sync();
+				} else {
+					await this.#seams.syncRecord(handle);
+				}
+				persisted = true;
+			} catch (error) {
+				failed = true;
+				persistenceError = error;
+			}
+			try {
+				await handle.close();
+			} catch (error) {
+				if (!failed) {
+					failed = true;
+					persistenceError = error;
+				}
+			}
+			if (!persisted) {
+				try {
+					await this.#unlinkRecord(path);
+				} catch (error) {
+					if (!failed) {
+						failed = true;
+						persistenceError = error;
+					}
+				}
+			}
+			if (failed) throw persistenceError;
+			await this.#syncPrivateDirectory(dirname(path), "engine runtime cleanup root");
+			return true;
+		} catch (error) {
+			throw runtimeCleanupStoreError("engine runtime cleanup persistence failed", error);
 		}
-		await this.#syncPrivateDirectory(dirname(path), "engine runtime cleanup root");
-		return true;
 	}
 
-	async remove(identity: ExitedEngineIdentity): Promise<void> {
-		const loaded = await this.#read(identity);
-		if (loaded === undefined) return;
-		if (loaded.record.engineRuntime !== undefined) {
-			await this.#quarantineAndRemove(loaded.record, "engine", loaded.record.engineRuntime);
+	async remove(identity: ExitedEngineIdentity): Promise<boolean> {
+		try {
+			const loaded = await this.#read(identity);
+			if (loaded === undefined) return false;
+			if (loaded.record.engineRuntime !== undefined) {
+				await this.#quarantineAndRemove(loaded.record, "engine", loaded.record.engineRuntime);
+			}
+			await this.#quarantineAndRemove(loaded.record, "ray", loaded.record.rayRuntime);
+			await this.#unlinkRecord(loaded.path);
+			return true;
+		} catch (error) {
+			throw runtimeCleanupStoreError("engine runtime cleanup failed", error);
 		}
-		await this.#quarantineAndRemove(loaded.record, "ray", loaded.record.rayRuntime);
-		await this.#unlinkRecord(loaded.path);
 	}
 
 	async #ensureAuthorityDirectory(relativePath: string | undefined, label: string): Promise<string> {
@@ -158,7 +227,11 @@ export class RuntimeCleanupStore {
 		try {
 			const before = await handle.stat();
 			await this.#requirePrivateOwnedDirectory(path, 0o700, label, before);
-			await handle.sync();
+			if (this.#seams.syncParent === undefined) {
+				await handle.sync();
+			} else {
+				await this.#seams.syncParent(handle);
+			}
 			const [after, named] = await Promise.all([handle.stat(), lstat(path)]);
 			if (
 				after.dev !== before.dev ||
@@ -233,13 +306,23 @@ export class RuntimeCleanupStore {
 		} finally {
 			await handle.close();
 		}
-		const parsed: unknown = JSON.parse(raw);
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (error) {
+			throw new RuntimeCleanupStoreError("engine runtime cleanup record is invalid", {
+				cause: sanitizedRuntimeCleanupCause(error),
+			});
+		}
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 			throw new RuntimeCleanupStoreError("engine runtime cleanup record is invalid");
 		}
 		const value = parsed as Record<string, unknown>;
+		const engineRuntime = value.engineRuntime;
+		const rayRuntime = value.rayRuntime;
+		const temporaryRoot = value.temporaryRoot;
 		const expectedKeys =
-			value.engineRuntime === undefined
+			engineRuntime === undefined
 				? "launchId\0pid\0rayRuntime\0schemaVersion\0startToken\0temporaryRoot"
 				: "engineRuntime\0launchId\0pid\0rayRuntime\0schemaVersion\0startToken\0temporaryRoot";
 		if (
@@ -248,13 +331,19 @@ export class RuntimeCleanupStore {
 			value.launchId !== identity.launchId ||
 			value.pid !== identity.pid ||
 			value.startToken !== identity.startToken ||
-			typeof value.temporaryRoot !== "string" ||
-			!this.#isRuntimeRootIdentity(value.rayRuntime) ||
-			(value.engineRuntime !== undefined && !this.#isRuntimeRootIdentity(value.engineRuntime))
+			typeof temporaryRoot !== "string" ||
+			!this.#isRuntimeRootIdentity(rayRuntime) ||
+			(engineRuntime !== undefined && !this.#isRuntimeRootIdentity(engineRuntime))
 		) {
 			throw new RuntimeCleanupStoreError("engine runtime cleanup identity changed");
 		}
-		const record = value as unknown as RuntimeCleanupRecord;
+		const record: RuntimeCleanupRecord = {
+			schemaVersion: RUNTIME_CLEANUP_SCHEMA,
+			...identity,
+			temporaryRoot,
+			...(engineRuntime === undefined ? {} : { engineRuntime }),
+			rayRuntime,
+		};
 		if (!isAbsolute(record.temporaryRoot) || record.temporaryRoot !== (await realpath(tmpdir()))) {
 			throw new RuntimeCleanupStoreError("engine runtime cleanup temporary root identity changed");
 		}
