@@ -608,6 +608,44 @@ def expected_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
+def installed_status(
+    bb: Path,
+    workspace: Path,
+    environment: dict[str, str],
+    label: str,
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any], Path]:
+    completed = subprocess.run(
+        [str(bb), "engine", "status"],
+        cwd=workspace,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if completed.returncode != 0 or completed.stderr:
+        raise JourneyFailure(
+            f"{label} failed: {completed.returncode}: {completed.stderr}"
+        )
+    identity = parse_status_identity(completed.stdout)
+    if completed.stdout != json.dumps(identity, separators=(",", ":")) + "\n":
+        raise JourneyFailure(f"{label} did not emit exactly one canonical identity line")
+    distribution_id = identity.get("distributionId")
+    if not isinstance(distribution_id, str) or re.fullmatch(
+        r"sha256:[0-9a-f]{64}", distribution_id
+    ) is None:
+        raise JourneyFailure(f"{label} emitted an invalid distribution identity")
+    manifest_path = (
+        bb.parent
+        / "engine"
+        / distribution_id.removeprefix("sha256:")
+        / "breadboard-engine-manifest.v1.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if identity != expected_identity(manifest):
+        raise JourneyFailure(f"{label} identity does not match the trusted manifest")
+    return completed, identity, manifest_path
+
 
 def exact_environment(home: Path, config: Path, agent: Path, temp: Path) -> dict[str, str]:
     user = pwd.getpwuid(os.getuid()).pw_name
@@ -918,6 +956,42 @@ def main() -> int:
     )
 
     baseline_ray_runtime_roots = ray_runtime_roots(roots["temp"])
+    preflight_status, preflight_status_identity, preflight_manifest_path = installed_status(
+        bb,
+        roots["workspace"],
+        environment,
+        "engine status before launch",
+    )
+    (output / "engine-status-before-launch.json").write_text(
+        json.dumps(
+            {
+                "exitCode": preflight_status.returncode,
+                "stdout": preflight_status.stdout,
+                "stderr": preflight_status.stderr,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    preflight_status_text = json.dumps(preflight_status_identity, sort_keys=True)
+    for unsafe in (
+        str(bb.parent),
+        str(roots["home"]),
+        str(roots["agent"]),
+        str(roots["config"]),
+    ):
+        if unsafe in preflight_status_text:
+            raise JourneyFailure("preflight status identity contains a local path")
+    if (
+        active_authority(roots["agent"]) is not None
+        or binding_snapshot(roots["agent"]) is not None
+        or extraction_roots(roots["temp"])
+        or ray_runtime_roots(roots["temp"]) != baseline_ray_runtime_roots
+        or endpoint_open("http://127.0.0.1:9099")
+    ):
+        raise JourneyFailure("preflight status created runtime authority or process state")
     initial = PtyChild([str(bb)], roots["workspace"], environment)
     try:
         initial.wait_until(
@@ -1058,35 +1132,38 @@ def main() -> int:
         raise JourneyFailure("retained engine state contains raw prompt text")
     assert_no_forbidden_paths(retained_text, [*forbidden_roots, bb.parent], "retained engine state")
 
-    status = subprocess.run(
-        [str(bb), "engine", "status"],
-        cwd=roots["workspace"],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+    status, status_identity, manifest_path = installed_status(
+        bb,
+        roots["workspace"],
+        environment,
+        "engine status after initial exit",
     )
     (output / "engine-status.json").write_text(
         json.dumps(
-            {"exitCode": status.returncode, "stdout": status.stdout, "stderr": status.stderr},
+            {
+                "exitCode": status.returncode,
+                "stdout": status.stdout,
+                "stderr": status.stderr,
+            },
             indent=2,
             sort_keys=True,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
-    if status.returncode != 0 or status.stderr:
-        raise JourneyFailure(f"engine status failed: {status.returncode}: {status.stderr}")
-    status_identity = parse_status_identity(status.stdout)
-    if status.stdout != json.dumps(status_identity, separators=(",", ":")) + "\n":
-        raise JourneyFailure("engine status did not emit exactly one canonical identity line")
-    distribution_hex = str(status_identity["distributionId"]).removeprefix("sha256:")
-    manifest_path = bb.parent / "engine" / distribution_hex / "breadboard-engine-manifest.v1.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if status_identity != expected_identity(manifest):
-        raise JourneyFailure("status installed identity does not match the trusted manifest")
+    if (
+        status_identity != preflight_status_identity
+        or status.stdout != preflight_status.stdout
+        or manifest_path != preflight_manifest_path
+    ):
+        raise JourneyFailure("initial journey changed the installed status identity")
     status_text = json.dumps(status_identity, sort_keys=True)
-    for unsafe in (str(bb.parent), str(roots["home"]), str(roots["agent"]), str(roots["config"])):
+    for unsafe in (
+        str(bb.parent),
+        str(roots["home"]),
+        str(roots["agent"]),
+        str(roots["config"]),
+    ):
         if unsafe in status_text:
             raise JourneyFailure("status identity contains a local path")
 
@@ -1243,6 +1320,8 @@ def main() -> int:
         "sessionFile": str(final_resume.session_file),
         "sessionId": final_resume.data["sessionId"],
         "preTurnBindingPresent": False,
+        "preflightStatusIdentity": preflight_status_identity,
+        "preflightRuntimeStateAbsent": True,
         "firstObservedCursor": first_cursor,
         "secondObservedCursor": cursor_sequence(second.data),
         "finalCursor": final_initial_cursor,
