@@ -2834,6 +2834,37 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(current?.pid).toBe(process.current().pid);
 	});
 
+	test("confirmed startup death cleans the bound runtime identity before one replacement", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		let first: { readonly pid: number; readonly launchId: string } | undefined;
+		let handshakes = 0;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: () => ({
+				handshake: async () => {
+					handshakes++;
+					if (handshakes === 1) {
+						first = process.current();
+						process.crash(first.pid);
+						return await new Promise<never>(() => {});
+					}
+					const current = process.current();
+					return boundClient(bindingFor(current.pid, current.launchId), []);
+				},
+			}),
+		});
+
+		expect((await supervisor.connect()).kind).toBe("ready");
+		if (first === undefined) throw new Error("expected first startup identity");
+		expect(process.spawnCount()).toBe(2);
+		expect(process.cleanups).toEqual([
+			{ launchId: first.launchId, pid: first.pid, startToken: `darwin:${first.pid}:1` },
+		]);
+	});
+
 	test("durable identity bind failure closes the unreleased child before one safe replacement", async () => {
 		let startingRenames = 0;
 		const store = await temporaryStore({
@@ -2883,6 +2914,35 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			store.claimStart("http://127.0.0.1:7777"),
 		);
 		expect(claim.kind).toBe("claimed");
+	});
+
+	test("explicit stop retires a confirmed-dead authority and its runtime cleanup identity without reconnecting", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const endpoint = "http://127.0.0.1:7777";
+		const starter = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, []),
+		});
+		expect((await starter.connect()).kind).toBe("ready");
+		const exited = process.current();
+		process.crash(exited.pid);
+		const calls: string[] = [];
+		const stopper = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+			endpointAbsent: async () => true,
+		});
+
+		expect((await stopper.stop({ consumerClosed: true })).kind).toBe("stopped");
+		expect(process.spawnCount()).toBe(1);
+		expect(calls).toEqual([]);
+		expect(process.cleanups).toEqual([
+			{ launchId: exited.launchId, pid: exited.pid, startToken: `darwin:${exited.pid}:1` },
+		]);
+		expect(await store.readCurrent(endpoint)).toBeNull();
 	});
 
 	test("explicit restart of an absent engine starts exactly one process without a drain cycle", async () => {
@@ -2969,6 +3029,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				const preserved = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
 				expect(preserved.kind).toBe("dead-bound");
 			}
+			expect(process.cleanups).toEqual(
+				absent === true ? [{ launchId, pid: enginePid, startToken: `darwin:${enginePid}:1` }] : [],
+			);
 			expect(process.events).not.toContain("hard-control");
 		}
 	});

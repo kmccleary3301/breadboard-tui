@@ -433,15 +433,35 @@ function containedPath(root: string, path: string): string {
 }
 
 async function makeTreeWritable(path: string): Promise<void> {
-	await chmod(path, 0o700).catch(() => undefined);
-	let children: Dirent[];
+	let handle: FileHandle;
 	try {
-		children = await readdir(path, { withFileTypes: true });
-	} catch {
-		return;
+		handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
 	}
-	for (const child of children) {
-		if (child.isDirectory() && !child.isSymbolicLink()) await makeTreeWritable(join(path, child.name));
+	try {
+		const before = await handle.stat();
+		if (!before.isDirectory() || before.isSymbolicLink()) {
+			throw new Error("private engine runtime cleanup encountered a non-directory");
+		}
+		await handle.chmod(0o700);
+		const after = await handle.stat();
+		if (!after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
+			throw new Error("private engine runtime cleanup directory identity changed");
+		}
+		let children: Dirent[];
+		try {
+			children = await readdir(path, { withFileTypes: true });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+			throw error;
+		}
+		for (const child of children) {
+			if (child.isDirectory() && !child.isSymbolicLink()) await makeTreeWritable(join(path, child.name));
+		}
+	} finally {
+		await handle.close();
 	}
 }
 

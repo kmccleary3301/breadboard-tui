@@ -373,7 +373,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				executableSizeBytes: artifact.executableSizeBytes,
 				executableSha256: artifact.executableSha256,
 			});
-			rayRuntimeRoot = await mkdtemp("/tmp/bb-ray-");
+			rayRuntimeRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const retained = extracted;
 			const verified = await spawnDarwinVerified({
@@ -503,7 +503,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			await execution.close();
 			execution = undefined;
 
-			rayRuntimeRoot = await mkdtemp("/tmp/bb-ray-");
+			rayRuntimeRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const verified = await spawnDarwinVerified({
 				executablePath: snapshotPath,
@@ -1262,6 +1262,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					if (claimed.kind !== "dead-bound") return claimed;
 					const absent = await this.#endpointAbsent(await this.unboundClient());
 					if (absent !== true) return claimed;
+					await this.#cleanupExitedStartClaim(claimed.claim);
 					await this.#store.retireDeadStartClaim(endpoint, claimed.claim);
 					return await this.#store.claimStart(endpoint);
 				});
@@ -1507,6 +1508,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			await this.#store.verifyStartClaim(endpoint, claim);
 			const absent = await this.#endpointAbsent(await this.unboundClient());
 			if (absent !== true) return null;
+			await this.#cleanupExitedStartClaim(claim);
 			await this.#store.retireDeadStartClaim(endpoint, claim);
 			const next = await this.#store.claimStart(endpoint);
 			return next.kind === "claimed" ? next.claim : null;
@@ -1660,6 +1662,20 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		}
 	}
 
+	async #retireDeadAuthority(record: LocalAuthorityRecord): Promise<boolean> {
+		return await this.#store.withExclusiveLock(record.normalizedEndpoint, async () => {
+			const current = await this.#store.readCurrentForRecovery(record.normalizedEndpoint);
+			if (!current) return true;
+			if (!this.#sameAuthorityRecord(current, record)) return false;
+			if ((await this.#process.observe(current.pid)).kind !== "dead") return false;
+			const absent = await this.#endpointAbsent(await this.unboundClient());
+			if (absent !== true) return false;
+			await this.#cleanupExitedRuntime(current);
+			await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
+			return true;
+		});
+	}
+
 	async #adoptOrRecover(record: LocalAuthorityRecord, attempt: number, recoverDead = true): Promise<LifecycleResult> {
 		if (!this.#recordMatchesConfig(record))
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
@@ -1671,17 +1687,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
 				};
 			}
-			const retired = await this.#store.withExclusiveLock(record.normalizedEndpoint, async () => {
-				const current = await this.#store.readCurrentForRecovery(record.normalizedEndpoint);
-				if (!current) return true;
-				const lockedObservation = await this.#process.observe(current.pid);
-				if (lockedObservation.kind !== "dead") return false;
-				const absent = await this.#endpointAbsent(await this.unboundClient());
-				if (absent !== true) return false;
-				await this.#cleanupExitedRuntime(current);
-				await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
-				return true;
-			});
+			const retired = await this.#retireDeadAuthority(record);
 			if (!retired) return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable", attempt);
 			return await this.#connectAttempt(attempt);
 		}
@@ -1991,6 +1997,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			}
 			const absent = await this.#endpointAbsent(await this.unboundClient());
 			if (absent !== true) return false;
+			await this.#cleanupExitedStartClaim(claim);
 			await this.#store.releaseStartClaim(endpoint, claim.token);
 			return true;
 		});
@@ -2163,6 +2170,22 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			await this.clock.sleep(25);
 		}
 		return false;
+	}
+
+	async #cleanupExitedStartClaim(claim: LocalStartClaim): Promise<void> {
+		if (claim.enginePid === undefined && claim.engineProcessStartToken === undefined) return;
+		if (
+			claim.launchId === undefined ||
+			claim.enginePid === undefined ||
+			claim.engineProcessStartToken === undefined
+		) {
+			throw new ProcessIdentityValidationError("dead startup cleanup identity is incomplete");
+		}
+		await this.#process.cleanupExited({
+			launchId: claim.launchId,
+			pid: claim.enginePid,
+			startToken: claim.engineProcessStartToken,
+		});
 	}
 
 	async #cleanupExitedRuntime(record: LocalAuthorityRecord): Promise<void> {
@@ -2579,6 +2602,22 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					kind: "stopped",
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
 				};
+			}
+			if (!this.#recordMatchesConfig(record)) {
+				return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
+			}
+			if ((await this.#process.observe(record.pid)).kind === "dead") {
+				try {
+					if (!(await this.#retireDeadAuthority(record))) {
+						return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable");
+					}
+					return {
+						kind: "stopped",
+						state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
+					};
+				} catch (error) {
+					return mappedFailure("local-owned", error);
+				}
 			}
 			const adopted = await this.#adoptOrRecover(record, 0, false);
 			if (adopted.kind !== "ready") return adopted;

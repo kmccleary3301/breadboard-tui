@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdtemp } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, realpath, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
@@ -29,9 +29,9 @@ async function fixture(): Promise<{
 	readonly recordPath: string;
 }> {
 	const root = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-store-"));
-	roots.push(root);
-	const engineRoot = await mkdtemp(join(root, "bb-engine-runtime-"));
-	const rayRoot = await mkdtemp(join(root, "bb-ray-"));
+	const engineRoot = await mkdtemp(join(tmpdir(), "bb-engine-runtime-"));
+	const rayRoot = await mkdtemp(join(tmpdir(), "bb-ray-"));
+	roots.push(root, engineRoot, rayRoot);
 	await chmod(engineRoot, 0o500);
 	await chmod(rayRoot, 0o700);
 	const store = new RuntimeCleanupStore(join(root, "engine-state"));
@@ -82,6 +82,50 @@ describe("RuntimeCleanupStore", () => {
 		expect(await exists(recordPath)).toBeTrue();
 
 		await store.remove(identity);
+	});
+
+	test("fails closed when a tracked runtime directory inode is replaced", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture();
+		await store.persist(identity, engineRoot, rayRoot);
+		const displaced = `${engineRoot}-displaced`;
+		roots.push(displaced);
+		await rename(engineRoot, displaced);
+		await mkdir(engineRoot, { mode: 0o500 });
+
+		await expect(store.remove(identity)).rejects.toBeInstanceOf(RuntimeCleanupStoreError);
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(displaced)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+		expect(await exists(recordPath)).toBeTrue();
+	});
+
+	test("resumes cleanup after a persisted root was already quarantined", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture();
+		await store.persist(identity, engineRoot, rayRoot);
+		const quarantineRoot = join(
+			await realpath(tmpdir()),
+			`bb-runtime-cleanup-quarantine-${process.geteuid?.() ?? process.getuid?.() ?? -1}`,
+		);
+		const quarantined = join(quarantineRoot, `${identity.launchId}.${identity.pid}.engine`);
+		await mkdir(quarantineRoot, { mode: 0o700 });
+		await chmod(engineRoot, 0o700);
+		await rename(engineRoot, quarantined);
+
+		await store.remove(identity);
+		expect(await exists(quarantined)).toBeFalse();
+		expect(await exists(rayRoot)).toBeFalse();
+		expect(await exists(recordPath)).toBeFalse();
+	});
+
+	test("rejects roots outside the canonical temporary-root scope before persisting authority", async () => {
+		const { store, rayRoot, recordPath } = await fixture();
+		const parent = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-parent-"));
+		roots.push(parent);
+		const nested = await mkdtemp(join(parent, "bb-engine-runtime-"));
+
+		await expect(store.persist(identity, nested, rayRoot)).rejects.toBeInstanceOf(RuntimeCleanupStoreError);
+		expect(await exists(recordPath)).toBeFalse();
+		expect(await exists(nested)).toBeTrue();
 	});
 
 	test("does not claim durable cleanup without a configured state root", async () => {
