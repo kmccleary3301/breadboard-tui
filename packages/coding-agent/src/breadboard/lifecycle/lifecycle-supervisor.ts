@@ -18,12 +18,7 @@ import {
 	P30_SESSION_CONTRACT_ID,
 	P30_SESSION_SCHEMA_SHA256,
 } from "@breadboard/sdk/internal";
-import {
-	type DarwinVerifiedProcess,
-	DarwinVerifiedSpawnError,
-	darwinProcessStartToken,
-	spawnDarwinVerified,
-} from "./darwin-verified-spawn";
+import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
 	EngineRuntimeBundleError,
 	type ExtractedEngineRuntimeBundle,
@@ -52,7 +47,11 @@ import {
 	engineArtifactLocationSha256,
 	type OwnerExitPolicy,
 } from "./run-config";
-import { type ExitedEngineIdentity, RuntimeCleanupStore } from "./runtime-cleanup-store";
+import {
+	type ExitedEngineIdentity,
+	type RuntimeCleanupDirectoryAuthority,
+	RuntimeCleanupStore,
+} from "./runtime-cleanup-store";
 
 export interface SpawnedEngineProcess {
 	readonly pid: number;
@@ -342,23 +341,13 @@ function unrefDelay(milliseconds: number): Promise<void> {
 	return promise;
 }
 
-async function terminateVerifiedChildAfterPersistenceFailure(child: DarwinVerifiedProcess): Promise<void> {
-	for (;;) {
-		if (await child.waitForExit(0).catch(() => false)) return;
-		const outcome = await child.signalIfSame("SIGKILL").catch(() => "identity-unavailable" as const);
-		if (outcome === "process-exited" || outcome === "identity-changed") return;
-		if (await child.waitForExit(5_000).catch(() => false)) return;
-		await unrefDelay(25);
-	}
-}
-
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
 	readonly #runtimeCleanup: RuntimeCleanupStore;
 	readonly #installedEngine: boolean;
 
-	constructor(engineStateRoot?: string, installedEngine = false) {
-		this.#runtimeCleanup = new RuntimeCleanupStore(engineStateRoot);
+	constructor(directoryAuthority?: RuntimeCleanupDirectoryAuthority, installedEngine = false) {
+		this.#runtimeCleanup = new RuntimeCleanupStore(directoryAuthority);
 		this.#installedEngine = installedEngine;
 	}
 
@@ -381,6 +370,8 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	): Promise<SpawnVerifiedResult> {
 		let extracted: ExtractedEngineRuntimeBundle | undefined;
 		let rayRuntimeRoot: string | undefined;
+		let cleanupPersisted = false;
+		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
 			extracted = await extractVerifiedEngineRuntimeBundle({
 				bundle: artifact.runtimeBundle,
@@ -397,29 +388,37 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				argv: artifact.argv,
 				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
 				bootstrap,
-				bindIdentity,
+				bindIdentity: async (pid, startToken) => {
+					await bindIdentity(pid, startToken);
+					cleanupIdentity = { launchId, pid, startToken };
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					cleanupPersisted = await this.#runtimeCleanup.persist(
+						cleanupIdentity,
+						retained.rootPath,
+						retainedRayRuntimeRoot,
+					);
+					if (!cleanupPersisted) {
+						extracted = retained;
+						rayRuntimeRoot = retainedRayRuntimeRoot;
+					}
+				},
 			});
 			const identity: ExitedEngineIdentity = {
 				launchId,
 				pid: verified.pid,
 				startToken: verified.startToken,
 			};
-			let cleanupPersisted = false;
-			try {
-				cleanupPersisted = await this.#runtimeCleanup.persist(identity, retained.rootPath, retainedRayRuntimeRoot);
-			} catch (error) {
-				await terminateVerifiedChildAfterPersistenceFailure(verified);
-				throw error;
-			}
-			const exited = verified.exited.finally(async () => {
+			const exited = verified.exited.then(async exitCode => {
 				if (cleanupPersisted) {
 					await this.#runtimeCleanup.remove(identity);
-					return;
+					return exitCode;
 				}
 				await Promise.allSettled([
 					retained.cleanup(),
 					rm(retainedRayRuntimeRoot, { recursive: true, force: true }),
 				]);
+				return exitCode;
 			});
 			extracted = undefined;
 			rayRuntimeRoot = undefined;
@@ -445,6 +444,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
 		} catch (error) {
+			if (
+				cleanupPersisted &&
+				cleanupIdentity !== undefined &&
+				(await this.observe(cleanupIdentity.pid)).kind === "dead"
+			) {
+				await this.#runtimeCleanup.remove(cleanupIdentity);
+				cleanupPersisted = false;
+			}
 			if (error instanceof EngineRuntimeBundleError) {
 				if (this.#installedEngine) {
 					throw new InstalledEngineDiscoveryError("engine_artifact_mismatch");
@@ -452,6 +459,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				throw new EngineArtifactValidationError("engine runtime bundle verification failed", { cause: error });
 			}
 			if (error instanceof DarwinVerifiedSpawnError) {
+				if (error.cause instanceof LocalAuthorityStoreError) throw error.cause;
 				throw new ProcessIdentityValidationError("Darwin verified engine spawn failed", { cause: error });
 			}
 			throw error;
@@ -479,6 +487,8 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		let snapshot: FileHandle | undefined;
 		let execution: FileHandle | undefined;
 		let rayRuntimeRoot: string | undefined;
+		let cleanupPersisted = false;
+		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
 			const sourceMetadata = await source.stat();
 			if (!sourceMetadata.isFile() || sourceMetadata.nlink !== 1) {
@@ -525,26 +535,30 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 				argv: artifact.argv,
 				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
 				bootstrap,
-				bindIdentity,
+				bindIdentity: async (pid, startToken) => {
+					await bindIdentity(pid, startToken);
+					cleanupIdentity = { launchId, pid, startToken };
+					rayRuntimeRoot = undefined;
+					cleanupPersisted = await this.#runtimeCleanup.persist(
+						cleanupIdentity,
+						undefined,
+						retainedRayRuntimeRoot,
+					);
+					if (!cleanupPersisted) rayRuntimeRoot = retainedRayRuntimeRoot;
+				},
 			});
 			const identity: ExitedEngineIdentity = {
 				launchId,
 				pid: verified.pid,
 				startToken: verified.startToken,
 			};
-			let cleanupPersisted = false;
-			try {
-				cleanupPersisted = await this.#runtimeCleanup.persist(identity, undefined, retainedRayRuntimeRoot);
-			} catch (error) {
-				await terminateVerifiedChildAfterPersistenceFailure(verified);
-				throw error;
-			}
-			const exited = verified.exited.finally(async () => {
+			const exited = verified.exited.then(async exitCode => {
 				if (cleanupPersisted) {
 					await this.#runtimeCleanup.remove(identity);
-					return;
+					return exitCode;
 				}
 				await rm(retainedRayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+				return exitCode;
 			});
 			rayRuntimeRoot = undefined;
 			const handle: SpawnedEngineProcess = {
@@ -569,7 +583,16 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
 		} catch (error) {
+			if (
+				cleanupPersisted &&
+				cleanupIdentity !== undefined &&
+				(await this.observe(cleanupIdentity.pid)).kind === "dead"
+			) {
+				await this.#runtimeCleanup.remove(cleanupIdentity);
+				cleanupPersisted = false;
+			}
 			if (error instanceof DarwinVerifiedSpawnError) {
+				if (error.cause instanceof LocalAuthorityStoreError) throw error.cause;
 				throw new ProcessIdentityValidationError("Darwin verified engine spawn failed", { cause: error });
 			}
 			throw error;
@@ -1217,10 +1240,17 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		if (!dependencies.store) throw new Error("local-owned requires a local authority store");
 		if (!config.endpoint) throw new Error("local-owned requires one endpoint");
 		this.#store = dependencies.store;
+		const stateRootRelativePath = join("engine-state", LocalAuthorityStore.endpointKey(config.endpoint));
 		this.#process =
 			dependencies.process ??
 			new DefaultLifecycleProcessAdapter(
-				join(this.#store.root, "engine-state", LocalAuthorityStore.endpointKey(config.endpoint)),
+				{
+					stateRootPath: join(this.#store.root, stateRootRelativePath),
+					ensure: relativePath =>
+						this.#store.ensurePrivateDirectory(
+							relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+						),
+				},
 				config.installedEngineIdentity !== undefined,
 			);
 		this.#endpointAbsent =
@@ -2063,14 +2093,27 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	#monitorOwnedChild(context: ReadyContext): void {
 		const child = context.process;
 		if (!child) return;
-		void child.exited.then(async () => {
-			if (this.#plannedProcesses.has(child) || this.context !== context) return;
-			this.stopLeaseRenewal();
-			this.context = undefined;
-			context.ownerCredential?.fill(0);
-			const result = await this.restartAfterConfirmedDeath();
-			this.stateChanged(result.state);
-		});
+		void child.exited.then(
+			async () => {
+				if (this.#plannedProcesses.has(child) || this.context !== context) return;
+				this.stopLeaseRenewal();
+				this.context = undefined;
+				context.ownerCredential?.fill(0);
+				try {
+					const result = await this.restartAfterConfirmedDeath();
+					this.stateChanged(result.state);
+				} catch (error) {
+					this.stateChanged(mappedFailure("local-owned", error).state);
+				}
+			},
+			error => {
+				if (this.#plannedProcesses.has(child) || this.context !== context) return;
+				this.stopLeaseRenewal();
+				this.context = undefined;
+				context.ownerCredential?.fill(0);
+				this.stateChanged(mappedFailure("local-owned", error).state);
+			},
+		);
 	}
 
 	async #withRevalidatedAuthority<T>(

@@ -118,6 +118,33 @@ describe.skipIf(process.platform !== "darwin")("Darwin pinned directory", () => 
 		expect(await Bun.file(join(target, "replacement")).text()).toBe("replacement");
 	});
 
+	test("rejects a simulated direct-child mount before mutation", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const outside = join(root, "outside");
+		await mkdir(target);
+		await mkdir(outside);
+		await writeFile(join(target, "value"), "retain");
+		await writeFile(join(outside, "value"), "outside");
+		await chmod(target, 0o500);
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(root, (_fd, relativePath, actualIdentity) =>
+			relativePath === "target" ? `${actualIdentity}:foreign-mount` : actualIdentity,
+		);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup refuses to cross a mount boundary");
+		expect((await lstat(target)).mode & 0o777).toBe(0o500);
+		expect(await Bun.file(join(target, "value")).text()).toBe("retain");
+		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
+		await chmod(target, 0o700);
+	});
+
 	test("rejects a simulated same-device mount before recursive mutation", async () => {
 		const root = await temporaryDirectory();
 		const target = join(root, "target");

@@ -839,6 +839,7 @@ class NativePinnedDirectory implements PinnedDirectory {
 		const budget: RemovalBudget = {
 			remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries,
 			rootDev: expected?.dev,
+			rootMountIdentity: this.#readMountIdentity(this.fd, "."),
 			readMountIdentity: this.#readMountIdentity,
 			beforeRetirementRename: this.#beforeRetirementRename,
 		};

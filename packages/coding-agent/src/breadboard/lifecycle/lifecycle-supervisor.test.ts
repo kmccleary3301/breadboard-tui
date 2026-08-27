@@ -29,7 +29,7 @@ import {
 	readKeychainReference,
 	type SpawnedEngineProcess,
 } from "./lifecycle-supervisor";
-import { LocalAuthorityStore } from "./local-authority-store";
+import { LocalAuthorityStore, LocalAuthorityStoreError } from "./local-authority-store";
 import {
 	type BreadboardRunConfig,
 	type EngineArtifact,
@@ -651,6 +651,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const bootstrapBuffers: Buffer[] = [];
 		const handles = new Map<number, SpawnedEngineProcess>();
 		const exitResolvers = new Map<number, (code: number | null) => void>();
+		const exitRejectors = new Map<number, (reason?: unknown) => void>();
 		const processTokens = new Map<number, string>();
 		const waitResults: boolean[] = [];
 		const waitTimeouts: number[] = [];
@@ -667,8 +668,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				const startToken = `darwin:${pid}:1`;
 				processTokens.set(pid, startToken);
 				bootstrapBuffers.push(bootstrap);
-				const { promise: exited, resolve } = Promise.withResolvers<number | null>();
+				const { promise: exited, resolve, reject } = Promise.withResolvers<number | null>();
 				exitResolvers.set(pid, resolve);
+				exitRejectors.set(pid, reject);
 				const handle: SpawnedEngineProcess = {
 					pid,
 					startToken,
@@ -738,6 +740,10 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			crash: (pid = currentPid) => {
 				dead.add(pid);
 				exitResolvers.get(pid)?.(1);
+			},
+			cleanupFailure: (error: unknown, pid = currentPid) => {
+				dead.add(pid);
+				exitRejectors.get(pid)?.(error);
 			},
 			rotateIdentity: (pid = currentPid) => processTokens.set(pid, `darwin:${pid}:2`),
 			exitOnNextWait: () => {
@@ -2777,6 +2783,37 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(sleeps).toContain(250);
 		expect(process.spawnCount()).toBe(2);
 	});
+	test("surfaces unexpected runtime cleanup failure without restarting or retiring authority", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const failed = Promise.withResolvers<LifecycleState>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+			stateChanged: state => {
+				if (state.name === "recovery-needed") failed.resolve(state);
+			},
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const exited = process.current();
+
+		process.cleanupFailure(
+			new LocalAuthorityStoreError("root_integrity", "synthetic runtime cleanup failure"),
+			exited.pid,
+		);
+		expect(await failed.promise).toMatchObject({
+			name: "recovery-needed",
+			reason: "authority_store_unavailable",
+		});
+		expect(process.spawnCount()).toBe(1);
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toMatchObject({
+			pid: exited.pid,
+			launchId: exited.launchId,
+		});
+	});
+
 	test("monitors an adopted child and replaces it once after confirmed death", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();

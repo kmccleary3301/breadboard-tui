@@ -1,7 +1,7 @@
 import { constants, type Stats } from "node:fs";
 import { type FileHandle, lstat, mkdir, open, realpath, rename, rmdir, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
 import { LocalAuthorityStoreError } from "./local-authority-store";
 
@@ -29,6 +29,11 @@ interface RuntimeCleanupRecord extends ExitedEngineIdentity {
 	readonly rayRuntime: RuntimeRootIdentity;
 }
 
+export interface RuntimeCleanupDirectoryAuthority {
+	readonly stateRootPath: string;
+	ensure(relativePath?: string): Promise<string>;
+}
+
 export class RuntimeCleanupStoreError extends LocalAuthorityStoreError {
 	constructor(message: string) {
 		super("root_integrity", message);
@@ -36,15 +41,15 @@ export class RuntimeCleanupStoreError extends LocalAuthorityStoreError {
 }
 
 export class RuntimeCleanupStore {
-	readonly #engineStateRoot: string | undefined;
+	readonly #directoryAuthority: RuntimeCleanupDirectoryAuthority | undefined;
 
-	constructor(engineStateRoot?: string) {
-		this.#engineStateRoot = engineStateRoot;
+	constructor(directoryAuthority?: RuntimeCleanupDirectoryAuthority) {
+		this.#directoryAuthority = directoryAuthority;
 	}
 
 	async stateRoot(): Promise<string | undefined> {
-		if (this.#engineStateRoot === undefined) return undefined;
-		return await this.#ensureDurablePrivateDirectory(this.#engineStateRoot, "engine state root");
+		if (this.#directoryAuthority === undefined) return undefined;
+		return await this.#ensureAuthorityDirectory(undefined, "engine state root");
 	}
 
 	async persist(
@@ -95,8 +100,20 @@ export class RuntimeCleanupStore {
 		await this.#unlinkRecord(loaded.path);
 	}
 
-	async #ensureDurablePrivateDirectory(path: string, label: string): Promise<string> {
-		const createdPath = await mkdir(path, { recursive: true, mode: 0o700 });
+	async #ensureAuthorityDirectory(relativePath: string | undefined, label: string): Promise<string> {
+		const authority = this.#directoryAuthority;
+		if (authority === undefined) throw new RuntimeCleanupStoreError(`${label} authority is unavailable`);
+		const expectedPath =
+			relativePath === undefined ? authority.stateRootPath : join(authority.stateRootPath, relativePath);
+		let path: string;
+		try {
+			path = await authority.ensure(relativePath);
+		} catch {
+			throw new RuntimeCleanupStoreError(`${label} authority rejected the requested directory`);
+		}
+		if (path !== expectedPath) {
+			throw new RuntimeCleanupStoreError(`${label} authority returned an unexpected path`);
+		}
 		let handle: FileHandle;
 		try {
 			handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -124,28 +141,9 @@ export class RuntimeCleanupStore {
 			) {
 				throw new RuntimeCleanupStoreError(`${label} identity changed while canonicalizing`);
 			}
+			await handle.sync();
 		} finally {
 			await handle.close();
-		}
-		if (createdPath !== undefined) {
-			const firstCreated = await realpath(createdPath);
-			const tail = relative(firstCreated, canonicalPath);
-			if (tail === ".." || tail.startsWith(`..${sep}`) || isAbsolute(tail)) {
-				throw new LocalAuthorityStoreError("root_integrity", `${label} creation escaped its private parent`);
-			}
-			const createdDirectories = [firstCreated];
-			let current = firstCreated;
-			if (tail !== "") {
-				for (const component of tail.split(sep)) {
-					current = join(current, component);
-					createdDirectories.push(current);
-				}
-			}
-			for (const created of createdDirectories) {
-				await this.#requirePrivateOwnedDirectory(created, 0o700, label);
-				await this.#syncPrivateDirectory(created, label);
-				await this.#syncPrivateDirectory(dirname(created), `${label} parent`);
-			}
 		}
 		return canonicalPath;
 	}
@@ -190,10 +188,8 @@ export class RuntimeCleanupStore {
 	}
 
 	async #recordRoot(): Promise<string | undefined> {
-		const engineStateRoot = await this.stateRoot();
-		if (engineStateRoot === undefined) return undefined;
-		const root = join(engineStateRoot, "runtime-cleanup");
-		return await this.#ensureDurablePrivateDirectory(root, "engine runtime cleanup root");
+		if (this.#directoryAuthority === undefined) return undefined;
+		return await this.#ensureAuthorityDirectory("runtime-cleanup", "engine runtime cleanup root");
 	}
 
 	async #recordPath(launchId: string): Promise<string | undefined> {

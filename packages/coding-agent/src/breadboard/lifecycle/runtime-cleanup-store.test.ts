@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, symlink, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
+import { LocalAuthorityStore } from "./local-authority-store";
 import { RuntimeCleanupStore, RuntimeCleanupStoreError } from "./runtime-cleanup-store";
 
 const roots: string[] = [];
@@ -22,6 +23,17 @@ async function exists(path: string): Promise<boolean> {
 	}
 }
 
+function cleanupStore(root: string, stateRootRelativePath = "engine-state"): RuntimeCleanupStore {
+	const authority = new LocalAuthorityStore(root);
+	return new RuntimeCleanupStore({
+		stateRootPath: join(root, stateRootRelativePath),
+		ensure: relativePath =>
+			authority.ensurePrivateDirectory(
+				relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+			),
+	});
+}
+
 async function fixture(): Promise<{
 	readonly store: RuntimeCleanupStore;
 	readonly engineRoot: string;
@@ -34,7 +46,7 @@ async function fixture(): Promise<{
 	roots.push(root, engineRoot, rayRoot);
 	await chmod(engineRoot, 0o500);
 	await chmod(rayRoot, 0o700);
-	const store = new RuntimeCleanupStore(join(root, "engine-state"));
+	const store = cleanupStore(root);
 	const stateRoot = await store.stateRoot();
 	if (stateRoot === undefined) throw new Error("expected configured state root");
 	return {
@@ -56,11 +68,26 @@ describe("RuntimeCleanupStore", () => {
 		roots.push(parent, target);
 		await writeFile(join(target, "unrelated"), "retain");
 		await symlink(target, join(parent, "engine-state"));
-		const store = new RuntimeCleanupStore(join(parent, "engine-state"));
+		const store = cleanupStore(parent);
 
 		const error = await store.stateRoot().catch(cause => cause);
 		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
 		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await Bun.file(join(target, "unrelated")).text()).toBe("retain");
+	});
+
+	test("rejects an intermediate engine-state symlink without creating outside the authority root", async () => {
+		const root = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-state-root-"));
+		const target = await mkdtemp(join(tmpdir(), "bb-runtime-cleanup-state-target-"));
+		roots.push(root, target);
+		await writeFile(join(target, "unrelated"), "retain");
+		await symlink(target, join(root, "engine-state"));
+		const store = cleanupStore(root, join("engine-state", "endpoint"));
+
+		const error = await store.stateRoot().catch(cause => cause);
+		expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+		expect((error as RuntimeCleanupStoreError).code).toBe("root_integrity");
+		expect(await exists(join(target, "endpoint"))).toBeFalse();
 		expect(await Bun.file(join(target, "unrelated")).text()).toBe("retain");
 	});
 
