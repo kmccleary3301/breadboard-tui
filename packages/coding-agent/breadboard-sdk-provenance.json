@@ -3,16 +3,15 @@
   "packageName": "@breadboard/sdk",
   "packageVersion": "0.3.0",
   "artifactPath": "./vendor/breadboard-sdk-0.3.0.tgz",
-  "artifactSha256": "9e3b9ddbb5bb86bc5983d7320bbb62afc6e13e34d92a3fd9ff9a0a182a3c64ad",
-  "artifactSha512Base64": "HYSOlaA9lgzgeFj/5cIEn4w0hF1aDRzfEI6e/RiID7ryXvvovwWZakQbizwlAeMs+XWUNTNW3L/3euG3O4UO6Q==",
-  "artifactSizeBytes": 59666,
-  "backendCommit": "90cc91fc2bcff20ff284eaa59e0fb52c9c5d89d7",
-  "backendTree": "bea811904c24b1d38c061f2323a01f8cb08f3dad",
+  "artifactSha256": "181309cc011c7a43dda2308aaf25fc7674965010b4275720f06d2e78fa7be80f",
+  "artifactSha512Base64": "DekHnbagDkb6zowNrpDr3IJYvmWHvKYhzovsRdoHNY1AvZH8tJgEfFF9bzSYg2+imZbvN4I+URHVS0F6b8nrBA==",
+  "artifactSizeBytes": 59672,
+  "backendCommit": "a1d5139cd24a615ac58f5f69fad9887ef8529ef7",
+  "backendTree": "001b06cb3b2e278ca84601112249a90658d69096",
   "backendRootEnvironmentVariable": "BREADBOARD_P30_BACKEND_ROOT",
   "installedFilesSha256": {
-    "README.md": "3864137b76651204b32f9eac284ee64553d907cb31b06441cfee140c3c17bc23",
-    "dist/client.d.ts": "065a08ae11b4ed52ee60e3c764a7624f142df9b02cfd3e7596979b5fa97e88d1",
-    "dist/client.js": "a67f14532448a3833fede14a3ad722d046aa841afb08b1c4b9e24863788f6132",
+    "dist/client.d.ts": "fa16775ed9cb80dfdbfb82b026e574c49ed16e6b4fea66daeccbc450ffa0226e",
+    "dist/client.js": "2c4e944d8d3f32ebc8a043b55099a42d1438c9dcae266513c3d01e33953e5163",
     "dist/endpoint-client.d.ts": "047e3450b0201b95667859ed1d925178ee5c5d6943c60febb65da41ead92c27a",
     "dist/endpoint-client.js": "dceac45c6b0dc6b82886d526882afe51b6563fb7fad27eabfb524c2aa0d6572e",
     "dist/generated/dtos.d.ts": "42dc32b4a1e1d188174e8fc9db737eca473b9834c630c9cd340cccc45884e86a",
@@ -30,9 +29,10 @@
     "dist/session-runtime.d.ts": "934bfad5a7855740cc85ac57ade61df877e98f1f70d073769474d9282d4260e8",
     "dist/session-runtime.js": "2739eaefbbf1dee5ac513c7cf5bb5f18af664ca1750d6654ae1d8bff3a29d688",
     "dist/stream.d.ts": "3a46e33c15cb23064835fe0708d7a55752e7a9739edf94ff9f4d0aeb22293817",
-    "dist/stream.js": "fdcae0f2a7b7c1f66d25b4cfe2162d9c969e8189a500c683400762e253fe55f4",
+    "dist/stream.js": "a895a290b45508703ea47e80ca0cb28cd06e1d4f59f47189a69a7e553fc4e9fb",
     "dist/types.d.ts": "f6f418638617b1d3a656342f6bc77dc41a0915d48484bf0677a15f15aa4b42a4",
     "dist/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
-    "package.json": "0161b1f9f0de584ac339f460a921e0fc91760e58321d29cb844dd357dfbb2155"
+    "package.json": "0161b1f9f0de584ac339f460a921e0fc91760e58321d29cb844dd357dfbb2155",
+    "README.md": "3864137b76651204b32f9eac284ee64553d907cb31b06441cfee140c3c17bc23"
   }
 }
