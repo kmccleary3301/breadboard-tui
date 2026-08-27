@@ -38,6 +38,10 @@ const DIRENT_NAMLEN_OFFSET = 18;
 const DIRENT_TYPE_OFFSET = 20;
 const DIRENT_NAME_OFFSET = 21;
 const DIRECTORY_BUFFER_BYTES = 64 * 1024;
+const STATFS_BYTES = 2168;
+const STATFS_FSID_OFFSET = 48;
+const STATFS_MNTONNAME_OFFSET = 88;
+const STATFS_MNTONNAME_BYTES = 1024;
 
 export const DARWIN_PINNED_DIRECTORY_LIMITS = Object.freeze({
 	maxRootPathBytes: 1023,
@@ -109,6 +113,7 @@ const SYSTEM_SYMBOLS = {
 	open: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	openat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	fstat: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+	fstatfs: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
 	pread: { args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.i64], returns: FFIType.i64 },
 	readlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
 	__getdirentries64: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
@@ -214,6 +219,22 @@ function fstatFd(lib: SystemLibrary, fd: number, operation: string, relativePath
 	const bytes = Buffer.alloc(STAT_BYTES);
 	if (Number(lib.symbols.fstat(fd, ptr(bytes))) !== 0) throw nativeError(lib, operation, relativePath);
 	return parseStat(bytes);
+}
+
+type MountIdentityReader = (fd: number, relativePath: string) => string;
+type MountIdentityTransform = (fd: number, relativePath: string, actualIdentity: string) => string;
+
+function mountIdentityFd(lib: SystemLibrary, fd: number, relativePath: string, bytes: Buffer): string {
+	for (;;) {
+		if (Number(lib.symbols.fstatfs(fd, ptr(bytes))) === 0) break;
+		if (currentErrno(lib) !== EINTR) throw nativeError(lib, "fstatfs", relativePath);
+	}
+	const mountName = bytes.subarray(STATFS_MNTONNAME_OFFSET, STATFS_MNTONNAME_OFFSET + STATFS_MNTONNAME_BYTES);
+	const terminator = mountName.indexOf(0);
+	if (terminator < 0) throw invalid("fstatfs returned an unterminated mount name", relativePath);
+	return `${bytes.subarray(STATFS_FSID_OFFSET, STATFS_FSID_OFFSET + 8).toString("hex")}:${mountName
+		.subarray(0, terminator)
+		.toString("hex")}`;
 }
 
 function sameIdentity(left: PinnedStat, right: Readonly<Pick<PinnedStat, "dev" | "ino">>): boolean {
@@ -436,6 +457,16 @@ function directoryEntries(lib: SystemLibrary, fd: number): readonly DirectoryEnt
 interface RemovalBudget {
 	remainingEntries: number;
 	rootDev?: bigint;
+	rootMountIdentity?: string;
+	readonly readMountIdentity: MountIdentityReader;
+}
+
+function assertCleanupMount(directoryFd: number, relativePath: string, budget: RemovalBudget): void {
+	const identity = budget.readMountIdentity(directoryFd, relativePath);
+	if (budget.rootMountIdentity === undefined) budget.rootMountIdentity = identity;
+	else if (identity !== budget.rootMountIdentity) {
+		throw invalid("cleanup refuses to cross a mount boundary", relativePath);
+	}
 }
 
 function makeDirectoryWritable(lib: SystemLibrary, fd: number, relativePath: string): void {
@@ -458,6 +489,7 @@ function unlinkAtErrno(lib: SystemLibrary, directoryFd: number, name: string, fl
 }
 
 function removeDirectoryContents(lib: SystemLibrary, directoryFd: number, prefix: string, budget: RemovalBudget): void {
+	assertCleanupMount(directoryFd, prefix, budget);
 	makeDirectoryWritable(lib, directoryFd, prefix);
 	for (;;) {
 		const enumerationFd = openDirectoryAt(lib, directoryFd, ".", prefix);
@@ -478,8 +510,8 @@ function removeDirectoryContents(lib: SystemLibrary, directoryFd: number, prefix
 	}
 }
 
-// Recursive mutation stays on opened descriptors. The final name operation is
-// nonrecursive and follows an identity check, so a race cannot redirect traversal.
+// Recursive mutation stays on same-mount opened descriptors. The final name
+// operation is nonrecursive and follows mount and inode identity checks.
 function removeDirectoryEntry(
 	lib: SystemLibrary,
 	parentFd: number,
@@ -517,6 +549,7 @@ function removeDirectoryEntry(
 			for (;;) {
 				const currentFd = openDirectoryAt(lib, parentFd, name, relativePath);
 				try {
+					assertCleanupMount(currentFd, relativePath, budget);
 					if (!sameIdentity(fstatFd(lib, currentFd, "fstat", relativePath), identity)) {
 						throw invalid("cleanup directory name no longer identifies its descriptor", relativePath);
 					}
@@ -630,10 +663,12 @@ class NativePinnedDirectory implements PinnedDirectory {
 	readonly fd: number;
 	readonly identity: Readonly<Pick<PinnedStat, "dev" | "ino">>;
 	readonly #lib: SystemLibrary;
+	readonly #readMountIdentity: MountIdentityReader;
 	#closed = false;
 
-	constructor(lib: SystemLibrary, fd: number, stat: PinnedStat) {
+	constructor(lib: SystemLibrary, fd: number, stat: PinnedStat, readMountIdentity: MountIdentityReader) {
 		this.#lib = lib;
+		this.#readMountIdentity = readMountIdentity;
 		this.fd = fd;
 		this.identity = Object.freeze({ dev: stat.dev, ino: stat.ino });
 	}
@@ -735,7 +770,11 @@ class NativePinnedDirectory implements PinnedDirectory {
 			this.fd,
 			components[0] as string,
 			relativePath,
-			{ remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries, rootDev: expected?.dev },
+			{
+				remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries,
+				rootDev: expected?.dev,
+				readMountIdentity: this.#readMountIdentity,
+			},
 			expected,
 			true,
 		);
@@ -757,7 +796,10 @@ class NativePinnedDirectory implements PinnedDirectory {
 	}
 }
 
-export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirectory> {
+async function openPinnedDirectoryInternal(
+	rootPath: string,
+	transformMountIdentity?: MountIdentityTransform,
+): Promise<PinnedDirectory> {
 	validateRootPath(rootPath);
 	const lib = system();
 	const path = cString(rootPath);
@@ -766,9 +808,26 @@ export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirec
 	try {
 		const stat = fstatFd(lib, fd, "fstat", rootPath);
 		if (stat.type !== "directory") throw invalid("opened root is not a directory", rootPath);
-		return new NativePinnedDirectory(lib, fd, stat);
+		const mountIdentityBytes = Buffer.alloc(STATFS_BYTES);
+		const readMountIdentity: MountIdentityReader = (descriptor, relativePath) => {
+			const actualIdentity = mountIdentityFd(lib, descriptor, relativePath, mountIdentityBytes);
+			return transformMountIdentity?.(descriptor, relativePath, actualIdentity) ?? actualIdentity;
+		};
+		return new NativePinnedDirectory(lib, fd, stat, readMountIdentity);
 	} catch (error) {
 		closeQuietly(lib, fd);
 		throw error;
 	}
+}
+
+export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirectory> {
+	return openPinnedDirectoryInternal(rootPath);
+}
+
+/** @internal Deterministic fault injection for mount-transition regression tests. */
+export async function openPinnedDirectoryWithMountIdentityForTesting(
+	rootPath: string,
+	transformMountIdentity: MountIdentityTransform,
+): Promise<PinnedDirectory> {
+	return openPinnedDirectoryInternal(rootPath, transformMountIdentity);
 }

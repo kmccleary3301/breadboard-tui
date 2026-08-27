@@ -8,6 +8,7 @@ import {
 	DARWIN_PINNED_DIRECTORY_LIMITS,
 	DarwinPinnedDirectoryError,
 	openPinnedDirectory,
+	openPinnedDirectoryWithMountIdentityForTesting,
 	type PinnedDirectory,
 } from "./darwin-pinned-directory";
 
@@ -97,6 +98,64 @@ describe.skipIf(process.platform !== "darwin")("Darwin pinned directory", () => 
 		).rejects.toBeInstanceOf(DarwinPinnedDirectoryError);
 		expect(await Bun.file(join(parked, "original")).text()).toBe("original");
 		expect(await Bun.file(join(target, "replacement")).text()).toBe("replacement");
+	});
+
+	test("rejects a simulated same-device mount before recursive mutation", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const nested = join(target, "nested");
+		const outside = join(root, "outside");
+		await mkdir(nested, { recursive: true });
+		await mkdir(outside);
+		await writeFile(join(nested, "value"), "retain");
+		await writeFile(join(outside, "value"), "outside");
+		await chmod(nested, 0o500);
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(root, (_fd, relativePath, actualIdentity) =>
+			relativePath === "target/nested" ? `${actualIdentity}:foreign-mount` : actualIdentity,
+		);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup refuses to cross a mount boundary");
+		expect((await lstat(nested)).mode & 0o777).toBe(0o500);
+		expect(await Bun.file(join(nested, "value")).text()).toBe("retain");
+		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
+		await chmod(nested, 0o700);
+	});
+
+	test("rejects a simulated same-device mount replacement after traversal", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const nested = join(target, "nested");
+		const outside = join(root, "outside");
+		await mkdir(nested, { recursive: true });
+		await mkdir(outside);
+		await writeFile(join(nested, "value"), "remove-before-race");
+		await writeFile(join(outside, "value"), "outside");
+		const targetMetadata = await lstat(target);
+		let nestedMountObservations = 0;
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(root, (_fd, relativePath, actualIdentity) => {
+			if (relativePath !== "target/nested") return actualIdentity;
+			nestedMountObservations += 1;
+			return nestedMountObservations === 1 ? actualIdentity : `${actualIdentity}:replacement-mount`;
+		});
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup refuses to cross a mount boundary");
+		expect(nestedMountObservations).toBe(2);
+		expect((await lstat(nested)).isDirectory()).toBeTrue();
+		await expect(lstat(join(nested, "value"))).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
 	});
 
 	test("fails closed when the cleanup root name is replaced after descriptor traversal starts", async () => {
