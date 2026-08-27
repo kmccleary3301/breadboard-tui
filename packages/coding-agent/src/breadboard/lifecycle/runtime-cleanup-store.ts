@@ -1,7 +1,7 @@
 import { constants, type Stats } from "node:fs";
 import { type FileHandle, lstat, mkdir, open, realpath, rename, rmdir, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
 import { LocalAuthorityStoreError } from "./local-authority-store";
 
@@ -42,18 +42,7 @@ export class RuntimeCleanupStore {
 
 	async stateRoot(): Promise<string | undefined> {
 		if (this.#engineStateRoot === undefined) return undefined;
-		await mkdir(this.#engineStateRoot, { recursive: true, mode: 0o700 });
-		const metadata = await lstat(this.#engineStateRoot);
-		const expectedUid = process.geteuid?.() ?? process.getuid?.() ?? -1;
-		if (
-			!metadata.isDirectory() ||
-			metadata.isSymbolicLink() ||
-			(metadata.mode & 0o777) !== 0o700 ||
-			metadata.uid !== expectedUid
-		) {
-			throw new LocalAuthorityStoreError("root_integrity", "engine state root is not one private owned directory");
-		}
-		return await realpath(this.#engineStateRoot);
+		return await this.#ensureDurablePrivateDirectory(this.#engineStateRoot, "engine state root");
 	}
 
 	async persist(
@@ -88,8 +77,9 @@ export class RuntimeCleanupStore {
 			persisted = true;
 		} finally {
 			await handle.close();
-			if (!persisted) await unlink(path).catch(() => undefined);
+			if (!persisted) await this.#unlinkRecord(path);
 		}
+		await this.#syncPrivateDirectory(dirname(path), "engine runtime cleanup root");
 		return true;
 	}
 
@@ -100,18 +90,66 @@ export class RuntimeCleanupStore {
 			await this.#quarantineAndRemove(loaded.record, "engine", loaded.record.engineRuntime);
 		}
 		await this.#quarantineAndRemove(loaded.record, "ray", loaded.record.rayRuntime);
-		await unlink(loaded.path).catch(error => {
+		await this.#unlinkRecord(loaded.path);
+	}
+
+	async #ensureDurablePrivateDirectory(path: string, label: string): Promise<string> {
+		const createdPath = await mkdir(path, { recursive: true, mode: 0o700 });
+		const canonicalPath = await realpath(path);
+		await this.#requirePrivateOwnedDirectory(canonicalPath, 0o700, label);
+		if (createdPath !== undefined) {
+			const firstCreated = await realpath(createdPath);
+			const tail = relative(firstCreated, canonicalPath);
+			if (tail === ".." || tail.startsWith(`..${sep}`) || isAbsolute(tail)) {
+				throw new LocalAuthorityStoreError("root_integrity", `${label} creation escaped its private parent`);
+			}
+			const createdDirectories = [firstCreated];
+			let current = firstCreated;
+			if (tail !== "") {
+				for (const component of tail.split(sep)) {
+					current = join(current, component);
+					createdDirectories.push(current);
+				}
+			}
+			for (const created of createdDirectories) {
+				await this.#requirePrivateOwnedDirectory(created, 0o700, label);
+				await this.#syncPrivateDirectory(dirname(created), `${label} parent`);
+			}
+		}
+		return canonicalPath;
+	}
+
+	async #syncPrivateDirectory(path: string, label: string): Promise<void> {
+		const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+		try {
+			const before = await handle.stat();
+			await this.#requirePrivateOwnedDirectory(path, 0o700, label, before);
+			await handle.sync();
+			const after = await handle.stat();
+			if (after.dev !== before.dev || after.ino !== before.ino || !after.isDirectory()) {
+				throw new LocalAuthorityStoreError("root_integrity", `${label} identity changed while synchronizing`);
+			}
+		} finally {
+			await handle.close();
+		}
+	}
+
+	async #unlinkRecord(path: string): Promise<void> {
+		let removed = false;
+		try {
+			await unlink(path);
+			removed = true;
+		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		});
+		}
+		if (removed) await this.#syncPrivateDirectory(dirname(path), "engine runtime cleanup root");
 	}
 
 	async #recordRoot(): Promise<string | undefined> {
 		const engineStateRoot = await this.stateRoot();
 		if (engineStateRoot === undefined) return undefined;
 		const root = join(engineStateRoot, "runtime-cleanup");
-		await mkdir(root, { recursive: true, mode: 0o700 });
-		await this.#requirePrivateOwnedDirectory(root, 0o700, "engine runtime cleanup root");
-		return await realpath(root);
+		return await this.#ensureDurablePrivateDirectory(root, "engine runtime cleanup root");
 	}
 
 	async #recordPath(launchId: string): Promise<string | undefined> {
@@ -176,7 +214,26 @@ export class RuntimeCleanupStore {
 		) {
 			throw new RuntimeCleanupStoreError("engine runtime cleanup identity changed");
 		}
-		return { path, record: value as unknown as RuntimeCleanupRecord };
+		const record = value as unknown as RuntimeCleanupRecord;
+		if (!isAbsolute(record.temporaryRoot) || record.temporaryRoot !== (await realpath(tmpdir()))) {
+			throw new RuntimeCleanupStoreError("engine runtime cleanup temporary root identity changed");
+		}
+		this.#validateRecordedRuntimeRoot(record.rayRuntime, record.temporaryRoot, RAY_RUNTIME_ROOT_PATTERN);
+		if (record.engineRuntime !== undefined) {
+			this.#validateRecordedRuntimeRoot(record.engineRuntime, record.temporaryRoot, ENGINE_RUNTIME_ROOT_PATTERN);
+		}
+		return { path, record };
+	}
+
+	#validateRecordedRuntimeRoot(root: RuntimeRootIdentity, temporaryRoot: string, pattern: RegExp): void {
+		if (
+			!isAbsolute(root.path) ||
+			dirname(root.path) !== temporaryRoot ||
+			join(temporaryRoot, basename(root.path)) !== root.path ||
+			!pattern.test(basename(root.path))
+		) {
+			throw new RuntimeCleanupStoreError("engine runtime cleanup path escaped its recorded namespace");
+		}
 	}
 
 	async #captureRuntimeRoot(path: string, temporaryRoot: string, pattern: RegExp): Promise<RuntimeRootIdentity> {

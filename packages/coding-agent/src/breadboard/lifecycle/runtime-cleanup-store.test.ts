@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, realpath, rename } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
@@ -99,6 +99,28 @@ describe("RuntimeCleanupStore", () => {
 		expect(await exists(recordPath)).toBeTrue();
 	});
 
+	test("rejects a cleanup record that rebinds Ray cleanup to the engine-root namespace", async () => {
+		const { store, engineRoot, rayRoot, recordPath } = await fixture();
+		await store.persist(identity, engineRoot, rayRoot);
+		const wrongKindRoot = await mkdtemp(join(tmpdir(), "bb-engine-runtime-"));
+		roots.push(wrongKindRoot);
+		const wrongKindMetadata = await lstat(wrongKindRoot);
+		const record = JSON.parse(await readFile(recordPath, "utf8")) as {
+			rayRuntime: { path: string; device: number; inode: number };
+		};
+		record.rayRuntime = {
+			path: await realpath(wrongKindRoot),
+			device: wrongKindMetadata.dev,
+			inode: wrongKindMetadata.ino,
+		};
+		await writeFile(recordPath, `${JSON.stringify(record)}\n`, "utf8");
+
+		await expect(store.remove(identity)).rejects.toBeInstanceOf(RuntimeCleanupStoreError);
+		expect(await exists(engineRoot)).toBeTrue();
+		expect(await exists(rayRoot)).toBeTrue();
+		expect(await exists(wrongKindRoot)).toBeTrue();
+		expect(await exists(recordPath)).toBeTrue();
+	});
 	test("resumes cleanup after a persisted root was already quarantined", async () => {
 		const { store, engineRoot, rayRoot, recordPath } = await fixture();
 		await store.persist(identity, engineRoot, rayRoot);

@@ -18,7 +18,12 @@ import {
 	P30_SESSION_CONTRACT_ID,
 	P30_SESSION_SCHEMA_SHA256,
 } from "@breadboard/sdk/internal";
-import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
+import {
+	type DarwinVerifiedProcess,
+	DarwinVerifiedSpawnError,
+	darwinProcessStartToken,
+	spawnDarwinVerified,
+} from "./darwin-verified-spawn";
 import {
 	EngineRuntimeBundleError,
 	type ExtractedEngineRuntimeBundle,
@@ -337,6 +342,16 @@ function unrefDelay(milliseconds: number): Promise<void> {
 	return promise;
 }
 
+async function terminateVerifiedChildAfterPersistenceFailure(child: DarwinVerifiedProcess): Promise<void> {
+	for (;;) {
+		if (await child.waitForExit(0).catch(() => false)) return;
+		const outcome = await child.signalIfSame("SIGKILL").catch(() => "identity-unavailable" as const);
+		if (outcome === "process-exited" || outcome === "identity-changed") return;
+		if (await child.waitForExit(5_000).catch(() => false)) return;
+		await unrefDelay(25);
+	}
+}
+
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
 	readonly #runtimeCleanup: RuntimeCleanupStore;
@@ -393,8 +408,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			try {
 				cleanupPersisted = await this.#runtimeCleanup.persist(identity, retained.rootPath, retainedRayRuntimeRoot);
 			} catch (error) {
-				await verified.signalIfSame("SIGKILL").catch(() => undefined);
-				await verified.waitForExit(5_000).catch(() => false);
+				await terminateVerifiedChildAfterPersistenceFailure(verified);
 				throw error;
 			}
 			const exited = verified.exited.finally(async () => {
@@ -522,8 +536,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			try {
 				cleanupPersisted = await this.#runtimeCleanup.persist(identity, undefined, retainedRayRuntimeRoot);
 			} catch (error) {
-				await verified.signalIfSame("SIGKILL").catch(() => undefined);
-				await verified.waitForExit(5_000).catch(() => false);
+				await terminateVerifiedChildAfterPersistenceFailure(verified);
 				throw error;
 			}
 			const exited = verified.exited.finally(async () => {
