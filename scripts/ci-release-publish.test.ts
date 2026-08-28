@@ -163,15 +163,36 @@ describe("published coding-agent topology", () => {
 				),
 				Bun.write(
 					path.join(sdkRoot, "package.json"),
-					JSON.stringify({ name: "@breadboard/sdk", version: "0.3.0" }),
+					JSON.stringify({
+						name: "@breadboard/sdk",
+						version: "0.3.0",
+						dependencies: { "eventsource-parser": "^1.1.2" },
+					}),
 				),
 			]);
+			await $`tar -czf ${tarball} -C ${root} package`.quiet();
+			await expect(rewritePackedBundledDependencies(tarball, ["@breadboard/sdk"])).rejects.toThrow(
+				"must retain eventsource-parser@^1.1.2",
+			);
+			await Bun.write(
+				path.join(packageRoot, "package.json"),
+				JSON.stringify({
+					name: "@oh-my-pi/pi-coding-agent",
+					version: "18.0.1",
+					dependencies: {
+						"@breadboard/sdk": "file:./vendor/breadboard-sdk-0.3.0.tgz",
+						"eventsource-parser": "^1.1.2",
+					},
+					bundledDependencies: ["@breadboard/sdk"],
+				}),
+			);
 			await $`tar -czf ${tarball} -C ${root} package`.quiet();
 
 			await rewritePackedBundledDependencies(tarball, ["@breadboard/sdk"]);
 
 			const packedManifest = JSON.parse((await $`tar -xOzf ${tarball} package/package.json`.quiet()).text());
 			expect(packedManifest.dependencies?.["@breadboard/sdk"]).toBeUndefined();
+			expect(packedManifest.dependencies?.["eventsource-parser"]).toBe("^1.1.2");
 			expect(
 				(await $`tar -xOzf ${tarball} package/node_modules/@breadboard/sdk/package.json`.quiet()).text(),
 			).toContain('"version":"0.3.0"');

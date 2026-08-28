@@ -378,9 +378,21 @@ export async function rewritePackedBundledDependencies(
 			if (!manifest.bundledDependencies?.includes(dependency)) {
 				throw new Error(`Packed manifest does not declare bundled dependency ${dependency}`);
 			}
-			const dependencyManifest = path.join(root, "package", "node_modules", dependency, "package.json");
-			if (!(await Bun.file(dependencyManifest).exists())) {
+			const dependencyManifestPath = path.join(root, "package", "node_modules", dependency, "package.json");
+			if (!(await Bun.file(dependencyManifestPath).exists())) {
 				throw new Error(`Packed archive is missing bundled dependency ${dependency}`);
+			}
+			const dependencyManifest = (await Bun.file(dependencyManifestPath).json()) as PackageManifest;
+			for (const runtimeDependency in dependencyManifest.dependencies ?? {}) {
+				const requiredRange = dependencyManifest.dependencies?.[runtimeDependency];
+				if (typeof requiredRange !== "string") {
+					throw new Error(`Bundled dependency ${dependency} has an invalid runtime dependency ${runtimeDependency}`);
+				}
+				if (manifest.dependencies?.[runtimeDependency] !== requiredRange) {
+					throw new Error(
+						`Packed manifest must retain ${runtimeDependency}@${requiredRange} required by bundled dependency ${dependency}`,
+					);
+				}
 			}
 			if (manifest.dependencies) delete manifest.dependencies[dependency];
 		}
