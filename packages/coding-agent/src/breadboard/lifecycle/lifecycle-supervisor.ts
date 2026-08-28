@@ -2851,7 +2851,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		}
 	}
 	async #settleChildRecovery(): Promise<void> {
-		await this.#childRecoveryPromise;
+		while (this.#childRecoveryPromise) await this.#childRecoveryPromise;
 	}
 
 	async stop(options: StopOptions): Promise<LifecycleResult> {

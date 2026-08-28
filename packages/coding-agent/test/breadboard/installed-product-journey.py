@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import atexit
 import argparse
 import codecs
+import csv
 import errno
 import fcntl
 import hashlib
@@ -62,23 +64,6 @@ SYNTHETIC_TOOLS = ("todo.write_board", "write", "run_shell")
 ANSI_RE = re.compile(
     rb"(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~]|\x1B[@-_])"
 )
-SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
-SYSTEM_OPEN = Path("/usr/bin/open")
-SYSTEM_PYTHON = Path("/usr/bin/python3")
-LOOPBACK_SANDBOX_PROFILE = """(version 1)
-(deny default)
-(allow process*)
-(allow process-info*)
-(allow signal (target same-sandbox))
-(deny process-exec (literal "/usr/bin/open"))
-(allow file*)
-(allow sysctl*)
-(allow mach*)
-(allow ipc*)
-(allow network-bind (local ip "localhost:*"))
-(allow network-inbound (local ip "localhost:*"))
-(allow network-outbound (remote ip "localhost:*"))
-"""
 
 
 class JourneyFailure(RuntimeError):
@@ -488,6 +473,7 @@ def transcript_facts(rows: list[dict[str, Any]]) -> dict[str, Any]:
                     "id": str(message.get("toolCallId", "")),
                     "name": name,
                     "isError": message.get("isError") is True,
+                    "content": content_text(content),
                 }
             )
     return {
@@ -612,47 +598,25 @@ def assert_loopback_network(processes: dict[str, Any], label: str) -> None:
         )
 
 
-def create_provider_isolation_guard(
+def create_browser_launch_guard(
     temp_root: Path, environment: dict[str, str]
-) -> tuple[Path, Path, dict[str, Any]]:
-    for executable in (SANDBOX_EXEC, SYSTEM_OPEN, SYSTEM_PYTHON):
-        if not executable.is_file() or not os.access(executable, os.X_OK):
-            raise JourneyFailure(
-                f"provider-isolation executable is unavailable: {executable}"
-            )
-    profile = temp_root / "g6-loopback-only.sb"
-    profile.write_text(LOOPBACK_SANDBOX_PROFILE, encoding="utf-8")
-    profile.chmod(0o400)
-    browser_marker = temp_root / "g6-browser-launch-attempted"
-    browser_guard = temp_root / "g6-browser-launch-guard"
-    browser_guard.write_text(
+) -> tuple[Path, dict[str, Any]]:
+    guard_root = temp_root / "g6-browser-guard-bin"
+    guard_root.mkdir(mode=0o700)
+    marker = temp_root / "g6-browser-launch-attempted"
+    guard = guard_root / "open"
+    guard.write_text(
         "#!/usr/bin/python3\n"
         "from pathlib import Path\n"
-        f"Path({str(browser_marker)!r}).write_text('attempted\\n', encoding='utf-8')\n"
+        f"Path({str(marker)!r}).open('a', encoding='utf-8').write('attempted\\n')\n"
         "raise SystemExit(125)\n",
         encoding="utf-8",
     )
-    browser_guard.chmod(0o700)
-    environment["BROWSER"] = str(browser_guard)
-    network_probe_source = (
-        "import errno,json,socket;"
-        "server=socket.socket();server.bind(('127.0.0.1',0));server.listen();"
-        "loopback=socket.socket();loopback_result=loopback.connect_ex(server.getsockname());"
-        "non_loopback=socket.socket();"
-        "non_loopback_result=non_loopback.connect_ex(('192.0.2.1',9));"
-        "print(json.dumps({'loopbackConnectErrno':loopback_result,"
-        "'nonLoopbackConnectErrno':non_loopback_result,"
-        "'expectedDeniedErrnos':[errno.EPERM,errno.EACCES]}))"
-    )
-    network_probe = subprocess.run(
-        [
-            str(SANDBOX_EXEC),
-            "-f",
-            str(profile),
-            str(SYSTEM_PYTHON),
-            "-c",
-            network_probe_source,
-        ],
+    guard.chmod(0o700)
+    environment["BROWSER"] = str(guard)
+    environment["PATH"] = f"{guard_root}:{environment['PATH']}"
+    probe = subprocess.run(
+        [str(guard), "control-probe"],
         cwd=temp_root,
         env=environment,
         capture_output=True,
@@ -660,60 +624,132 @@ def create_provider_isolation_guard(
         timeout=10,
         check=False,
     )
-    try:
-        network_result = json.loads(network_probe.stdout)
-    except json.JSONDecodeError as error:
-        raise JourneyFailure(
-            f"provider-isolation network probe returned invalid JSON: {network_probe.stdout!r}"
-        ) from error
-    denied_errnos = network_result.get("expectedDeniedErrnos")
     if (
-        network_probe.returncode != 0
-        or network_result.get("loopbackConnectErrno") != 0
-        or not isinstance(denied_errnos, list)
-        or network_result.get("nonLoopbackConnectErrno") not in denied_errnos
+        probe.returncode != 125
+        or not marker.is_file()
+        or marker.read_text(encoding="utf-8").splitlines() != ["attempted"]
     ):
-        raise JourneyFailure(
-            "provider-isolation sandbox did not allow loopback and deny non-loopback networking"
-        )
-    browser_probe = subprocess.run(
-        [str(SANDBOX_EXEC), "-f", str(profile), str(SYSTEM_OPEN), "--help"],
-        cwd=temp_root,
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    if browser_probe.returncode == 0 or browser_marker.exists():
-        raise JourneyFailure("provider-isolation sandbox permitted a browser launch")
-    evidence = {
-        "schemaVersion": "bb.g6_provider_isolation_guard.v1",
+        raise JourneyFailure("OAuth browser launch guard control probe failed")
+    marker.unlink()
+    return marker, {
+        "schemaVersion": "bb.g6_browser_launch_guard.v1",
         "status": "pass",
-        "profileSha256": hashlib.sha256(
-            LOOPBACK_SANDBOX_PROFILE.encode("utf-8")
-        ).hexdigest(),
-        "networkProbe": {
-            **network_result,
-            "exitCode": network_probe.returncode,
-            "nonLoopbackDenied": True,
-            "loopbackAllowed": True,
-        },
-        "browserProbe": {
-            "exitCode": browser_probe.returncode,
-            "systemOpenDenied": True,
-        },
-        "browserGuard": {
-            "environmentKey": "BROWSER",
-            "attemptCount": 0,
-        },
-        "productCommandPrefix": [
-            str(SANDBOX_EXEC),
-            "-f",
-            "<isolated-loopback-profile>",
-        ],
+        "environmentKey": "BROWSER",
+        "pathCommand": "open",
+        "controlProbeExitCode": probe.returncode,
+        "attemptCount": 0,
     }
-    return profile, browser_marker, evidence
+
+
+def start_network_audit(
+    temp_root: Path,
+) -> tuple[Path, subprocess.Popen[str], Any]:
+    nettop = Path("/usr/bin/nettop")
+    if not nettop.is_file() or not os.access(nettop, os.X_OK):
+        raise JourneyFailure("continuous network audit requires /usr/bin/nettop")
+    raw_path = temp_root / "g6-network-audit.raw.csv"
+    stream = raw_path.open("w", encoding="utf-8", newline="")
+    process = subprocess.Popen(
+        [
+            str(nettop),
+            "-L",
+            "0",
+            "-n",
+            "-x",
+            "-s",
+            "1",
+        ],
+        stdout=stream,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if process.poll() is not None:
+        stream.close()
+        raise JourneyFailure("continuous network audit exited during startup")
+    return raw_path, process, stream
+
+
+def stop_network_audit(process: subprocess.Popen[str], stream: Any) -> str:
+    if process.poll() is None:
+        process.terminate()
+    try:
+        _, stderr = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        _, stderr = process.communicate(timeout=5)
+    stream.close()
+    if process.returncode not in (0, -signal.SIGTERM):
+        raise JourneyFailure(
+            f"continuous network audit exited unexpectedly: {process.returncode}"
+        )
+    return stderr
+
+
+def analyze_network_audit(
+    raw_path: Path, filtered_path: Path, expected_pids: set[int], stderr: str
+) -> dict[str, Any]:
+    selected_rows: list[list[str]] = []
+    connection_rows: list[dict[str, Any]] = []
+    observed_pids: set[int] = set()
+    current_pid: int | None = None
+    with raw_path.open(encoding="utf-8", newline="") as stream:
+        for row in csv.reader(stream):
+            if not row:
+                continue
+            if row[0] == "time":
+                if not selected_rows:
+                    selected_rows.append(row)
+                continue
+            descriptor = row[1] if len(row) > 1 else ""
+            summary = (
+                None
+                if descriptor.startswith(("tcp", "udp"))
+                else re.fullmatch(r".+\.(\d+)", descriptor)
+            )
+            if summary is not None:
+                current_pid = int(summary.group(1))
+                if current_pid in expected_pids:
+                    observed_pids.add(current_pid)
+                    selected_rows.append(row)
+                continue
+            if current_pid not in expected_pids or not descriptor.startswith(
+                ("tcp", "udp")
+            ):
+                continue
+            interface = row[2] if len(row) > 2 else ""
+            connection = {
+                "pid": current_pid,
+                "descriptor": descriptor,
+                "interface": interface,
+                "state": row[3] if len(row) > 3 else "",
+            }
+            connection_rows.append(connection)
+            selected_rows.append(row)
+    missing_pids = sorted(expected_pids - observed_pids)
+    if missing_pids:
+        raise JourneyFailure(
+            f"continuous network audit missed managed process IDs: {missing_pids}"
+        )
+    violations = [row for row in connection_rows if row["interface"] not in ("", "lo0")]
+    if violations:
+        raise JourneyFailure(
+            f"managed product opened non-loopback network connections: {violations}"
+        )
+    with filtered_path.open("w", encoding="utf-8", newline="") as stream:
+        csv.writer(stream).writerows(selected_rows)
+    raw_path.unlink()
+    return {
+        "schemaVersion": "bb.g6_network_observation.v1",
+        "status": "pass",
+        "sampleIntervalMilliseconds": 1_000,
+        "observedPids": sorted(observed_pids),
+        "connectionSampleCount": len(connection_rows),
+        "nonLoopbackConnectionCount": len(violations),
+        "loopbackOnly": True,
+        "filteredTrace": filtered_path.name,
+        "filteredTraceSha256": hashlib.sha256(filtered_path.read_bytes()).hexdigest(),
+        "stderr": stderr,
+    }
 
 
 def endpoint_open(endpoint: str) -> bool:
@@ -1443,10 +1479,25 @@ def main() -> int:
     )
     secret_canary = f"g6-secret-{hashlib.sha256(os.urandom(32)).hexdigest()}"
     environment["BB_G6_SECRET_CANARY"] = secret_canary
-    isolation_profile, browser_marker, provider_isolation_guard = (
-        create_provider_isolation_guard(roots["temp"], environment)
+    browser_marker, browser_observation = create_browser_launch_guard(
+        roots["temp"], environment
     )
-    write_json(output / "provider-isolation-guard.json", provider_isolation_guard)
+    network_audit_raw, network_audit_process, network_audit_stream = (
+        start_network_audit(roots["temp"])
+    )
+
+    def stop_network_audit_at_exit() -> None:
+        if network_audit_process.poll() is None:
+            network_audit_process.terminate()
+            try:
+                network_audit_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                network_audit_process.kill()
+                network_audit_process.wait(timeout=5)
+        if not network_audit_stream.closed:
+            network_audit_stream.close()
+
+    atexit.register(stop_network_audit_at_exit)
     recorded_environment = {
         key: "<secret-canary>" if key == "BB_G6_SECRET_CANARY" else value
         for key, value in environment.items()
@@ -1509,11 +1560,7 @@ def main() -> int:
         raise JourneyFailure(
             "preflight status created runtime authority or process state"
         )
-    initial = PtyChild(
-        [str(SANDBOX_EXEC), "-f", str(isolation_profile), str(bb)],
-        roots["workspace"],
-        environment,
-    )
+    initial = PtyChild([str(bb)], roots["workspace"], environment)
     try:
         initial.wait_until(
             lambda: (
@@ -2211,14 +2258,7 @@ def main() -> int:
             raise JourneyFailure("status identity contains a local path")
 
     resume = PtyChild(
-        [
-            str(SANDBOX_EXEC),
-            "-f",
-            str(isolation_profile),
-            str(bb),
-            "--resume",
-            str(final_initial.session_file),
-        ],
+        [str(bb), "--resume", str(final_initial.session_file)],
         roots["workspace"],
         environment,
     )
@@ -2386,6 +2426,23 @@ def main() -> int:
         raise JourneyFailure("resumed engine extraction root remains after close")
     if ray_runtime_roots(roots["temp"]) - baseline_ray_runtime_roots:
         raise JourneyFailure("resumed ephemeral Ray runtime root remains after close")
+    network_audit_stderr = stop_network_audit(
+        network_audit_process, network_audit_stream
+    )
+    atexit.unregister(stop_network_audit_at_exit)
+    network_observation = analyze_network_audit(
+        network_audit_raw,
+        output / "network-observation.csv",
+        {
+            initial.pid,
+            int(first_authority["pid"]),
+            int(replacement_authority["pid"]),
+            resume.pid,
+            int(second_authority["pid"]),
+        },
+        network_audit_stderr,
+    )
+    write_json(output / "network-observation.json", network_observation)
 
     restart_status = subprocess.run(
         [str(bb), "engine", "status"],
@@ -2488,6 +2545,16 @@ def main() -> int:
         raise JourneyFailure(
             f"OMP transcript has unexpected tool results: {facts['toolResults']}"
         )
+    shell_results = [
+        row for row in facts["toolResultRows"] if row["name"] == "run_shell"
+    ]
+    if len(shell_results) != 3 or any(
+        row["isError"] or "[1, 2, 3, 4, 5]" not in row["content"]
+        for row in shell_results
+    ):
+        raise JourneyFailure(
+            f"installed shell validations did not succeed exactly three times: {shell_results}"
+        )
     tool_receipt_evidence = validate_tool_receipts(facts)
     session_text = final_resume.session_file.read_text(encoding="utf-8")
     if secret_canary in session_text:
@@ -2560,8 +2627,14 @@ def main() -> int:
         raise JourneyFailure(
             "configured route is not retained as credential-free synthetic evidence"
         )
-    provider_isolation_guard["browserGuard"]["attemptCount"] = browser_launch_attempts
-    write_json(output / "provider-isolation-guard.json", provider_isolation_guard)
+    browser_observation["attemptCount"] = browser_launch_attempts
+    provider_observation = {
+        "schemaVersion": "bb.g6_provider_observation.v1",
+        "status": "pass",
+        "network": network_observation,
+        "browser": browser_observation,
+    }
+    write_json(output / "provider-observation.json", provider_observation)
 
     binding_extract = {
         "schemaVersion": "bb.g6_binding_extract.v1",
@@ -2602,13 +2675,11 @@ def main() -> int:
         "configuredModel": "cli_mock/reference",
         "modelRoleLock": model_role_lock,
         "nativeAuthRowCounts": native_auth_counts,
-        "providerRequests": (
-            0 if provider_isolation_guard["networkProbe"]["nonLoopbackDenied"] else 1
-        ),
+        "providerRequests": network_observation["nonLoopbackConnectionCount"],
         "credentialRows": credential_rows,
         "oauthBrowserLaunches": browser_launch_attempts,
         "syntheticEvidenceOnly": synthetic_evidence_only,
-        "isolationGuard": provider_isolation_guard,
+        "isolationObservation": provider_observation,
     }
     write_json(output / "binding-extract.json", binding_extract)
     write_json(output / "engine-event-extract.json", event_extract)
@@ -2689,13 +2760,8 @@ def main() -> int:
         "resumeRayRuntime": resume_ray_runtime,
         "cleanup": cleanup,
         "providerIsolation": {
-            "providerCalls": not (
-                provider_isolation_guard["networkProbe"]["nonLoopbackDenied"]
-                and synthetic_evidence_only
-            ),
-            "loopbackOnlyNetwork": provider_isolation_guard["networkProbe"][
-                "nonLoopbackDenied"
-            ],
+            "providerCalls": network_observation["nonLoopbackConnectionCount"] != 0,
+            "loopbackOnlyNetwork": network_observation["loopbackOnly"],
             "nativeAuthMutation": credential_rows != 0,
             "oauthBrowserLaunches": browser_launch_attempts,
             "secretCanaryAbsentFromEngineEnvironments": (

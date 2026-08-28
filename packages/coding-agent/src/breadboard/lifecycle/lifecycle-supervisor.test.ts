@@ -3139,6 +3139,55 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(sleeps).toEqual([250]);
 		expect(process.spawnCount()).toBe(3);
 	});
+	test("restart waits through chained child replacements before starting another generation", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const sleeps: number[] = [];
+		const firstSleepStarted = Promise.withResolvers<void>();
+		const secondSleepStarted = Promise.withResolvers<void>();
+		const releaseFirstSleep = Promise.withResolvers<void>();
+		const releaseSecondSleep = Promise.withResolvers<void>();
+		let readyCount = 0;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => 1_000,
+				sleep: async milliseconds => {
+					sleeps.push(milliseconds);
+					if (sleeps.length === 1) {
+						firstSleepStarted.resolve();
+						await releaseFirstSleep.promise;
+						return;
+					}
+					if (sleeps.length === 2) {
+						secondSleepStarted.resolve();
+						await releaseSecondSleep.promise;
+						return;
+					}
+					throw new Error("unexpected concurrent child recovery");
+				},
+			},
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+			stateChanged: state => {
+				if (state.name === "ready" && ++readyCount === 2) process.crash();
+			},
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		await firstSleepStarted.promise;
+		process.exitOnNextWait();
+		const restarting = supervisor.restart({ consumerClosed: true });
+		releaseFirstSleep.resolve();
+		await secondSleepStarted.promise;
+		releaseSecondSleep.resolve();
+
+		expect((await restarting).kind).toBe("ready");
+		expect(sleeps).toEqual([250, 1_000]);
+		expect(process.spawnCount()).toBe(4);
+	});
 	test("surfaces unexpected runtime cleanup failure without restarting or retiring authority", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();
