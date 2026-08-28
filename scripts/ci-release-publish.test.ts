@@ -139,6 +139,7 @@ describe("published coding-agent topology", () => {
 		expect(manifest.bin).toEqual({ omp: "dist/cli.js" });
 		expect(manifest.bundledDependencies).toEqual(["@breadboard/sdk"]);
 		expect(manifest.dependencies?.["@breadboard/sdk"]).toBeUndefined();
+		expect(manifest.dependencies?.["eventsource-parser"]).toBe("^1.1.2");
 		expect(manifest.files).toContain("dist/cli.js");
 		expect(manifest.files).toContain("dist/THIRD_PARTY_NOTICES-*.txt");
 	});
