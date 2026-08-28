@@ -2897,6 +2897,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async restart(options: StopOptions): Promise<LifecycleResult> {
+		await this.#settleChildRecovery();
 		if (!options.consumerClosed) return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
 		if (!this.context) {
 			const endpoint = this.config.endpoint;

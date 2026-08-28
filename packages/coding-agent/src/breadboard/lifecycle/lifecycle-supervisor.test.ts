@@ -3107,6 +3107,38 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(process.spawnCount()).toBe(2);
 		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
 	});
+	test("restart waits for an in-flight child replacement before replacing its successor", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const sleeps: number[] = [];
+		const sleepStarted = Promise.withResolvers<void>();
+		const releaseSleep = Promise.withResolvers<void>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => 1_000,
+				sleep: async milliseconds => {
+					sleeps.push(milliseconds);
+					sleepStarted.resolve();
+					await releaseSleep.promise;
+				},
+			},
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		await sleepStarted.promise;
+		process.exitOnNextWait();
+		const restarting = supervisor.restart({ consumerClosed: true });
+		releaseSleep.resolve();
+
+		expect((await restarting).kind).toBe("ready");
+		expect(sleeps).toEqual([250]);
+		expect(process.spawnCount()).toBe(3);
+	});
 	test("surfaces unexpected runtime cleanup failure without restarting or retiring authority", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();

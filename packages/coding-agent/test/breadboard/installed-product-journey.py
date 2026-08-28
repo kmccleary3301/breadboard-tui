@@ -62,6 +62,23 @@ SYNTHETIC_TOOLS = ("todo.write_board", "write", "run_shell")
 ANSI_RE = re.compile(
     rb"(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~]|\x1B[@-_])"
 )
+SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
+SYSTEM_OPEN = Path("/usr/bin/open")
+SYSTEM_PYTHON = Path("/usr/bin/python3")
+LOOPBACK_SANDBOX_PROFILE = """(version 1)
+(deny default)
+(allow process*)
+(allow process-info*)
+(allow signal (target same-sandbox))
+(deny process-exec (literal "/usr/bin/open"))
+(allow file*)
+(allow sysctl*)
+(allow mach*)
+(allow ipc*)
+(allow network-bind (local ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
+(allow network-outbound (remote ip "localhost:*"))
+"""
 
 
 class JourneyFailure(RuntimeError):
@@ -593,6 +610,110 @@ def assert_loopback_network(processes: dict[str, Any], label: str) -> None:
         raise JourneyFailure(
             f"{label} opened non-loopback network endpoints: {violations}"
         )
+
+
+def create_provider_isolation_guard(
+    temp_root: Path, environment: dict[str, str]
+) -> tuple[Path, Path, dict[str, Any]]:
+    for executable in (SANDBOX_EXEC, SYSTEM_OPEN, SYSTEM_PYTHON):
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise JourneyFailure(
+                f"provider-isolation executable is unavailable: {executable}"
+            )
+    profile = temp_root / "g6-loopback-only.sb"
+    profile.write_text(LOOPBACK_SANDBOX_PROFILE, encoding="utf-8")
+    profile.chmod(0o400)
+    browser_marker = temp_root / "g6-browser-launch-attempted"
+    browser_guard = temp_root / "g6-browser-launch-guard"
+    browser_guard.write_text(
+        "#!/usr/bin/python3\n"
+        "from pathlib import Path\n"
+        f"Path({str(browser_marker)!r}).write_text('attempted\\n', encoding='utf-8')\n"
+        "raise SystemExit(125)\n",
+        encoding="utf-8",
+    )
+    browser_guard.chmod(0o700)
+    environment["BROWSER"] = str(browser_guard)
+    network_probe_source = (
+        "import errno,json,socket;"
+        "server=socket.socket();server.bind(('127.0.0.1',0));server.listen();"
+        "loopback=socket.socket();loopback_result=loopback.connect_ex(server.getsockname());"
+        "non_loopback=socket.socket();"
+        "non_loopback_result=non_loopback.connect_ex(('192.0.2.1',9));"
+        "print(json.dumps({'loopbackConnectErrno':loopback_result,"
+        "'nonLoopbackConnectErrno':non_loopback_result,"
+        "'expectedDeniedErrnos':[errno.EPERM,errno.EACCES]}))"
+    )
+    network_probe = subprocess.run(
+        [
+            str(SANDBOX_EXEC),
+            "-f",
+            str(profile),
+            str(SYSTEM_PYTHON),
+            "-c",
+            network_probe_source,
+        ],
+        cwd=temp_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    try:
+        network_result = json.loads(network_probe.stdout)
+    except json.JSONDecodeError as error:
+        raise JourneyFailure(
+            f"provider-isolation network probe returned invalid JSON: {network_probe.stdout!r}"
+        ) from error
+    denied_errnos = network_result.get("expectedDeniedErrnos")
+    if (
+        network_probe.returncode != 0
+        or network_result.get("loopbackConnectErrno") != 0
+        or not isinstance(denied_errnos, list)
+        or network_result.get("nonLoopbackConnectErrno") not in denied_errnos
+    ):
+        raise JourneyFailure(
+            "provider-isolation sandbox did not allow loopback and deny non-loopback networking"
+        )
+    browser_probe = subprocess.run(
+        [str(SANDBOX_EXEC), "-f", str(profile), str(SYSTEM_OPEN), "--help"],
+        cwd=temp_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if browser_probe.returncode == 0 or browser_marker.exists():
+        raise JourneyFailure("provider-isolation sandbox permitted a browser launch")
+    evidence = {
+        "schemaVersion": "bb.g6_provider_isolation_guard.v1",
+        "status": "pass",
+        "profileSha256": hashlib.sha256(
+            LOOPBACK_SANDBOX_PROFILE.encode("utf-8")
+        ).hexdigest(),
+        "networkProbe": {
+            **network_result,
+            "exitCode": network_probe.returncode,
+            "nonLoopbackDenied": True,
+            "loopbackAllowed": True,
+        },
+        "browserProbe": {
+            "exitCode": browser_probe.returncode,
+            "systemOpenDenied": True,
+        },
+        "browserGuard": {
+            "environmentKey": "BROWSER",
+            "attemptCount": 0,
+        },
+        "productCommandPrefix": [
+            str(SANDBOX_EXEC),
+            "-f",
+            "<isolated-loopback-profile>",
+        ],
+    }
+    return profile, browser_marker, evidence
 
 
 def endpoint_open(endpoint: str) -> bool:
@@ -1322,6 +1443,10 @@ def main() -> int:
     )
     secret_canary = f"g6-secret-{hashlib.sha256(os.urandom(32)).hexdigest()}"
     environment["BB_G6_SECRET_CANARY"] = secret_canary
+    isolation_profile, browser_marker, provider_isolation_guard = (
+        create_provider_isolation_guard(roots["temp"], environment)
+    )
+    write_json(output / "provider-isolation-guard.json", provider_isolation_guard)
     recorded_environment = {
         key: "<secret-canary>" if key == "BB_G6_SECRET_CANARY" else value
         for key, value in environment.items()
@@ -1384,7 +1509,11 @@ def main() -> int:
         raise JourneyFailure(
             "preflight status created runtime authority or process state"
         )
-    initial = PtyChild([str(bb)], roots["workspace"], environment)
+    initial = PtyChild(
+        [str(SANDBOX_EXEC), "-f", str(isolation_profile), str(bb)],
+        roots["workspace"],
+        environment,
+    )
     try:
         initial.wait_until(
             lambda: (
@@ -1624,7 +1753,10 @@ def main() -> int:
             if cursor_sequence(snapshot.data) <= synthetic_cursor:
                 return None
             facts = transcript_facts(snapshot.rows)
-            if len(facts["assistantErrors"]) != len(synthetic_facts["assistantErrors"]) + 1:
+            if (
+                len(facts["assistantErrors"])
+                != len(synthetic_facts["assistantErrors"]) + 1
+            ):
                 return None
             return snapshot
 
@@ -2079,7 +2211,14 @@ def main() -> int:
             raise JourneyFailure("status identity contains a local path")
 
     resume = PtyChild(
-        [str(bb), "--resume", str(final_initial.session_file)],
+        [
+            str(SANDBOX_EXEC),
+            "-f",
+            str(isolation_profile),
+            str(bb),
+            "--resume",
+            str(final_initial.session_file),
+        ],
         roots["workspace"],
         environment,
     )
@@ -2157,9 +2296,7 @@ def main() -> int:
         resume.send_line(POST_RESUME_PROMPT)
         record_action("submit-post-resume-turn", prompt=POST_RESUME_PROMPT)
         resume.wait_until(
-            lambda: (
-                "BreadBoard permission request · run_shell" in resume.screen.text()
-            ),
+            lambda: "BreadBoard permission request · run_shell" in resume.screen.text(),
             options.turn_timeout,
             "post-resume run_shell permission",
         )
@@ -2398,6 +2535,33 @@ def main() -> int:
     ):
         if native_auth_counts.get(table, 0) != 0:
             raise JourneyFailure(f"native OMP AuthStorage mutated {table}")
+    credential_rows = sum(
+        native_auth_counts.get(table, 0)
+        for table in (
+            "auth_credentials",
+            "auth_credential_blocks",
+            "auth_credential_refresh_leases",
+        )
+    )
+    browser_launch_attempts = (
+        len(browser_marker.read_text(encoding="utf-8").splitlines())
+        if browser_marker.is_file()
+        else 0
+    )
+    if browser_launch_attempts != 0:
+        raise JourneyFailure("installed product attempted an OAuth browser launch")
+    retained_session = retained_state_after.get("session")
+    synthetic_evidence_only = (
+        isinstance(retained_session, dict)
+        and retained_session.get("model") == "cli_mock/reference"
+        and credential_rows == 0
+    )
+    if not synthetic_evidence_only:
+        raise JourneyFailure(
+            "configured route is not retained as credential-free synthetic evidence"
+        )
+    provider_isolation_guard["browserGuard"]["attemptCount"] = browser_launch_attempts
+    write_json(output / "provider-isolation-guard.json", provider_isolation_guard)
 
     binding_extract = {
         "schemaVersion": "bb.g6_binding_extract.v1",
@@ -2438,10 +2602,13 @@ def main() -> int:
         "configuredModel": "cli_mock/reference",
         "modelRoleLock": model_role_lock,
         "nativeAuthRowCounts": native_auth_counts,
-        "providerRequests": 0,
-        "credentialRows": 0,
-        "oauthBrowserLaunches": 0,
-        "syntheticEvidenceOnly": True,
+        "providerRequests": (
+            0 if provider_isolation_guard["networkProbe"]["nonLoopbackDenied"] else 1
+        ),
+        "credentialRows": credential_rows,
+        "oauthBrowserLaunches": browser_launch_attempts,
+        "syntheticEvidenceOnly": synthetic_evidence_only,
+        "isolationGuard": provider_isolation_guard,
     }
     write_json(output / "binding-extract.json", binding_extract)
     write_json(output / "engine-event-extract.json", event_extract)
@@ -2522,9 +2689,15 @@ def main() -> int:
         "resumeRayRuntime": resume_ray_runtime,
         "cleanup": cleanup,
         "providerIsolation": {
-            "providerCalls": False,
-            "loopbackOnlyNetwork": True,
-            "nativeAuthMutation": False,
+            "providerCalls": not (
+                provider_isolation_guard["networkProbe"]["nonLoopbackDenied"]
+                and synthetic_evidence_only
+            ),
+            "loopbackOnlyNetwork": provider_isolation_guard["networkProbe"][
+                "nonLoopbackDenied"
+            ],
+            "nativeAuthMutation": credential_rows != 0,
+            "oauthBrowserLaunches": browser_launch_attempts,
             "secretCanaryAbsentFromEngineEnvironments": (
                 initial_engine_canary_absent
                 and replacement_engine_canary_absent
