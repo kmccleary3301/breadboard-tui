@@ -254,12 +254,17 @@ describe("SignInTab", () => {
 				},
 			]);
 			expect(nativeCalls).toEqual([]);
-			expect(
-				tab
+			let successfulRender = "";
+			for (let pass = 0; pass < 16; pass++) {
+				await Promise.resolve();
+				successfulRender = tab
 					.render(80)
 					.map(line => Bun.stripANSI(line))
-					.join("\n"),
-			).not.toContain(secretCanary);
+					.join("\n");
+				if (successfulRender.includes("Credentials managed by BreadBoard auth broker")) break;
+			}
+			expect(successfulRender).toContain("Credentials managed by BreadBoard auth broker");
+			expect(successfulRender).not.toContain(secretCanary);
 
 			for (let pass = 0; pass < 16 && tab.modal; pass++) await Promise.resolve();
 			expect(tab.modal).toBe(false);

@@ -12,7 +12,7 @@
     "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 222,
+    "maxTotalChangedPaths": 236,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
@@ -28,6 +28,11 @@
         "README.md",
         "README.omp-upstream.md",
         "packages/coding-agent/src/breadboard/**",
+        "packages/coding-agent/src/assets/branding/breadboard_icon_bb_v1.*",
+        "packages/coding-agent/src/product-identity.ts",
+        "packages/coding-agent/src/product-identity.test.ts",
+        "packages/coding-agent/src/blob-broker/uploaders-cloud-drives.ts",
+        "packages/coding-agent/src/debug/index.ts",
         "packages/coding-agent/src/bb.ts",
         "packages/coding-agent/src/omp.ts",
         "packages/coding-agent/src/product-entrypoint.test.ts",
@@ -84,6 +89,9 @@
         "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
         "packages/coding-agent/src/modes/setup-wizard/scenes/types.ts",
         "packages/coding-agent/src/modes/setup-wizard/wizard-overlay.ts",
+        "packages/coding-agent/src/modes/setup-wizard/scenes/outro.ts",
+        "packages/coding-agent/src/modes/setup-wizard/scenes/splash.ts",
+        "packages/coding-agent/src/tools/ask.ts",
         "packages/coding-agent/src/slash-commands/builtin-session.ts",
         "packages/coding-agent/test/main-session-resolution-error.test.ts",
         "packages/coding-agent/test/model-registry.test.ts",

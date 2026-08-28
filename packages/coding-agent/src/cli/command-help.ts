@@ -1,14 +1,14 @@
 import type { CommandMetadata } from "@oh-my-pi/pi-utils/cli";
-import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+import { ACTIVE_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 
 export const acpHelp = {
-	description: `Run ${APP_NAME === "bb" ? "BreadBoard" : "Oh My Pi"} as an ACP (Agent Client Protocol) server over stdio`,
+	description: `Run ${ACTIVE_PRODUCT_IDENTITY.displayName} as an ACP (Agent Client Protocol) server over stdio`,
 } satisfies CommandMetadata;
 
 export const agentsHelp = { description: "Manage bundled task agents" } satisfies CommandMetadata;
 
 export const authBrokerHelp = {
-	description: `Manage the ${APP_NAME} auth-broker (credential vault)`,
+	description: `Manage the ${ACTIVE_PRODUCT_IDENTITY.cliName} auth-broker (credential vault)`,
 } satisfies CommandMetadata;
 
 export const authGatewayHelp = {
@@ -46,7 +46,9 @@ export const dryBalanceHelp = {
 	description: "Dry-run OAuth account balancing across random session ids",
 } satisfies CommandMetadata;
 
-export const engineHelp = { description: "Manage the governed BreadBoard engine lifecycle" } satisfies CommandMetadata;
+export const engineHelp = {
+	description: `Manage the governed ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine lifecycle`,
+} satisfies CommandMetadata;
 
 export const galleryHelp = {
 	description: "Preview tool renderers across streaming, in-progress, success, and failure states",

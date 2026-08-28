@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import {
-	BB_LOGO,
-	PI_LOGO,
-	pickWeightedTip,
-	WelcomeComponent,
-} from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
+import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
 import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import {
+	BREADBOARD_PRODUCT_IDENTITY,
+	OMP_PRODUCT_IDENTITY,
+	type ProductIdentity,
+} from "@oh-my-pi/pi-coding-agent/product-identity";
 
 describe("WelcomeComponent", () => {
 	beforeAll(async () => {
@@ -83,20 +83,58 @@ describe("WelcomeComponent", () => {
 });
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
-const visLen = (s: string): number => [...stripAnsi(s)].length;
 const hasRow = (lines: string[], row: string): boolean => lines.some(l => l.includes(row.trimEnd()));
 
 describe("WelcomeComponent native identity", () => {
 	it("renders the OMP mark and no BreadBoard mark", () => {
 		const lines = new WelcomeComponent("18.0.1", "model", "provider").render(90).map(stripAnsi);
-		for (const row of PI_LOGO) expect(hasRow(lines, row)).toBe(true);
-		expect(hasRow(lines, BB_LOGO[2])).toBe(false);
+		for (const row of OMP_PRODUCT_IDENTITY.logoArt) expect(hasRow(lines, row)).toBe(true);
+		expect(hasRow(lines, BREADBOARD_PRODUCT_IDENTITY.logoArt[2] ?? "")).toBe(false);
 	});
 
 	it("keeps the exact OMP copy", () => {
 		const header = stripAnsi(new WelcomeComponent("18.0.1", "model", "provider").render(90)[0] ?? "");
 		expect(header).toContain("omp v18.0.1");
 		expect(header).not.toContain("BreadBoard");
+	});
+
+	it("renders an injected BreadBoard identity without product process state", () => {
+		const lines = new WelcomeComponent("0.1.0-rc.4", "model", "provider", [], [], BREADBOARD_PRODUCT_IDENTITY, "dark")
+			.render(90)
+			.map(stripAnsi);
+
+		expect(lines[0]).toContain("BreadBoard v0.1.0-rc.4");
+		for (const row of BREADBOARD_PRODUCT_IDENTITY.logoArt) expect(hasRow(lines, row)).toBe(true);
+		expect(hasRow(lines, OMP_PRODUCT_IDENTITY.logoArt[1] ?? "")).toBe(false);
+	});
+
+	it("reskins title, art, palette, and appearance without renderer changes", () => {
+		const alternate: ProductIdentity = Object.freeze({
+			id: "alternate",
+			displayName: "Alternate Product",
+			shortDisplayName: "Alternate",
+			cliName: "alt",
+			welcomeTitle: "Alternate",
+			logoArt: Object.freeze(["ALT"]),
+			compactLogo: Object.freeze({ unicode: "A", nerdfont: "A", ascii: "A" }),
+			gradientPalettes: Object.freeze({
+				dark: Object.freeze({
+					stops: Object.freeze([[255, 0, 0] as const, [128, 0, 0] as const]),
+					ramp256: Object.freeze([196]),
+				}),
+				light: Object.freeze({
+					stops: Object.freeze([[0, 0, 255] as const, [0, 0, 128] as const]),
+					ramp256: Object.freeze([21]),
+				}),
+			}),
+			defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
+		});
+		const dark = new WelcomeComponent("1.2.3", "model", "provider", [], [], alternate, "dark").render(90);
+		const light = new WelcomeComponent("1.2.3", "model", "provider", [], [], alternate, "light").render(90);
+
+		expect(stripAnsi(dark[0] ?? "")).toContain("Alternate v1.2.3");
+		expect(hasRow(dark.map(stripAnsi), "ALT")).toBe(true);
+		expect(dark.join("\n")).not.toBe(light.join("\n"));
 	});
 });
 

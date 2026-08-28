@@ -43,6 +43,7 @@ import {
 	theme,
 } from "../../modes/theme/theme";
 import type { AgentHubOpenOptions, InteractiveModeContext } from "../../modes/types";
+import { BREADBOARD_PRODUCT_IDENTITY } from "../../product-identity";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
 import type {
 	OAuthLoginIdentity,
@@ -1862,7 +1863,7 @@ export class SelectorController {
 					theme.fg(
 						"dim",
 						this.providerAuthPort
-							? "Credentials managed by BreadBoard auth broker"
+							? `Credentials managed by ${BREADBOARD_PRODUCT_IDENTITY.displayName} auth broker`
 							: `Credentials saved to ${getAgentDbPath()}`,
 					),
 					1,
@@ -1895,7 +1896,8 @@ export class SelectorController {
 	}
 
 	async #handleProviderLogout(credential: AuthCredentialView): Promise<void> {
-		if (!this.providerAuthPort) throw new Error("BreadBoard provider auth port is not configured");
+		if (!this.providerAuthPort)
+			throw new Error(`${BREADBOARD_PRODUCT_IDENTITY.displayName} provider auth port is not configured`);
 		try {
 			const result = await this.providerAuthPort.logout({ credentialRef: credential.credentialRef });
 			if (!result.ok || result.outcome === "no_op") {
@@ -1964,7 +1966,7 @@ export class SelectorController {
 			const [providers, credentials] = loaded;
 			const activeCredentials = credentials.filter(credential => credential.status === "active");
 			if (activeCredentials.length === 0) {
-				this.ctx.showStatus(`No stored BreadBoard credentials for ${providerId}.`);
+				this.ctx.showStatus(`No stored ${BREADBOARD_PRODUCT_IDENTITY.displayName} credentials for ${providerId}.`);
 				return;
 			}
 			const accounts = activeCredentials.map(
@@ -2037,7 +2039,7 @@ export class SelectorController {
 	async #handleProviderRevoke(credential: AuthCredentialView): Promise<void> {
 		if (!this.providerAuthPort) return;
 		const confirmed = await this.ctx.showHookConfirm(
-			"Revoke BreadBoard credential",
+			`Revoke ${BREADBOARD_PRODUCT_IDENTITY.displayName} credential`,
 			`Permanently revoke ${credential.accountLabel} for ${credential.providerId}? This is distinct from logout and cannot be undone.`,
 		);
 		if (!confirmed) {
@@ -2062,7 +2064,7 @@ export class SelectorController {
 
 	async #showProviderRevokeAccountSelector(providerId: string): Promise<void> {
 		if (!this.providerAuthPort) {
-			this.ctx.showStatus("Credential revoke requires BreadBoard product mode.");
+			this.ctx.showStatus(`Credential revoke requires ${BREADBOARD_PRODUCT_IDENTITY.displayName} product mode.`);
 			return;
 		}
 		const loaded = await Promise.all([
@@ -2076,7 +2078,7 @@ export class SelectorController {
 		const [providers, credentials] = loaded;
 		const revocableCredentials = credentials.filter(credential => credential.status !== "revoked");
 		if (revocableCredentials.length === 0) {
-			this.ctx.showStatus(`No revocable BreadBoard credentials for ${providerId}.`);
+			this.ctx.showStatus(`No revocable ${BREADBOARD_PRODUCT_IDENTITY.displayName} credentials for ${providerId}.`);
 			return;
 		}
 		const accounts = revocableCredentials.map(
@@ -2113,7 +2115,7 @@ export class SelectorController {
 	async showProviderRevokeSelector(providerId?: string): Promise<void> {
 		const providerAuthPort = this.providerAuthPort;
 		if (!providerAuthPort) {
-			this.ctx.showStatus("Credential revoke requires BreadBoard product mode.");
+			this.ctx.showStatus(`Credential revoke requires ${BREADBOARD_PRODUCT_IDENTITY.displayName} product mode.`);
 			return;
 		}
 		if (providerId) {
@@ -2126,7 +2128,7 @@ export class SelectorController {
 				candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
 			);
 			if (!provider) {
-				this.ctx.showError(`Unknown BreadBoard provider: ${providerId}`);
+				this.ctx.showError(`Unknown ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider: ${providerId}`);
 				return;
 			}
 			await this.#showProviderRevokeAccountSelector(provider.providerId);
@@ -2138,7 +2140,7 @@ export class SelectorController {
 		});
 		if (!credentials) return;
 		if (!credentials.some(credential => credential.status !== "revoked")) {
-			this.ctx.showStatus("No revocable BreadBoard provider credentials.");
+			this.ctx.showStatus(`No revocable ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider credentials.`);
 			return;
 		}
 		this.showSelector(done => {
@@ -2176,7 +2178,7 @@ export class SelectorController {
 						candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
 					);
 					if (!provider) {
-						this.ctx.showError(`Unknown BreadBoard provider: ${providerId}`);
+						this.ctx.showError(`Unknown ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider: ${providerId}`);
 						return;
 					}
 					selectedProviderId = provider.providerId;
@@ -2204,7 +2206,9 @@ export class SelectorController {
 				try {
 					const credentials = await this.providerAuthPort.listCredentials();
 					if (!credentials.some(credential => credential.status === "active")) {
-						this.ctx.showStatus("No stored BreadBoard provider credentials to log out.");
+						this.ctx.showStatus(
+							`No stored ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider credentials to log out.`,
+						);
 						return;
 					}
 				} catch (error) {
@@ -2272,7 +2276,7 @@ export class SelectorController {
 	async showSessionPinSelector(): Promise<void> {
 		if (this.providerAuthPort) {
 			this.ctx.showStatus(
-				"BreadBoard credentials are bound when a product session starts. Start a new session to use a different account.",
+				`${BREADBOARD_PRODUCT_IDENTITY.displayName} credentials are bound when a product session starts. Start a new session to use a different account.`,
 			);
 			return;
 		}

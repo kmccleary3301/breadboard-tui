@@ -85,6 +85,27 @@ describe("BreadBoard product entrypoint", () => {
 		expect(result.stdout.trim()).toBe("omp/18.0.1");
 		expect(await Bun.file(path.join(home, ".breadboard")).exists()).toBe(false);
 	});
+	test("selects the active identity once in fresh product and native processes", async () => {
+		const probe =
+			'const identity = await import("./src/product-identity.ts"); process.stdout.write(JSON.stringify(identity.ACTIVE_PRODUCT_IDENTITY));';
+		const [product, native] = await Promise.all([
+			runProcess(["-e", probe], await temporaryHome(), { BREADBOARD_PRODUCT: "1" }),
+			runProcess(["-e", probe], await temporaryHome()),
+		]);
+
+		expect(product).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(native).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(product.stdout)).toMatchObject({
+			id: "breadboard",
+			displayName: "BreadBoard",
+			cliName: "bb",
+		});
+		expect(JSON.parse(native.stdout)).toMatchObject({
+			id: "omp",
+			displayName: "Oh My Pi",
+			cliName: "omp",
+		});
+	});
 
 	test("ignores BreadBoard config overrides in the native entrypoint", async () => {
 		const home = await temporaryHome();
@@ -157,7 +178,8 @@ describe("BreadBoard product entrypoint", () => {
 			const { initTheme } = await import("./src/modes/theme/theme.ts");
 			await Settings.init({ inMemory: true });
 			await initTheme(false);
-			const { BB_LOGO, PI_LOGO, WelcomeComponent } = await import("./src/modes/components/welcome.ts");
+			const { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } = await import("./src/product-identity.ts");
+			const { WelcomeComponent } = await import("./src/modes/components/welcome.ts");
 			const stripAnsi = value => value.replace(/\x1b\[[0-9;]*m/g, "");
 			const hasRow = (lines, row) => lines.some(line => line.includes(row.trimEnd()));
 			const welcome = new WelcomeComponent("0.1.0-rc.4", "model", "provider");
@@ -168,8 +190,8 @@ describe("BreadBoard product entrypoint", () => {
 			});
 			process.stdout.write(JSON.stringify({
 				header: lines[0],
-				breadboardLogo: BB_LOGO.every(row => hasRow(lines, row)),
-				ompLogo: hasRow(lines, PI_LOGO[1]),
+				breadboardLogo: BREADBOARD_PRODUCT_IDENTITY.logoArt.every(row => hasRow(lines, row)),
+				ompLogo: hasRow(lines, OMP_PRODUCT_IDENTITY.logoArt[1]),
 				widths,
 			}));
 		`;
@@ -184,23 +206,46 @@ describe("BreadBoard product entrypoint", () => {
 		});
 	});
 
-	test("selects product theme defaults only in an isolated product process", async () => {
-		const probe = String.raw`
+	test("keeps configured custom themes ahead of product defaults for both appearances", async () => {
+		const probe = `
+			const { mkdir } = await import("node:fs/promises");
+			const path = await import("node:path");
+			const { getCustomThemesDir } = await import("@oh-my-pi/pi-utils");
+			const themesDir = getCustomThemesDir();
+			await mkdir(themesDir, { recursive: true });
+			const darkBase = await Bun.file("./src/modes/theme/dark.json").json();
+			const lightBase = await Bun.file("./src/modes/theme/light.json").json();
+			await Bun.write(path.join(themesDir, "identity-custom-dark.json"), JSON.stringify({ ...darkBase, name: "identity-custom-dark" }));
+			await Bun.write(path.join(themesDir, "identity-custom-light.json"), JSON.stringify({ ...lightBase, name: "identity-custom-light" }));
 			const { Settings } = await import("./src/config/settings.ts");
 			const theme = await import("./src/modes/theme/theme.ts");
 			await Settings.init({ inMemory: true });
 			await theme.initTheme(false);
 			const defaultTheme = theme.getCurrentThemeName();
-			await theme.initTheme(false, undefined, undefined, "dark", "light");
-			process.stdout.write(JSON.stringify({ defaultTheme, explicitTheme: theme.getCurrentThemeName() }));
+			await theme.initTheme(false, undefined, undefined, "identity-custom-dark", "identity-custom-light");
+			process.stdout.write(JSON.stringify({ defaultTheme, configuredTheme: theme.getCurrentThemeName() }));
 		`;
-		const result = await runProcess(["-e", probe], await temporaryHome(), {
-			BREADBOARD_PRODUCT: "1",
-			COLORFGBG: "15;0",
-		});
+		const [dark, light] = await Promise.all([
+			runProcess(["-e", probe], await temporaryHome(), {
+				BREADBOARD_PRODUCT: "1",
+				COLORFGBG: "15;0",
+			}),
+			runProcess(["-e", probe], await temporaryHome(), {
+				BREADBOARD_PRODUCT: "1",
+				COLORFGBG: "0;15",
+			}),
+		]);
 
-		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(JSON.parse(result.stdout)).toEqual({ defaultTheme: "breadboard", explicitTheme: "dark" });
+		expect(dark).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(light).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(dark.stdout)).toEqual({
+			defaultTheme: "breadboard",
+			configuredTheme: "identity-custom-dark",
+		});
+		expect(JSON.parse(light.stdout)).toEqual({
+			defaultTheme: "breadboard-light",
+			configuredTheme: "identity-custom-light",
+		});
 	});
 
 	test("bootstraps explicit BreadBoard config and agent path overrides", async () => {

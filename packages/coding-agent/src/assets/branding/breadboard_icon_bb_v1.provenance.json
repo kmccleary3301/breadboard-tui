@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "bb.product_source_art_provenance.v1",
+  "sourceRepository": "https://github.com/kmccleary3301/breadboard.git",
+  "sourceCommit": "b7bd56e00abfd216fa560edba34eb05b823f59da",
+  "sourceTree": "fa73901f9dc2fad00bb7335754003afbafedaebc",
+  "sourcePath": "docs/media/branding/breadboard_icon_bb_v1.svg",
+  "localPath": "packages/coding-agent/src/assets/branding/breadboard_icon_bb_v1.svg",
+  "assetVersion": "breadboard_icon_bb_v1",
+  "sha256": "87c6e65ca32d35b3604d6c3970bfa2a8d447440ea399809103df3e3bc49a873b"
+}

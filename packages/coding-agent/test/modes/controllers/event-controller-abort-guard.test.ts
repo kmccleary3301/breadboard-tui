@@ -135,8 +135,9 @@ describe("EventController.sendCompletionNotification — abort guard", () => {
 		const controller = new EventController(makeContext());
 		controller.sendCompletionNotification(makeAgentEndEvent([makeAssistantMessage("stop")]));
 		expect(spy).toHaveBeenCalledTimes(1);
-		// Completion now sends a structured notification (title=session, body="Complete").
-		expect(spy).toHaveBeenCalledWith(expect.objectContaining({ body: "Complete", type: "completion" }));
+		expect(spy).toHaveBeenCalledWith(
+			expect.objectContaining({ applicationName: "Oh My Pi", body: "Complete", type: "completion" }),
+		);
 	});
 
 	it("fires notification when agent_end carries no assistant message (e.g. brand-new session)", () => {
@@ -178,7 +179,12 @@ describe("EventController.sendErrorNotification", () => {
 		controller.sendErrorNotification(makeAgentEndEvent([makeAssistantMessage("error")]));
 		expect(spy).toHaveBeenCalledTimes(1);
 		expect(spy).toHaveBeenCalledWith(
-			expect.objectContaining({ body: "Stopped with error", type: "error", title: "test-session" }),
+			expect.objectContaining({
+				applicationName: "Oh My Pi",
+				body: "Stopped with error",
+				type: "error",
+				title: "test-session",
+			}),
 		);
 	});
 

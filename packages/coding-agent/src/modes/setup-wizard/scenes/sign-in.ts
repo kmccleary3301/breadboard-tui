@@ -12,6 +12,7 @@ import {
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { authenticateProvider } from "../../../breadboard/provider-auth-login";
 import { ProviderAuthError, type ProviderAuthPort } from "../../../breadboard/provider-auth-port";
+import { BREADBOARD_PRODUCT_IDENTITY } from "../../../product-identity";
 import { copyToClipboard } from "../../../utils/clipboard";
 import { createNativeProviderAuthDataSource } from "../../components/oauth-provider-data-source";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
@@ -308,7 +309,7 @@ export class SignInTab implements SetupTab {
 				theme.fg(
 					"dim",
 					this.#providerAuthPort
-						? "Credentials managed by BreadBoard auth broker"
+						? `Credentials managed by ${BREADBOARD_PRODUCT_IDENTITY.displayName} auth broker`
 						: `Credentials saved to ${getAgentDbPath()}`,
 				),
 			];

@@ -197,7 +197,22 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/src/assets/branding/breadboard_icon_bb_v1.provenance.json",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/assets/branding/breadboard_icon_bb_v1.svg",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/src/bb.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/blob-broker/uploaders-cloud-drives.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -407,6 +422,11 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/src/debug/index.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/src/irc/bus.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
@@ -499,7 +519,22 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/src/modes/setup-wizard/scenes/outro.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/setup-wizard/scenes/splash.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/modes/setup-wizard/wizard-overlay.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -530,6 +565,16 @@
     },
     {
       "path": "packages/coding-agent/src/omp.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/product-identity.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/product-identity.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -565,6 +610,11 @@
     },
     {
       "path": "packages/coding-agent/src/slash-commands/builtin-session.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/src/tools/ask.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
     },
@@ -754,6 +804,26 @@
       "path": "packages/natives/test/issue-823-repro.test.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/tui/src/desktop-notify.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/tui/src/terminal-capabilities.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/tui/test/desktop-notify.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/tui/test/notifications.test.ts",
+      "class": "upstream-owned",
+      "rule": "upstream-ordinary-omp"
     },
     {
       "path": "packages/utils/src/dirs.ts",

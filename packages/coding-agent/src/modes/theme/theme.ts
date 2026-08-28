@@ -2,7 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { detectMacOSAppearance, MacAppearanceObserver } from "@oh-my-pi/pi-natives";
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
-import { colorLuma, getCustomThemesDir, IS_BREADBOARD_PRODUCT, logger } from "@oh-my-pi/pi-utils";
+import { colorLuma, getCustomThemesDir, logger } from "@oh-my-pi/pi-utils";
+import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
 import { ansi256ToHex, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
 import type { ThemeColor, ThemeJson } from "./schema";
@@ -73,17 +74,6 @@ function getDefaultTheme(): string {
 	return bg === "light" ? autoLightTheme : autoDarkTheme;
 }
 
-/** Default dark theme under the BreadBoard product entrypoint (`BREADBOARD_PRODUCT=1`). */
-export const BREADBOARD_DARK_THEME = "breadboard";
-/** Default light theme under the BreadBoard product entrypoint. */
-export const BREADBOARD_LIGHT_THEME = "breadboard-light";
-
-/** Whether this process was bootstrapped through the BreadBoard product
- *  entrypoint. Identity is immutable after the entrypoint loads. */
-export function isBreadboardProduct(): boolean {
-	return IS_BREADBOARD_PRODUCT;
-}
-
 // ============================================================================
 // Global Theme Instance
 // ============================================================================
@@ -130,14 +120,8 @@ function configureTheme(
 	lightTheme?: string,
 ): string {
 	autoDetectedTheme = true;
-	autoDarkTheme = darkTheme ?? "dark";
-	autoLightTheme = lightTheme ?? "light";
-	if (isBreadboardProduct()) {
-		// Callers pass only explicitly configured slots. Missing slots use the
-		// BreadBoard defaults without pulling Settings into the prepaint graph.
-		autoDarkTheme = darkTheme ?? BREADBOARD_DARK_THEME;
-		autoLightTheme = lightTheme ?? BREADBOARD_LIGHT_THEME;
-	}
+	autoDarkTheme = darkTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.dark;
+	autoLightTheme = lightTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.light;
 	currentSymbolPresetOverride = symbolPreset;
 	currentColorBlindMode = colorBlindMode ?? false;
 	const name = getDefaultTheme();
