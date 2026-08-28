@@ -7,7 +7,7 @@
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
-import { detectSensitiveValues, REDACTED_VALUE, type SessionSnapshot } from "@breadboard/sdk/internal";
+import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/internal";
 import { type AgentEvent, EventLoopKeepalive, type StreamFn, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
@@ -52,6 +52,20 @@ import {
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import { createBreadboardProviderFreeModel } from "./breadboard/provider-free-model";
+import {
+	addOwnedSubmission,
+	advanceProjectionBinding,
+	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
+	type BreadboardSessionBindingData,
+	type BreadboardSessionBindingManager,
+	type BreadboardSessionBindingStore,
+	BreadboardSessionTransitionError,
+	durableBridgeCursor,
+	parseBreadboardSessionBindingData,
+	readBreadboardSessionBinding,
+	validateBreadboardActivation,
+	validateBreadboardSnapshot,
+} from "./breadboard/session-binding";
 import type { OpenedSession, OpenSession } from "./breadboard/session-port";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -1417,148 +1431,6 @@ interface RunRootCommandDependencies {
 }
 const DEFAULT_RUN_ROOT_DEPENDENCIES: RunRootCommandDependencies = {};
 
-export const BREADBOARD_SESSION_BINDING_CUSTOM_TYPE = "breadboard.session-binding";
-
-export interface BreadboardSessionBindingData {
-	readonly schemaVersion: "breadboard.session-binding.v3";
-	readonly sessionId: string;
-	readonly replayConfigurationDigest: string;
-	readonly cursor: {
-		readonly eventId: string | null;
-		readonly sequence: number;
-	};
-	readonly ownedSubmissions: readonly E4OwnedSubmission[];
-}
-
-type BreadboardSessionBindingManager = Pick<SessionManager, "getBranch">;
-
-const BREADBOARD_SESSION_BINDING_SCHEMA_VERSION = "breadboard.session-binding.v3";
-
-function isExactSafeString(value: unknown): value is string {
-	return typeof value === "string" && value.length > 0 && value.trim() === value && !/[\p{Cc}]/u.test(value);
-}
-
-function parseBreadboardSessionBindingData(value: unknown): BreadboardSessionBindingData {
-	const fail = (): never => {
-		throw new BreadboardSessionTransitionError(
-			"BreadBoard session binding is malformed or incompatible with the required schema.",
-		);
-	};
-	if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
-	const data = value as Record<string, unknown>;
-	if (
-		Object.keys(data).length !== 5 ||
-		data.schemaVersion !== BREADBOARD_SESSION_BINDING_SCHEMA_VERSION ||
-		!isExactSafeString(data.sessionId) ||
-		!isExactSafeString(data.replayConfigurationDigest) ||
-		!data.cursor ||
-		typeof data.cursor !== "object" ||
-		Array.isArray(data.cursor) ||
-		!Array.isArray(data.ownedSubmissions) ||
-		data.ownedSubmissions.length > 10_000
-	) {
-		return fail();
-	}
-	const cursor = data.cursor as Record<string, unknown>;
-	const cursorSequence = cursor.sequence;
-	const cursorEventId = cursor.eventId;
-	if (
-		Object.keys(cursor).length !== 2 ||
-		typeof cursorSequence !== "number" ||
-		!Number.isSafeInteger(cursorSequence) ||
-		cursorSequence < 0
-	) {
-		return fail();
-	}
-	let normalizedCursorEventId: string | null;
-	if (cursorSequence === 0) {
-		if (cursorEventId !== null) return fail();
-		normalizedCursorEventId = null;
-	} else {
-		if (!isExactSafeString(cursorEventId)) return fail();
-		normalizedCursorEventId = cursorEventId;
-	}
-	const ownedSubmissions: E4OwnedSubmission[] = [];
-	const clientMessageIds = new Set<string>();
-	const inputIds = new Set<string>();
-	const turnIds = new Set<string>();
-	for (const item of data.ownedSubmissions) {
-		if (!item || typeof item !== "object" || Array.isArray(item)) return fail();
-		const submission = item as Record<string, unknown>;
-		if (
-			Object.keys(submission).length !== 3 ||
-			!isExactSafeString(submission.clientMessageId) ||
-			!isExactSafeString(submission.inputId) ||
-			!isExactSafeString(submission.turnId) ||
-			clientMessageIds.has(submission.clientMessageId) ||
-			inputIds.has(submission.inputId) ||
-			turnIds.has(submission.turnId)
-		) {
-			return fail();
-		}
-		clientMessageIds.add(submission.clientMessageId);
-		inputIds.add(submission.inputId);
-		turnIds.add(submission.turnId);
-		ownedSubmissions.push({
-			clientMessageId: submission.clientMessageId,
-			inputId: submission.inputId,
-			turnId: submission.turnId,
-		});
-	}
-	return {
-		schemaVersion: BREADBOARD_SESSION_BINDING_SCHEMA_VERSION,
-		sessionId: data.sessionId,
-		replayConfigurationDigest: data.replayConfigurationDigest,
-		cursor: { eventId: normalizedCursorEventId, sequence: cursorSequence },
-		ownedSubmissions,
-	};
-}
-
-function sameOwnedSubmissions(left: readonly E4OwnedSubmission[], right: readonly E4OwnedSubmission[]): boolean {
-	return (
-		left.length === right.length &&
-		left.every(
-			(item, index) =>
-				item.clientMessageId === right[index]?.clientMessageId &&
-				item.inputId === right[index]?.inputId &&
-				item.turnId === right[index]?.turnId,
-		)
-	);
-}
-
-function readBreadboardSessionBinding(
-	sessionManager: BreadboardSessionBindingManager,
-): BreadboardSessionBindingData | undefined {
-	let binding: BreadboardSessionBindingData | undefined;
-	for (const entry of sessionManager.getBranch()) {
-		if (entry.type !== "custom" || entry.customType !== BREADBOARD_SESSION_BINDING_CUSTOM_TYPE) continue;
-		const candidate = parseBreadboardSessionBindingData(entry.data);
-		if (
-			binding &&
-			(candidate.sessionId !== binding.sessionId ||
-				candidate.replayConfigurationDigest !== binding.replayConfigurationDigest ||
-				candidate.cursor.sequence < binding.cursor.sequence ||
-				(candidate.cursor.sequence === binding.cursor.sequence &&
-					candidate.cursor.eventId !== binding.cursor.eventId))
-		) {
-			throw new BreadboardSessionTransitionError(
-				"BreadBoard session binding conflicts with the active transcript or rolls back its durable cursor.",
-			);
-		}
-		binding = candidate;
-	}
-	return binding;
-}
-
-export class BreadboardSessionTransitionError extends Error {
-	readonly code = "unsupported_resume_transition";
-
-	constructor(message: string) {
-		super(message);
-		this.name = "BreadboardSessionTransitionError";
-	}
-}
-
 type NonReadyLifecycleResult = BreadboardEngineConnectionFailure;
 
 export class BreadboardLifecycleStartupError extends Error {
@@ -1707,7 +1579,7 @@ export interface PreparedBreadboardRuntime {
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
-	activate(sessionManager: SessionManager): Promise<void>;
+	activate(sessionManager: BreadboardSessionBindingStore): Promise<void>;
 	start(): void;
 	close(): Promise<void>;
 }
@@ -1725,8 +1597,13 @@ export interface BreadboardRuntimeAuthority {
 	readonly requestPermission: E4PermissionHandler;
 }
 
+type ConnectedBreadboardEnginePort = Pick<
+	BreadboardEnginePort,
+	"lifecycleFailure" | "openSession" | "providerAuth" | "close"
+>;
+
 export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuthority {
-	readonly engine: BreadboardEnginePort;
+	readonly engine: ConnectedBreadboardEnginePort;
 	readonly sessionTarget: OpenSession;
 	readonly emitAgentEvent: (event: AgentEvent, idempotencyKey: string) => Promise<void>;
 	readonly releaseAgentEvent: (idempotencyKey: string) => void;
@@ -1865,77 +1742,6 @@ export function createBreadboardPermissionHandler(
 	};
 }
 
-type BreadboardSessionSnapshot = SessionSnapshot;
-
-function validateBreadboardSnapshot(
-	openedSessionId: unknown,
-	snapshot: BreadboardSessionSnapshot,
-	resumeBinding: BreadboardSessionBindingData | undefined,
-): BreadboardSessionBindingData {
-	const sessionId: unknown = snapshot.sessionId;
-	const replayConfigurationDigest: unknown = snapshot.replayRetention.configurationDigest;
-	const headSequence = snapshot.headSequence;
-	const headEventId: unknown = snapshot.headEventId;
-	const earliestRetainedSequence = snapshot.earliestRetainedSequence;
-	const earliestRetainedEventId: unknown = snapshot.earliestRetainedEventId;
-	const invalid =
-		!isExactSafeString(openedSessionId) ||
-		!isExactSafeString(sessionId) ||
-		sessionId !== openedSessionId ||
-		!isExactSafeString(replayConfigurationDigest) ||
-		!Number.isSafeInteger(headSequence) ||
-		headSequence < 0 ||
-		(headSequence === 0 ? headEventId !== null : !isExactSafeString(headEventId)) ||
-		(headSequence === 0
-			? earliestRetainedSequence !== null || earliestRetainedEventId !== null
-			: !Number.isSafeInteger(earliestRetainedSequence) ||
-				earliestRetainedSequence === null ||
-				earliestRetainedSequence < 1 ||
-				earliestRetainedSequence > headSequence ||
-				!isExactSafeString(earliestRetainedEventId) ||
-				(earliestRetainedSequence === headSequence && earliestRetainedEventId !== headEventId)) ||
-		(snapshot.retainedHistory === "complete"
-			? headSequence > 0 && earliestRetainedSequence !== 1
-			: snapshot.retainedHistory !== "partial");
-	if (invalid) {
-		throw new BreadboardSessionTransitionError("BreadBoard returned an impossible or malformed session snapshot.");
-	}
-	if (!resumeBinding) {
-		if (snapshot.retainedHistory === "partial") {
-			throw new BreadboardSessionTransitionError(
-				"BreadBoard returned partial retained history for a session without a durable resume cursor.",
-			);
-		}
-		return {
-			schemaVersion: BREADBOARD_SESSION_BINDING_SCHEMA_VERSION,
-			sessionId,
-			replayConfigurationDigest,
-			cursor: { eventId: headEventId as string | null, sequence: headSequence },
-			ownedSubmissions: [],
-		};
-	}
-	if (
-		resumeBinding.sessionId !== sessionId ||
-		resumeBinding.replayConfigurationDigest !== replayConfigurationDigest ||
-		resumeBinding.cursor.sequence > headSequence ||
-		(resumeBinding.cursor.sequence === headSequence && resumeBinding.cursor.eventId !== headEventId) ||
-		(resumeBinding.cursor.sequence > 0 &&
-			(earliestRetainedSequence === null || resumeBinding.cursor.sequence < earliestRetainedSequence)) ||
-		(snapshot.retainedHistory === "partial" && resumeBinding.cursor.sequence === 0)
-	) {
-		throw new BreadboardSessionTransitionError(
-			"BreadBoard resume snapshot conflicts with the durable OMP session binding or no longer retains its cursor.",
-		);
-	}
-	return resumeBinding;
-}
-
-function durableBridgeCursor(binding: BreadboardSessionBindingData): E4DurableCursor | undefined {
-	return binding.cursor.eventId === null
-		? undefined
-		: { eventId: binding.cursor.eventId, sequence: binding.cursor.sequence };
-}
-
 export async function prepareConnectedBreadboardRuntime(
 	options: ConnectedBreadboardRuntimeOptions,
 ): Promise<PreparedBreadboardRuntime> {
@@ -1948,7 +1754,7 @@ export async function prepareConnectedBreadboardRuntime(
 	let preparedClosePromise: Promise<void> | undefined;
 	let activationPromise: Promise<void> | undefined;
 	let lifecycleFailure: BreadboardLifecycleFailureResult | undefined;
-	let activatedSessionManager: SessionManager | undefined;
+	let activatedSessionManager: BreadboardSessionBindingStore | undefined;
 	let durableBinding: BreadboardSessionBindingData | undefined;
 	let bindingWritePromise = Promise.resolve();
 	let runtimeStarted = false;
@@ -1973,16 +1779,25 @@ export async function prepareConnectedBreadboardRuntime(
 		cancel?.();
 	};
 	const cleanupAvailableResources = async (): Promise<void> => {
+		releaseRegistrations();
+		let runtimeError: unknown;
 		try {
-			releaseRegistrations();
-		} finally {
-			try {
-				if (bridge) await closeBridge();
-				else await closeOpened();
-			} finally {
-				await options.engine.close();
-			}
+			if (bridge) await closeBridge();
+			else await closeOpened();
+		} catch (error) {
+			runtimeError = error;
 		}
+		let engineError: unknown;
+		try {
+			await options.engine.close();
+		} catch (error) {
+			engineError = error;
+		}
+		if (runtimeError !== undefined && engineError !== undefined) {
+			throw new AggregateError([runtimeError, engineError], "BreadBoard runtime cleanup failed");
+		}
+		if (runtimeError !== undefined) throw runtimeError;
+		if (engineError !== undefined) throw engineError;
 	};
 	const closePreparedRuntime = (): Promise<void> => {
 		preparedClosePromise ??= cleanupAvailableResources();
@@ -2037,46 +1852,11 @@ export async function prepareConnectedBreadboardRuntime(
 			return operation;
 		};
 		const submissionOwned = (submission: E4OwnedSubmission): Promise<void> =>
-			persistBinding(current => {
-				const existing = current.ownedSubmissions.find(item => item.turnId === submission.turnId);
-				if (
-					existing &&
-					(existing.clientMessageId !== submission.clientMessageId || existing.inputId !== submission.inputId)
-				) {
-					throw new BreadboardSessionTransitionError(
-						`BreadBoard owned submission ${submission.turnId} conflicts with the durable binding.`,
-					);
-				}
-				if (existing) return current;
-				return {
-					...current,
-					ownedSubmissions: [...current.ownedSubmissions, submission].sort((left, right) =>
-						left.turnId.localeCompare(right.turnId),
-					),
-				};
-			});
+			persistBinding(current => addOwnedSubmission(current, submission));
 		const projectionCommitted = (
 			cursor: E4DurableCursor,
 			ownedSubmissions: readonly E4OwnedSubmission[],
-		): Promise<void> =>
-			persistBinding(current => {
-				if (
-					!isExactSafeString(cursor.eventId) ||
-					!Number.isSafeInteger(cursor.sequence) ||
-					cursor.sequence <= 0 ||
-					cursor.sequence < current.cursor.sequence ||
-					(cursor.sequence === current.cursor.sequence && cursor.eventId !== current.cursor.eventId)
-				) {
-					throw new BreadboardSessionTransitionError(
-						"BreadBoard projection cursor conflicts with or rolls back the durable OMP session binding.",
-					);
-				}
-				return {
-					...current,
-					cursor: { eventId: cursor.eventId, sequence: cursor.sequence },
-					ownedSubmissions,
-				};
-			});
+		): Promise<void> => persistBinding(current => advanceProjectionBinding(current, cursor, ownedSubmissions));
 		bridge = (options.createBridge ?? (bridgeOptions => new E4AgentStreamBridge(bridgeOptions)))({
 			session: opened,
 			durableCursor: durableBridgeCursor(initialBinding),
@@ -2094,29 +1874,16 @@ export async function prepareConnectedBreadboardRuntime(
 			closePreparedRuntime,
 		);
 		throwIfLifecycleFailed();
-		const activate = (sessionManager: SessionManager): Promise<void> => {
+		const activate = (sessionManager: BreadboardSessionBindingStore): Promise<void> => {
 			activationPromise ??= (async () => {
 				try {
 					const existingBinding = readBreadboardSessionBinding(sessionManager);
-					if (resumeBinding) {
-						if (
-							!existingBinding ||
-							existingBinding.sessionId !== initialBinding.sessionId ||
-							existingBinding.replayConfigurationDigest !== initialBinding.replayConfigurationDigest ||
-							existingBinding.cursor.sequence !== initialBinding.cursor.sequence ||
-							existingBinding.cursor.eventId !== initialBinding.cursor.eventId ||
-							!sameOwnedSubmissions(existingBinding.ownedSubmissions, initialBinding.ownedSubmissions)
-						) {
-							throw new BreadboardSessionTransitionError(
-								"BreadBoard resumed session identity or cursor does not match the durable OMP binding.",
-							);
-						}
-					} else {
-						if (existingBinding) {
-							throw new BreadboardSessionTransitionError(
-								"BreadBoard fresh session cannot replace an existing durable OMP binding.",
-							);
-						}
+					const activation = validateBreadboardActivation(
+						existingBinding,
+						initialBinding,
+						resumeBinding !== undefined,
+					);
+					if (activation === "append") {
 						sessionManager.appendCustomEntry(
 							BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
 							initialBinding satisfies BreadboardSessionBindingData,
@@ -2132,7 +1899,11 @@ export async function prepareConnectedBreadboardRuntime(
 					activatedSessionManager = sessionManager;
 					throwIfLifecycleFailed();
 				} catch (error) {
-					await closePreparedRuntime();
+					try {
+						await closePreparedRuntime();
+					} catch (cleanupError) {
+						logger.warn("BreadBoard runtime activation cleanup failed", { error: String(cleanupError) });
+					}
 					throw error;
 				}
 			})();

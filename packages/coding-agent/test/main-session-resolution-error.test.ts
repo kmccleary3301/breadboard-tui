@@ -9,10 +9,10 @@ import { describe, expect, it, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { BreadboardSessionTransitionError } from "@oh-my-pi/pi-coding-agent/breadboard/session-binding";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
-	BreadboardSessionTransitionError,
 	createBreadboardStartupForkPolicy,
 	createSessionManager,
 	resolveBreadboardSessionTarget,

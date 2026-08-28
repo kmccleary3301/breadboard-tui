@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { decodeLoggedSessionEvent } from "@breadboard/sdk/internal";
 import {
 	buildBreadboardSessionCreatePayload,
 	connectCanonicalBreadboardEnginePort,
-	filterUncorrelatedCanonicalEvents,
+	createCanonicalEventFetch,
+	createLifecycleMonitor,
+	invalidateBreadboardSessionsOnLifecycleFailure,
 } from "./engine-port";
+import { lifecycleFailure, lifecycleState } from "./lifecycle/lifecycle-state";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
 
 const offConfig = {
@@ -59,57 +63,153 @@ describe("connectCanonicalBreadboardEnginePort", () => {
 	});
 });
 
-describe("filterUncorrelatedCanonicalEvents", () => {
-	test("retains canonical correlation even when the legacy numeric turn is null", async () => {
-		const envelope = (sequence: number, type: string, correlation: boolean, payload: object = {}): string =>
-			[
-				`id: ${sequence}`,
-				`data: ${JSON.stringify({
-					stable_cursor: true,
-					id: `event-${sequence}`,
-					seq: sequence,
-					session_id: "session-1",
-					input_id: correlation ? "input-1" : null,
-					turn_id: correlation ? "turn-1" : null,
-					turn: null,
-					timestamp_ms: sequence,
-					type,
-					payload,
-				})}`,
-				"",
-				"",
-			].join("\n");
-		const response = new Response(
-			[
-				`data: ${JSON.stringify({ stable_cursor: false, type: "stream.open", payload: {} })}\n\n`,
-				envelope(3, "ctree_node", true),
-				envelope(4, "user_message", true),
-				envelope(5, "ctree_node", false),
-				envelope(6, "warning", false),
-				envelope(7, "assistant_message", true, { text: "done\n\n>>>>>> END RESPONSE" }),
-				envelope(8, "completion", true, { summary: { completed: true } }),
-				envelope(9, "run_finished", true, { completed: true }),
-				envelope(10, "turn_completed", true),
-			].join(""),
-			{ headers: { "content-type": "text/event-stream" } },
+describe("createLifecycleMonitor", () => {
+	const authority = {
+		mode: "local-owned",
+		engineInstanceId: "engine-instance-1",
+		engineBootId: "engine-boot-1",
+		registrationId: "registration-1",
+		registrationGeneration: 3,
+		ownerGeneration: 7,
+	} as const;
+
+	test("latches confirmed post-ready replacement as an authority discontinuity", () => {
+		const presented: string[] = [];
+		const monitor = createLifecycleMonitor(result => presented.push(result.state.name));
+		monitor.stateChanged(lifecycleState("local-owned", "ready"));
+		monitor.activateAuthority(authority);
+		monitor.stateChanged(lifecycleState("local-owned", "reconnecting", 1));
+		expect(monitor.signal.failure()).toBeUndefined();
+
+		const replacement = lifecycleState("local-owned", "backing-off", 1);
+		monitor.stateChanged(replacement);
+		expect(monitor.signal.failure()).toMatchObject({
+			kind: "failure",
+			state: { name: "identity-changed", reason: "identity_changed", attempt: 1 },
+		});
+		expect(monitor.signal.authorityDiscontinuity()).toEqual({
+			previous: authority,
+			trigger: replacement,
+		});
+		monitor.stateChanged(lifecycleFailure("local-owned", "failed", "restart_budget_exhausted", 2).state);
+		expect(presented).toEqual(["identity-changed"]);
+	});
+
+	test("treats a second ready generation as replacement but rejects authority rebinding", () => {
+		const monitor = createLifecycleMonitor();
+		monitor.activateAuthority(authority);
+		expect(() => monitor.activateAuthority({ ...authority, engineBootId: "engine-boot-2" })).toThrow(
+			"authority is already active",
+		);
+		monitor.stateChanged(lifecycleState("local-owned", "ready"));
+		expect(monitor.signal.authorityDiscontinuity()?.previous).toEqual(authority);
+		expect(monitor.signal.failure()?.state.name).toBe("identity-changed");
+	});
+});
+
+describe("invalidateBreadboardSessionsOnLifecycleFailure", () => {
+	test("closes every old session once and reports a late close failure", async () => {
+		const monitor = createLifecycleMonitor();
+		monitor.activateAuthority({
+			mode: "local-owned",
+			engineInstanceId: "engine-instance-1",
+			engineBootId: "engine-boot-1",
+			registrationId: "registration-1",
+			registrationGeneration: 1,
+			ownerGeneration: 1,
+		});
+		const lateCloseError = new Error("late close failed");
+		const reported = Promise.withResolvers<unknown>();
+		let closeCount = 0;
+		const unsubscribe = invalidateBreadboardSessionsOnLifecycleFailure(
+			monitor.signal,
+			new Set([
+				{
+					async close() {
+						closeCount++;
+						throw lateCloseError;
+					},
+				},
+			]),
+			error => reported.resolve(error),
 		);
 
-		const filtered = await filterUncorrelatedCanonicalEvents(response).text();
+		monitor.stateChanged(lifecycleState("local-owned", "reconnecting", 1));
+		expect(closeCount).toBe(0);
+		monitor.stateChanged(lifecycleState("local-owned", "backing-off", 1));
+		expect(await reported.promise).toBe(lateCloseError);
+		monitor.stateChanged(lifecycleState("local-owned", "ready", 1));
+		expect(closeCount).toBe(1);
+		unsubscribe();
+	});
+});
 
-		expect(filtered).toContain('"seq":3');
-		expect(filtered).toContain('"seq":4');
-		expect(filtered).toContain('"seq":5');
-		expect(filtered).not.toContain('"seq":6');
-		expect(filtered).toContain('"seq":7');
-		expect(filtered).toContain('"type":"assistant.message.end"');
-		expect(filtered).toContain('"text":"done"');
-		expect(filtered).not.toContain(">>>>>> END RESPONSE");
-		expect(filtered).toContain('"seq":8');
-		expect(filtered).toContain('"type":"completion"');
-		expect(filtered).toContain('"seq":9');
-		expect(filtered).toContain('"type":"run_finished"');
-		expect(filtered).toContain('"seq":10');
-		expect(filtered).toContain('"type":"turn_completed"');
+describe("createCanonicalEventFetch", () => {
+	test("adds the strict event query without mutating the canonical response", async () => {
+		const response = new Response("canonical stream", { headers: { "content-type": "text/event-stream" } });
+		let requestedUrl: URL | undefined;
+		const requestFetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0]) => {
+				requestedUrl = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+				return response;
+			},
+			{ preconnect() {} },
+		) satisfies typeof fetch;
+		const canonicalFetch = createCanonicalEventFetch(requestFetch);
+
+		const received = await canonicalFetch("http://127.0.0.1:41739/v1/sessions/session-1/events?after=event-1");
+
+		expect(received).toBe(response);
+		expect(requestedUrl?.pathname).toBe("/v1/sessions/session-1/events");
+		expect(requestedUrl?.searchParams.get("after")).toBe("event-1");
+		expect(requestedUrl?.searchParams.get("schema")).toBe("2");
+		expect(requestedUrl?.searchParams.get("include_legacy")).toBe("false");
+	});
+
+	test("does not add event parameters to another canonical route", async () => {
+		const response = new Response("{}");
+		let requestedUrl: URL | undefined;
+		const requestFetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0]) => {
+				requestedUrl = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+				return response;
+			},
+			{ preconnect() {} },
+		) satisfies typeof fetch;
+
+		expect(await createCanonicalEventFetch(requestFetch)("http://127.0.0.1:41739/v1/sessions/session-1")).toBe(
+			response,
+		);
+		expect(requestedUrl?.searchParams.has("schema")).toBe(false);
+		expect(requestedUrl?.searchParams.has("include_legacy")).toBe(false);
+	});
+
+	test("leaves canonical scope and family validation to the pinned SDK decoder", () => {
+		const envelope = (type: string, correlated: boolean) => ({
+			stable_cursor: true,
+			id: "event-1",
+			seq: 1,
+			session_id: "session-1",
+			input_id: correlated ? "input-1" : null,
+			turn_id: correlated ? "turn-1" : null,
+			timestamp_ms: 1,
+			type,
+			payload: type === "error" ? { code: "worker_crash", message: "must-not-render" } : {},
+		});
+
+		expect(decodeLoggedSessionEvent(envelope("error", false))).toMatchObject({
+			kind: "runtime_error_observed",
+			scope: "session",
+			inputId: null,
+			turnId: null,
+			payload: { error: { code: "worker_crash", message: "[redacted]" } },
+		});
+		expect(() => decodeLoggedSessionEvent(envelope("warning", false))).toThrow(
+			"Session protocol error (missing_turn_correlation)",
+		);
+		expect(() => decodeLoggedSessionEvent(envelope("future_runtime_family", true))).toThrow(
+			"Session protocol error (unsupported_event_family)",
+		);
 	});
 });
 

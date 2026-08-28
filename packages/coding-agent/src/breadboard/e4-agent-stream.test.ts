@@ -28,13 +28,34 @@ import type { OpenedSession } from "./session-port";
 const normalizePersistedMessage = <T>(message: T): T =>
 	JSON.parse(JSON.stringify(message, (key, value) => (key === "errorId" && value === 0 ? undefined : value))) as T;
 
+const ZERO_COMPLETION_PAYLOAD = {
+	finish_reason: "stop",
+	raw_provider_finish: null,
+	output_emitted: true,
+	usage: {
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		totalTokens: 0,
+	},
+};
+
 const wireEvent = (
 	sequence: number,
 	type: string,
 	payload: unknown,
 	turnId: string | null = "turn-1",
-): LoggedSessionEvent =>
-	decodeLoggedSessionEvent({
+): LoggedSessionEvent => {
+	const normalizedPayload =
+		type === "turn_completed" &&
+		payload !== null &&
+		typeof payload === "object" &&
+		!Array.isArray(payload) &&
+		Object.keys(payload).length === 0
+			? ZERO_COMPLETION_PAYLOAD
+			: payload;
+	return decodeLoggedSessionEvent({
 		stable_cursor: true,
 		id: `event-${sequence}`,
 		seq: sequence,
@@ -43,8 +64,9 @@ const wireEvent = (
 		turn_id: turnId,
 		timestamp_ms: sequence,
 		type,
-		payload,
+		payload: normalizedPayload,
 	});
+};
 
 const started = wireEvent(2, "turn_start", {});
 if (started.inputId === null || started.turnId === null) throw new Error("fixture correlation missing");
@@ -218,6 +240,72 @@ describe("E4AgentStreamBridge", () => {
 		await bridge.close();
 	});
 
+	test("projects the canonical provider finish reason and exact usage", async () => {
+		const submitted: SubmitInput[] = [];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[
+					started,
+					wireEvent(3, "assistant.message.end", { text: "bounded" }),
+					wireEvent(4, "turn_completed", {
+						finish_reason: "length",
+						raw_provider_finish: "max_tokens",
+						output_emitted: true,
+						usage: {
+							inputTokens: 11,
+							outputTokens: 7,
+							cacheReadTokens: 3,
+							cacheWriteTokens: 2,
+							totalTokens: 23,
+							reasoningTokens: 4,
+						},
+					}),
+				],
+				submitted,
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const result = await (await startBridgeStream(bridge, model, context)).result();
+
+		expect(result.stopReason).toBe("length");
+		expect(result.responseId).toBe("breadboard:e4:event-4");
+		expect(result.usage).toEqual({
+			input: 11,
+			output: 7,
+			cacheRead: 3,
+			cacheWrite: 2,
+			totalTokens: 23,
+			reasoningTokens: 4,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		});
+		await bridge.close();
+	});
+
+	test("fails closed when canonical completion usage is unknown", async () => {
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[started, wireEvent(3, "turn_completed", { finish_reason: "stop", output_emitted: false })],
+				[],
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const result = await (await startBridgeStream(bridge, model, context)).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toBe("BreadBoard turn completion omitted exact provider usage");
+		await bridge.close();
+	});
+
 	test("projects reasoning and tool-call deltas without delegating backend tools to OMP", async () => {
 		const submitted: SubmitInput[] = [];
 		const agentEvents: AgentEvent[] = [];
@@ -341,15 +429,17 @@ describe("E4AgentStreamBridge", () => {
 		await bridge.close();
 	});
 
-	test("commits session-scoped compaction tree nodes before the owned turn", async () => {
+	test("commits session observations regardless of optional turn correlation", async () => {
 		const submitted: SubmitInput[] = [];
 		const committed: number[] = [];
 		const events = [
 			wireEvent(1, "ctree_node", { node: { id: "bootstrap" } }, null),
 			started,
-			wireEvent(3, "assistant.message.delta", { text: "ready" }),
-			wireEvent(4, "assistant.message.end", { text: "ready" }),
-			wireEvent(5, "turn_completed", {}),
+			wireEvent(3, "stream.gap", { source: "worker" }),
+			wireEvent(4, "session_control", { action: "observed" }),
+			wireEvent(5, "assistant.message.delta", { text: "ready" }),
+			wireEvent(6, "assistant.message.end", { text: "ready" }),
+			wireEvent(7, "turn_completed", {}),
 		];
 		const bridge = new E4AgentStreamBridge({
 			async submissionOwned() {},
@@ -366,7 +456,7 @@ describe("E4AgentStreamBridge", () => {
 		const result = await stream.result();
 
 		expect(result.content).toEqual([{ type: "text", text: "ready" }]);
-		expect(committed).toContain(1);
+		expect(committed).toEqual(expect.arrayContaining([1, 3, 4]));
 		await bridge.close();
 	});
 
@@ -1336,6 +1426,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(firstResult.stopReason).toBe("error");
 			expect(firstResult.content).toEqual([{ type: "text", text: "partial" }]);
 			expect(firstResult.errorMessage).toBe("BreadBoard runtime error [worker_crash]: [redacted]");
+			expect(firstResult.responseId).toBe("breadboard:e4:event-5");
 			expect(firstResult.errorMessage).not.toContain("sensitive backend detail");
 			expect(secondResult.stopReason).toBe("stop");
 			expect(secondResult.content).toEqual([{ type: "text", text: "healthy" }]);
@@ -1423,6 +1514,7 @@ describe("E4AgentStreamBridge", () => {
 		const releaseSecondSubmit = Promise.withResolvers<void>();
 		const runtimeErrorObserved = Promise.withResolvers<void>();
 		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const commits: Array<{ readonly eventId: string; readonly sequence: number; readonly owned: string[] }> = [];
 		const secondReceipt: SubmitReceipt = {
 			...receipt,
 			clientMessageId: "client-message-2" as ClientMessageId,
@@ -1476,7 +1568,13 @@ describe("E4AgentStreamBridge", () => {
 			session,
 			durableCursor: undefined,
 			releaseAgentEvent() {},
-			async projectionCommitted() {},
+			async projectionCommitted(cursor, owned) {
+				commits.push({
+					eventId: cursor.eventId,
+					sequence: cursor.sequence,
+					owned: owned.map(submission => submission.turnId),
+				});
+			},
 			async emitAgentEvent() {},
 			modelPolicy: { kind: "fixed", model: model },
 		});
@@ -1497,9 +1595,11 @@ describe("E4AgentStreamBridge", () => {
 			expect(activeResult.stopReason).toBe("error");
 			expect(activeResult.content).toEqual([{ type: "text", text: "partial" }]);
 			expect(activeResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
+			expect(activeResult.responseId).toBe("breadboard:e4:event-4");
 			expect(activeResult.errorMessage).not.toContain("sensitive backend detail");
 			expect(submittingResult.stopReason).toBe("error");
 			expect(submittingResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
+			expect(submittingResult.responseId).toBe("breadboard:e4:event-4");
 
 			const laterResult = await (await startBridgeStream(bridge, model, laterContext)).result();
 			expect(laterResult.stopReason).toBe("error");
@@ -1509,6 +1609,8 @@ describe("E4AgentStreamBridge", () => {
 				{ turnId: receipt.turnId, reason: "timeout" },
 				{ turnId: secondReceipt.turnId, reason: "timeout" },
 			]);
+			await bridge.close();
+			expect(commits.at(-1)).toEqual({ eventId: "event-4", sequence: 4, owned: [] });
 		} finally {
 			releaseSecondSubmit.resolve();
 			await bridge.close();
