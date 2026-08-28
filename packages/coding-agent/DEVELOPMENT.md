@@ -33,10 +33,13 @@ with `bun run gen:tool-views`.
 process argv
    │
    ▼
-src/cli.ts (runCli)            ── worker-host dispatch + Bun version guard;
+src/omp.ts                      ── immutable native identity bootstrap
+   │
+   ▼
+src/cli.ts (runCli)             ── worker-host dispatch + Bun version guard;
    │  default subcommand: launch    argv normalization
    ▼
-src/commands/* (+ src/cli/)   ── per-command adapters
+src/commands/* (+ src/cli/)     ── per-command adapters
    │
    ▼
 src/main.ts (runRootCommand)  ── theme / settings / model registry / session opts

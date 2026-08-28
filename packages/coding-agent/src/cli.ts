@@ -15,7 +15,6 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
-import { installGlobalProxyFetch } from "@oh-my-pi/pi-ai/utils/proxy";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
@@ -427,8 +426,10 @@ export async function runCli(argv: string[]): Promise<void> {
 	// browser workers onto the same-realm inline fallback.
 	if (isProcessEntry) declareWorkerHostEntry();
 
-	// OAuth refresh/login and usage probes use the bare global `fetch`, so the
-	// profile-scoped proxy must be installed before any provider call.
+	// `PI_PROXY` must reach bare global `fetch` before provider calls. A static
+	// import would load the provider graph before profile bootstrap and worker
+	// dispatch, so preserve upstream's intentional lazy boundary.
+	const { installGlobalProxyFetch } = await import("@oh-my-pi/pi-ai/utils/proxy");
 	installGlobalProxyFetch();
 
 	if (resolvedArgv[0] === "--smoke-test") {

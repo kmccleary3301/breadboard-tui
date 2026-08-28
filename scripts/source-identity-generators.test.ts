@@ -37,10 +37,10 @@ describe("source identity generators", () => {
 		}
 	});
 
-	test("published OMP packages remain at v18.0.0 with synchronized dependency references", async () => {
+	test("published OMP packages remain at v18.0.1 with synchronized dependency references", async () => {
 		const result = await run("scripts/sync-versions.ts");
 		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
-		expect(result.stdout).toContain("@oh-my-pi/pi-coding-agent: 18.0.0");
+		expect(result.stdout).toContain("@oh-my-pi/pi-coding-agent: 18.0.1");
 		expect(result.stdout).toContain("All packages at same version (lockstep)");
 		expect(result.stdout).toContain("All inter-package dependencies already in sync.");
 	});

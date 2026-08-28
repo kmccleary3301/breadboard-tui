@@ -10,7 +10,6 @@ import {
 	inspectUpstreamSync,
 	loadSyncPolicy,
 	type SyncPolicy,
-	UPSTREAM_ORACLE_COMMIT,
 	type UpstreamSyncInspection,
 } from "./inspect-upstream-sync";
 
@@ -76,10 +75,14 @@ const DEFAULT_PROOF_COMMANDS: readonly (readonly string[])[] = [
 	[
 		"bun",
 		"test",
+		"packages/coding-agent/src/product-entrypoint.test.ts",
 		"packages/coding-agent/src/breadboard/canonical-e4-session-port.test.ts",
 		"packages/coding-agent/src/breadboard/e4-agent-stream.test.ts",
 		"packages/coding-agent/src/breadboard/engine-port.test.ts",
-		"packages/coding-agent/test/breadboard-native-authority.test.ts",
+		"packages/coding-agent/test/main-startup-initialization.test.ts",
+		"packages/coding-agent/test/main-session-resolution-error.test.ts",
+		"packages/coding-agent/test/modes/components/welcome.test.ts",
+		"packages/coding-agent/test/breadboard/provider-auth-port.test.ts",
 	],
 ];
 
@@ -118,10 +121,10 @@ function proofReceipt(command: readonly string[], result: CommandResult): ProofC
 
 export async function verifyUpstreamSync(options: VerifyUpstreamSyncOptions = {}): Promise<UpstreamSyncVerification> {
 	const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
-	const upstreamRef = options.upstreamRef ?? UPSTREAM_ORACLE_COMMIT;
 	const candidateRef = options.candidateRef ?? "HEAD";
 	const run = options.run ?? createCommandRunner();
 	const policy = options.policy ?? (await loadSyncPolicy());
+	const upstreamRef = options.upstreamRef ?? policy.upstream.commit;
 	const createTempRoot = options.createTempRoot ?? (() => mkdtemp(path.join(tmpdir(), "p31-upstream-sync-")));
 	const inspect =
 		options.inspect ??

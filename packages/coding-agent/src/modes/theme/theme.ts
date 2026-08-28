@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { detectMacOSAppearance, MacAppearanceObserver } from "@oh-my-pi/pi-natives";
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
-import { colorLuma, getCustomThemesDir, logger } from "@oh-my-pi/pi-utils";
+import { colorLuma, getCustomThemesDir, IS_BREADBOARD_PRODUCT, logger } from "@oh-my-pi/pi-utils";
 import { ansi256ToHex, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
 import type { ThemeColor, ThemeJson } from "./schema";
@@ -78,11 +78,10 @@ export const BREADBOARD_DARK_THEME = "breadboard";
 /** Default light theme under the BreadBoard product entrypoint. */
 export const BREADBOARD_LIGHT_THEME = "breadboard-light";
 
-/** Whether the process was launched via the BreadBoard product entrypoint. The
- *  `bb` binary sets `BREADBOARD_PRODUCT=1` before loading the CLI; native `omp`
- *  leaves it unset. Read live so tests and subprocess launches see changes. */
+/** Whether this process was bootstrapped through the BreadBoard product
+ *  entrypoint. Identity is immutable after the entrypoint loads. */
 export function isBreadboardProduct(): boolean {
-	return process.env.BREADBOARD_PRODUCT === "1";
+	return IS_BREADBOARD_PRODUCT;
 }
 
 // ============================================================================

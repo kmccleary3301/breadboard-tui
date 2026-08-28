@@ -82,6 +82,9 @@
     "@opentelemetry/sdk-trace-node": "catalog:",
     "puppeteer-core": "catalog:"
   },
+  "bundledDependencies": [
+    "@breadboard/sdk"
+  ],
   "optionalDependencies": {
     "@huggingface/transformers": "catalog:",
     "sherpa-onnx-node": "1.13.2"

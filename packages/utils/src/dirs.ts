@@ -135,7 +135,7 @@ function readProfileFromEnvSafe(): string | undefined {
 }
 
 function getBaseConfigRoot(): string {
-	const breadboardOverride = process.env.BREADBOARD_CONFIG_DIR;
+	const breadboardOverride = IS_BREADBOARD_PRODUCT ? process.env.BREADBOARD_CONFIG_DIR : undefined;
 	if (breadboardOverride && path.isAbsolute(breadboardOverride)) return path.resolve(breadboardOverride);
 	return path.join(os.homedir(), getConfigDirName());
 }
@@ -235,9 +235,13 @@ export async function directoryExists(dir: string): Promise<boolean> {
 	}
 }
 
-/** Get the config directory name or explicit path override. */
+/** Get the active product's config directory name or explicit path override. */
 export function getConfigDirName(): string {
-	return process.env.BREADBOARD_CONFIG_DIR || process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
+	return (
+		(IS_BREADBOARD_PRODUCT ? process.env.BREADBOARD_CONFIG_DIR : undefined) ||
+		process.env.PI_CONFIG_DIR ||
+		CONFIG_DIR_NAME
+	);
 }
 
 /** Get the config agent directory name (or path) relative to the config root. */

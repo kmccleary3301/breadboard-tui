@@ -511,7 +511,11 @@ export async function verifyBackendIdentity(
 }
 export function verifyPinnedReferences(
 	manifest: BreadboardSdkProvenance,
-	packageJson: { readonly dependencies?: Readonly<Record<string, string>> },
+	packageJson: {
+		readonly bin?: Readonly<Record<string, string>>;
+		readonly bundledDependencies?: readonly string[];
+		readonly dependencies?: Readonly<Record<string, string>>;
+	},
 	lockText: string,
 ): void {
 	invariant(
@@ -519,8 +523,13 @@ export function verifyPinnedReferences(
 		"artifact path must be repository-relative",
 	);
 	const dependency = `file:${manifest.artifactPath}`;
+	const packageDependency = packageJson.dependencies?.[manifest.packageName];
+	const isPublishedBundle =
+		packageDependency === undefined &&
+		packageJson.bin?.omp === "dist/cli.js" &&
+		packageJson.bundledDependencies?.includes(manifest.packageName) === true;
 	invariant(
-		packageJson.dependencies?.[manifest.packageName] === dependency,
+		packageDependency === dependency || isPublishedBundle,
 		"package.json dependency is not the pinned artifact",
 	);
 	let parsed: unknown;

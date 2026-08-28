@@ -8,6 +8,8 @@ import { buildDocsIndexPayload } from "./generate-docs-index";
 const packageDir = path.join(import.meta.dir, "..");
 const outDir = path.join(packageDir, "dist");
 const cliPath = path.join(outDir, "cli.js");
+const workspaceBreadboardSdkDir = path.join(packageDir, "..", "..", "node_modules", "@breadboard", "sdk");
+const bundledBreadboardSdkDir = path.join(packageDir, "node_modules", "@breadboard", "sdk");
 const shebang = "#!/usr/bin/env bun\n";
 const legacyHtmlExportAssetPattern = /^(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js)$/;
 
@@ -78,6 +80,12 @@ async function cleanBundleOutputs(): Promise<void> {
 	);
 }
 
+async function stageBundledBreadboardSdk(): Promise<void> {
+	await fs.rm(bundledBreadboardSdkDir, { recursive: true, force: true });
+	await fs.mkdir(path.dirname(bundledBreadboardSdkDir), { recursive: true });
+	await fs.cp(workspaceBreadboardSdkDir, bundledBreadboardSdkDir, { recursive: true });
+}
+
 async function main(): Promise<void> {
 	const start = Bun.nanoseconds();
 	await cleanBundleOutputs();
@@ -85,6 +93,7 @@ async function main(): Promise<void> {
 	// archive the same way compiled binaries do (scripts/build-binary.ts). Reset
 	// afterwards to keep the checked-in placeholder empty.
 	await runCommand(["bun", "--cwd=../stats", "run", "gen:stats"]);
+	await stageBundledBreadboardSdk();
 	// One payload for both consumers: inlined into dist/cli.js via `--define` for
 	// the bundled CLI entrypoint, and written to dist/docs-index.generated.txt so
 	// SDK consumers importing `@oh-my-pi/pi-coding-agent/*` (TypeScript source, no
@@ -95,7 +104,8 @@ async function main(): Promise<void> {
 		// 128KiB per-argv-string cap, so it can never be passed as a CLI
 		// `--define` (posix_spawn fails with E2BIG).
 		const output = await Bun.build({
-			entrypoints: [path.join(packageDir, "src/cli.ts")],
+			entrypoints: [path.join(packageDir, "src/omp.ts")],
+			naming: "cli.js",
 			outdir: outDir,
 			target: "bun",
 			external: [...ALWAYS_EXTERNAL, ...RUNTIME_EXTERNAL],

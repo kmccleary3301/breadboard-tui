@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { $ } from "bun";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7,6 +8,7 @@ import {
 	packages,
 	prepareNativeCorePackage,
 	rewriteManifest,
+	rewritePackedBundledDependencies,
 	stageLegalPayloads,
 } from "./ci-release-publish";
 
@@ -56,6 +58,8 @@ describe("published legal payloads", () => {
 				"native/clipboard.d.ts",
 				"native/desktop.js",
 				"native/desktop.d.ts",
+				"native/desktop-adapter.js",
+				"native/desktop-adapter.d.ts",
 				"native/loader-state.js",
 				"native/loader-state.d.ts",
 				"native/embedded-addon.js",
@@ -123,5 +127,54 @@ describe("published manifest topology", () => {
 				import: "./src/ar/index.ts",
 			},
 		});
+	});
+});
+
+describe("published coding-agent topology", () => {
+	it("routes the omp bin through the native identity bundle", async () => {
+		const pkg = packages.find(entry => entry.dir === "packages/coding-agent");
+		if (!pkg) throw new Error("coding-agent missing from publish set");
+
+		const manifest = await rewriteManifest(pkg, false);
+		expect(manifest.bin).toEqual({ omp: "dist/cli.js" });
+		expect(manifest.bundledDependencies).toEqual(["@breadboard/sdk"]);
+		expect(manifest.dependencies?.["@breadboard/sdk"]).toBeUndefined();
+		expect(manifest.files).toContain("dist/cli.js");
+	});
+
+	it("removes source-only SDK references from the self-contained archive", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-publish-bundled-"));
+		const packageRoot = path.join(root, "package");
+		const sdkRoot = path.join(packageRoot, "node_modules", "@breadboard", "sdk");
+		const tarball = path.join(root, "fixture.tgz");
+		try {
+			await fs.mkdir(sdkRoot, { recursive: true });
+			await Promise.all([
+				Bun.write(
+					path.join(packageRoot, "package.json"),
+					JSON.stringify({
+						name: "@oh-my-pi/pi-coding-agent",
+						version: "18.0.1",
+						dependencies: { "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.3.0.tgz" },
+						bundledDependencies: ["@breadboard/sdk"],
+					}),
+				),
+				Bun.write(
+					path.join(sdkRoot, "package.json"),
+					JSON.stringify({ name: "@breadboard/sdk", version: "0.3.0" }),
+				),
+			]);
+			await $`tar -czf ${tarball} -C ${root} package`.quiet();
+
+			await rewritePackedBundledDependencies(tarball, ["@breadboard/sdk"]);
+
+			const packedManifest = JSON.parse((await $`tar -xOzf ${tarball} package/package.json`.quiet()).text());
+			expect(packedManifest.dependencies?.["@breadboard/sdk"]).toBeUndefined();
+			expect(
+				(await $`tar -xOzf ${tarball} package/node_modules/@breadboard/sdk/package.json`.quiet()).text(),
+			).toContain('"version":"0.3.0"');
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
 	});
 });

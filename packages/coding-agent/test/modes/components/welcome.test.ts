@@ -86,49 +86,17 @@ const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const visLen = (s: string): number => [...stripAnsi(s)].length;
 const hasRow = (lines: string[], row: string): boolean => lines.some(l => l.includes(row.trimEnd()));
 
-describe("WelcomeComponent BreadBoard product mode", () => {
-	const priorProduct = process.env.BREADBOARD_PRODUCT;
-	afterEach(() => {
-		if (priorProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
-		else process.env.BREADBOARD_PRODUCT = priorProduct;
-	});
-
-	it("renders the BreadBoard brand mark and drops the OMP mark in product mode", () => {
-		process.env.BREADBOARD_PRODUCT = "1";
-		const lines = new WelcomeComponent("0.1.0-rc.1", "model", "provider").render(90).map(stripAnsi);
-		for (const row of BB_LOGO) expect(hasRow(lines, row)).toBe(true);
-		expect(hasRow(lines, PI_LOGO[1])).toBe(false);
-	});
-
-	it("renders the OMP mark and no brand mark in native mode", () => {
-		delete process.env.BREADBOARD_PRODUCT;
-		const lines = new WelcomeComponent("17.4.0", "model", "provider").render(90).map(stripAnsi);
+describe("WelcomeComponent native identity", () => {
+	it("renders the OMP mark and no BreadBoard mark", () => {
+		const lines = new WelcomeComponent("18.0.1", "model", "provider").render(90).map(stripAnsi);
 		for (const row of PI_LOGO) expect(hasRow(lines, row)).toBe(true);
 		expect(hasRow(lines, BB_LOGO[2])).toBe(false);
 	});
 
-	it("titles the box with the exact BreadBoard product copy", () => {
-		process.env.BREADBOARD_PRODUCT = "1";
-		const header = stripAnsi(new WelcomeComponent("0.1.0-rc.1", "model", "provider").render(90)[0] ?? "");
-		expect(header).toContain("BreadBoard v0.1.0-rc.1");
-		expect(header).not.toContain("omp v");
-	});
-
-	it("keeps the exact OMP copy in native mode", () => {
-		delete process.env.BREADBOARD_PRODUCT;
-		const header = stripAnsi(new WelcomeComponent("17.4.0", "model", "provider").render(90)[0] ?? "");
-		expect(header).toContain("omp v17.4.0");
+	it("keeps the exact OMP copy", () => {
+		const header = stripAnsi(new WelcomeComponent("18.0.1", "model", "provider").render(90)[0] ?? "");
+		expect(header).toContain("omp v18.0.1");
 		expect(header).not.toContain("BreadBoard");
-	});
-
-	it("keeps product rendering within the terminal width when narrow", () => {
-		process.env.BREADBOARD_PRODUCT = "1";
-		const welcome = new WelcomeComponent("0.1.0-rc.1", "model", "provider");
-		for (const width of [20, 12, 6]) {
-			const lines = welcome.render(width);
-			for (const line of lines) expect(visLen(line)).toBeLessThanOrEqual(width);
-			welcome.invalidate();
-		}
 	});
 });
 

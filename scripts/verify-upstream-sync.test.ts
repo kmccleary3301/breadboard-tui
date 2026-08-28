@@ -4,6 +4,11 @@ import { type CommandResult, type CommandRunner, verifyUpstreamSync } from "./ve
 
 const policy: SyncPolicy = {
 	schemaVersion: "p31.upstream-sync-policy.v1",
+	upstream: {
+		tag: "v18.0.1",
+		commit: "6c1209842323bb4713f127ac303c97fd043d585c",
+		tree: "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61",
+	},
 	classes: ["breadboard-owned", "upstream-owned", "generated", "manual-review"],
 	rules: [
 		{
