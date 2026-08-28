@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
+import type { ProviderAuthPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { SignInTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
 import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -138,6 +139,152 @@ describe("SignInTab", () => {
 			tab.dispose();
 			loginGate.resolve();
 			await loginGate.promise;
+		}
+	});
+
+	it("uses the broker login state machine and clears masked API-key input", async () => {
+		const secretCanary = "sk-ant-setup-canary";
+		const nativeCalls: string[] = [];
+		const writes: unknown[] = [];
+		const authStorage = {
+			async login() {
+				nativeCalls.push("login");
+				throw new Error("native AuthStorage login must not run in BreadBoard mode");
+			},
+			setRuntimeApiKey() {
+				nativeCalls.push("setRuntimeApiKey");
+				throw new Error("native AuthStorage mutation must not run in BreadBoard mode");
+			},
+		} as unknown as AuthStorage;
+		const port: ProviderAuthPort = {
+			async listProviders() {
+				return [
+					{
+						providerId: "anthropic",
+						aliases: ["claude"],
+						displayName: "Anthropic",
+						supportTier: "core",
+						authOwner: "broker",
+						available: true,
+						authSchemes: ["api_key"],
+						loginAvailable: false,
+						oauthFlows: [],
+						modelDiscovery: "configured_only",
+					},
+				];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin() {
+				throw new Error("OAuth login must not run for an API-key provider");
+			},
+			async getLogin() {
+				throw new Error("OAuth login must not run for an API-key provider");
+			},
+			async completeLogin() {
+				throw new Error("OAuth login must not run for an API-key provider");
+			},
+			async cancelLogin(loginSessionId) {
+				return { ok: true, outcome: "cancelled", loginSessionId };
+			},
+			async putApiKey(input) {
+				writes.push(input);
+				return {
+					schemaVersion: "bb.auth.credential_summary.v1",
+					credentialRef: "bbcred_anthropic_work",
+					accountId: "bbacct_anthropic_work",
+					providerId: input.providerId,
+					authSchemeId: "api_key",
+					credentialKind: "api_key",
+					accountLabel: input.accountLabel,
+					status: "active",
+					source: "broker",
+					expiresAtUtc: null,
+				};
+			},
+			async logout(input) {
+				return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
+			},
+			async revoke(input) {
+				return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
+			},
+		};
+		const focused: Component[] = [];
+		const host = {
+			providerAuthPort: port,
+			ctx: {
+				openInBrowser(): void {},
+				session: { modelRegistry: { authStorage } },
+			},
+			requestRender(): void {},
+			finish(): void {},
+			setFocus(component: Component | null): void {
+				if (component) focused.push(component);
+			},
+			restoreFocus(): void {},
+		} as unknown as SetupSceneHost;
+		const tab = new SignInTab(host);
+		try {
+			for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 8 && focused.length < 1; pass++) await Promise.resolve();
+			const labelInput = focused[0];
+			if (!labelInput) throw new Error("Account label prompt did not receive focus");
+			for (const character of "work") labelInput.handleInput?.(character);
+			labelInput.handleInput?.("\n");
+			for (let pass = 0; pass < 8 && focused.length < 2; pass++) await Promise.resolve();
+			const secretInput = focused[1];
+			if (!secretInput) throw new Error("API-key prompt did not receive focus");
+			for (const character of secretCanary) secretInput.handleInput?.(character);
+			expect(
+				tab
+					.render(80)
+					.map(line => Bun.stripANSI(line))
+					.join("\n"),
+			).not.toContain(secretCanary);
+			secretInput.handleInput?.("\n");
+			for (let pass = 0; pass < 8 && writes.length === 0; pass++) await Promise.resolve();
+			expect(writes).toEqual([
+				{
+					providerId: "anthropic",
+					authSchemeId: "api_key",
+					accountLabel: "work",
+					apiKey: secretCanary,
+				},
+			]);
+			expect(nativeCalls).toEqual([]);
+			expect(
+				tab
+					.render(80)
+					.map(line => Bun.stripANSI(line))
+					.join("\n"),
+			).not.toContain(secretCanary);
+
+			for (let pass = 0; pass < 16 && tab.modal; pass++) await Promise.resolve();
+			expect(tab.modal).toBe(false);
+			for (let pass = 0; pass < 8; pass++) await Promise.resolve();
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 8 && focused.length < 3; pass++) await Promise.resolve();
+			if (focused.length < 3) throw new Error("Second account label prompt did not receive focus");
+			for (const character of "personal") tab.handleInput(character);
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 8 && focused.length < 4; pass++) await Promise.resolve();
+			if (focused.length < 4) throw new Error("Second API-key prompt did not receive focus");
+			for (const character of "sk-cancelled-setup-canary") tab.handleInput(character);
+			tab.handleInput("\u001b");
+			for (let pass = 0; pass < 8 && tab.modal; pass++) await Promise.resolve();
+			const cancelledRender = tab
+				.render(80)
+				.map(line => Bun.stripANSI(line))
+				.join("\n");
+			expect(tab.modal).toBe(false);
+			expect(writes).toHaveLength(1);
+			expect(cancelledRender).toContain("Login cancelled.");
+			expect(cancelledRender).not.toContain("sk-cancelled-setup-canary");
+			expect(nativeCalls).toEqual([]);
+		} finally {
+			tab.dispose();
 		}
 	});
 });

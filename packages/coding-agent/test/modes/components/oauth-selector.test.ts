@@ -17,11 +17,16 @@ function providerDataSource(storedProviders: readonly string[] = []): ProviderAu
 		async listProviders() {
 			return getOAuthProviders().map(provider => ({
 				providerId: provider.id,
+				aliases: [],
 				displayName: provider.name,
 				storeCredentialsAs: provider.storeCredentialsAs,
+				supportTier: "core",
+				authOwner: "provider",
 				available: provider.available,
 				authSchemes: ["oauth2"],
 				loginAvailable: provider.available,
+				oauthFlows: [],
+				modelDiscovery: "configured_only",
 			}));
 		},
 		async listCredentials() {
@@ -30,16 +35,15 @@ function providerDataSource(storedProviders: readonly string[] = []): ProviderAu
 					({
 						schemaVersion: "bb.auth.credential_summary.v1",
 						credentialRef: `${providerId}-credential`,
+						accountId: `${providerId}-account`,
 						providerId,
 						authSchemeId: "oauth2",
 						credentialKind: "oauth2",
 						accountLabel: `${providerId} account`,
 						status: "active",
 						source: "oauth",
-						isDefault: true,
 						expiresAtUtc: null,
 						createdAtUtc: "",
-						lastUsedAtUtc: null,
 					}) satisfies AuthCredentialView,
 			);
 		},

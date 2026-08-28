@@ -345,6 +345,27 @@ export function buildModelScopeNotification(
 		.join(", ");
 	return { kind: "info", message: `Model scope: ${modelList} (Ctrl+P to cycle)` };
 }
+
+export class BreadboardProductApiKeyError extends Error {
+	constructor() {
+		super(
+			"--api-key is not accepted in BreadBoard product mode; use /login to add an API key through the auth broker",
+		);
+		this.name = "BreadboardProductApiKeyError";
+	}
+}
+
+export function applyCliApiKeyOverride(
+	authStorage: Pick<AuthStorage, "setRuntimeApiKey">,
+	input: {
+		readonly apiKey: string;
+		readonly provider?: string;
+		readonly breadboardProductModeSelected: boolean;
+	},
+): void {
+	if (input.breadboardProductModeSelected) throw new BreadboardProductApiKeyError();
+	if (input.provider) authStorage.setRuntimeApiKey(input.provider, input.apiKey);
+}
 export async function submitInteractiveInput(
 	mode: Pick<
 		InteractiveMode,
@@ -608,7 +629,7 @@ async function runInteractiveMode(
 	}
 
 	if (setupWizard && setupScenes.length > 0) {
-		await setupWizard.runSetupWizard(mode, setupScenes);
+		await setupWizard.runSetupWizard(mode, setupScenes, { providerAuthPort });
 	}
 
 	// Consume failures immediately, but defer any banner until the transcript is stable.
@@ -2654,16 +2675,31 @@ export async function runRootCommand(
 			sessionOptions.telemetry = createTelemetryExportConfig(sessionOptions.telemetry);
 		}
 
-		// Handle CLI --api-key as runtime override (not persisted)
+		// Product sessions bind credentials through the BreadBoard broker. Reject
+		// the native override before AuthStorage can observe the supplied secret.
+		const breadboardProductModeSelected = !startupBreadboardModeIsOff(
+			parsedArgs,
+			settingsInstance,
+			cwd,
+			IS_BREADBOARD_PRODUCT,
+		);
 		if (parsedArgs.apiKey) {
+			try {
+				applyCliApiKeyOverride(authStorage, {
+					apiKey: parsedArgs.apiKey,
+					provider: sessionOptions.model?.provider,
+					breadboardProductModeSelected,
+				});
+			} catch (error) {
+				if (!(error instanceof BreadboardProductApiKeyError)) throw error;
+				process.stderr.write(`${chalk.red(error.message)}\n`);
+				process.exit(1);
+			}
 			if (!sessionOptions.model && !sessionOptions.modelPattern) {
 				process.stderr.write(
 					`${chalk.red("--api-key requires a model to be specified via --model, --provider/--model, or --models")}\n`,
 				);
 				process.exit(1);
-			}
-			if (sessionOptions.model) {
-				authStorage.setRuntimeApiKey(sessionOptions.model.provider, parsedArgs.apiKey);
 			}
 		}
 
@@ -2891,8 +2927,12 @@ export async function runRootCommand(
 				}),
 				Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 			);
-			if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
-				authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);
+			if (parsedArgs.apiKey && preparedBreadboardRuntime === null && !sessionOptions.model && session.model) {
+				applyCliApiKeyOverride(authStorage, {
+					apiKey: parsedArgs.apiKey,
+					provider: session.model.provider,
+					breadboardProductModeSelected: false,
+				});
 			}
 
 			// Runtime provider discovery (opencode-go, models.yml `discovery:`, proxies)

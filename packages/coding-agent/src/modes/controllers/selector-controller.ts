@@ -13,7 +13,8 @@ import {
 	resolveAdvisorConfigEditPath,
 	saveWatchdogConfigFile,
 } from "../../advisor";
-import type { AuthCredentialView, AuthLoginSession, ProviderAuthPort } from "../../breadboard/provider-auth-port";
+import { authenticateProvider } from "../../breadboard/provider-auth-login";
+import { type AuthCredentialView, ProviderAuthError, type ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import { reset as resetCapabilities } from "../../capability";
 import {
 	formatModelSelectorValue,
@@ -1748,57 +1749,13 @@ export class SelectorController {
 		await this.showSessionSelector();
 	}
 
-	async #completeProviderLogin(
-		providerId: string,
-		dialog: LoginDialogComponent,
-		useManualInput: boolean,
-	): Promise<AuthLoginSession> {
-		if (!this.providerAuthPort) throw new Error("BreadBoard provider auth port is not configured");
-		let loginSessionId: string | undefined;
-		const cancelLogin = () => {
-			if (loginSessionId) void this.providerAuthPort?.cancelLogin(loginSessionId).catch(() => {});
-		};
-		dialog.signal.addEventListener("abort", cancelLogin, { once: true });
-		try {
-			let session = await this.providerAuthPort.beginLogin({
-				providerId,
-				flow: useManualInput ? "manual" : "auto",
-			});
-			loginSessionId = session.loginSessionId;
-			if (session.authorizeUrl) dialog.showAuth(session.authorizeUrl, session.instructions, session.launchUrl);
-			if (session.status === "pending" || session.status === "awaiting_input") {
-				if (session.prompt) {
-					const redirectOrCode = await dialog.showPrompt(session.prompt);
-					session = await this.providerAuthPort.completeLogin({
-						loginSessionId: session.loginSessionId,
-						redirectOrCode,
-					});
-				} else if (!session.authorizeUrl) {
-					session = await this.providerAuthPort.getLogin(session.loginSessionId);
-				}
-			}
-			if (session.status === "failed" || session.status === "cancelled" || session.status === "unavailable") {
-				throw new Error(session.problem?.message ?? `Provider login ${session.status}`);
-			}
-			if (session.status !== "completed" || !session.credential) {
-				throw new Error("Provider login did not complete");
-			}
-			return session;
-		} finally {
-			dialog.signal.removeEventListener("abort", cancelLogin);
-		}
-	}
-
 	/**
-	 * Run the OAuth login flow for `providerId` inside a cancellable
-	 * {@link LoginDialogComponent} that replaces the editor slot. Esc aborts:
-	 * the dialog's abort signal reaches the provider flow, any pending prompt
-	 * rejects, and the editor is restored immediately. Returns true when
-	 * credentials were stored.
+	 * Run provider login through the BreadBoard broker when configured. Native
+	 * mode retains the existing AuthStorage flow.
 	 */
 	async #handleOAuthLogin(providerId: string): Promise<boolean> {
 		this.ctx.showStatus(`Logging in to ${providerId}…`);
-		const useManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
+		const useManualInput = !this.providerAuthPort && PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
 		let restored = false;
 		const restoreEditor = () => {
 			if (restored) return;
@@ -1820,12 +1777,53 @@ export class SelectorController {
 		this.ctx.ui.requestRender();
 		try {
 			let identity: OAuthLoginIdentity | undefined;
+			let brokerAccountLabel: string | undefined;
 			if (this.providerAuthPort) {
-				const session = await this.#completeProviderLogin(providerId, dialog, useManualInput);
-				identity = {
-					type: "oauth",
-					accountId: session.credential?.accountLabel,
-				};
+				const credential = await authenticateProvider(this.providerAuthPort, providerId, {
+					signal: dialog.signal,
+					async selectAuthScheme(provider, schemes) {
+						const choices = schemes.map((scheme, index) => `${index + 1}) ${scheme}`).join("  ");
+						const answer = (
+							await dialog.showPrompt(`Choose authentication for ${provider.displayName}: ${choices}`)
+						).trim();
+						const selectedIndex = Number.parseInt(answer, 10) - 1;
+						return schemes[selectedIndex] ?? answer;
+					},
+					async selectOAuthFlow(provider) {
+						const flows = provider.oauthFlows.filter(
+							(flow): flow is "browser" | "device" => flow === "browser" || flow === "device",
+						);
+						if (flows.length <= 1) return flows[0];
+						const choices = flows.map((flow, index) => `${index + 1}) ${flow}`).join("  ");
+						const answer = (await dialog.showPrompt(`Choose OAuth flow: ${choices}`)).trim();
+						const selectedIndex = Number.parseInt(answer, 10) - 1;
+						const selectedByName = answer === "browser" || answer === "device" ? answer : undefined;
+						return (
+							flows[selectedIndex] ??
+							(selectedByName && flows.includes(selectedByName) ? selectedByName : undefined)
+						);
+					},
+					showAuthorization(session) {
+						const instructions = [
+							session.instructions,
+							session.userCode ? `Code: ${session.userCode}` : undefined,
+						]
+							.filter((line): line is string => Boolean(line))
+							.join("\n");
+						if (session.authorizeUrl) {
+							dialog.showAuth(session.authorizeUrl, instructions || undefined);
+							return;
+						}
+						if (instructions) dialog.showProgress(instructions);
+					},
+					prompt(input) {
+						return dialog.showPrompt(input.message, input.placeholder, { secret: input.secret });
+					},
+					showProgress(message) {
+						dialog.showProgress(message);
+					},
+				});
+				brokerAccountLabel = credential.accountLabel;
 			} else {
 				identity = await this.ctx.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
 					signal: dialog.signal,
@@ -1848,7 +1846,8 @@ export class SelectorController {
 			// Name the account (and Anthropic organization) that was stored so a
 			// login that lands on an unintended account/subscription is visible
 			// immediately instead of silently replacing an existing registration.
-			const whoBase = identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined;
+			const whoBase =
+				brokerAccountLabel ?? (identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined);
 			const whoOrg = identity?.type === "oauth" ? (identity.orgName ?? identity.orgId) : undefined;
 			const who = whoBase ? ` as ${whoBase}${whoOrg ? ` (${whoOrg})` : ""}` : whoOrg ? ` as ${whoOrg}` : "";
 			block.addChild(
@@ -1874,28 +1873,43 @@ export class SelectorController {
 			return true;
 		} catch (error: unknown) {
 			if (dialog.signal.aborted) {
-				// User-cancelled: the dialog already restored the editor and
-				// surfaced "Login cancelled".
-
 				return false;
 			}
-			this.ctx.showError(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
+			if (error instanceof ProviderAuthError) {
+				this.ctx.showError(`Login failed: ${error.message} ${error.nextAction}`);
+			} else {
+				this.ctx.showError(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
 			return false;
 		} finally {
 			restoreEditor();
 		}
 	}
 
-	async #handleProviderLogout(providerId: string): Promise<void> {
-		if (!this.providerAuthPort) throw new Error("BreadBoard provider auth port is not configured");
-		const credentials: ReadonlyArray<AuthCredentialView> = await this.providerAuthPort.listCredentials(providerId);
-		const credential = credentials.find(item => item.status === "active");
-		if (!credential) {
-			this.ctx.showStatus(`No stored BreadBoard credentials for ${providerId}.`);
+	#showProviderAuthError(operation: string, error: unknown): void {
+		if (error instanceof ProviderAuthError) {
+			this.ctx.showError(`${operation} failed: ${error.message} ${error.nextAction}`);
 			return;
 		}
-		await this.providerAuthPort.logout({ credentialRef: credential.credentialRef });
-		this.ctx.showStatus(`Successfully logged out ${credential.accountLabel} from ${providerId}`);
+		this.ctx.showError(`${operation} failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
+
+	async #handleProviderLogout(credential: AuthCredentialView): Promise<void> {
+		if (!this.providerAuthPort) throw new Error("BreadBoard provider auth port is not configured");
+		try {
+			const result = await this.providerAuthPort.logout({ credentialRef: credential.credentialRef });
+			if (!result.ok || result.outcome === "no_op") {
+				this.ctx.showStatus(`Logout skipped: ${credential.accountLabel} is no longer active.`);
+				return;
+			}
+			this.ctx.showStatus(`Successfully logged out ${credential.accountLabel} from ${credential.providerId}`);
+		} catch (error) {
+			if (error instanceof ProviderAuthError) {
+				this.ctx.showError(`Logout failed: ${error.message} ${error.nextAction}`);
+				return;
+			}
+			throw error;
+		}
 	}
 
 	async #handleCredentialLogout(providerId: string, account: LogoutAccount): Promise<void> {
@@ -1939,7 +1953,48 @@ export class SelectorController {
 
 	async #showOAuthLogoutAccountSelector(providerId: string): Promise<void> {
 		if (this.providerAuthPort) {
-			await this.#handleProviderLogout(providerId);
+			const loaded = await Promise.all([
+				this.providerAuthPort.listProviders(),
+				this.providerAuthPort.listCredentials(providerId),
+			]).catch(error => {
+				this.#showProviderAuthError("Account lookup", error);
+				return undefined;
+			});
+			if (!loaded) return;
+			const [providers, credentials] = loaded;
+			const activeCredentials = credentials.filter(credential => credential.status === "active");
+			if (activeCredentials.length === 0) {
+				this.ctx.showStatus(`No stored BreadBoard credentials for ${providerId}.`);
+				return;
+			}
+			const accounts = activeCredentials.map(
+				(credential, index) =>
+					({
+						credentialId: index,
+						provider: credential.providerId,
+						label: credential.accountLabel,
+						detail: [credential.alias, credential.status, credential.source].filter(Boolean).join(" · "),
+						type: credential.credentialKind === "api_key" ? "api_key" : "oauth",
+						active: credential.status === "active",
+					}) satisfies LogoutAccount,
+			);
+			const provider = providers.find(candidate => candidate.providerId === providerId);
+			this.showSelector(done => {
+				const selector = new LogoutAccountSelectorComponent(
+					provider?.displayName ?? providerId,
+					accounts,
+					account => {
+						done();
+						const credential = activeCredentials[account.credentialId];
+						if (credential) void this.#handleProviderLogout(credential);
+					},
+					() => {
+						done();
+						this.ctx.ui.requestRender();
+					},
+				);
+				return { component: selector, focus: selector };
+			});
 			return;
 		}
 		const authStorage = this.ctx.session.modelRegistry.authStorage;
@@ -1979,23 +2034,185 @@ export class SelectorController {
 			return { component: selector, focus: selector };
 		});
 	}
+	async #handleProviderRevoke(credential: AuthCredentialView): Promise<void> {
+		if (!this.providerAuthPort) return;
+		const confirmed = await this.ctx.showHookConfirm(
+			"Revoke BreadBoard credential",
+			`Permanently revoke ${credential.accountLabel} for ${credential.providerId}? This is distinct from logout and cannot be undone.`,
+		);
+		if (!confirmed) {
+			this.ctx.showStatus("Credential revoke cancelled.");
+			return;
+		}
+		try {
+			const result = await this.providerAuthPort.revoke({ credentialRef: credential.credentialRef });
+			if (result.outcome === "no_op") {
+				this.ctx.showStatus(`${credential.accountLabel} was already revoked.`);
+				return;
+			}
+			this.ctx.showStatus(`Revoked ${credential.accountLabel} for ${credential.providerId}.`);
+		} catch (error) {
+			if (error instanceof ProviderAuthError) {
+				this.ctx.showError(`Revoke failed: ${error.message} ${error.nextAction}`);
+				return;
+			}
+			this.ctx.showError(`Revoke failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	async #showProviderRevokeAccountSelector(providerId: string): Promise<void> {
+		if (!this.providerAuthPort) {
+			this.ctx.showStatus("Credential revoke requires BreadBoard product mode.");
+			return;
+		}
+		const loaded = await Promise.all([
+			this.providerAuthPort.listProviders(),
+			this.providerAuthPort.listCredentials(providerId),
+		]).catch(error => {
+			this.#showProviderAuthError("Credential lookup", error);
+			return undefined;
+		});
+		if (!loaded) return;
+		const [providers, credentials] = loaded;
+		const revocableCredentials = credentials.filter(credential => credential.status !== "revoked");
+		if (revocableCredentials.length === 0) {
+			this.ctx.showStatus(`No revocable BreadBoard credentials for ${providerId}.`);
+			return;
+		}
+		const accounts = revocableCredentials.map(
+			(credential, index) =>
+				({
+					credentialId: index,
+					provider: credential.providerId,
+					label: credential.accountLabel,
+					detail: [credential.alias, credential.status, credential.source].filter(Boolean).join(" · "),
+					type: credential.credentialKind === "api_key" ? "api_key" : "oauth",
+					active: credential.status === "active",
+				}) satisfies LogoutAccount,
+		);
+		const provider = providers.find(candidate => candidate.providerId === providerId);
+		this.showSelector(done => {
+			const selector = new LogoutAccountSelectorComponent(
+				provider?.displayName ?? providerId,
+				accounts,
+				account => {
+					done();
+					const credential = revocableCredentials[account.credentialId];
+					if (credential) void this.#handleProviderRevoke(credential);
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+				"revoke",
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	async showProviderRevokeSelector(providerId?: string): Promise<void> {
+		const providerAuthPort = this.providerAuthPort;
+		if (!providerAuthPort) {
+			this.ctx.showStatus("Credential revoke requires BreadBoard product mode.");
+			return;
+		}
+		if (providerId) {
+			const providers = await providerAuthPort.listProviders().catch(error => {
+				this.#showProviderAuthError("Provider lookup", error);
+				return undefined;
+			});
+			if (!providers) return;
+			const provider = providers.find(
+				candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
+			);
+			if (!provider) {
+				this.ctx.showError(`Unknown BreadBoard provider: ${providerId}`);
+				return;
+			}
+			await this.#showProviderRevokeAccountSelector(provider.providerId);
+			return;
+		}
+		const credentials = await providerAuthPort.listCredentials().catch(error => {
+			this.#showProviderAuthError("Credential lookup", error);
+			return undefined;
+		});
+		if (!credentials) return;
+		if (!credentials.some(credential => credential.status !== "revoked")) {
+			this.ctx.showStatus("No revocable BreadBoard provider credentials.");
+			return;
+		}
+		this.showSelector(done => {
+			let selector: OAuthSelectorComponent;
+			selector = new OAuthSelectorComponent(
+				"revoke",
+				providerAuthPort,
+				selectedProviderId => {
+					selector.stopValidation();
+					done();
+					void this.#showProviderRevokeAccountSelector(selectedProviderId);
+				},
+				() => {
+					selector.stopValidation();
+					done();
+					this.ctx.ui.requestRender();
+				},
+				{ requestRender: () => this.ctx.ui.requestRender() },
+			);
+			return { component: selector, focus: selector };
+		});
+	}
 
 	async showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
 		if (providerId) {
+			let selectedProviderId = providerId;
+			if (this.providerAuthPort) {
+				if (mode === "login") {
+					await this.#handleOAuthLogin(providerId);
+					return;
+				}
+				try {
+					const providers = await this.providerAuthPort.listProviders();
+					const provider = providers.find(
+						candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
+					);
+					if (!provider) {
+						this.ctx.showError(`Unknown BreadBoard provider: ${providerId}`);
+						return;
+					}
+					selectedProviderId = provider.providerId;
+				} catch (error) {
+					if (error instanceof ProviderAuthError) {
+						this.ctx.showError(`Provider lookup failed: ${error.message} ${error.nextAction}`);
+						return;
+					}
+					throw error;
+				}
+			} else if (!getOAuthProviders().some(provider => provider.id === providerId)) {
+				this.ctx.showError(`Unknown OAuth provider: ${providerId}`);
+				return;
+			}
 			if (mode === "login") {
-				await this.#handleOAuthLogin(providerId);
+				await this.#handleOAuthLogin(selectedProviderId);
 			} else {
-				await this.#showOAuthLogoutAccountSelector(providerId);
+				await this.#showOAuthLogoutAccountSelector(selectedProviderId);
 			}
 			return;
 		}
 
 		if (mode === "logout") {
 			if (this.providerAuthPort) {
-				const credentials = await this.providerAuthPort.listCredentials();
-				if (!credentials.some(credential => credential.status === "active")) {
-					this.ctx.showStatus("No stored BreadBoard provider credentials to log out.");
-					return;
+				try {
+					const credentials = await this.providerAuthPort.listCredentials();
+					if (!credentials.some(credential => credential.status === "active")) {
+						this.ctx.showStatus("No stored BreadBoard provider credentials to log out.");
+						return;
+					}
+				} catch (error) {
+					if (error instanceof ProviderAuthError) {
+						this.ctx.showError(`Account lookup failed: ${error.message} ${error.nextAction}`);
+						return;
+					}
+					throw error;
 				}
 			} else {
 				await this.#refreshOAuthProviderAuthState();
@@ -2053,6 +2270,12 @@ export class SelectorController {
 	}
 
 	async showSessionPinSelector(): Promise<void> {
+		if (this.providerAuthPort) {
+			this.ctx.showStatus(
+				"BreadBoard credentials are bound when a product session starts. Start a new session to use a different account.",
+			);
+			return;
+		}
 		const session = this.ctx.session;
 		if (session.isStreaming) {
 			this.ctx.showStatus("Cannot pin an account while the session is streaming.");

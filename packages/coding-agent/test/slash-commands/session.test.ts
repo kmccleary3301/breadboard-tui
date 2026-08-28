@@ -6,6 +6,7 @@ function createRuntimeHarness(options?: {
 	handleSessionCommand?: InteractiveModeContext["handleSessionCommand"];
 	handleSessionDeleteCommand?: InteractiveModeContext["handleSessionDeleteCommand"];
 	showSessionPinSelector?: InteractiveModeContext["showSessionPinSelector"];
+	usesBroker?: boolean;
 }) {
 	const setText = vi.fn();
 	const handleSessionCommand =
@@ -34,6 +35,15 @@ function createRuntimeHarness(options?: {
 				editor: { setText } as unknown as InteractiveModeContext["editor"],
 				handleSessionCommand,
 				handleSessionDeleteCommand,
+				usesProviderAuthBroker: () => options?.usesBroker === true,
+				session: {
+					async listCurrentProviderOAuthAccounts() {
+						throw new Error("product pin must not read native accounts");
+					},
+					pinCurrentProviderOAuthAccount() {
+						throw new Error("product pin must not mutate native session pinning");
+					},
+				} as unknown as InteractiveModeContext["session"],
 				showSessionPinSelector,
 			} as InteractiveModeContext,
 		},
@@ -83,6 +93,17 @@ describe("/session slash command", () => {
 
 		deferred.resolve();
 		expect(await execution).toBe(true);
+		expect(harness.setText).toHaveBeenCalledWith("");
+	});
+
+	it("routes explicit product account pins through the immutable-session guard", async () => {
+		const showSessionPinSelector = vi.fn(async () => {});
+		const harness = createRuntimeHarness({ showSessionPinSelector, usesBroker: true });
+
+		const handled = await executeBuiltinSlashCommand("/session pin work", harness.runtime);
+
+		expect(handled).toBe(true);
+		expect(showSessionPinSelector).toHaveBeenCalledTimes(1);
 		expect(harness.setText).toHaveBeenCalledWith("");
 	});
 

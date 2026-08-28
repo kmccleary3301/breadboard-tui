@@ -6,7 +6,6 @@ import type {
 	AuthLoginSession,
 	AuthProviderView,
 	ProviderAuthPort,
-	RevokeResult,
 } from "../../src/breadboard/provider-auth-port";
 import { createNativeProviderAuthDataSource } from "../../src/modes/components/oauth-provider-data-source";
 import { OAuthSelectorComponent } from "../../src/modes/components/oauth-selector";
@@ -26,16 +25,15 @@ afterEach(() => {
 const credential: AuthCredentialView = {
 	schemaVersion: "bb.auth.credential_summary.v1",
 	credentialRef: "bbcred_openai_1",
+	accountId: "bbacct_openai_1",
 	providerId: "openai",
 	authSchemeId: "oauth2",
 	credentialKind: "oauth2",
 	accountLabel: "test@example.com",
 	status: "active",
 	source: "broker",
-	isDefault: true,
 	expiresAtUtc: null,
 	createdAtUtc: "2026-08-20T00:00:00Z",
-	lastUsedAtUtc: null,
 };
 
 const completedLogin: AuthLoginSession = {
@@ -51,10 +49,15 @@ function providerPort(overrides: Partial<ProviderAuthPort> = {}): ProviderAuthPo
 			return [
 				{
 					providerId: "openai",
+					aliases: ["openai-api"],
 					displayName: "OpenAI",
+					supportTier: "core",
+					authOwner: "broker",
 					available: true,
 					authSchemes: ["oauth2"],
 					loginAvailable: true,
+					oauthFlows: ["browser"],
+					modelDiscovery: "configured_only",
 				},
 			];
 		},
@@ -70,13 +73,17 @@ function providerPort(overrides: Partial<ProviderAuthPort> = {}): ProviderAuthPo
 		async completeLogin() {
 			return completedLogin;
 		},
-		async cancelLogin() {},
+		async cancelLogin(loginSessionId) {
+			return { ok: true, outcome: "cancelled", loginSessionId };
+		},
 		async putApiKey() {
 			return credential;
 		},
-		async logout() {},
-		async revoke(): Promise<RevokeResult> {
-			return { credentialRef: credential.credentialRef, revoked: true };
+		async logout(input) {
+			return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
+		},
+		async revoke(input) {
+			return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
 		},
 		...overrides,
 	};
@@ -107,6 +114,9 @@ function controllerContext(
 		},
 		showError(message: string) {
 			statuses.push(`error:${message}`);
+		},
+		async showHookConfirm() {
+			return true;
 		},
 		present() {},
 		session: { modelRegistry: { authStorage } },
@@ -145,7 +155,12 @@ describe("BreadBoard provider auth port integration", () => {
 			},
 		};
 		const statuses: string[] = [];
-		const context = controllerContext(authStorage, statuses);
+		let focused: { handleInput(data: string): void } | undefined;
+		const context = controllerContext(authStorage, statuses, component => {
+			if (component && typeof component === "object" && "handleInput" in component) {
+				focused = component as { handleInput(data: string): void };
+			}
+		});
 		const port = providerPort({
 			async listCredentials(providerId) {
 				calls.push(`listCredentials:${providerId}`);
@@ -153,12 +168,134 @@ describe("BreadBoard provider auth port integration", () => {
 			},
 			async logout(input) {
 				calls.push(`logout:${input.credentialRef}`);
+				return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
 			},
 		});
 		const controller = new SelectorController(context, port);
 		await controller.showOAuthSelector("logout", "openai");
+		if (!focused) throw new Error("Logout account selector did not receive focus");
+		focused.handleInput("\n");
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
 		expect(calls).toEqual(["listCredentials:openai", `logout:${credential.credentialRef}`]);
 		expect(statuses).toEqual(["Successfully logged out test@example.com from openai"]);
+	});
+
+	test("multi-account logout and confirmed revoke use the selected broker credential reference", async () => {
+		const secondCredential: AuthCredentialView = {
+			...credential,
+			credentialRef: "bbcred_openai_2",
+			accountId: "bbacct_openai_2",
+			accountLabel: "second@example.com",
+		};
+		const actions: string[] = [];
+		const authStorage = {
+			async removeCredential() {
+				throw new Error("native AuthStorage must not run in BreadBoard mode");
+			},
+		};
+		const statuses: string[] = [];
+		const focused: Array<{ handleInput(data: string): void }> = [];
+		const context = controllerContext(authStorage, statuses, component => {
+			if (component && typeof component === "object" && "handleInput" in component) {
+				focused.push(component as { handleInput(data: string): void });
+			}
+		});
+		const port = providerPort({
+			async listCredentials() {
+				return [credential, secondCredential];
+			},
+			async logout(input) {
+				actions.push(`logout:${input.credentialRef}`);
+				return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
+			},
+			async revoke(input) {
+				actions.push(`revoke:${input.credentialRef}`);
+				return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
+			},
+		});
+		const controller = new SelectorController(context, port);
+
+		await controller.showOAuthSelector("logout", "openai");
+		const logoutSelector = focused.at(-1);
+		if (!logoutSelector) throw new Error("Logout account selector did not receive focus");
+		logoutSelector.handleInput("\u001b[B");
+		logoutSelector.handleInput("\n");
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+
+		await controller.showProviderRevokeSelector("openai");
+		const revokeSelector = focused.at(-1);
+		if (!revokeSelector || revokeSelector === logoutSelector) {
+			throw new Error("Revoke account selector did not receive focus");
+		}
+		revokeSelector.handleInput("\u001b[B");
+		revokeSelector.handleInput("\n");
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+
+		expect(actions).toEqual([`logout:${secondCredential.credentialRef}`, `revoke:${secondCredential.credentialRef}`]);
+		expect(statuses).toContain("Revoked second@example.com for openai.");
+	});
+
+	test("broker logout and revoke no-op outcomes never fall back to native storage", async () => {
+		const statuses: string[] = [];
+		const focused: Array<{ handleInput(data: string): void }> = [];
+		const context = controllerContext(
+			{
+				async removeCredential() {
+					throw new Error("native AuthStorage must not run in BreadBoard mode");
+				},
+			},
+			statuses,
+			component => {
+				if (component && typeof component === "object" && "handleInput" in component) {
+					focused.push(component as { handleInput(data: string): void });
+				}
+			},
+		);
+		const port = providerPort({
+			async logout(input) {
+				return { ok: false, outcome: "no_op", credentialRef: input.credentialRef };
+			},
+			async revoke(input) {
+				return { ok: false, outcome: "no_op", credentialRef: input.credentialRef };
+			},
+		});
+		const controller = new SelectorController(context, port);
+
+		await controller.showOAuthSelector("logout", "openai");
+		const logoutSelector = focused.at(-1);
+		if (!logoutSelector) throw new Error("Logout account selector did not receive focus");
+		logoutSelector.handleInput("\n");
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+
+		await controller.showProviderRevokeSelector("openai");
+		const revokeSelector = focused.at(-1);
+		if (!revokeSelector || revokeSelector === logoutSelector) {
+			throw new Error("Revoke account selector did not receive focus");
+		}
+		revokeSelector.handleInput("\n");
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+
+		expect(statuses).toContain("Logout skipped: test@example.com is no longer active.");
+		expect(statuses).toContain("test@example.com was already revoked.");
+	});
+
+	test("product session pin exits before native account APIs", async () => {
+		const statuses: string[] = [];
+		const context = controllerContext(
+			{
+				listStoredCredentials() {
+					throw new Error("native AuthStorage must not run in BreadBoard mode");
+				},
+			},
+			statuses,
+		);
+		const controller = new SelectorController(context, providerPort());
+
+		await controller.showSessionPinSelector();
+
+		expect(statuses).toEqual([
+			"BreadBoard credentials are bound when a product session starts. Start a new session to use a different account.",
+		]);
 	});
 	test("BreadBoard provider/status data source drives selector rows without the native catalog", async () => {
 		const selected: string[] = [];
@@ -167,10 +304,16 @@ describe("BreadBoard provider auth port integration", () => {
 				return [
 					{
 						providerId: "bb-custom",
+						aliases: [],
 						displayName: "BreadBoard Custom",
-						available: true,
+						supportTier: "core",
+						authOwner: "broker",
+						available: false,
+						availabilityReason: "missing_auth",
 						authSchemes: ["api_key"],
 						loginAvailable: false,
+						oauthFlows: [],
+						modelDiscovery: "configured_only",
 					},
 				];
 			},
@@ -186,6 +329,44 @@ describe("BreadBoard provider auth port integration", () => {
 		);
 		await selector.ready;
 		expect(selector.render(80).join("\n")).toContain("BreadBoard Custom");
+		expect(selector.render(80).join("\n")).toContain("credentials required");
+		selector.handleInput("\n");
+		expect(selected).toEqual(["bb-custom"]);
+	});
+
+	test("provider-managed rows remain visible but cannot start broker login", async () => {
+		const selected: string[] = [];
+		const source = providerPort({
+			async listProviders() {
+				return [
+					{
+						providerId: "codex",
+						aliases: [],
+						displayName: "Codex",
+						supportTier: "core",
+						authOwner: "provider",
+						available: true,
+						availabilityReason: "provider_managed",
+						authSchemes: ["api_key"],
+						loginAvailable: false,
+						oauthFlows: [],
+						modelDiscovery: "configured_only",
+					},
+				];
+			},
+			async listCredentials() {
+				return [];
+			},
+		});
+		const selector = new OAuthSelectorComponent(
+			"login",
+			source,
+			providerId => selected.push(providerId),
+			() => {},
+		);
+		await selector.ready;
+
+		expect(selector.render(80).join("\n")).toContain("provider managed");
 		selector.handleInput("\n");
 		expect(selected).toEqual([]);
 	});
@@ -204,6 +385,19 @@ describe("BreadBoard provider auth port integration", () => {
 			secret_version: 1,
 			created_at_ms: 1,
 			updated_at_ms: 2,
+			expires_at_ms: 60_000,
+			has_api_key: true,
+			refresh_state: {
+				status: "idle",
+				expected_secret_version: 1,
+				lease_acquired_at_ms: null,
+				lease_expires_at_ms: null,
+				last_failure_class: null,
+				last_failure_code: null,
+				last_failure_at_ms: null,
+				retry_not_before_ms: null,
+				updated_at_ms: 2,
+			},
 		};
 		const client = {
 			async listProviders() {
@@ -217,6 +411,7 @@ describe("BreadBoard provider auth port integration", () => {
 						auth_schemes: ["api_key"],
 						available: true,
 						login_available: false,
+						oauth_flows: [],
 						model_discovery: "configured_only" as const,
 					},
 				];
@@ -248,8 +443,35 @@ describe("BreadBoard provider auth port integration", () => {
 			},
 		};
 		const port = createBreadboardProviderAuthPort(client);
+		const providers = await port.listProviders();
 		const rows = await port.listCredentials("openai");
-		expect(rows).toMatchObject([{ providerId: "openai", credentialRef: "bbcred_work", accountLabel: "work" }]);
+		expect(providers).toEqual([
+			{
+				providerId: "openai",
+				aliases: [],
+				displayName: "OpenAI",
+				supportTier: "core",
+				authOwner: "broker",
+				available: true,
+				authSchemes: ["api_key"],
+				loginAvailable: false,
+				oauthFlows: [],
+				modelDiscovery: "configured_only",
+			},
+		]);
+		expect(rows).toMatchObject([
+			{
+				providerId: "openai",
+				accountId: "bbacct_work",
+				credentialRef: "bbcred_work",
+				accountLabel: "work",
+				hasApiKey: true,
+				secretVersion: 1,
+				refreshState: { status: "idle", expectedSecretVersion: 1 },
+			},
+		]);
+		expect(rows[0]).not.toHaveProperty("isDefault");
+		expect(rows[0]).not.toHaveProperty("lastUsedAtUtc");
 		const stored = await port.putApiKey({ providerId: "openai", accountLabel: "work", apiKey: "secret-value" });
 		const rotated = await port.putApiKey({ providerId: "openai", accountLabel: "work", apiKey: "rotated-secret" });
 		expect(stored).toMatchObject({ providerId: "openai", credentialRef: "bbcred_work" });
@@ -387,7 +609,7 @@ describe("BreadBoard provider auth port integration", () => {
 		};
 		const port = createBreadboardProviderAuthPort(client);
 
-		const started = await port.beginLogin({ providerId: "codex", flow: "manual" });
+		const started = await port.beginLogin({ providerId: "codex", flow: "browser" });
 		expect(beginRequest).toEqual({ provider_id: "codex", flow: "browser" });
 		expect(started).toMatchObject({
 			status: "pending",
@@ -477,15 +699,10 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(started).toMatchObject({
 			flowKind: "device",
 			userCode: "ABCD-EFGH",
-			instructions: "Enter the code in your browser.\nAuthorization code: ABCD-EFGH",
-			prompt: "Complete authorization in your browser, then press Enter.",
+			instructions: "Enter the code in your browser.",
 		});
-		const completed = await port.completeLogin({ loginSessionId: started.loginSessionId, redirectOrCode: "" });
-		expect(completed.status).toBe("completed");
-		expect(requests).toEqual([
-			{ provider_id: "codex", auth_scheme_id: "oauth2", flow: "device" },
-			{ login_session_id: "login-device" },
-		]);
+		expect(started).not.toHaveProperty("prompt");
+		expect(requests).toEqual([{ provider_id: "codex", auth_scheme_id: "oauth2", flow: "device" }]);
 	});
 
 	test("pending browser login opens authorization and completes through the mounted prompt", async () => {
@@ -506,7 +723,20 @@ describe("BreadBoard provider auth port integration", () => {
 		});
 		const client = {
 			async listProviders() {
-				return [];
+				return [
+					{
+						provider_id: "broker-browser",
+						aliases: [],
+						display_name: "Broker Browser",
+						support_tier: "core" as const,
+						auth_owner: "broker" as const,
+						auth_schemes: ["oauth2"],
+						available: true,
+						login_available: true,
+						oauth_flows: ["browser"],
+						model_discovery: "configured_only" as const,
+					},
+				];
 			},
 			async listCredentials() {
 				return [];
@@ -515,7 +745,7 @@ describe("BreadBoard provider auth port integration", () => {
 				beginObserved.resolve();
 				return {
 					login_session_id: "login-pending",
-					provider_id: "codex",
+					provider_id: "broker-browser",
 					status: "pending",
 					authorization_url: "https://auth.example/authorize?state=csrf-state",
 					flow_kind: "browser",
@@ -527,12 +757,12 @@ describe("BreadBoard provider auth port integration", () => {
 			async completeLogin() {
 				return {
 					login_session_id: "login-pending",
-					provider_id: "codex",
+					provider_id: "broker-browser",
 					status: "completed",
 					credential: {
-						account_id: "bbacct_codex",
-						credential_id: "bbcred_codex",
-						provider_id: "codex",
+						account_id: "bbacct_browser",
+						credential_id: "bbcred_browser",
+						provider_id: "broker-browser",
 						auth_scheme_id: "oauth2",
 						label: "user@example.com",
 						credential_kind: "oauth2",
@@ -559,7 +789,7 @@ describe("BreadBoard provider auth port integration", () => {
 		};
 		const controller = new SelectorController(context, createBreadboardProviderAuthPort(client));
 
-		const login = controller.showOAuthSelector("login", "codex");
+		const login = controller.showOAuthSelector("login", "broker-browser");
 		for (let pass = 0; pass < 8 && !focused; pass++) await Promise.resolve();
 		if (!focused) throw new Error("Login prompt did not receive focus");
 		await beginObserved.promise;
@@ -568,7 +798,75 @@ describe("BreadBoard provider auth port integration", () => {
 		focused.handleInput("\n");
 		await login;
 		expect(opened).toEqual(["https://auth.example/authorize?state=csrf-state"]);
-		expect(statuses).toEqual(["Logging in to codex…"]);
+		expect(statuses).toEqual(["Logging in to broker-browser…"]);
+	});
+
+	test("normal device login renders the broker user code beside its authorization URL", async () => {
+		const beginObserved = Promise.withResolvers<void>();
+		const cancelCalls: string[] = [];
+		vi.spyOn(openModule, "openPath").mockImplementation(() => {});
+		let focused:
+			| {
+					handleInput(data: string): void;
+					render(width: number): readonly string[];
+			  }
+			| undefined;
+		const context = controllerContext({}, [], component => {
+			if (component && typeof component === "object" && "handleInput" in component && "render" in component) {
+				focused = component as typeof focused;
+			}
+		});
+		const port = providerPort({
+			async listProviders() {
+				return [
+					{
+						providerId: "broker-device",
+						aliases: [],
+						displayName: "Broker Device",
+						supportTier: "core",
+						authOwner: "broker",
+						available: true,
+						authSchemes: ["oauth2"],
+						loginAvailable: true,
+						oauthFlows: ["device"],
+						modelDiscovery: "configured_only",
+					},
+				];
+			},
+			async beginLogin() {
+				beginObserved.resolve();
+				return {
+					loginSessionId: "login-device-ui",
+					providerId: "broker-device",
+					status: "pending",
+					authorizeUrl: "https://auth.example/device",
+					flowKind: "device",
+					userCode: "ABCD-EFGH",
+					instructions: "Enter this code in your browser.",
+				};
+			},
+			async cancelLogin(loginSessionId) {
+				cancelCalls.push(loginSessionId);
+				return { ok: true, outcome: "cancelled", loginSessionId };
+			},
+		});
+		const controller = new SelectorController(context, port);
+
+		const login = controller.showOAuthSelector("login", "broker-device");
+		await beginObserved.promise;
+		for (let pass = 0; pass < 8 && !focused; pass++) await Promise.resolve();
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+		if (!focused) throw new Error("Device login dialog did not receive focus");
+		const rendered = focused
+			.render(80)
+			.map(line => Bun.stripANSI(line))
+			.join("\n");
+		expect(rendered).toContain("https://auth.example/device");
+		expect(rendered).toContain("Code: ABCD-EFGH");
+		focused.handleInput("\u001b");
+		await login;
+		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+		expect(cancelCalls).toEqual(["login-device-ui"]);
 	});
 
 	test("Escape cancels a pending broker login and restores the editor", async () => {
@@ -587,7 +885,7 @@ describe("BreadBoard provider auth port integration", () => {
 				beginObserved.resolve();
 				return {
 					loginSessionId: "login-cancel",
-					providerId: "codex",
+					providerId: "openai",
 					status: "pending",
 					authorizeUrl: "https://auth.example/authorize",
 					prompt: "Paste the callback URL.",
@@ -595,6 +893,7 @@ describe("BreadBoard provider auth port integration", () => {
 			},
 			async cancelLogin(loginSessionId) {
 				cancelCalls.push(loginSessionId);
+				return { ok: true, outcome: "cancelled", loginSessionId };
 			},
 			async completeLogin() {
 				throw new Error("cancelled login must not complete");
@@ -602,7 +901,7 @@ describe("BreadBoard provider auth port integration", () => {
 		});
 		const controller = new SelectorController(context, port);
 
-		const login = controller.showOAuthSelector("login", "codex");
+		const login = controller.showOAuthSelector("login", "openai");
 		for (let pass = 0; pass < 8 && !focused; pass++) await Promise.resolve();
 		if (!focused) throw new Error("Login prompt did not receive focus");
 		await beginObserved.promise;
@@ -612,7 +911,7 @@ describe("BreadBoard provider auth port integration", () => {
 		for (let pass = 0; pass < 4; pass++) await Promise.resolve();
 
 		expect(cancelCalls).toEqual(["login-cancel"]);
-		expect(statuses).toEqual(["Logging in to codex…", "Login cancelled"]);
+		expect(statuses).toEqual(["Logging in to openai…", "Login cancelled"]);
 	});
 
 	test("native data source reports credential summaries without exposing secret bytes", async () => {

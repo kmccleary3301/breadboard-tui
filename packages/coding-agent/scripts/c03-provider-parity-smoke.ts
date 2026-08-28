@@ -58,7 +58,7 @@ const rotatedAccount = rotatedCredentials.find(row => row.credentialRef === rota
 if (firstAccount !== providerId || rotatedAccount !== providerId)
 	throw new Error("provider status changed across rotation");
 
-await auth.revoke({ credentialRef: rotated.credentialRef, reason: "c03 parity cleanup" });
+await auth.revoke({ credentialRef: rotated.credentialRef });
 await auth.logout({ credentialRef: rotated.credentialRef });
 
 const result = {

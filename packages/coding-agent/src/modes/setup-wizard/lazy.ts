@@ -1,6 +1,10 @@
+import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import type { InteractiveModeContext } from "../types";
 
-export async function runProviderSetupWizard(ctx: InteractiveModeContext): Promise<void> {
+export async function runProviderSetupWizard(
+	ctx: InteractiveModeContext,
+	providerAuthPort?: ProviderAuthPort,
+): Promise<void> {
 	// Keep the full setup wizard behind the existing cold-start boundary; a static
 	// import here would load provider/OAuth/search/theme setup deps on every TUI startup.
 	const { ALL_SCENES, runSetupWizard } = await import("./index");
@@ -12,5 +16,6 @@ export async function runProviderSetupWizard(ctx: InteractiveModeContext): Promi
 	await runSetupWizard(ctx, [providersScene], {
 		markComplete: false,
 		playWelcomeIntro: false,
+		providerAuthPort,
 	});
 }

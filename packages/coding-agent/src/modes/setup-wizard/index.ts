@@ -1,3 +1,4 @@
+import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import type { Settings } from "../../config/settings";
 import { CURRENT_SETUP_VERSION } from "../setup-version";
 import type { InteractiveModeContext } from "../types";
@@ -73,6 +74,7 @@ export async function markSetupWizardComplete(
 export interface RunSetupWizardOptions {
 	markComplete?: boolean;
 	playWelcomeIntro?: boolean;
+	providerAuthPort?: ProviderAuthPort;
 }
 
 export async function runSetupWizard(
@@ -81,7 +83,7 @@ export async function runSetupWizard(
 	options: RunSetupWizardOptions = {},
 ): Promise<void> {
 	if (scenes.length === 0) return;
-	const component = new SetupWizardComponent(ctx, scenes);
+	const component = new SetupWizardComponent(ctx, scenes, options.providerAuthPort);
 	const overlay = ctx.ui.showOverlay(component, {
 		width: "100%",
 		maxHeight: "100%",
