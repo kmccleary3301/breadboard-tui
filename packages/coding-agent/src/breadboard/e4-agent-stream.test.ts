@@ -22,7 +22,7 @@ import { AuthStorage } from "../session/auth-storage";
 import { collectPendingToolCalls } from "../session/exit-diagnostics";
 import { convertToLlm } from "../session/messages";
 import { SessionManager } from "../session/session-manager";
-import { E4AgentStreamBridge } from "./e4-agent-stream";
+import { E4AgentStreamBridge, type E4BackendModelAttribution } from "./e4-agent-stream";
 import type { OpenedSession } from "./session-port";
 
 const normalizePersistedMessage = <T>(message: T): T =>
@@ -166,7 +166,7 @@ function permissionSession(
 			async cancel(request) {
 				cancelled.push(request);
 				actionObserved.resolve();
-				resumeEvents.resolve();
+				await resumeEvents.promise;
 				return {} as CancellationReceipt;
 			},
 			async respondPermission(request) {
@@ -1820,15 +1820,15 @@ describe("E4AgentStreamBridge", () => {
 			started,
 			wireEvent(3, "tool_call", {
 				call_id: "call-1",
-				tool: "read",
-				arguments: { path: "README.md" },
-				action: "inspect",
+				tool: "write",
+				arguments: { filePath: "README.md", content: "contents" },
+				action: "create",
 				diff_preview: null,
 				progress: null,
 			}),
 			wireEvent(4, "tool.result", {
 				call_id: "call-1",
-				tool: "read",
+				tool: "create_file_from_block",
 				status: "completed",
 				error: false,
 				result: { output: "contents" },
@@ -1868,7 +1868,14 @@ describe("E4AgentStreamBridge", () => {
 		}
 		expect(toolCallMessageStart.message).toEqual({
 			role: "assistant",
-			content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md" } }],
+			content: [
+				{
+					type: "toolCall",
+					id: "call-1",
+					name: "write",
+					arguments: { filePath: "README.md", content: "contents" },
+				},
+			],
 			api: model.api,
 			provider: model.provider,
 			model: model.id,
@@ -1888,14 +1895,14 @@ describe("E4AgentStreamBridge", () => {
 		expect(agentEvents[2]).toEqual({
 			type: "tool_execution_start",
 			toolCallId: "call-1",
-			toolName: "read",
-			args: { path: "README.md" },
-			intent: "inspect",
+			toolName: "write",
+			args: { filePath: "README.md", content: "contents" },
+			intent: "create",
 		});
 		expect(agentEvents[3]).toEqual({
 			type: "tool_execution_end",
 			toolCallId: "call-1",
-			toolName: "read",
+			toolName: "write",
 			result: normalizedResult,
 			isError: false,
 		});
@@ -1907,7 +1914,7 @@ describe("E4AgentStreamBridge", () => {
 		expect(messageStart.message).toEqual({
 			role: "toolResult",
 			toolCallId: "call-1",
-			toolName: "read",
+			toolName: "write",
 			content: normalizedResult.content,
 			details: normalizedResult.details,
 			isError: false,
@@ -2989,7 +2996,7 @@ describe("E4AgentStreamBridge", () => {
 
 			expect(result.stopReason).toBe("aborted");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
-			expect(responded).toEqual([]);
+			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
 			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3025,7 +3032,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.stopReason).toBe("error");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(result.errorMessage).toBe("permission UI failed");
-			expect(responded).toEqual([]);
+			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
 			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3056,7 +3063,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.stopReason).toBe("error");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(result.errorMessage).toContain("permission UI");
-			expect(responded).toEqual([]);
+			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
 			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3078,12 +3085,42 @@ describe("E4AgentStreamBridge", () => {
 
 		try {
 			const stream = await startBridgeStream(bridge, selectedModel, context);
-			expect(stream.resultSettled).toBeTrue();
 			const result = await stream.result();
 
 			expect(result.stopReason).toBe("error");
 			expect(result.errorMessage).toContain("does not support per-turn model selection");
 			expect(submitted).toEqual([]);
+		} finally {
+			await bridge.close();
+		}
+	});
+
+	test("reconfigures the backend model before admitting a turn", async () => {
+		const submitted: SubmitInput[] = [];
+		const selectedModel = { ...model, provider: "cli_mock", id: "reference" };
+		const selections: E4BackendModelAttribution[] = [];
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession([started, wireEvent(3, "turn_completed", {})], submitted),
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+			async selectModel(selected) {
+				selections.push(selected);
+				return selected;
+			},
+		});
+
+		try {
+			const result = await (await startBridgeStream(bridge, selectedModel, context)).result();
+
+			expect(result.stopReason).toBe("stop");
+			expect(result.provider).toBe("cli_mock");
+			expect(result.model).toBe("reference");
+			expect(submitted).toHaveLength(1);
+			expect(selections).toEqual([{ api: selectedModel.api, provider: "cli_mock", id: "reference" }]);
 		} finally {
 			await bridge.close();
 		}
@@ -3414,6 +3451,7 @@ describe("E4AgentStreamBridge", () => {
 		const projectedKeys: string[] = [];
 		const releasedKeys: string[] = [];
 		const commits: Array<{ eventId: string; sequence: number }> = [];
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
 		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
 		const secondReceipt: SubmitReceipt = {
 			...receipt,
@@ -3436,6 +3474,13 @@ describe("E4AgentStreamBridge", () => {
 				cancelled.push(request);
 				if (String(request.turnId) === String(receipt.turnId)) cancellationAccepted.resolve();
 				return {} as CancellationReceipt;
+			},
+			async respondPermission(request) {
+				responded.push(request);
+				return {
+					requestId: request.requestId as PermissionDecisionReceipt["requestId"],
+					decision: request.decision,
+				};
 			},
 			async *events(request) {
 				await firstSubmitted.promise;
@@ -3484,6 +3529,7 @@ describe("E4AgentStreamBridge", () => {
 		expect((await firstStream.result()).stopReason).toBe("aborted");
 		await terminalProcessed.promise;
 		expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
+		expect(responded).toEqual([{ requestId: "permission-after-tool", decision: "deny" }]);
 		expect(commits).toEqual([{ eventId: "event-2", sequence: 2 }]);
 		expect(releasedKeys).toEqual([]);
 		const secondStream = await bridge.stream(model, context);

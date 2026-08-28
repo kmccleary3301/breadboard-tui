@@ -16,7 +16,7 @@ The engine seam is the pinned `@breadboard/sdk` package. Direct imports from the
 
 Current product identity:
 
-- BreadBoard: `0.1.0-rc.3`
+- BreadBoard: `0.1.0-rc.4`
 - OMP: `18.0.1`
 - `@breadboard/sdk`: `0.3.0`
 - engine interface: `>=0.1.0 <0.4.0`

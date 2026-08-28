@@ -1,20 +1,32 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type EventId,
+	type InputId,
 	REPLAY_RETENTION_MAX_AGE_MS,
 	REPLAY_RETENTION_MAX_EVENTS,
 	type ReplayContractDigest,
 	type SessionId,
 	type SessionSnapshot,
+	type TurnId,
 } from "@breadboard/sdk/internal";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { prepareConnectedBreadboardRuntime } from "../main";
+import {
+	createRecoverableBreadboardRuntime,
+	type PreparedBreadboardRuntime,
+	prepareConnectedBreadboardRuntime,
+	resolveBreadboardCatalogModels,
+} from "../main";
 import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
 import { createLifecycleMonitor } from "./engine-port";
 import { lifecycleState } from "./lifecycle/lifecycle-state";
 import type { ProviderAuthPort } from "./provider-auth-port";
-import type { BreadboardSessionBindingStore } from "./session-binding";
+import {
+	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
+	type BreadboardSessionBindingData,
+	type BreadboardSessionBindingStore,
+} from "./session-binding";
 import type { OpenedSession, OpenSession } from "./session-port";
 
 const model = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -86,11 +98,18 @@ interface RuntimeHarness {
 }
 
 function runtimeHarness(
-	options: { readonly sessionCloseError?: Error; readonly engineCloseError?: Error } = {},
+	options: {
+		readonly sessionCloseError?: Error;
+		readonly engineCloseError?: Error;
+		readonly snapshot?: SessionSnapshot;
+		readonly sessionBinding?: BreadboardSessionBindingData;
+		readonly allowTerminalSnapshotRecovery?: boolean;
+	} = {},
 ): RuntimeHarness {
 	const lifecycle: string[] = [];
 	const targets: OpenSession[] = [];
 	const monitor = createLifecycleMonitor();
+	const activeSnapshot = options.snapshot ?? snapshot;
 	monitor.activateAuthority({
 		mode: "local-owned",
 		engineInstanceId: "engine-instance-1",
@@ -100,9 +119,9 @@ function runtimeHarness(
 		ownerGeneration: 1,
 	});
 	const session: OpenedSession = {
-		sessionId: snapshot.sessionId,
+		sessionId: activeSnapshot.sessionId,
 		async snapshot() {
-			return snapshot;
+			return activeSnapshot;
 		},
 		async submit() {
 			throw new Error("submit not used");
@@ -120,7 +139,7 @@ function runtimeHarness(
 		},
 	};
 	let capturedBridgeOptions: E4AgentStreamBridgeOptions | undefined;
-	const sessionTarget: OpenSession = { kind: "attach", sessionId: snapshot.sessionId };
+	const sessionTarget: OpenSession = { kind: "attach", sessionId: activeSnapshot.sessionId };
 	return {
 		lifecycle,
 		monitor,
@@ -133,6 +152,29 @@ function runtimeHarness(
 			prepareConnectedBreadboardRuntime({
 				engine: {
 					lifecycleFailure: monitor.signal,
+					async getModelCatalog(configPath) {
+						return {
+							models: [
+								{
+									id: `${model.provider}/${model.id}`,
+									provider: model.provider,
+									canonical_provider: model.provider,
+									support_tier: "core" as const,
+									available: true,
+									availability_reason: null,
+									discovery: "configured_only" as const,
+									source: "configured" as const,
+								},
+							],
+							default_model: `${model.provider}/${model.id}`,
+							config_path: configPath,
+							discovery_policy: "configured_only" as const,
+							issues: [],
+						};
+					},
+					async setSessionModel() {
+						throw new Error("model selection not used");
+					},
 					providerAuth,
 					async openSession(target) {
 						targets.push(target);
@@ -144,6 +186,8 @@ function runtimeHarness(
 					},
 				},
 				sessionTarget,
+				sessionBinding: options.sessionBinding,
+				allowTerminalSnapshotRecovery: options.allowTerminalSnapshotRecovery,
 				modelRegistry: { getAll: () => [model] },
 				async requestPermission() {
 					return "deny";
@@ -169,6 +213,36 @@ function runtimeHarness(
 	};
 }
 
+test("projects configured evidence routes into the public session model scope", () => {
+	const models = resolveBreadboardCatalogModels(
+		{
+			models: ["mock/reference", "cli_mock/reference"].map(id => {
+				const provider = id.split("/", 1)[0];
+				return {
+					id,
+					provider,
+					canonical_provider: provider,
+					support_tier: "evidence" as const,
+					available: true,
+					availability_reason: null,
+					discovery: "configured_only" as const,
+					source: "configured" as const,
+				};
+			}),
+			default_model: "mock/reference",
+			config_path: "agent_configs/templates/daily_driver.v1.yaml",
+			discovery_policy: "configured_only",
+			issues: [],
+		},
+		{ getAll: () => [] },
+	);
+
+	expect(models.map(candidate => `${candidate.provider}/${candidate.id}`)).toEqual([
+		"mock/reference",
+		"cli_mock/reference",
+	]);
+	expect(models.every(candidate => candidate.baseUrl === "http://127.0.0.1:9/v1")).toBeTrue();
+});
 describe("connected BreadBoard runtime lifecycle", () => {
 	test("invalidates one old runtime on authority replacement and requires an explicit fresh attach", async () => {
 		const oldHarness = runtimeHarness();
@@ -187,6 +261,186 @@ describe("connected BreadBoard runtime lifecycle", () => {
 		expect(freshHarness.lifecycle).toEqual([]);
 		await freshRuntime.close();
 		expect(freshHarness.lifecycle).toEqual(["bridge", "session", "engine"]);
+	});
+
+	test("advances a fully terminal retained snapshot before opening the fresh SDK stream", async () => {
+		const inputId = "input-1" as InputId;
+		const turnId = "turn-1" as TurnId;
+		const interruptedSubmission: BreadboardSessionBindingData["ownedSubmissions"][number] = {
+			clientMessageId: "client-1",
+			inputId,
+			turnId,
+		};
+		const interruptedBinding: BreadboardSessionBindingData = {
+			schemaVersion: "breadboard.session-binding.v3",
+			sessionId: snapshot.sessionId,
+			replayConfigurationDigest: replayDigest,
+			cursor: { eventId: "event-4" as EventId, sequence: 4 },
+			ownedSubmissions: [interruptedSubmission],
+		};
+		const harness = runtimeHarness({
+			snapshot: {
+				...snapshot,
+				headSequence: 5,
+				headEventId: "event-5" as EventId,
+				earliestRetainedSequence: 1,
+				earliestRetainedEventId: "event-1" as EventId,
+				retainedHistory: "partial",
+				terminalTurns: [
+					{
+						inputId,
+						turnId,
+						outcome: "failed",
+						originalDisposition: "started",
+					},
+				],
+			},
+			sessionBinding: interruptedBinding,
+			allowTerminalSnapshotRecovery: true,
+		});
+		const runtime = await harness.prepare();
+		expect(harness.bridgeOptions().durableCursor).toEqual({
+			eventId: "event-5",
+			sequence: 5,
+		});
+		const branch: Array<{ type: string; customType?: string; data?: unknown }> = [
+			{
+				type: "custom",
+				customType: BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
+				data: interruptedBinding,
+			},
+		];
+		const store: BreadboardSessionBindingStore = {
+			getBranch: () => branch,
+			appendCustomEntry(customType, data) {
+				branch.push({ type: "custom", customType, data });
+			},
+			async flush() {},
+		};
+		await runtime.activate(store);
+		expect(branch.at(-1)?.data).toMatchObject({
+			cursor: { eventId: "event-5", sequence: 5 },
+		});
+		await runtime.close();
+	});
+
+	test("reattaches one unchanged turn through a fresh runtime generation", async () => {
+		const oldMonitor = createLifecycleMonitor();
+		oldMonitor.activateAuthority({
+			mode: "local-owned",
+			engineInstanceId: "engine-instance-old",
+			engineBootId: "engine-boot-old",
+			registrationId: "registration-old",
+			registrationGeneration: 1,
+			ownerGeneration: 1,
+		});
+		const freshMonitor = createLifecycleMonitor();
+		freshMonitor.activateAuthority({
+			mode: "local-owned",
+			engineInstanceId: "engine-instance-fresh",
+			engineBootId: "engine-boot-fresh",
+			registrationId: "registration-fresh",
+			registrationGeneration: 1,
+			ownerGeneration: 1,
+		});
+		const oldStream = new AssistantMessageEventStream();
+		const freshStream = new AssistantMessageEventStream();
+		const calls: string[] = [];
+		let registeredCleanup: (() => Promise<void>) | undefined;
+		const prepared = (label: string, stream: StreamFn): PreparedBreadboardRuntime => ({
+			providerAuth,
+			stream,
+			sessionId: snapshot.sessionId,
+			model,
+			models: [model],
+			async activate() {
+				calls.push(`${label}:activate`);
+			},
+			start() {
+				calls.push(`${label}:start`);
+			},
+			async close() {
+				calls.push(`${label}:close`);
+			},
+		});
+		const oldRuntime = prepared("old", () => oldStream);
+		const freshRuntime = prepared("fresh", () => freshStream);
+		const branch: Array<{ type: string; customType?: string; data?: unknown }> = [
+			{
+				type: "custom",
+				customType: BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
+				data: {
+					schemaVersion: "breadboard.session-binding.v3",
+					sessionId: snapshot.sessionId,
+					replayConfigurationDigest: replayDigest,
+					cursor: { eventId: null, sequence: 0 },
+					ownedSubmissions: [],
+				},
+			},
+		];
+		const store: BreadboardSessionBindingStore = {
+			getBranch: () => branch,
+			appendCustomEntry(customType, data) {
+				branch.push({ type: "custom", customType, data });
+			},
+			async flush() {},
+		};
+		const runtime = createRecoverableBreadboardRuntime(
+			{ runtime: oldRuntime, lifecycleFailure: oldMonitor.signal },
+			async (sessionId, binding) => {
+				expect(sessionId).toBe(snapshot.sessionId);
+				expect(binding.sessionId).toBe(snapshot.sessionId);
+				calls.push("reconnect");
+				return { runtime: freshRuntime, lifecycleFailure: freshMonitor.signal };
+			},
+			cleanup => {
+				calls.push("register");
+				registeredCleanup = cleanup;
+				return () => calls.push("unregister");
+			},
+		);
+		await runtime.activate(store);
+		runtime.start();
+		const output = await runtime.stream(model, { messages: [] });
+		oldMonitor.stateChanged(lifecycleState("local-owned", "backing-off", 1));
+		oldStream.push({
+			type: "error",
+			reason: "aborted",
+			error: {
+				role: "assistant",
+				content: [],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "aborted",
+				errorMessage: "BreadBoard session closed",
+				timestamp: 1,
+			},
+		});
+		expect((await output.result()).errorMessage).toBe("BreadBoard session closed");
+		expect(calls).toEqual([
+			"register",
+			"old:activate",
+			"old:start",
+			"old:close",
+			"reconnect",
+			"fresh:activate",
+			"fresh:start",
+		]);
+		const nextOutput = await runtime.stream(model, { messages: [] });
+		freshStream.fail(new Error("fresh generation failed"));
+		await expect(nextOutput.result()).rejects.toThrow("fresh generation failed");
+		if (!registeredCleanup) throw new Error("recoverable cleanup was not registered");
+		await registeredCleanup();
+		expect(calls.slice(-2)).toEqual(["unregister", "fresh:close"]);
 	});
 
 	test("keeps a binding flush failure primary while cleanup reports late close failures", async () => {

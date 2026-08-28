@@ -134,6 +134,7 @@ export interface LifecycleSupervisorDependencies {
 	readonly clock?: LifecycleClock;
 	readonly stateChanged?: (state: LifecycleState) => void;
 	readonly endpointAbsent?: (client: LifecycleE4Client) => Promise<boolean | "ambiguous">;
+	readonly restartOnUnexpectedChildExit?: boolean;
 }
 
 export interface StopOptions {
@@ -1386,6 +1387,9 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	#releaseReplayClient: BoundLifecycleE4Client | undefined;
 	#hardSignalCommitActive = false;
 	#connectPromise: Promise<LifecycleResult> | undefined;
+	#childRecoveryPromise: Promise<void> | undefined;
+	readonly #restartOnUnexpectedChildExit: boolean;
+	#unexpectedDeathRecord: LocalAuthorityRecord | undefined;
 
 	constructor(config: BreadboardRunConfig, dependencies: LifecycleSupervisorDependencies) {
 		super(config, dependencies);
@@ -1419,6 +1423,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						: "ambiguous";
 				}
 			});
+		this.#restartOnUnexpectedChildExit = dependencies.restartOnUnexpectedChildExit ?? true;
 	}
 	override abortRequiresQuiescence(): boolean {
 		return this.#hardSignalCommitActive;
@@ -2273,20 +2278,36 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		const child = context.process;
 		if (!child) return;
 		void child.exited.then(
-			async () => {
+			() => {
 				if (this.#plannedProcesses.has(child) || this.context !== context) return;
-				this.stopLeaseRenewal();
-				this.context = undefined;
-				context.ownerCredential?.fill(0);
-				try {
-					const result = await this.restartAfterConfirmedDeath();
-					this.stateChanged(result.state);
-				} catch (error) {
-					this.stateChanged(mappedFailure("local-owned", error).state);
+				this.#unexpectedDeathRecord = context.record;
+				if (!this.#restartOnUnexpectedChildExit) {
+					this.stopLeaseRenewal();
+					this.context = undefined;
+					context.ownerCredential?.fill(0);
+					this.stateChanged(lifecycleState("local-owned", "backing-off", 1));
+					return;
 				}
+				const completion = Promise.withResolvers<void>();
+				this.#childRecoveryPromise = completion.promise;
+				void (async () => {
+					this.stopLeaseRenewal();
+					this.context = undefined;
+					context.ownerCredential?.fill(0);
+					try {
+						const result = await this.restartAfterConfirmedDeath();
+						this.stateChanged(result.state);
+					} catch (error) {
+						this.stateChanged(mappedFailure("local-owned", error).state);
+					} finally {
+						if (this.#childRecoveryPromise === completion.promise) this.#childRecoveryPromise = undefined;
+						completion.resolve();
+					}
+				})();
 			},
 			error => {
 				if (this.#plannedProcesses.has(child) || this.context !== context) return;
+				this.#unexpectedDeathRecord = context.record;
 				this.stopLeaseRenewal();
 				this.context = undefined;
 				context.ownerCredential?.fill(0);
@@ -2829,13 +2850,25 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			this.#hardSignalCommitActive = false;
 		}
 	}
+	async #settleChildRecovery(): Promise<void> {
+		await this.#childRecoveryPromise;
+	}
+
 	async stop(options: StopOptions): Promise<LifecycleResult> {
+		await this.#settleChildRecovery();
 		if (!options.consumerClosed) return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
 		if (!this.context) {
 			const endpoint = this.config.endpoint;
 			if (!endpoint) return lifecycleFailure("local-owned", "failed", "endpoint_unreachable");
 			const record = await this.#store.probeCurrent(endpoint);
 			if (!record) {
+				return {
+					kind: "stopped",
+					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
+				};
+			}
+			if (this.#unexpectedDeathRecord && !this.#sameAuthorityRecord(record, this.#unexpectedDeathRecord)) {
+				this.#unexpectedDeathRecord = undefined;
 				return {
 					kind: "stopped",
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
@@ -2944,6 +2977,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async close(options: StopOptions): Promise<LifecycleResult> {
+		await this.#settleChildRecovery();
 		const context = this.context;
 		const policy = context?.effectiveExitPolicy ?? context?.record?.ownerExitPolicy ?? this.config.ownerExitPolicy;
 		if (policy !== "detached") return await this.stop(options);

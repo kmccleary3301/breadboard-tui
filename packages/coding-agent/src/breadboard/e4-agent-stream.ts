@@ -212,6 +212,7 @@ export interface E4AgentStreamBridgeOptions {
 		ownedSubmissions: readonly E4OwnedSubmission[],
 	) => Promise<void>;
 	readonly modelPolicy?: E4BackendModelPolicy;
+	readonly selectModel?: (model: E4BackendModelAttribution) => Promise<E4BackendModelAttribution>;
 	readonly requestPermission?: E4PermissionHandler;
 }
 
@@ -232,7 +233,7 @@ export class E4AgentStreamBridge {
 	readonly #projectionCommitted: E4AgentStreamBridgeOptions["projectionCommitted"];
 	readonly #submissionOwned: E4AgentStreamBridgeOptions["submissionOwned"];
 	readonly #receipts: ReadonlySet<string>;
-	readonly #modelPolicy: E4BackendModelPolicy | undefined;
+	readonly #selectModel: E4AgentStreamBridgeOptions["selectModel"];
 	readonly #requestPermission: E4PermissionHandler | undefined;
 	readonly #initialCursor: E4DurableCursor | undefined;
 	readonly #observeAbort = new AbortController();
@@ -249,6 +250,8 @@ export class E4AgentStreamBridge {
 	readonly #cancellationsInFlight = new Set<Promise<boolean>>();
 	readonly #eventApplicationsInFlight = new Set<Promise<void>>();
 	readonly #ownershipWaiters = new Set<() => void>();
+	#activeModel: E4BackendModelAttribution | undefined;
+	#modelSelectionBarrier = Promise.resolve();
 	#started = false;
 	#closed = false;
 	#observeFailure: Error | undefined;
@@ -264,7 +267,8 @@ export class E4AgentStreamBridge {
 		this.#projectionCommitted = options.projectionCommitted;
 		this.#submissionOwned = options.submissionOwned;
 		this.#receipts = options.projectionReceiptEventIds ?? new Set();
-		this.#modelPolicy = options.modelPolicy;
+		this.#activeModel = options.modelPolicy?.model;
+		this.#selectModel = options.selectModel;
 		this.#requestPermission = options.requestPermission;
 		this.#initialCursor = options.durableCursor;
 		for (const submission of options.ownedSubmissions ?? []) {
@@ -575,19 +579,49 @@ export class E4AgentStreamBridge {
 				return;
 			}
 		}
-		const backendModel = this.#modelPolicy?.model;
+		let backendModel = this.#activeModel;
 		if (!backendModel) {
 			this.#pushStandaloneError(stream, model, "BreadBoard backend model attribution is not configured", "error");
 			return;
 		}
 		if (backendModel.api !== model.api || backendModel.provider !== model.provider || backendModel.id !== model.id) {
-			this.#pushStandaloneError(
-				stream,
-				model,
-				`BreadBoard E4 session uses ${backendModel.provider}/${backendModel.id} (${backendModel.api}), but OMP selected ${model.provider}/${model.id} (${model.api}); E4 does not support per-turn model selection`,
-				"error",
+			const selectedModel = { api: model.api, provider: model.provider, id: model.id };
+			const selection = this.#modelSelectionBarrier.then(async () => {
+				const current = this.#activeModel;
+				if (
+					current &&
+					current.api === selectedModel.api &&
+					current.provider === selectedModel.provider &&
+					current.id === selectedModel.id
+				) {
+					return current;
+				}
+				if (!this.#selectModel) {
+					throw new Error(
+						`BreadBoard E4 session uses ${current?.provider}/${current?.id} (${current?.api}), but OMP selected ${model.provider}/${model.id} (${model.api}); E4 does not support per-turn model selection`,
+					);
+				}
+				const selected = await this.#selectModel(selectedModel);
+				if (
+					selected.api !== selectedModel.api ||
+					selected.provider !== selectedModel.provider ||
+					selected.id !== selectedModel.id
+				) {
+					throw new Error("BreadBoard backend selected a different model than requested");
+				}
+				this.#activeModel = selected;
+				return selected;
+			});
+			this.#modelSelectionBarrier = selection.then(
+				() => {},
+				() => {},
 			);
-			return;
+			try {
+				backendModel = await selection;
+			} catch (error) {
+				this.#pushStandaloneError(stream, model, safeErrorMessage(error), "error");
+				return;
+			}
 		}
 		const sink = this.#newSink(backendModel, stream);
 		this.#submittingSinks.add(sink);
@@ -728,7 +762,7 @@ export class E4AgentStreamBridge {
 			throw new Error(`BreadBoard owned turn ${turnKey} changed input correlation`);
 		}
 		if (!sink) {
-			const backendModel = this.#modelPolicy?.model;
+			const backendModel = this.#activeModel;
 			if (!backendModel) throw new Error("BreadBoard backend model attribution is not configured");
 			sink = this.#newSink(backendModel);
 			sink.turnId = event.turnId;
@@ -1061,7 +1095,7 @@ export class E4AgentStreamBridge {
 		sink.projectedToolResultIds.add(toolCallId);
 		sink.streamedToolCallsByCallId.delete(toolCallId);
 		if (!this.#receipts.has(String(event.eventId))) {
-			const toolName = event.payload.tool ?? toolCall.payload.tool;
+			const toolName = toolCall.payload.tool;
 			const result = toolResult(event.payload.result, event.payload.artifactRef, String(event.eventId));
 			await this.#emit(
 				event,
@@ -1097,26 +1131,26 @@ export class E4AgentStreamBridge {
 				"BreadBoard permission request requires OMP permission UI wiring",
 				"error",
 			);
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 		let decision: E4PermissionDecision;
 		try {
 			decision = await requestPermission(event.payload, sink.permissionAbort.signal);
 		} catch (error) {
 			this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 		if (sink.terminal || sink.permissionAbort.signal.aborted || this.#closed) return false;
 		if (decision === "cancel") {
 			this.#failSinkPendingTerminal(sink, "BreadBoard permission request cancelled in OMP", "aborted");
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 		try {
 			await this.#session.respondPermission({ requestId: event.payload.requestId, decision });
 			return true;
 		} catch (error) {
 			this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 	}
 
@@ -1346,14 +1380,14 @@ export class E4AgentStreamBridge {
 		return cancellation;
 	}
 
-	async #cancelAfterPermissionFailure(sink: TurnSink): Promise<boolean> {
+	async #denyPermissionAndCancel(sink: TurnSink, requestId: string): Promise<boolean> {
 		const cancellation = this.#trackCancellation(sink, "user_requested");
-		if (!cancellation) return false;
-		if (!sink.adopted) {
-			void cancellation;
-			return false;
+		try {
+			await this.#session.respondPermission({ requestId, decision: "deny" });
+		} catch (error) {
+			this.#invalidateBridge(`BreadBoard permission rejection failed: ${safeErrorMessage(error)}`);
 		}
-		return cancellation;
+		return cancellation ? await cancellation : false;
 	}
 
 	#cancelSink(sink: TurnSink, reason: "user_requested" | "timeout"): void {

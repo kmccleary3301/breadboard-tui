@@ -29,7 +29,7 @@ export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
 export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
 
 /** BreadBoard product version. */
-export const BREADBOARD_VERSION = "0.1.0-rc.3";
+export const BREADBOARD_VERSION = "0.1.0-rc.4";
 
 /** Canonical SDK dependency version used by the BreadBoard product. */
 export const BREADBOARD_SDK_VERSION = "0.3.0";

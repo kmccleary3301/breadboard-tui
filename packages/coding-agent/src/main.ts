@@ -10,6 +10,7 @@ import { createInterface } from "node:readline/promises";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/internal";
 import { type AgentEvent, EventLoopKeepalive, type StreamFn, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import {
 	$env,
 	directoryExists,
@@ -29,6 +30,7 @@ import {
 	breadboardProjectionEventId,
 	E4AgentStreamBridge,
 	type E4AgentStreamBridgeOptions,
+	type E4BackendModelAttribution,
 	type E4DurableCursor,
 	type E4OwnedSubmission,
 	type E4PermissionHandler,
@@ -36,6 +38,7 @@ import {
 import {
 	type BreadboardEngineConnectionFailure,
 	type BreadboardEnginePort,
+	type BreadboardLifecycleFailureSignal,
 	connectCanonicalBreadboardEnginePort,
 	type BreadboardLifecycleFailureResult as EngineLifecycleFailureResult,
 } from "./breadboard/engine-port";
@@ -1569,6 +1572,7 @@ export function resolveBreadboardSessionTarget(
 		kind: "create",
 		request: {
 			workspace: workspacePath,
+			permissionMode: "configured",
 			...(sessionConfigPath === undefined ? {} : { configPath: sessionConfigPath }),
 		},
 	};
@@ -1579,6 +1583,7 @@ export interface PreparedBreadboardRuntime {
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
+	readonly models: readonly Model[];
 	activate(sessionManager: BreadboardSessionBindingStore): Promise<void>;
 	start(): void;
 	close(): Promise<void>;
@@ -1599,15 +1604,17 @@ export interface BreadboardRuntimeAuthority {
 
 type ConnectedBreadboardEnginePort = Pick<
 	BreadboardEnginePort,
-	"lifecycleFailure" | "openSession" | "providerAuth" | "close"
+	"lifecycleFailure" | "openSession" | "getModelCatalog" | "setSessionModel" | "providerAuth" | "close"
 >;
 
 export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuthority {
 	readonly engine: ConnectedBreadboardEnginePort;
 	readonly sessionTarget: OpenSession;
+	readonly modelCatalogConfigPath?: string;
 	readonly emitAgentEvent: (event: AgentEvent, idempotencyKey: string) => Promise<void>;
 	readonly releaseAgentEvent: (idempotencyKey: string) => void;
 	readonly sessionBinding?: BreadboardSessionBindingData;
+	readonly allowTerminalSnapshotRecovery?: boolean;
 	readonly createBridge?: (options: E4AgentStreamBridgeOptions) => BreadboardRuntimeBridge;
 	readonly registerCleanup?: (close: () => Promise<void>) => () => void;
 }
@@ -1615,7 +1622,8 @@ export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuth
 export type BreadboardModelAuthorityErrorCode =
 	| "missing_backend_model"
 	| "unresolved_backend_model"
-	| "ambiguous_backend_model";
+	| "ambiguous_backend_model"
+	| "invalid_backend_catalog";
 
 export class BreadboardModelAuthorityError extends Error {
 	constructor(
@@ -1647,6 +1655,8 @@ const BREADBOARD_MODEL_PROVIDER_ALIASES: Readonly<Record<string, string>> = {
 	// BreadBoard's engine owns the runtime id; OMP owns the catalog id.
 	codex: "openai-codex",
 };
+
+const DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH = "agent_configs/templates/daily_driver.v1.yaml";
 
 export function resolveBreadboardBackendModel(
 	backendModel: string | null | undefined,
@@ -1692,6 +1702,63 @@ export function resolveBreadboardBackendModel(
 		);
 	}
 	return matches[0];
+}
+
+export function resolveBreadboardCatalogModels(
+	catalog: Awaited<ReturnType<BreadboardEnginePort["getModelCatalog"]>>,
+	modelRegistry: BreadboardModelRegistry,
+): readonly Model[] {
+	if (catalog.discovery_policy !== "configured_only") {
+		throw new BreadboardModelAuthorityError(
+			"invalid_backend_catalog",
+			"BreadBoard model catalog widened beyond configured models.",
+		);
+	}
+	const models = new Map<string, Model>();
+	for (const entry of catalog.models) {
+		if (entry.source !== "configured" || entry.discovery !== "configured_only") {
+			throw new BreadboardModelAuthorityError(
+				"invalid_backend_catalog",
+				"BreadBoard model catalog contains a non-configured model.",
+			);
+		}
+		if (!entry.available) continue;
+		const selector = entry.id.trim();
+		if (!selector || selector !== entry.id || models.has(selector)) {
+			throw new BreadboardModelAuthorityError(
+				"invalid_backend_catalog",
+				"BreadBoard model catalog contains an invalid or duplicate selector.",
+			);
+		}
+		let model: Model;
+		if (entry.support_tier === "evidence") {
+			const provider = selector.split("/", 1)[0];
+			if (entry.provider !== provider || entry.canonical_provider !== provider) {
+				throw new BreadboardModelAuthorityError(
+					"invalid_backend_catalog",
+					`BreadBoard evidence model ${selector} has inconsistent provider identity.`,
+				);
+			}
+			const providerFreeModel = createBreadboardProviderFreeModel(selector);
+			if (!providerFreeModel) {
+				throw new BreadboardModelAuthorityError(
+					"invalid_backend_catalog",
+					`BreadBoard evidence model ${selector} is not an admitted provider-free route.`,
+				);
+			}
+			model = providerFreeModel;
+		} else {
+			model = resolveBreadboardBackendModel(selector, modelRegistry);
+		}
+		models.set(selector, model);
+	}
+	if (models.size === 0) {
+		throw new BreadboardModelAuthorityError(
+			"invalid_backend_catalog",
+			"BreadBoard configured model catalog has no available models.",
+		);
+	}
+	return [...models.values()];
 }
 
 const BREADBOARD_PERMISSION_TEXT_LIMIT = 240;
@@ -1824,11 +1891,34 @@ export async function prepareConnectedBreadboardRuntime(
 		throwIfLifecycleFailed();
 		const snapshot = await opened.snapshot();
 		throwIfLifecycleFailed();
+		const catalog = await options.engine.getModelCatalog(
+			options.modelCatalogConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+		);
+		const catalogModels = resolveBreadboardCatalogModels(catalog, options.modelRegistry);
+		const catalogRegistry: BreadboardModelRegistry = { getAll: () => [...catalogModels] };
 		const resumeBinding =
 			options.sessionBinding === undefined ? undefined : parseBreadboardSessionBindingData(options.sessionBinding);
 		const initialBinding = validateBreadboardSnapshot(opened.sessionId, snapshot, resumeBinding);
-		const model = resolveBreadboardBackendModel(snapshot.model, options.modelRegistry);
-		throwIfLifecycleFailed();
+		let snapshotRecovery = false;
+		let bridgeBinding = initialBinding;
+		if (options.allowTerminalSnapshotRecovery && resumeBinding && snapshot.headEventId !== null) {
+			const everyOwnedTurnIsTerminal =
+				resumeBinding.ownedSubmissions.length > 0 &&
+				resumeBinding.ownedSubmissions.every(submission =>
+					snapshot.terminalTurns.some(
+						terminal => terminal.inputId === submission.inputId && terminal.turnId === submission.turnId,
+					),
+				);
+			if (everyOwnedTurnIsTerminal && resumeBinding.cursor.sequence < snapshot.headSequence) {
+				snapshotRecovery = true;
+				bridgeBinding = advanceProjectionBinding(
+					initialBinding,
+					{ eventId: snapshot.headEventId, sequence: snapshot.headSequence },
+					initialBinding.ownedSubmissions,
+				);
+			}
+		}
+		const model = resolveBreadboardBackendModel(snapshot.model, catalogRegistry);
 		const persistBinding = (
 			update: (current: BreadboardSessionBindingData) => BreadboardSessionBindingData,
 		): Promise<void> => {
@@ -1857,17 +1947,48 @@ export async function prepareConnectedBreadboardRuntime(
 			cursor: E4DurableCursor,
 			ownedSubmissions: readonly E4OwnedSubmission[],
 		): Promise<void> => persistBinding(current => advanceProjectionBinding(current, cursor, ownedSubmissions));
+		const selectModel = async (selected: E4BackendModelAttribution): Promise<E4BackendModelAttribution> => {
+			const selector = `${selected.provider}/${selected.id}`;
+			const expected = catalogModels.find(
+				candidate =>
+					candidate.api === selected.api &&
+					candidate.provider === selected.provider &&
+					candidate.id === selected.id,
+			);
+			if (!expected) {
+				throw new BreadboardModelAuthorityError(
+					"unresolved_backend_model",
+					`BreadBoard model ${selector} is outside the configured session catalog.`,
+				);
+			}
+			await options.engine.setSessionModel(opened!.sessionId, selector);
+			throwIfLifecycleFailed();
+			const selectedSnapshot = await opened!.snapshot();
+			const confirmed = resolveBreadboardBackendModel(selectedSnapshot.model, catalogRegistry);
+			if (
+				confirmed.api !== expected.api ||
+				confirmed.provider !== expected.provider ||
+				confirmed.id !== expected.id
+			) {
+				throw new BreadboardModelAuthorityError(
+					"unresolved_backend_model",
+					`BreadBoard engine did not retain selected model ${selector}.`,
+				);
+			}
+			return confirmed;
+		};
 		bridge = (options.createBridge ?? (bridgeOptions => new E4AgentStreamBridge(bridgeOptions)))({
 			session: opened,
-			durableCursor: durableBridgeCursor(initialBinding),
+			durableCursor: durableBridgeCursor(bridgeBinding),
 			projectionReceiptEventIds,
-			ownedSubmissions: initialBinding.ownedSubmissions,
+			ownedSubmissions: bridgeBinding.ownedSubmissions,
 			emitAgentEvent: options.emitAgentEvent,
 			releaseAgentEvent: options.releaseAgentEvent,
 			submissionOwned,
 			projectionCommitted,
 			modelPolicy: { kind: "fixed", model },
 			requestPermission: options.requestPermission,
+			selectModel,
 		});
 		throwIfLifecycleFailed();
 		cancelCleanup = (options.registerCleanup ?? (cleanup => postmortem.register("breadboard-runtime", cleanup)))(
@@ -1889,8 +2010,11 @@ export async function prepareConnectedBreadboardRuntime(
 							initialBinding satisfies BreadboardSessionBindingData,
 						);
 					}
+					if (snapshotRecovery) {
+						sessionManager.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, bridgeBinding);
+					}
 					await sessionManager.flush();
-					durableBinding = existingBinding ?? initialBinding;
+					durableBinding = snapshotRecovery ? bridgeBinding : (existingBinding ?? initialBinding);
 					for (const entry of sessionManager.getBranch()) {
 						if (entry.type !== "message") continue;
 						const eventId = breadboardProjectionEventId(entry.message);
@@ -1922,6 +2046,7 @@ export async function prepareConnectedBreadboardRuntime(
 			stream: bridge.stream,
 			sessionId: initialBinding.sessionId,
 			providerAuth: options.engine.providerAuth,
+			models: catalogModels,
 			model,
 			activate,
 			start,
@@ -1935,6 +2060,150 @@ export async function prepareConnectedBreadboardRuntime(
 		}
 		throw lifecycleFailure ? new BreadboardLifecycleStartupError(lifecycleFailure) : error;
 	}
+}
+
+export interface BreadboardRuntimeGeneration {
+	readonly runtime: PreparedBreadboardRuntime;
+	readonly lifecycleFailure: BreadboardLifecycleFailureSignal;
+}
+
+export function createRecoverableBreadboardRuntime(
+	initial: BreadboardRuntimeGeneration,
+	reconnect: (sessionId: string, binding: BreadboardSessionBindingData) => Promise<BreadboardRuntimeGeneration>,
+	registerCleanup?: (cleanup: () => Promise<void>) => () => void,
+): PreparedBreadboardRuntime {
+	let current = initial;
+	let activatedStore: BreadboardSessionBindingStore | undefined;
+	let activationPromise: Promise<void> | undefined;
+	let replacementPromise: Promise<BreadboardRuntimeGeneration> | undefined;
+	let closePromise: Promise<void> | undefined;
+	let started = false;
+	let closed = false;
+	const retiredClosures = new Set<Promise<void>>();
+
+	const retire = (generation: BreadboardRuntimeGeneration): Promise<void> => {
+		const closing = generation.runtime
+			.close()
+			.catch(error => logger.warn("Superseded BreadBoard runtime cleanup failed", { error: String(error) }));
+		retiredClosures.add(closing);
+		void closing.finally(() => retiredClosures.delete(closing));
+		return closing;
+	};
+	const replace = async (expected: BreadboardRuntimeGeneration): Promise<BreadboardRuntimeGeneration> => {
+		if (current !== expected) return current;
+		if (replacementPromise) return replacementPromise;
+		const store = activatedStore;
+		if (!store) throw new Error("BreadBoard runtime replacement requires an active session binding");
+		const binding = readBreadboardSessionBinding(store);
+		if (!binding) {
+			throw new BreadboardSessionTransitionError(
+				"BreadBoard runtime replacement requires a durable session binding.",
+			);
+		}
+		const pending = (async (): Promise<BreadboardRuntimeGeneration> => {
+			await retire(expected);
+			if (closed) throw new Error("BreadBoard runtime closed during replacement");
+			const next = await reconnect(expected.runtime.sessionId, binding);
+			if (closed) {
+				await next.runtime.close();
+				throw new Error("BreadBoard runtime closed during replacement");
+			}
+			await next.runtime.activate(store);
+			if (started) next.runtime.start();
+			current = next;
+			return next;
+		})();
+		replacementPromise = pending;
+		try {
+			return await pending;
+		} finally {
+			if (replacementPromise === pending) replacementPromise = undefined;
+		}
+	};
+	const stream: StreamFn = (model, context, streamOptions) => {
+		const outer = new AssistantMessageEventStream();
+		const run = async (): Promise<void> => {
+			const generation = current;
+			try {
+				const inner = await generation.runtime.stream(model, context, streamOptions);
+				for await (const event of inner) {
+					if (
+						event.type === "error" &&
+						!closed &&
+						!streamOptions?.signal?.aborted &&
+						current === generation &&
+						generation.lifecycleFailure.authorityDiscontinuity() !== undefined
+					) {
+						await replace(generation);
+						outer.push(event);
+						return;
+					}
+					outer.push(event);
+				}
+				if (!outer.done) outer.fail(new Error("BreadBoard runtime stream ended without a terminal event"));
+			} catch (error) {
+				if (
+					!closed &&
+					!streamOptions?.signal?.aborted &&
+					current === generation &&
+					generation.lifecycleFailure.authorityDiscontinuity() !== undefined
+				) {
+					await replace(generation);
+				}
+				throw error;
+			}
+		};
+		void run().catch(error => {
+			if (!outer.done) outer.fail(error);
+		});
+		return outer;
+	};
+
+	let cancelRegisteredCleanup: (() => void) | undefined;
+	const close = (): Promise<void> => {
+		closePromise ??= (async () => {
+			cancelRegisteredCleanup?.();
+			cancelRegisteredCleanup = undefined;
+			closed = true;
+			if (replacementPromise) await replacementPromise.catch(() => {});
+			await current.runtime.close();
+			await Promise.all([...retiredClosures]);
+		})();
+		return closePromise;
+	};
+	cancelRegisteredCleanup = registerCleanup?.(close);
+
+	return Object.freeze({
+		get providerAuth() {
+			return current.runtime.providerAuth;
+		},
+		stream,
+		get sessionId() {
+			return current.runtime.sessionId;
+		},
+		get model() {
+			return current.runtime.model;
+		},
+		get models() {
+			return current.runtime.models;
+		},
+		activate(store: BreadboardSessionBindingStore) {
+			if (activatedStore && activatedStore !== store) {
+				return Promise.reject(new Error("BreadBoard runtime is already bound to another AgentSession"));
+			}
+			activationPromise ??= current.runtime.activate(store).then(() => {
+				activatedStore = store;
+			});
+			return activationPromise;
+		},
+		start() {
+			if (started) return;
+			if (!activatedStore) throw new Error("BreadBoard runtime cannot start before AgentSession activation");
+			started = true;
+			current.runtime.start();
+		},
+		close,
+	});
 }
 
 export async function prepareBreadboardRuntime(
@@ -1963,31 +2232,47 @@ export async function prepareBreadboardRuntime(
 		IS_BREADBOARD_PRODUCT,
 	);
 
-	const connected = await connectCanonicalBreadboardEnginePort(config, {
-		onLateSessionCloseError: () => {
-			process.stderr.write("BreadBoard session cleanup failed after caller abort.\n");
-			process.exitCode = 1;
-		},
-		onLifecycleFailure: failure => {
-			process.exitCode = writeLifecyclePresentation(failure).exitCode || 1;
-		},
-	});
-	if (connected.kind !== "ready") {
-		process.exitCode = writeLifecyclePresentation(connected.result).exitCode || 1;
-		throw new BreadboardLifecycleStartupError(connected.result);
-	}
-	const enginePort = connected.port;
-	return prepareConnectedBreadboardRuntime({
-		engine: enginePort,
-		sessionTarget: target,
-		emitAgentEvent: async (event, idempotencyKey) => {
-			await emitAgentEvent(event, idempotencyKey);
-		},
-		releaseAgentEvent,
-		sessionBinding,
-		modelRegistry: authority.modelRegistry,
-		requestPermission: authority.requestPermission,
-	});
+	const connectGeneration = async (
+		sessionTarget: OpenSession,
+		binding: BreadboardSessionBindingData | undefined,
+		allowTerminalSnapshotRecovery = false,
+	): Promise<BreadboardRuntimeGeneration> => {
+		const connected = await connectCanonicalBreadboardEnginePort(config, {
+			onLateSessionCloseError: () => {
+				process.stderr.write("BreadBoard session cleanup failed after caller abort.\n");
+				process.exitCode = 1;
+			},
+			onLifecycleFailure: failure => {
+				if (failure.state.reason === "identity_changed") return;
+				process.exitCode = writeLifecyclePresentation(failure).exitCode || 1;
+			},
+		});
+		if (connected.kind !== "ready") {
+			process.exitCode = writeLifecyclePresentation(connected.result).exitCode || 1;
+			throw new BreadboardLifecycleStartupError(connected.result);
+		}
+		const enginePort = connected.port;
+		const runtime = await prepareConnectedBreadboardRuntime({
+			engine: enginePort,
+			modelCatalogConfigPath: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+			sessionTarget,
+			emitAgentEvent: async (event, idempotencyKey) => {
+				await emitAgentEvent(event, idempotencyKey);
+			},
+			releaseAgentEvent,
+			sessionBinding: binding,
+			allowTerminalSnapshotRecovery,
+			modelRegistry: authority.modelRegistry,
+			requestPermission: authority.requestPermission,
+		});
+		return { runtime, lifecycleFailure: enginePort.lifecycleFailure };
+	};
+	const initial = await connectGeneration(target, sessionBinding, sessionBinding !== undefined);
+	return createRecoverableBreadboardRuntime(
+		initial,
+		(sessionId, binding) => connectGeneration({ kind: "attach", sessionId }, binding, true),
+		cleanup => postmortem.register("breadboard-recoverable-runtime", cleanup),
+	);
 }
 
 export async function runRootCommand(
@@ -2609,6 +2894,7 @@ export async function runRootCommand(
 					if (preparedBreadboardRuntime !== null) {
 						sessionOptions.mainStreamFn = preparedBreadboardRuntime.stream;
 						sessionOptions.model = preparedBreadboardRuntime.model;
+						sessionOptions.scopedModels = preparedBreadboardRuntime.models.map(model => ({ model }));
 					}
 				} catch (error) {
 					if (error instanceof BreadboardLifecycleStartupError) {

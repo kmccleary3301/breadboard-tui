@@ -83,6 +83,7 @@ export interface BreadboardEnginePort {
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
 	getFeatures(): Promise<EngineStatusResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
+	setSessionModel(sessionId: string, model: string): Promise<void>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
 	readonly modelRoles: ModelRolePort;
 	attachProviderAuth(request: ProviderAuthAttachRequest): Promise<ProviderAuthAttachResponse>;
@@ -383,6 +384,16 @@ function createConnectedPort(
 			assertOperational();
 			return controlClient.getModelCatalog(configPath);
 		},
+		setSessionModel: async (sessionId, model) => {
+			assertOperational();
+			const response = await controlClient.postCommand(sessionId, {
+				command: "set_model",
+				payload: { model },
+			});
+			if (response.detail?.status !== "ok" || response.detail.model !== model) {
+				throw new Error("BreadBoard engine returned an invalid model-selection receipt");
+			}
+		},
 		getProviderAuthStatus: async () => {
 			assertOperational();
 			return controlClient.providerAuthStatus();
@@ -421,6 +432,7 @@ export async function connectCanonicalBreadboardEnginePort(
 		...suppliedDependencies,
 		...(store === undefined ? { store: undefined } : { store }),
 		stateChanged: monitor.stateChanged,
+		restartOnUnexpectedChildExit: false,
 	});
 	const connected = await supervisor.connect();
 	if (connected.kind !== "ready") {

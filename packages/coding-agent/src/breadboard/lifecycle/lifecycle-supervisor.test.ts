@@ -3038,6 +3038,75 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(sleeps).toContain(250);
 		expect(process.spawnCount()).toBe(2);
 	});
+	test("can hand unexpected child death to a higher-level runtime owner", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const failed = Promise.withResolvers<LifecycleState>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+			restartOnUnexpectedChildExit: false,
+			stateChanged: state => {
+				if (state.name === "backing-off") failed.resolve(state);
+			},
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		expect(await failed.promise).toMatchObject({
+			name: "backing-off",
+			attempt: 1,
+		});
+		expect(process.spawnCount()).toBe(1);
+		const successor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+		});
+		expect((await successor.connect()).kind).toBe("ready");
+		const successorRecord = await store.readCurrent("http://127.0.0.1:7777");
+		expect(successorRecord).not.toBeNull();
+
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toEqual(successorRecord);
+		expect(process.spawnCount()).toBe(2);
+		process.exitOnNextWait();
+		expect((await successor.stop({ consumerClosed: true })).kind).toBe("stopped");
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+	test("close waits for an in-flight child replacement and stops its successor", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const sleepStarted = Promise.withResolvers<void>();
+		const releaseSleep = Promise.withResolvers<void>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => 1_000,
+				sleep: async () => {
+					sleepStarted.resolve();
+					await releaseSleep.promise;
+				},
+			},
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		await sleepStarted.promise;
+		process.exitOnNextWait();
+		const closing = supervisor.close({ consumerClosed: true });
+		releaseSleep.resolve();
+
+		expect((await closing).kind).toBe("stopped");
+		expect(process.spawnCount()).toBe(2);
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
 	test("surfaces unexpected runtime cleanup failure without restarting or retiring authority", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();

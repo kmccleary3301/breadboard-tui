@@ -264,7 +264,7 @@ describe("resolveBreadboardSessionTarget", () => {
 	it("creates a default-profile session with the canonical workspace", () => {
 		expect(resolveBreadboardSessionTarget({}, undefined, undefined, workspace, true)).toEqual({
 			kind: "create",
-			request: { workspace },
+			request: { permissionMode: "configured", workspace },
 		});
 	});
 
@@ -272,7 +272,7 @@ describe("resolveBreadboardSessionTarget", () => {
 		const configPath = "/profiles/daily_driver.v1.yaml";
 		expect(resolveBreadboardSessionTarget({}, undefined, configPath, workspace, true)).toEqual({
 			kind: "create",
-			request: { configPath, workspace },
+			request: { configPath, permissionMode: "configured", workspace },
 		});
 	});
 
