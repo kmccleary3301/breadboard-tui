@@ -140,6 +140,7 @@ describe("published coding-agent topology", () => {
 		expect(manifest.bundledDependencies).toEqual(["@breadboard/sdk"]);
 		expect(manifest.dependencies?.["@breadboard/sdk"]).toBeUndefined();
 		expect(manifest.files).toContain("dist/cli.js");
+		expect(manifest.files).toContain("dist/THIRD_PARTY_NOTICES-*.txt");
 	});
 
 	it("removes source-only SDK references from the self-contained archive", async () => {

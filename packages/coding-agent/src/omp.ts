@@ -15,8 +15,10 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main || isCompiled || !Bun.isMainThread) {
-	main().catch((error: unknown) => {
+	try {
+		await main();
+	} catch (error) {
 		process.stderr.write(`${Bun.inspect(error, { colors: process.stderr.isTTY === true })}\n`);
 		process.exit(1);
-	});
+	}
 }

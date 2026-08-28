@@ -98,6 +98,7 @@
   "files": [
     "src",
     "dist/cli.js",
+    "dist/THIRD_PARTY_NOTICES-*.txt",
     "dist/docs-index.generated.txt",
     "dist/CHANGELOG-*.md",
     "dist/*.node",
