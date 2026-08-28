@@ -17,11 +17,35 @@ import {
 } from "../../product-identity";
 import tipsText from "./tips.txt" with { type: "text" };
 
-/** Tips embedded at build time, one per line; blanks dropped. */
-const TIPS: readonly string[] = tipsText
-	.split("\n")
-	.map(line => line.trim())
-	.filter(line => line.length > 0);
+const NATIVE_ONLY_TIP_PREFIX = "[native-only]";
+
+interface TipTemplate {
+	readonly text: string;
+	readonly nativeOnly: boolean;
+}
+
+/** Tip templates embedded at build time; command/display tokens resolve from immutable identity data. */
+const TIP_TEMPLATES: readonly TipTemplate[] = Object.freeze(
+	tipsText
+		.split("\n")
+		.map(line => line.trim())
+		.filter(line => line.length > 0)
+		.map(line =>
+			Object.freeze({
+				text: line.startsWith(NATIVE_ONLY_TIP_PREFIX) ? line.slice(NATIVE_ONLY_TIP_PREFIX.length) : line,
+				nativeOnly: line.startsWith(NATIVE_ONLY_TIP_PREFIX),
+			}),
+		),
+);
+
+export function getWelcomeTips(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): readonly string[] {
+	const includeNativeOnly = identity.id === OMP_PRODUCT_IDENTITY.id;
+	return Object.freeze(
+		TIP_TEMPLATES.filter(template => includeNativeOnly || !template.nativeOnly).map(template =>
+			template.text.replaceAll("{cli}", identity.cliName).replaceAll("{display}", identity.welcomeTitle),
+		),
+	);
+}
 
 /**
  * Fixed number of session rows in the welcome box so its height stays stable
@@ -149,6 +173,7 @@ export class WelcomeComponent implements Component {
 	#animTimer: Timer | null = null;
 	#requestRender: (() => void) | null = null;
 	#selectedTip: string | undefined;
+	readonly #tips: readonly string[];
 	// Render cache: the welcome box is the first transcript-area component, so
 	// returning a stable array reference keeps the whole frame prefix stable.
 	// Bypassed while the intro animation runs (every frame differs).
@@ -166,6 +191,7 @@ export class WelcomeComponent implements Component {
 		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
 		private readonly appearance?: ProductAppearance,
 	) {
+		this.#tips = getWelcomeTips(identity);
 		const dark = gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes.dark);
 		const light =
 			identity.gradientPalettes.light === identity.gradientPalettes.dark
@@ -178,7 +204,7 @@ export class WelcomeComponent implements Component {
 			if (theme.getSymbolPreset() === "unicode" && Math.random() < 0.1) {
 				this.#selectedTip = "Please use nerdfont 😭.";
 			} else {
-				this.#selectedTip = pickWeightedTip(TIPS, Math.random());
+				this.#selectedTip = pickWeightedTip(this.#tips, Math.random());
 			}
 		}
 		return this.#selectedTip || undefined;

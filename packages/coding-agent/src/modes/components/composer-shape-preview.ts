@@ -17,6 +17,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { ComposerShape } from "../../config/settings-schema";
+import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
 import { theme } from "../theme/theme";
 
 /**
@@ -37,14 +38,17 @@ export interface ComposerShapePreviewOptions {
 	requestRender?: () => void;
 	/** Live status renderer; omitted (tests), the chrome renders without status rows. */
 	status?: ComposerPreviewStatusSource;
+	/** Stand-in title forwarded through the real status renderer for unnamed sessions. */
+	previewTitle?: string;
 }
 /** Stand-in session title shown while the previewed session is unnamed. */
-const PREVIEW_TITLE = "omp";
+const PREVIEW_TITLE = ACTIVE_PRODUCT_IDENTITY.cliName;
 
 export function renderComposerShapePreview(
 	shape: ComposerShape,
 	width: number,
 	status?: ComposerPreviewStatusSource,
+	previewTitle: string = PREVIEW_TITLE,
 ): readonly string[] {
 	const previewWidth = Math.max(24, Math.min(width, 96));
 	const style = getComposerStyle(shape);
@@ -54,9 +58,9 @@ export function renderComposerShapePreview(
 	let topBorder: EditorTopBorder | undefined;
 	if (status) {
 		if (style.statusAttachment === "top-border") {
-			topBorder = status.getTopBorder(Math.max(1, previewWidth - chromeWidth * 2), PREVIEW_TITLE);
+			topBorder = status.getTopBorder(Math.max(1, previewWidth - chromeWidth * 2), previewTitle);
 		} else if (style.statusAttachment === "top-rule-chip") {
-			topBorder = status.getStandaloneTopBorder(previewWidth, PREVIEW_TITLE);
+			topBorder = status.getStandaloneTopBorder(previewWidth, previewTitle);
 		}
 	}
 
@@ -96,7 +100,7 @@ export function renderComposerShapePreview(
 	if (bottom !== undefined) lines.push(bottom);
 
 	if (style.bottomBar !== "none" && status) {
-		const bar = status.renderBottomBar(previewWidth, style.bottomBar, PREVIEW_TITLE);
+		const bar = status.renderBottomBar(previewWidth, style.bottomBar, previewTitle);
 		if (bar) {
 			if (style.bottomBarGap) lines.push("");
 			lines.push(bar);
@@ -121,7 +125,12 @@ export class ComposerShapePreview implements Component {
 	}
 
 	render(width: number): readonly string[] {
-		const lines = renderComposerShapePreview(this.#shape, width, this.#options.status);
+		const lines = renderComposerShapePreview(
+			this.#shape,
+			width,
+			this.#options.status,
+			this.#options.previewTitle ?? PREVIEW_TITLE,
+		);
 		return ["", theme.fg("muted", "Preview:"), ...lines];
 	}
 }

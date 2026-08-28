@@ -1,10 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
-import type { ProviderAuthPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
+import { ProviderAuthError, type ProviderAuthPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { SignInTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
 import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "@oh-my-pi/pi-coding-agent/product-identity";
 import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
 import type { Component } from "@oh-my-pi/pi-tui";
 
@@ -37,6 +38,7 @@ describe("SignInTab", () => {
 		} as unknown as AuthStorage;
 
 		const host = {
+			identity: OMP_PRODUCT_IDENTITY,
 			ctx: {
 				openInBrowser(openedUrl: string): void {
 					openedUrls.push(openedUrl);
@@ -107,6 +109,7 @@ describe("SignInTab", () => {
 		} as unknown as AuthStorage;
 
 		const host = {
+			identity: OMP_PRODUCT_IDENTITY,
 			ctx: {
 				openInBrowser(): void {},
 				session: {
@@ -212,6 +215,7 @@ describe("SignInTab", () => {
 		};
 		const focused: Component[] = [];
 		const host = {
+			identity: BREADBOARD_PRODUCT_IDENTITY,
 			providerAuthPort: port,
 			ctx: {
 				openInBrowser(): void {},
@@ -285,9 +289,120 @@ describe("SignInTab", () => {
 				.join("\n");
 			expect(tab.modal).toBe(false);
 			expect(writes).toHaveLength(1);
+
 			expect(cancelledRender).toContain("Login cancelled.");
 			expect(cancelledRender).not.toContain("sk-cancelled-setup-canary");
 			expect(nativeCalls).toEqual([]);
+		} finally {
+			tab.dispose();
+		}
+	});
+	it("shows product remediation without instantiating native AuthStorage when the broker port is absent", async () => {
+		const modelRegistry: Record<string, unknown> = {};
+		Object.defineProperty(modelRegistry, "authStorage", {
+			get() {
+				throw new Error("native AuthStorage must not be read in BreadBoard setup");
+			},
+		});
+		const host = {
+			identity: BREADBOARD_PRODUCT_IDENTITY,
+			ctx: {
+				session: { modelRegistry },
+				openInBrowser(): void {},
+			},
+			requestRender(): void {},
+			finish(): void {},
+			setFocus(): void {},
+			restoreFocus(): void {},
+		} as unknown as SetupSceneHost;
+
+		const tab = new SignInTab(host);
+		try {
+			await Promise.resolve();
+			const rendered = tab
+				.render(80)
+				.map(line => Bun.stripANSI(line))
+				.join("\n");
+			expect(rendered).toContain("BreadBoard provider setup is unavailable.");
+			expect(rendered).toContain("retry with `bb setup` when the auth broker is ready");
+			expect(rendered).not.toContain("Credentials saved to");
+			expect(rendered).not.toContain("Oh My Pi");
+		} finally {
+			tab.dispose();
+		}
+	});
+
+	it("preserves broker failure codes and actionable retry-or-continue remediation", async () => {
+		const port: ProviderAuthPort = {
+			async listProviders() {
+				return [
+					{
+						providerId: "anthropic",
+						aliases: ["claude"],
+						displayName: "Anthropic",
+						supportTier: "core",
+						authOwner: "broker",
+						available: true,
+						authSchemes: ["oauth2"],
+						loginAvailable: true,
+						oauthFlows: ["browser"],
+						modelDiscovery: "configured_only",
+					},
+				];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin() {
+				throw new ProviderAuthError({
+					code: "broker_unavailable",
+					message: "BreadBoard auth broker is unavailable.",
+					nextAction: "Retry provider setup or press Esc to continue.",
+				});
+			},
+			async getLogin() {
+				throw new Error("unexpected getLogin");
+			},
+			async completeLogin() {
+				throw new Error("unexpected completeLogin");
+			},
+			async cancelLogin(loginSessionId) {
+				return { ok: true, outcome: "cancelled", loginSessionId };
+			},
+			async putApiKey() {
+				throw new Error("unexpected putApiKey");
+			},
+			async logout(input) {
+				return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
+			},
+			async revoke(input) {
+				return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
+			},
+		};
+		const host = {
+			identity: BREADBOARD_PRODUCT_IDENTITY,
+			providerAuthPort: port,
+			ctx: {
+				openInBrowser(): void {},
+				session: { modelRegistry: {} },
+			},
+			requestRender(): void {},
+			finish(): void {},
+			setFocus(): void {},
+			restoreFocus(): void {},
+		} as unknown as SetupSceneHost;
+		const tab = new SignInTab(host);
+		try {
+			for (let pass = 0; pass < 6; pass++) await Promise.resolve();
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 12 && tab.modal; pass++) await Promise.resolve();
+			const rendered = tab
+				.render(80)
+				.map(line => Bun.stripANSI(line))
+				.join("\n");
+			expect(rendered).toContain("Login failed [broker_unavailable]: BreadBoard auth broker is unavailable.");
+			expect(rendered).toContain("Retry provider setup or press Esc to continue.");
+			expect(rendered).not.toContain("Credentials saved to");
 		} finally {
 			tab.dispose();
 		}

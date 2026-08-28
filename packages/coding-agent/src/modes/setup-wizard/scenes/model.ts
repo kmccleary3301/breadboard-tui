@@ -23,7 +23,9 @@ class ModelSceneController implements SetupSceneController {
 	#browserRowStart = 2;
 
 	constructor(private readonly host: SetupSceneHost) {
-		this.#browser = new ModelBrowser(host.ctx.settings);
+		this.#browser = new ModelBrowser(host.ctx.settings, {
+			emptyText: () => host.identity.setupModelEmptyText,
+		});
 		this.#browser.onActivate = item => {
 			void this.#select(item.model, item.selector);
 		};

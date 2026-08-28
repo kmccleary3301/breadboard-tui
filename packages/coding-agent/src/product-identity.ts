@@ -8,7 +8,7 @@ import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 import breadboardSourceArt from "./assets/branding/breadboard_icon_bb_v1.provenance.json" with { type: "json" };
 
 export type ProductAppearance = "dark" | "light";
-export type ProductSymbolPreset = "unicode" | "nerdfont" | "ascii";
+export type ProductSymbolPreset = "unicode" | "nerd" | "ascii";
 export type GradientStop = readonly [red: number, green: number, blue: number];
 
 export interface GradientPalette {
@@ -34,6 +34,12 @@ export interface ProductIdentity {
 	readonly shortDisplayName: string;
 	readonly cliName: string;
 	readonly welcomeTitle: string;
+	/** Wordmark shown below compact setup art. */
+	readonly setupWordmark: string;
+	/** User-facing label for the stable `pi` composer shape id. */
+	readonly composerFrameLabel: string;
+	/** Product-specific model remediation; native setup keeps its existing generic empty state. */
+	readonly setupModelEmptyText?: string;
 	readonly logoArt: readonly string[];
 	readonly compactLogo: Readonly<Record<ProductSymbolPreset, string>>;
 	readonly gradientPalettes: Readonly<Record<ProductAppearance, GradientPalette>>;
@@ -88,8 +94,10 @@ export const OMP_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	shortDisplayName: "OMP",
 	cliName: "omp",
 	welcomeTitle: "omp",
+	setupWordmark: "O h   M y   P i",
+	composerFrameLabel: "Pi",
 	logoArt: OMP_LOGO,
-	compactLogo: Object.freeze({ unicode: "π", nerdfont: "\ue22c", ascii: "pi" }),
+	compactLogo: Object.freeze({ unicode: "π", nerd: "\ue22c", ascii: "pi" }),
 	gradientPalettes: Object.freeze({ dark: OMP_GRADIENT, light: OMP_GRADIENT }),
 	defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
 });
@@ -100,8 +108,11 @@ export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	shortDisplayName: "BreadBoard",
 	cliName: "bb",
 	welcomeTitle: "BreadBoard",
+	setupWordmark: "BreadBoard",
+	composerFrameLabel: "Framed Rules",
+	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",
 	logoArt: BREADBOARD_LOGO,
-	compactLogo: Object.freeze({ unicode: "bb", nerdfont: "bb", ascii: "bb" }),
+	compactLogo: Object.freeze({ unicode: "bb", nerd: "bb", ascii: "bb" }),
 	gradientPalettes: Object.freeze({ dark: BREADBOARD_DARK_GRADIENT, light: BREADBOARD_LIGHT_GRADIENT }),
 	defaultThemes: Object.freeze({ dark: "breadboard", light: "breadboard-light" }),
 	sourceArt: BREADBOARD_SOURCE_ART,

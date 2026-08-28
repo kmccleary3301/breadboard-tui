@@ -1,21 +1,39 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { OMP_PRODUCT_IDENTITY } from "../../../product-identity";
+import type { GradientPalette, ProductAppearance, ProductIdentity } from "../../../product-identity";
 import { gradientEscape, gradientLogo, type ShineConfig } from "../../components/welcome";
 import { theme } from "../../theme/theme";
 
 export const SETUP_SPLASH_MS = 2600;
 export const SETUP_TICK_MS = 33;
 
-/** Brand mark at 2x: every glyph doubled horizontally, every row doubled vertically. */
-const LARGE_LOGO = OMP_PRODUCT_IDENTITY.logoArt.flatMap(line => {
-	let wide = "";
-	for (const char of line) {
-		wide += char === " " ? "  " : `${char}${char}`;
-	}
-	return [wide, wide];
-});
-const LOGO_WIDTH = Math.max(...LARGE_LOGO.map(line => visibleWidth(line)));
-const LOGO_HEIGHT = LARGE_LOGO.length;
+interface EnlargedLogo {
+	readonly lines: readonly string[];
+	readonly width: number;
+	readonly height: number;
+}
+
+const enlargedLogos = new WeakMap<ProductIdentity, EnlargedLogo>();
+
+/** Brand mark at 2x, memoized by immutable identity rather than rebuilt per animation frame. */
+function getEnlargedLogo(identity: ProductIdentity): EnlargedLogo {
+	const cached = enlargedLogos.get(identity);
+	if (cached) return cached;
+	const lines = identity.logoArt.flatMap(line => {
+		let wide = "";
+		for (const char of line) {
+			wide += char === " " ? "  " : `${char}${char}`;
+		}
+		return [wide, wide];
+	});
+	const enlarged = Object.freeze({
+		lines: Object.freeze(lines),
+		width: Math.max(...lines.map(line => visibleWidth(line))),
+		height: lines.length,
+	});
+	enlargedLogos.set(identity, enlarged);
+	return enlarged;
+}
+
 const RESET = "\x1b[0m";
 
 /** Full scene needs comfortable room; below this we drop to a centered mark. */
@@ -118,20 +136,28 @@ function waterAmplitude(
 }
 
 /**
- * Animated setup splash, in the spirit of the omp landing page: the brand π
- * mark rendered with the live diagonal gradient + shine sweep, rising out of a
- * rippling, gradient-lit water surface, under a faint twinkling starfield. The
- * mark and water share one continuous gradient so the sweep reads across the
- * whole scene; the water surface drifts each frame.
+ * Animated identity splash: the selected brand mark rises out of a rippling,
+ * gradient-lit water surface under a faint twinkling starfield. The mark and
+ * water share one continuous gradient so the sweep reads across the scene.
  */
-export function renderSetupSplash(width: number, height: number, elapsedMs: number): string[] {
+export function renderSetupSplash(
+	width: number,
+	height: number,
+	elapsedMs: number,
+	identity: ProductIdentity,
+	appearance: ProductAppearance,
+): string[] {
 	const w = Math.max(1, width);
 	const h = Math.max(1, height);
 	const progress = Math.max(0, Math.min(1, elapsedMs / SETUP_SPLASH_MS));
+	const enlargedLogo = getEnlargedLogo(identity);
+	const palette = identity.gradientPalettes[appearance];
 	const phase = progress * 1.8;
 	const shine: ShineConfig = { pos: (progress * 2.5) % 1, strength: Math.max(0, 1 - progress * 0.35) };
 
-	if (w < MIN_SCENE_WIDTH || h < MIN_SCENE_HEIGHT) return renderCompactSplash(w, h, phase, shine);
+	if (w < MIN_SCENE_WIDTH || h < MIN_SCENE_HEIGHT) {
+		return renderCompactSplash(w, h, phase, shine, identity, palette, enlargedLogo);
+	}
 
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
 	const cx = Math.floor(w / 2);
@@ -142,9 +168,9 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 		if (y >= 0 && y < h && x >= 0 && x < w) cells[y][x] = glyph;
 	};
 
-	const hx = Math.floor((w - LOGO_WIDTH) / 2);
+	const hx = Math.floor((w - enlargedLogo.width) / 2);
 	const hy = Math.max(2, Math.floor(h * 0.16));
-	const waterTop = hy + LOGO_HEIGHT;
+	const waterTop = hy + enlargedLogo.height;
 	const waterHeight = Math.max(1, h - waterTop);
 
 	// 1. rippling water surface (shares the screen-wide gradient with the mark)
@@ -152,14 +178,7 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 		for (let x = 0; x < w; x++) {
 			const amp = waterAmplitude(x, y, cx, waterTop, waterHeight, w, surfaceTime) + (waterJitter(x, y) - 0.5) * 0.06;
 			const cell = WATER_RAMP.find(step => amp > step.min);
-			if (cell)
-				put(
-					x,
-					y,
-					gradientEscape(screenGradientT(x, y, w, h, phase), shine, OMP_PRODUCT_IDENTITY.gradientPalettes.dark) +
-						cell.char +
-						RESET,
-				);
+			if (cell) put(x, y, gradientEscape(screenGradientT(x, y, w, h, phase), shine, palette) + cell.char + RESET);
 		}
 	}
 	// 2. twinkling starfield in the sky above the water
@@ -170,20 +189,14 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 		}
 	}
 	// 3. hero — the brand mark with the live gradient + shine sweep
-	LARGE_LOGO.forEach((line, row) => {
+	enlargedLogo.lines.forEach((line, row) => {
 		let col = 0;
 		for (const ch of line) {
 			if (ch !== " ") {
 				put(
 					hx + col,
 					hy + row,
-					gradientEscape(
-						screenGradientT(hx + col, hy + row, w, h, phase),
-						shine,
-						OMP_PRODUCT_IDENTITY.gradientPalettes.dark,
-					) +
-						ch +
-						RESET,
+					gradientEscape(screenGradientT(hx + col, hy + row, w, h, phase), shine, palette) + ch + RESET,
 				);
 			}
 			col++;
@@ -201,13 +214,17 @@ export function renderSetupSplash(width: number, height: number, elapsedMs: numb
 }
 
 /** Centered fallback for windows too small to hold the full scene. */
-function renderCompactSplash(width: number, height: number, phase: number, shine: ShineConfig): string[] {
-	const art = height >= 14 ? LARGE_LOGO : OMP_PRODUCT_IDENTITY.logoArt;
-	const content = [
-		...gradientLogo(art, phase, shine, OMP_PRODUCT_IDENTITY.gradientPalettes.dark),
-		"",
-		theme.bold("O h   M y   P i"),
-	];
+function renderCompactSplash(
+	width: number,
+	height: number,
+	phase: number,
+	shine: ShineConfig,
+	identity: ProductIdentity,
+	palette: GradientPalette,
+	enlargedLogo: EnlargedLogo,
+): string[] {
+	const art = height >= 14 ? enlargedLogo.lines : identity.logoArt;
+	const content = [...gradientLogo(art, phase, shine, palette), "", theme.bold(identity.setupWordmark)];
 	const start = Math.max(0, Math.floor((height - content.length) / 2));
 	const lines: string[] = [];
 	for (let y = 0; y < height; y++) {

@@ -8,11 +8,10 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
-import { APP_NAME } from "@oh-my-pi/pi-utils";
 import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
-import { OMP_PRODUCT_IDENTITY } from "../../product-identity";
+import type { ProductAppearance, ProductIdentity } from "../../product-identity";
 import { gradientLogo } from "../components/welcome";
-import { theme } from "../theme/theme";
+import { getCurrentThemeName, isLightTheme, theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
@@ -24,6 +23,16 @@ const SCENE_MARGIN_X = 4;
 const MIN_CONTENT_WIDTH = 20;
 /** Cross-dissolve duration from the splash into the first scene. */
 const SCENE_TRANSITION_MS = 420;
+
+export interface SetupWizardComponentOptions {
+	readonly identity: ProductIdentity;
+	readonly providerAuthPort?: ProviderAuthPort;
+	readonly now?: () => number;
+}
+
+function currentAppearance(): ProductAppearance {
+	return isLightTheme(getCurrentThemeName()) ? "light" : "dark";
+}
 
 function centerLine(line: string, width: number): string {
 	const lineWidth = visibleWidth(line);
@@ -66,7 +75,7 @@ function dissolveFrames(from: string[], to: string[], progress: number, height: 
 
 export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	#phase: WizardPhase = "splash";
-	#phaseStartedAt = performance.now();
+	#phaseStartedAt: number;
 	#sceneIndex = 0;
 	#activeScene: SetupSceneController | undefined;
 	#timer: NodeJS.Timeout | undefined;
@@ -75,16 +84,20 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	/** Screen row where the active scene's body began in the last rendered frame. */
 	#bodyRowStart = 0;
 	#sceneFocusTarget: Component | undefined;
+	readonly #now: () => number;
 
 	constructor(
 		readonly ctx: InteractiveModeContext,
 		readonly scenes: readonly SetupScene[],
-		private readonly providerAuthPort?: ProviderAuthPort,
-	) {}
+		private readonly options: SetupWizardComponentOptions,
+	) {
+		this.#now = options.now ?? (() => performance.now());
+		this.#phaseStartedAt = this.#now();
+	}
 
 	run(): Promise<void> {
 		this.#phase = this.scenes.length === 0 ? "outro" : "splash";
-		this.#phaseStartedAt = performance.now();
+		this.#phaseStartedAt = this.#now();
 		this.#startTimer();
 		this.ctx.ui.requestRender();
 		return this.#done.promise;
@@ -173,24 +186,43 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	render(width: number): readonly string[] {
 		const safeWidth = Math.max(1, width);
 		const height = Math.max(1, this.ctx.ui.terminal.rows);
+		const appearance = currentAppearance();
 		let lines: string[];
 		switch (this.#phase) {
 			case "splash":
-				lines = renderSetupSplash(safeWidth, height, performance.now() - this.#phaseStartedAt);
+				lines = renderSetupSplash(
+					safeWidth,
+					height,
+					this.#now() - this.#phaseStartedAt,
+					this.options.identity,
+					appearance,
+				);
 				break;
 			case "transition": {
-				const elapsed = performance.now() - this.#phaseStartedAt;
+				const elapsed = this.#now() - this.#phaseStartedAt;
 				const progress = Math.min(1, elapsed / SCENE_TRANSITION_MS);
-				const splash = renderSetupSplash(safeWidth, height, SETUP_SPLASH_MS + elapsed);
-				const scene = this.#renderScene(safeWidth, height);
+				const splash = renderSetupSplash(
+					safeWidth,
+					height,
+					SETUP_SPLASH_MS + elapsed,
+					this.options.identity,
+					appearance,
+				);
+				const scene = this.#renderScene(safeWidth, height, appearance);
 				lines = dissolveFrames(splash, scene, progress, height);
 				break;
 			}
 			case "outro":
-				lines = renderSetupOutro(safeWidth, height, performance.now() - this.#phaseStartedAt);
+				lines = renderSetupOutro(
+					safeWidth,
+					height,
+					this.#now() - this.#phaseStartedAt,
+					this.options.identity,
+					appearance,
+				);
 				break;
 			case "scene":
-				lines = this.#renderScene(safeWidth, height);
+				lines = this.#renderScene(safeWidth, height, appearance);
 				break;
 			case "done":
 				lines = [];
@@ -199,16 +231,17 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		return this.#fitToScreen(lines, safeWidth, height);
 	}
 
-	#renderScene(width: number, height: number): string[] {
+	#renderScene(width: number, height: number, appearance: ProductAppearance): string[] {
 		const scene = this.scenes[this.#sceneIndex];
 		const title = this.#activeScene?.title ?? scene?.title ?? "Setup";
 		const subtitle = this.#activeScene?.subtitle;
 		const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - SCENE_MARGIN_X * 2);
-		const logo = gradientLogo(OMP_PRODUCT_IDENTITY.logoArt, 0, undefined, OMP_PRODUCT_IDENTITY.gradientPalettes.dark);
+		const identity = this.options.identity;
+		const logo = gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes[appearance]);
 		const header = [
 			"",
 			...logo.map(line => centerLine(line, width)),
-			centerLine(theme.bold(theme.fg("accent", APP_NAME)), width),
+			centerLine(theme.bold(theme.fg("accent", identity.welcomeTitle)), width),
 			centerLine(theme.fg("muted", `Setup step ${this.#sceneIndex + 1} of ${this.scenes.length}`), width),
 			"",
 			indentLine(theme.bold(title), width, SCENE_MARGIN_X),
@@ -245,12 +278,12 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		if (this.#timer) return;
 		this.#timer = setInterval(() => {
 			if (this.#disposed) return;
-			const elapsed = performance.now() - this.#phaseStartedAt;
+			const elapsed = this.#now() - this.#phaseStartedAt;
 			if (this.#phase === "splash" && elapsed >= SETUP_SPLASH_MS) {
 				this.#beginScene();
 			} else if (this.#phase === "transition" && elapsed >= SCENE_TRANSITION_MS) {
 				this.#phase = "scene";
-				this.#phaseStartedAt = performance.now();
+				this.#phaseStartedAt = this.#now();
 				this.ctx.ui.requestRender();
 			} else if (this.#phase === "outro" && elapsed >= SETUP_OUTRO_MS) {
 				this.#complete();
@@ -276,7 +309,8 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const scene = this.scenes[this.#sceneIndex];
 		const host: SetupSceneHost = {
 			ctx: this.ctx,
-			providerAuthPort: this.providerAuthPort,
+			identity: this.options.identity,
+			providerAuthPort: this.options.providerAuthPort,
 			requestRender: () => this.ctx.ui.requestRender(),
 			finish: (_result: SetupSceneResult) => this.#finishScene(),
 			setFocus: component => {
@@ -290,7 +324,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		};
 		this.#activeScene = scene.mount(host);
 		this.#phase = targetPhase;
-		this.#phaseStartedAt = performance.now();
+		this.#phaseStartedAt = this.#now();
 		this.#sceneFocusTarget = undefined;
 		this.ctx.ui.setFocus(this);
 		void this.#activeScene.onMount?.();
@@ -324,7 +358,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		if (this.#phase === "done") return;
 		this.#unmountActiveScene();
 		this.#phase = "outro";
-		this.#phaseStartedAt = performance.now();
+		this.#phaseStartedAt = this.#now();
 		this.ctx.ui.setFocus(this);
 		this.#startTimer();
 		this.ctx.ui.requestRender();
