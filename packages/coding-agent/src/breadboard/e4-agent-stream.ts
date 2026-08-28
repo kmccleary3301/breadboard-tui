@@ -1242,7 +1242,7 @@ export class E4AgentStreamBridge {
 		await Promise.all([...this.#submissionsInFlight]);
 		await Promise.all([...this.#cancellationsInFlight]);
 		for (const sink of sinks) {
-			await this.#terminalFailure(sink, event, message, "error");
+			await this.#terminalFailure(sink, event, message, "error", true);
 		}
 		this.#ownedSubmissions.clear();
 		this.#pendingSubmit = undefined;
@@ -1293,6 +1293,7 @@ export class E4AgentStreamBridge {
 		>,
 		message: string,
 		reason: "error" | "aborted",
+		holdCursor = false,
 	): Promise<void> {
 		if (sink.turnId !== undefined) this.#ownedSubmissions.delete(String(sink.turnId));
 		if (sink.adopted) {
@@ -1301,7 +1302,9 @@ export class E4AgentStreamBridge {
 			}
 			await this.#projectAdoptedTerminal(sink, event, reason, message, sink.messageText);
 			this.#undurableSinks.delete(sink);
-			await this.#commit(event, sink.pendingProjectionKeys.splice(0));
+			const projectionKeys = sink.pendingProjectionKeys.splice(0);
+			if (holdCursor) this.#deferredProjectionKeys.push(...projectionKeys);
+			else await this.#commit(event, projectionKeys);
 		} else {
 			if (!sink.failureDelivered) {
 				sink.stream?.push({

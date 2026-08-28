@@ -1617,6 +1617,53 @@ describe("E4AgentStreamBridge", () => {
 		}
 	});
 
+	test("commits one session-failure cursor after every adopted turn projection", async () => {
+		const projected = Promise.withResolvers<void>();
+		const commits: Array<{ readonly sequence: number; readonly owned: string[] }> = [];
+		const emittedKeys: string[] = [];
+		const session = openedSession(
+			[
+				wireEvent(1, "turn_start", {}, "turn-1"),
+				wireEvent(2, "turn_start", {}, "turn-2"),
+				wireEvent(3, "error", { code: "runtime_failure", message: "sensitive backend detail" }, null),
+			],
+			[],
+		);
+		const bridge = new E4AgentStreamBridge({
+			session,
+			durableCursor: undefined,
+			ownedSubmissions: [
+				{ clientMessageId: "client-1", inputId: "input-1", turnId: "turn-1" },
+				{ clientMessageId: "client-2", inputId: "input-2", turnId: "turn-2" },
+			],
+			async submissionOwned() {},
+			async emitAgentEvent(_event, key) {
+				emittedKeys.push(key);
+				if (emittedKeys.length === 4) projected.resolve();
+			},
+			releaseAgentEvent() {},
+			async projectionCommitted(cursor, owned) {
+				commits.push({ sequence: cursor.sequence, owned: owned.map(submission => submission.turnId) });
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		bridge.start();
+		await projected.promise;
+		await bridge.close();
+		expect(emittedKeys).toEqual([
+			"event-3:message_start:turn-1",
+			"event-3:message_end:turn-1",
+			"event-3:message_start:turn-2",
+			"event-3:message_end:turn-2",
+		]);
+		expect(commits).toEqual([
+			{ sequence: 1, owned: ["turn-1", "turn-2"] },
+			{ sequence: 2, owned: ["turn-1", "turn-2"] },
+			{ sequence: 3, owned: [] },
+		]);
+	});
+
 	for (const runtimeFamily of [
 		{
 			label: "a session-scoped runtime protocol error",
