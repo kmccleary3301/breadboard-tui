@@ -1728,6 +1728,21 @@ describe("Inline color swatches", () => {
 		expect(out.includes(swatchFor("C5FFD6", "■"))).toBe(false);
 	});
 
+	it("delegates swatch painting to the application theme", () => {
+		const calls: Array<readonly [string, string]> = [];
+		const themed = {
+			...defaultMarkdownTheme,
+			colorSwatch: (color: string, glyph: string) => {
+				calls.push([color, glyph]);
+				return glyph;
+			},
+		};
+		const out = new Markdown("Accent #C5FFD6.", 0, 0, themed).render(80).join("\n");
+		expect(calls).toEqual([["#C5FFD6", "■"]]);
+		expect(out).toContain("■ #C5FFD6");
+		expect(out).not.toContain(Bun.color("#C5FFD6", FMT) ?? "");
+	});
+
 	it("re-applies the surrounding style after the swatch in thinking traces", () => {
 		const out = new Markdown("Picked #C5FFD6 for accent.", 1, 0, defaultMarkdownTheme, {
 			color: text => chalk.gray(text),

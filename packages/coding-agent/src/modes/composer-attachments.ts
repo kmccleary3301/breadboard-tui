@@ -43,10 +43,10 @@ export function attachmentRgb(kind: ChipKind, n: number): readonly [number, numb
 	return ATTACHMENT_PALETTE[index];
 }
 
-/** ANSI truecolor foreground sequence for the color assigned by {@link attachmentRgb}. */
+/** Capability-safe foreground sequence for the color assigned by {@link attachmentRgb}. */
 export function attachmentSgr(kind: ChipKind, n: number): string {
-	const [r, g, b] = attachmentRgb(kind, n);
-	return `\x1b[38;2;${r};${g};${b}m`;
+	const [red, green, blue] = attachmentRgb(kind, n);
+	return theme.getCustomColorAnsi(`rgb(${red}, ${green}, ${blue})`);
 }
 
 /** Matches expanded image and paste markers, including optional marker metadata. */

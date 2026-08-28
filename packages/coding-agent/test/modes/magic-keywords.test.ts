@@ -4,7 +4,7 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 beforeAll(async () => {
 	// Gradient palettes read the active theme's color mode.
-	await initTheme(false);
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 describe("highlightMagicKeywords", () => {

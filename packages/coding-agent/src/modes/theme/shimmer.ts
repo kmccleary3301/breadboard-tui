@@ -27,7 +27,7 @@ const FG_RESET = "\x1b[39m";
 const BOLD_OPEN = "\x1b[1m";
 const BOLD_CLOSE = "\x1b[22m";
 
-type ShimmerTheme = Pick<Theme, "bold" | "fg" | "getFgAnsi">;
+type ShimmerTheme = Pick<Theme, "bold" | "fg" | "getFgAnsi"> & Partial<Pick<Theme, "getColorMode">>;
 type ShimmerMode = "classic" | "kitt" | "disabled";
 
 type ShimmerPaletteTier = ThemeColor | { ansi: string };
@@ -90,6 +90,16 @@ function compile(theme: ShimmerTheme, palette: ShimmerPalette): CompiledPalette 
 	const p = palette as ShimmerPalette & PaletteCache;
 	const cached = p[kCompiled];
 	if (cached && p[kCompiledFor] === theme) return cached;
+	if (theme.getColorMode?.() === "none") {
+		const plain: CompiledPalette = {
+			low: { open: "", close: "" },
+			mid: { open: "", close: "" },
+			high: { open: "", close: "" },
+		};
+		p[kCompiledFor] = theme;
+		p[kCompiled] = plain;
+		return plain;
+	}
 	const lowOpen = resolveTierAnsi(theme, palette.low);
 	const midOpen = resolveTierAnsi(theme, palette.mid);
 	const highColorOpen = resolveTierAnsi(theme, palette.high);

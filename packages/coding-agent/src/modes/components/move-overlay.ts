@@ -262,13 +262,13 @@ export class MoveOverlay implements Component, Focusable {
 		if (this.#input.length === 0) {
 			const placeholder = theme.fg("dim", "Type a directory path…");
 			const marker = this.#focused ? CURSOR_MARKER : "";
-			return `${prompt}${placeholder}${marker}\x1b[7m \x1b[27m`;
+			return `${prompt}${placeholder}${marker}${theme.inverse(" ")}`;
 		}
 		const before = this.#input.slice(0, this.#cursor);
 		const cursorChar = this.#cursor < this.#input.length ? this.#input[this.#cursor] : " ";
 		const after = this.#input.slice(this.#cursor + 1);
 		const marker = this.#focused ? CURSOR_MARKER : "";
-		return `${prompt}${before}${marker}\x1b[7m${cursorChar}\x1b[27m${after}`;
+		return `${prompt}${before}${marker}${theme.inverse(cursorChar)}${after}`;
 	}
 
 	#updateResults(): void {

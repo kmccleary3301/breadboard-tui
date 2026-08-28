@@ -1177,6 +1177,8 @@ export interface MarkdownTheme {
 	italic: (text: string) => string;
 	strikethrough: (text: string) => string;
 	underline: (text: string) => string;
+	/** Paint an inline CSS color swatch through the active application's capability policy. */
+	colorSwatch?: (color: string, glyph: string) => string;
 	highlightCode?: (code: string, lang?: string) => string[];
 	/**
 	 * Create a stateful incremental highlighter for one streaming code fence.
@@ -1365,8 +1367,8 @@ function collapseInlineHtml(tokens: Token[]): Token[] {
 // When prose/thinking mentions a CSS hex color (e.g. #C5FFD6 or `#C5FFD6`),
 // render a small chip painted with that color just before the code. The chip
 // glyph comes from the theme's symbol set (ASCII → Unicode → Nerd Font), so it
-// degrades gracefully; the color itself is exact 24-bit on truecolor terminals
-// and the nearest 256-color cell otherwise (Bun.color quantizes for us).
+// degrades gracefully. Applications may provide the capability-aware painter;
+// the TUI fallback retains its terminal capability behavior.
 
 /** Fallback chip when the theme supplies no `colorSwatch` symbol (Unicode default). */
 const DEFAULT_COLOR_SWATCH_GLYPH = "■";
@@ -1397,11 +1399,10 @@ function classifyHexColor(hex: string, strict: boolean): boolean {
 	return true;
 }
 
-/** ANSI-painted `glyph` for `#${hex}`, or "" when the color can't be encoded. */
-function colorSwatch(hex: string, glyph: string): string {
+/** Capability-painted `glyph` for `#${hex}`, or "" when the color can't be encoded. */
+function colorSwatch(hex: string, glyph: string, paintSwatch?: (color: string, glyph: string) => string): string {
+	if (paintSwatch) return `${paintSwatch(`#${hex}`, glyph)} `;
 	const ansi = Bun.color(`#${hex}`, TERMINAL.trueColor ? "ansi-16m" : "ansi-256");
-	// Reset only the foreground (\x1b[39m) so an enclosing background/decoration
-	// applied later by the line renderer survives across the swatch.
 	return ansi ? `${ansi}${glyph}\x1b[39m ` : "";
 }
 
@@ -1410,7 +1411,12 @@ function colorSwatch(hex: string, glyph: string): string {
  * mentions. Non-color text (including the matched `#hex` itself) is routed
  * through `applySegment` so the caller's base styling is preserved verbatim.
  */
-function renderTextWithSwatches(text: string, applySegment: (t: string) => string, glyph: string): string {
+function renderTextWithSwatches(
+	text: string,
+	applySegment: (t: string) => string,
+	glyph: string,
+	paintSwatch?: (color: string, glyph: string) => string,
+): string {
 	HEX_COLOR_REGEX.lastIndex = 0;
 	let result = "";
 	let last = 0;
@@ -1418,7 +1424,7 @@ function renderTextWithSwatches(text: string, applySegment: (t: string) => strin
 		const match = HEX_COLOR_REGEX.exec(text);
 		if (match === null) break;
 		if (!classifyHexColor(match[1], true)) continue;
-		const swatch = colorSwatch(match[1], glyph);
+		const swatch = colorSwatch(match[1], glyph, paintSwatch);
 		if (!swatch) continue;
 		if (match.index > last) result += applySegment(text.slice(last, match.index));
 		result += swatch + applySegment(match[0]);
@@ -1430,10 +1436,10 @@ function renderTextWithSwatches(text: string, applySegment: (t: string) => strin
 }
 
 /** Swatch for a codespan whose entire content is a single hex color, else "". */
-function codespanSwatch(code: string, glyph: string): string {
+function codespanSwatch(code: string, glyph: string, paintSwatch?: (color: string, glyph: string) => string): string {
 	const match = HEX_COLOR_EXACT_REGEX.exec(code.trim());
 	if (!match || !classifyHexColor(match[1], false)) return "";
-	return colorSwatch(match[1], glyph);
+	return colorSwatch(match[1], glyph, paintSwatch);
 }
 
 interface RenderSignature {
@@ -2417,7 +2423,7 @@ export class Markdown implements Component {
 					if (token.tokens && token.tokens.length > 0) {
 						result += this.#renderInlineTokens(token.tokens, resolvedStyleContext);
 					} else {
-						result += renderTextWithSwatches(text, applyTextWithNewlines, swatchGlyph);
+						result += renderTextWithSwatches(text, applyTextWithNewlines, swatchGlyph, this.#theme.colorSwatch);
 					}
 					break;
 				}
@@ -2444,7 +2450,10 @@ export class Markdown implements Component {
 
 				case "codespan": {
 					markHtmlItemWhenContent(token.text);
-					result += codespanSwatch(token.text, swatchGlyph) + this.#theme.code(token.text) + stylePrefix;
+					result +=
+						codespanSwatch(token.text, swatchGlyph, this.#theme.colorSwatch) +
+						this.#theme.code(token.text) +
+						stylePrefix;
 					break;
 				}
 

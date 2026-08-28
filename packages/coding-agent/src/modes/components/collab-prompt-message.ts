@@ -12,7 +12,7 @@ export class CollabPromptMessageComponent extends Container {
 	constructor(message: CustomMessage<CollabPromptDetails>) {
 		super();
 		const from = message.details?.from?.trim() || "guest";
-		const authorText = new Text(theme.fg("accent", `\x1b[1m«${from}»\x1b[22m ›`), 1, 0);
+		const authorText = new Text(theme.fg("accent", theme.bold(`«${from}» ›`)), 1, 0);
 		authorText.setIgnoreTight(true);
 		this.addChild(authorText);
 		const text =

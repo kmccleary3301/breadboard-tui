@@ -1,9 +1,10 @@
-import { describe, expect, it, mock } from "bun:test";
+import { beforeAll, describe, expect, it, mock } from "bun:test";
 import {
 	MacOSSpellingProvider,
 	type SpellingBackend,
 	type SpellingDecorationContext,
 } from "../src/modes/macos-spelling";
+import { initTheme, theme } from "../src/modes/theme/theme";
 
 function backend(overrides: Partial<SpellingBackend>): SpellingBackend {
 	return {
@@ -19,6 +20,10 @@ function backend(overrides: Partial<SpellingBackend>): SpellingBackend {
 function decorationContext(editorText: string, line: number = 0, startCol: number = 0): SpellingDecorationContext {
 	return { editorText, lines: editorText.split("\n"), line, startCol };
 }
+
+beforeAll(async () => {
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
+});
 
 describe("macOS spelling feature gates", () => {
 	it("enables typo detection without enabling autocomplete or autocorrect", async () => {
@@ -45,7 +50,7 @@ describe("macOS spelling feature gates", () => {
 		await updated.promise;
 		expect(onUpdate).toHaveBeenCalledTimes(1);
 		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toBe(
-			"\x1b[4:3m\x1b[58:2::255:95:95mrecieved\x1b[4:0m\x1b[59m",
+			theme.underline(theme.fg("error", "recieved")),
 		);
 		expect(provider.getWordCompletion(["recieved"], 0, 8)).toBeNull();
 		expect(await provider.tryAutocorrect(["recieved "], 0, 9)).toBeNull();
@@ -150,7 +155,7 @@ describe("macOS spelling feature gates", () => {
 		provider.onUpdate = updated.resolve;
 		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toBe("recieved");
 		await updated.promise;
-		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toContain("\x1b[4:3m");
+		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toContain("\x1b[4m");
 	});
 
 	it("does no spelling work for huge editor buffers", async () => {

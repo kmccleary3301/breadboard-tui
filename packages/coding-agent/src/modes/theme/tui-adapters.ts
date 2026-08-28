@@ -5,13 +5,19 @@ import {
 	supportsLanguage as nativeSupportsLanguage,
 } from "@oh-my-pi/pi-natives";
 import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme, SymbolTheme } from "@oh-my-pi/pi-tui";
-import chalk from "@oh-my-pi/pi-utils/chalk";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { resolveMermaidAscii } from "./mermaid-cache";
+import type { ColorMode } from "./schema";
 import type { SlashCommandIconName } from "./symbols";
 import { theme } from "./theme";
 import type { Theme } from "./theme-class";
 
+const MERMAID_COLOR_MODE_BY_THEME_MODE = {
+	none: "none",
+	"16color": "ansi16",
+	"256color": "ansi256",
+	truecolor: "truecolor",
+} as const satisfies Record<ColorMode, "none" | "ansi16" | "ansi256" | "truecolor">;
 // ============================================================================
 // TUI Helpers
 // ============================================================================
@@ -153,8 +159,7 @@ export function getMarkdownTheme(): MarkdownTheme {
 		? (() => {
 				// Diagram geometry is content, so keep every structural stroke on the
 				// theme's readable muted foreground instead of subtle UI chrome borders.
-				const mermaidColorMode =
-					theme.getColorMode() === "truecolor" ? ("truecolor" as const) : ("ansi256" as const);
+				const mermaidColorMode = MERMAID_COLOR_MODE_BY_THEME_MODE[theme.getColorMode()];
 				const mermaidTheme = {
 					fg: theme.getColorHex("text"),
 					border: theme.getColorHex("muted"),
@@ -180,7 +185,8 @@ export function getMarkdownTheme(): MarkdownTheme {
 		bold: (text: string) => theme.bold(text),
 		italic: (text: string) => theme.italic(text),
 		underline: (text: string) => theme.underline(text),
-		strikethrough: (text: string) => chalk.strikethrough(text),
+		strikethrough: (text: string) => theme.strikethrough(text),
+		colorSwatch: (color: string, glyph: string) => theme.customColor(color, glyph),
 		symbols: getSymbolTheme(),
 		resolveMermaidAscii: mermaid
 			? (source, maxWidth) =>

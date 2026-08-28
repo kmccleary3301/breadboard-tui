@@ -2,10 +2,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { detectMacOSAppearance, MacAppearanceObserver } from "@oh-my-pi/pi-natives";
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
-import { colorLuma, getCustomThemesDir, IS_BREADBOARD_PRODUCT, logger } from "@oh-my-pi/pi-utils";
-import { ansi256ToHex, resolveThemeColors, resolveVarRefs } from "./color";
+import { colorLuma, getCustomThemesDir, logger } from "@oh-my-pi/pi-utils";
+import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
+import { ansi256ToHex, detectColorMode, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
-import type { ThemeColor, ThemeJson } from "./schema";
+import type { ColorMode, ThemeColor, ThemeJson } from "./schema";
 import type { SymbolPreset } from "./symbols";
 import type { Theme } from "./theme-class";
 
@@ -73,17 +74,6 @@ function getDefaultTheme(): string {
 	return bg === "light" ? autoLightTheme : autoDarkTheme;
 }
 
-/** Default dark theme under the BreadBoard product entrypoint (`BREADBOARD_PRODUCT=1`). */
-export const BREADBOARD_DARK_THEME = "breadboard";
-/** Default light theme under the BreadBoard product entrypoint. */
-export const BREADBOARD_LIGHT_THEME = "breadboard-light";
-
-/** Whether this process was bootstrapped through the BreadBoard product
- *  entrypoint. Identity is immutable after the entrypoint loads. */
-export function isBreadboardProduct(): boolean {
-	return IS_BREADBOARD_PRODUCT;
-}
-
 // ============================================================================
 // Global Theme Instance
 // ============================================================================
@@ -107,6 +97,7 @@ export interface ThemeChangeEvent {
 
 var currentSymbolPresetOverride: SymbolPreset | undefined;
 var currentColorBlindMode: boolean = false;
+var currentColorMode: ColorMode = detectColorMode();
 var themeWatcher: fs.FSWatcher | undefined;
 var themeReloadTimer: NodeJS.Timeout | undefined;
 var sigwinchHandler: (() => void) | undefined;
@@ -121,6 +112,7 @@ function getCurrentThemeOptions(): CreateThemeOptions {
 	return {
 		symbolPresetOverride: currentSymbolPresetOverride,
 		colorBlindMode: currentColorBlindMode,
+		mode: currentColorMode,
 	};
 }
 function configureTheme(
@@ -128,18 +120,14 @@ function configureTheme(
 	colorBlindMode?: boolean,
 	darkTheme?: string,
 	lightTheme?: string,
+	mode?: ColorMode,
 ): string {
 	autoDetectedTheme = true;
-	autoDarkTheme = darkTheme ?? "dark";
-	autoLightTheme = lightTheme ?? "light";
-	if (isBreadboardProduct()) {
-		// Callers pass only explicitly configured slots. Missing slots use the
-		// BreadBoard defaults without pulling Settings into the prepaint graph.
-		autoDarkTheme = darkTheme ?? BREADBOARD_DARK_THEME;
-		autoLightTheme = lightTheme ?? BREADBOARD_LIGHT_THEME;
-	}
+	autoDarkTheme = darkTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.dark;
+	autoLightTheme = lightTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.light;
 	currentSymbolPresetOverride = symbolPreset;
 	currentColorBlindMode = colorBlindMode ?? false;
+	currentColorMode = mode ?? detectColorMode();
 	const name = getDefaultTheme();
 	currentThemeName = name;
 	return name;
@@ -151,11 +139,13 @@ export function initThemeSync(
 	colorBlindMode?: boolean,
 	darkTheme?: string,
 	lightTheme?: string,
+	mode?: ColorMode,
 ): void {
-	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme);
+	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme, mode);
 	const options: CreateThemeOptions = {
 		symbolPresetOverride: currentSymbolPresetOverride,
 		colorBlindMode: currentColorBlindMode,
+		mode: currentColorMode,
 	};
 	try {
 		theme = loadThemeSync(name, options);
@@ -178,8 +168,9 @@ export async function initTheme(
 	colorBlindMode?: boolean,
 	darkTheme?: string,
 	lightTheme?: string,
+	mode?: ColorMode,
 ): Promise<void> {
-	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme);
+	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme, mode);
 	try {
 		theme = await loadTheme(name, getCurrentThemeOptions());
 		if (enableWatcher) {
@@ -290,6 +281,7 @@ export function onTerminalAppearanceChange(
 export function setThemeInstance(themeInstance: Theme): void {
 	autoDetectedTheme = false;
 	theme = themeInstance;
+	currentColorMode = themeInstance.getColorMode();
 	currentThemeName = "<in-memory>";
 	stopThemeWatcher();
 	notifyThemeChange({ ephemeral: true });

@@ -11,7 +11,6 @@ import {
 	Text,
 } from "@oh-my-pi/pi-tui";
 import { formatNumber } from "@oh-my-pi/pi-utils";
-import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { AssistantThinkingRenderer } from "../../extensibility/extensions/types";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { expandKeyHint, getPreviewLines, resolveImageOptions, TRUNCATE_LENGTHS } from "../../tools/render-utils";
@@ -334,7 +333,7 @@ export class AssistantMessageComponent extends Container {
 		const ratio = Math.sqrt(rate / SPEED_MAX);
 		const hex = lerpHex(theme.getColorHex("dim"), theme.getAccentColorHex(), ratio);
 		const rateText = ` · ${rate.toFixed(1)} toks/s`;
-		const rateSpan = theme.getColorMode() === "truecolor" ? chalk.hex(hex)(rateText) : theme.fg("muted", rateText);
+		const rateSpan = theme.customColor(hex, rateText);
 		return coloredGlyph + thinkingLabel + totalSpan + rateSpan;
 	}
 
