@@ -561,6 +561,7 @@ export class E4AgentStreamBridge {
 				model,
 				this.#observeFailure?.message ?? "BreadBoard session is closed",
 				"error",
+				this.#observeFailure ? this.#observeFailureProjectionEventId : undefined,
 			);
 			return;
 		}
@@ -1414,8 +1415,13 @@ export class E4AgentStreamBridge {
 		model: E4BackendModelAttribution,
 		message: string,
 		reason: "error" | "aborted",
+		projectionEventId?: string,
 	): void {
-		stream.push({ type: "error", reason, error: assistantMessage(model, "", reason, message) });
+		stream.push({
+			type: "error",
+			reason,
+			error: assistantMessage(model, "", reason, message, projectionEventId),
+		});
 	}
 
 	#removeSink(sink: TurnSink): void {

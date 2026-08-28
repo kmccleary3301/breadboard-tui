@@ -5,7 +5,6 @@ import {
 	connectCanonicalBreadboardEnginePort,
 	createCanonicalEventFetch,
 	createLifecycleMonitor,
-	invalidateBreadboardSessionsOnLifecycleFailure,
 } from "./engine-port";
 import { lifecycleFailure, lifecycleState } from "./lifecycle/lifecycle-state";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
@@ -104,43 +103,6 @@ describe("createLifecycleMonitor", () => {
 		monitor.stateChanged(lifecycleState("local-owned", "ready"));
 		expect(monitor.signal.authorityDiscontinuity()?.previous).toEqual(authority);
 		expect(monitor.signal.failure()?.state.name).toBe("identity-changed");
-	});
-});
-
-describe("invalidateBreadboardSessionsOnLifecycleFailure", () => {
-	test("closes every old session once and reports a late close failure", async () => {
-		const monitor = createLifecycleMonitor();
-		monitor.activateAuthority({
-			mode: "local-owned",
-			engineInstanceId: "engine-instance-1",
-			engineBootId: "engine-boot-1",
-			registrationId: "registration-1",
-			registrationGeneration: 1,
-			ownerGeneration: 1,
-		});
-		const lateCloseError = new Error("late close failed");
-		const reported = Promise.withResolvers<unknown>();
-		let closeCount = 0;
-		const unsubscribe = invalidateBreadboardSessionsOnLifecycleFailure(
-			monitor.signal,
-			new Set([
-				{
-					async close() {
-						closeCount++;
-						throw lateCloseError;
-					},
-				},
-			]),
-			error => reported.resolve(error),
-		);
-
-		monitor.stateChanged(lifecycleState("local-owned", "reconnecting", 1));
-		expect(closeCount).toBe(0);
-		monitor.stateChanged(lifecycleState("local-owned", "backing-off", 1));
-		expect(await reported.promise).toBe(lateCloseError);
-		monitor.stateChanged(lifecycleState("local-owned", "ready", 1));
-		expect(closeCount).toBe(1);
-		unsubscribe();
 	});
 });
 

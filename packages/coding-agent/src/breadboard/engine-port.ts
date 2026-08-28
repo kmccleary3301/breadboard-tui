@@ -173,32 +173,6 @@ export function createLifecycleMonitor(
 	};
 }
 
-export function invalidateBreadboardSessionsOnLifecycleFailure<T extends Pick<OpenedSession, "close">>(
-	signal: BreadboardLifecycleFailureSignal,
-	sessions: ReadonlySet<T>,
-	onLateSessionCloseError: (error: unknown) => void,
-): () => void {
-	let invalidated = false;
-	const invalidate = (): void => {
-		if (invalidated || signal.failure() === undefined) return;
-		invalidated = true;
-		for (const session of [...sessions]) {
-			void session.close().catch(error => {
-				try {
-					onLateSessionCloseError(error);
-				} catch (reportingError) {
-					logger.warn("BreadBoard late session close error presentation failed", {
-						error: String(reportingError),
-					});
-				}
-			});
-		}
-	};
-	const unsubscribe = signal.subscribe(invalidate);
-	invalidate();
-	return unsubscribe;
-}
-
 function authorityFacts(handle: BreadboardEngineReadyHandle): BreadboardEngineAuthorityFacts {
 	return Object.freeze({
 		mode: handle.mode,
@@ -294,11 +268,6 @@ function createConnectedPort(
 	const sessions = new Set<OpenedSession>();
 	let closed = false;
 	let closePromise: Promise<void> | undefined;
-	const unsubscribeLifecycle = invalidateBreadboardSessionsOnLifecycleFailure(
-		monitor.signal,
-		sessions,
-		options.onLateSessionCloseError,
-	);
 
 	const assertOperational = (): void => {
 		const failure = monitor.signal.failure();
@@ -335,7 +304,6 @@ function createConnectedPort(
 	const close = (): Promise<void> => {
 		closePromise ??= (async () => {
 			closed = true;
-			unsubscribeLifecycle();
 			let sessionError: unknown;
 			for (const session of sessions) {
 				try {
@@ -359,6 +327,50 @@ function createConnectedPort(
 		})();
 		return closePromise;
 	};
+	const modelRoles = createBreadboardModelRolePort({
+		resolveModelRoles(input) {
+			assertOperational();
+			return controlClient.resolveModelRoles(input);
+		},
+	});
+	const providerAuth = createBreadboardProviderAuthPort({
+		listProviders() {
+			assertOperational();
+			return controlClient.listProviders();
+		},
+		listCredentials(providerId) {
+			assertOperational();
+			return controlClient.listCredentials(providerId);
+		},
+		beginLogin(input) {
+			assertOperational();
+			return controlClient.beginLogin(input);
+		},
+		getLogin(loginSessionId) {
+			assertOperational();
+			return controlClient.getLogin(loginSessionId);
+		},
+		completeLogin(input) {
+			assertOperational();
+			return controlClient.completeLogin(input);
+		},
+		cancelLogin(loginSessionId) {
+			assertOperational();
+			return controlClient.cancelLogin(loginSessionId);
+		},
+		putApiKey(providerId, accountLabel, input) {
+			assertOperational();
+			return controlClient.putApiKey(providerId, accountLabel, input);
+		},
+		logout(input) {
+			assertOperational();
+			return controlClient.logout(input);
+		},
+		revoke(input) {
+			assertOperational();
+			return controlClient.revoke(input);
+		},
+	});
 	const port: BreadboardEnginePort = {
 		authority,
 		lifecycleFailure: monitor.signal,
@@ -383,9 +395,9 @@ function createConnectedPort(
 			assertOperational();
 			return controlClient.providerAuthDetach(request);
 		},
-		modelRoles: createBreadboardModelRolePort(controlClient),
+		modelRoles,
 		close,
-		providerAuth: createBreadboardProviderAuthPort(controlClient),
+		providerAuth,
 	};
 	return Object.freeze(port);
 }

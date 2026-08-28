@@ -1595,6 +1595,7 @@ describe("E4AgentStreamBridge", () => {
 			const laterResult = await (await startBridgeStream(bridge, model, laterContext)).result();
 			expect(laterResult.stopReason).toBe("error");
 			expect(laterResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
+			expect(laterResult.responseId).toBe("breadboard:e4:event-4");
 			expect(submissionCount).toBe(2);
 			expect(cancelled).toEqual([
 				{ turnId: receipt.turnId, reason: "timeout" },
