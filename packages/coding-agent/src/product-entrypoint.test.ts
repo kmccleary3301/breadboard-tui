@@ -126,6 +126,31 @@ describe("BreadBoard product entrypoint", () => {
 		expect(await Bun.file(productRoot).exists()).toBe(false);
 	});
 
+	test("pins native identity across profile env and native-loader initialization", async () => {
+		const home = await temporaryHome();
+		const agentDir = path.join(home, ".omp", "agent");
+		const productRoot = path.join(home, "hostile-product-config");
+		const nativeLoaderModule = path.join(packageDir, "..", "natives", "native", "loader-state.js");
+		await mkdir(agentDir, { recursive: true });
+		await writeFile(path.join(agentDir, ".env"), "BREADBOARD_PRODUCT=1\n");
+		const probe =
+			'await import("./src/omp.ts"); await import("@oh-my-pi/pi-utils/env"); const dirs = await import("@oh-my-pi/pi-utils/dirs"); const loader = await import(process.env.BB_NATIVE_LOADER_MODULE); process.stdout.write(JSON.stringify({ marker: process.env.BREADBOARD_PRODUCT, root: dirs.getConfigRootDir(), natives: loader.resolveNativesDir({ homeDir: process.env.HOME, pathExists: () => false }) }));';
+
+		const result = await runProcess(["-e", probe], home, {
+			BREADBOARD_PRODUCT: "1",
+			BREADBOARD_CONFIG_DIR: productRoot,
+			BB_NATIVE_LOADER_MODULE: nativeLoaderModule,
+		});
+
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout)).toEqual({
+			marker: "0",
+			root: path.join(home, ".omp"),
+			natives: path.join(home, ".omp", "natives"),
+		});
+		expect(await Bun.file(productRoot).exists()).toBe(false);
+	});
+
 	test("renders BreadBoard welcome copy only in an isolated product process", async () => {
 		const probe = String.raw`
 			const { Settings } = await import("./src/config/settings.ts");

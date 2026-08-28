@@ -96,7 +96,7 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
  * tarball installs all exercise it on every CI run.
  */
 async function runSmokeTest(): Promise<void> {
-	const noticeBundle = await Bun.file(noticeBundlePath).text();
+	const noticeBundle = await Bun.file(new URL(noticeBundlePath, import.meta.url)).text();
 	if (
 		!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n") ||
 		!noticeBundle.includes("Package: @breadboard/sdk@0.3.0")
@@ -354,7 +354,7 @@ function writeProductVersion(): void {
 }
 
 /** Run the CLI with the given argv (no `process.argv` prefix). */
-export async function runCli(argv: string[]): Promise<void> {
+export async function runCli(argv: string[], options: { readonly processEntry?: boolean } = {}): Promise<void> {
 	let resolvedArgv = argv;
 	try {
 		const extracted = extractProfileFlags(resolvedArgv);
@@ -418,13 +418,14 @@ export async function runCli(argv: string[]): Promise<void> {
 	// Declare this module as the worker-host entry now that the active profile
 	// is resolved. The worker-host module is side-effect-free; importing
 	// `@oh-my-pi/pi-utils/env` here would snapshot the wrong agent `.env`.
-	// Gated on `isProcessEntry`: only the real CLI process entry is a valid
-	// worker host. Worker-thread re-entry already returned above at the
-	// `__omp_worker_` dispatch, and importers (`runCli` in profile-CLI tests,
-	// SDK embedding) have `import.meta.main === false` — declaring there would
-	// poison `workerHostEntry()` for the whole test process, forcing eval/stats/
-	// browser workers onto the same-realm inline fallback.
-	if (isProcessEntry) declareWorkerHostEntry();
+	// Gated on process-entry ownership: only the real CLI process entry is a
+	// valid worker host. Source wrappers import this module, so they pass that
+	// ownership explicitly; direct importers keep the module-derived default.
+	// Worker-thread re-entry already returned above at the `__omp_worker_`
+	// dispatch. Declaring for SDK/test importers would poison
+	// `workerHostEntry()` for the whole process and force eval/stats/browser
+	// workers onto the same-realm inline fallback.
+	if (options.processEntry ?? isProcessEntry) declareWorkerHostEntry();
 
 	// `PI_PROXY` must reach bare global `fetch` before provider calls. A static
 	// import would load the provider graph before profile bootstrap and worker
