@@ -500,8 +500,8 @@
     },
     {
       "path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/src/modes/theme/defaults/breadboard-light.json",
@@ -565,8 +565,8 @@
     },
     {
       "path": "packages/coding-agent/src/slash-commands/builtin-session.ts",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/src/tools/hub/index.ts",
@@ -672,8 +672,8 @@
     },
     {
       "path": "packages/coding-agent/test/main-session-resolution-error.test.ts",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/test/main-startup-initialization.test.ts",
@@ -811,6 +811,13 @@
       "path": "scripts/install-tests/run-ci.sh",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "scripts/link-omp.sh",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
     },
     {
       "path": "scripts/p31/upstream-sync-policy.json",
