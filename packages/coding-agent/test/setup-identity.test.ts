@@ -97,7 +97,7 @@ describe("setup identity renderers", () => {
 		"renders deterministic full start/mid/end frames for $id",
 		identity => {
 			const frames = [0, SETUP_SPLASH_MS / 2, SETUP_SPLASH_MS].map(elapsed =>
-				renderSetupSplash(80, 30, elapsed, identity, "dark"),
+				renderSetupSplash(80, 30, elapsed, identity, "dark", "truecolor"),
 			);
 			for (const frame of frames) {
 				assertFrameGeometry(frame, 80, 30);
@@ -112,7 +112,7 @@ describe("setup identity renderers", () => {
 		"renders compact enlarged and original art with the $id wordmark",
 		identity => {
 			for (const height of [16, 10]) {
-				const frame = renderSetupSplash(48, height, 700, identity, "dark");
+				const frame = renderSetupSplash(48, height, 700, identity, "dark", "truecolor");
 				assertFrameGeometry(frame, 48, height);
 				const text = stripFrame(frame).join("\n");
 				expect(text).toContain(identity.setupWordmark);
@@ -124,19 +124,19 @@ describe("setup identity renderers", () => {
 
 	it("keeps product setup frames free of native identity while preserving native copy", () => {
 		const productCompact = stripFrame(
-			renderSetupSplash(48, 16, SETUP_SPLASH_MS / 2, BREADBOARD_PRODUCT_IDENTITY, "dark"),
+			renderSetupSplash(48, 16, SETUP_SPLASH_MS / 2, BREADBOARD_PRODUCT_IDENTITY, "dark", "truecolor"),
 		).join("\n");
 		assertNoNativeIdentity(productCompact);
 		expect(productCompact).toContain("BreadBoard");
 
 		const nativeCompact = stripFrame(
-			renderSetupSplash(48, 16, SETUP_SPLASH_MS / 2, OMP_PRODUCT_IDENTITY, "dark"),
+			renderSetupSplash(48, 16, SETUP_SPLASH_MS / 2, OMP_PRODUCT_IDENTITY, "dark", "truecolor"),
 		).join("\n");
 		expect(nativeCompact).toContain("O h   M y   P i");
 		expect(nativeCompact).not.toContain("BreadBoard");
 
-		const productOutro = renderSetupOutro(80, 24, 600, BREADBOARD_PRODUCT_IDENTITY, "dark");
-		const nativeOutro = renderSetupOutro(80, 24, 600, OMP_PRODUCT_IDENTITY, "dark");
+		const productOutro = renderSetupOutro(80, 24, 600, BREADBOARD_PRODUCT_IDENTITY, "dark", "truecolor");
+		const nativeOutro = renderSetupOutro(80, 24, 600, OMP_PRODUCT_IDENTITY, "dark", "truecolor");
 		assertFrameGeometry(productOutro, 80, 24);
 		assertFrameGeometry(nativeOutro, 80, 24);
 		expect(stripFrame(productOutro).join("\n")).toContain(BREADBOARD_PRODUCT_IDENTITY.logoArt[2] ?? "");
@@ -145,8 +145,8 @@ describe("setup identity renderers", () => {
 	});
 
 	it("selects distinct BreadBoard palettes for dark and light appearance", () => {
-		const dark = renderSetupSplash(48, 16, 900, BREADBOARD_PRODUCT_IDENTITY, "dark").join("\n");
-		const light = renderSetupSplash(48, 16, 900, BREADBOARD_PRODUCT_IDENTITY, "light").join("\n");
+		const dark = renderSetupSplash(48, 16, 900, BREADBOARD_PRODUCT_IDENTITY, "dark", "truecolor").join("\n");
+		const light = renderSetupSplash(48, 16, 900, BREADBOARD_PRODUCT_IDENTITY, "light", "truecolor").join("\n");
 		expect(dark).not.toBe(light);
 	});
 });

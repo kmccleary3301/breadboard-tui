@@ -1,6 +1,8 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { GradientPalette, ProductAppearance, ProductIdentity } from "../../../product-identity";
 import { gradientEscape, gradientLogo, type ShineConfig } from "../../components/welcome";
+import { paintAnsi } from "../../theme/color";
+import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
 
 export const SETUP_SPLASH_MS = 2600;
@@ -33,8 +35,6 @@ function getEnlargedLogo(identity: ProductIdentity): EnlargedLogo {
 	enlargedLogos.set(identity, enlarged);
 	return enlarged;
 }
-
-const RESET = "\x1b[0m";
 
 /** Full scene needs comfortable room; below this we drop to a centered mark. */
 const MIN_SCENE_WIDTH = 56;
@@ -146,6 +146,7 @@ export function renderSetupSplash(
 	elapsedMs: number,
 	identity: ProductIdentity,
 	appearance: ProductAppearance,
+	mode: ColorMode,
 ): string[] {
 	const w = Math.max(1, width);
 	const h = Math.max(1, height);
@@ -156,7 +157,7 @@ export function renderSetupSplash(
 	const shine: ShineConfig = { pos: (progress * 2.5) % 1, strength: Math.max(0, 1 - progress * 0.35) };
 
 	if (w < MIN_SCENE_WIDTH || h < MIN_SCENE_HEIGHT) {
-		return renderCompactSplash(w, h, phase, shine, identity, palette, enlargedLogo);
+		return renderCompactSplash(w, h, phase, shine, identity, palette, enlargedLogo, mode);
 	}
 
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
@@ -178,7 +179,10 @@ export function renderSetupSplash(
 		for (let x = 0; x < w; x++) {
 			const amp = waterAmplitude(x, y, cx, waterTop, waterHeight, w, surfaceTime) + (waterJitter(x, y) - 0.5) * 0.06;
 			const cell = WATER_RAMP.find(step => amp > step.min);
-			if (cell) put(x, y, gradientEscape(screenGradientT(x, y, w, h, phase), shine, palette) + cell.char + RESET);
+			if (cell) {
+				const color = gradientEscape(screenGradientT(x, y, w, h, phase), shine, palette, mode);
+				put(x, y, paintAnsi(color, cell.char));
+			}
 		}
 	}
 	// 2. twinkling starfield in the sky above the water
@@ -193,11 +197,8 @@ export function renderSetupSplash(
 		let col = 0;
 		for (const ch of line) {
 			if (ch !== " ") {
-				put(
-					hx + col,
-					hy + row,
-					gradientEscape(screenGradientT(hx + col, hy + row, w, h, phase), shine, palette) + ch + RESET,
-				);
+				const color = gradientEscape(screenGradientT(hx + col, hy + row, w, h, phase), shine, palette, mode);
+				put(hx + col, hy + row, paintAnsi(color, ch));
 			}
 			col++;
 		}
@@ -222,9 +223,10 @@ function renderCompactSplash(
 	identity: ProductIdentity,
 	palette: GradientPalette,
 	enlargedLogo: EnlargedLogo,
+	mode: ColorMode,
 ): string[] {
 	const art = height >= 14 ? enlargedLogo.lines : identity.logoArt;
-	const content = [...gradientLogo(art, phase, shine, palette), "", theme.bold(identity.setupWordmark)];
+	const content = [...gradientLogo(art, phase, shine, palette, mode), "", theme.bold(identity.setupWordmark)];
 	const start = Math.max(0, Math.floor((height - content.length) / 2));
 	const lines: string[] = [];
 	for (let y = 0; y < height; y++) {

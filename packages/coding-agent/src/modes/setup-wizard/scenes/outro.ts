@@ -1,6 +1,7 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { ProductAppearance, ProductIdentity } from "../../../product-identity";
 import { gradientLogo } from "../../components/welcome";
+import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
 import { renderStarfield, SETUP_TICK_MS } from "./splash";
 
@@ -24,6 +25,7 @@ export function renderSetupOutro(
 	elapsedMs: number,
 	identity: ProductIdentity,
 	appearance: ProductAppearance,
+	mode: ColorMode,
 ): string[] {
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
 	const lines = renderStarfield(width, height, frame + 1000);
@@ -33,6 +35,7 @@ export function renderSetupOutro(
 		progress * 1.2,
 		{ pos: (progress * 2) % 1, strength: 1 - progress },
 		identity.gradientPalettes[appearance],
+		mode,
 	);
 	const title = theme.bold(theme.fg("success", `${theme.status.success} Setup saved`));
 	const subtitle = theme.fg("muted", "Handing off to the normal CLI…");

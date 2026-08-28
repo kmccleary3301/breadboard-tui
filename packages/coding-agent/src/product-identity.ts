@@ -14,6 +14,7 @@ export type GradientStop = readonly [red: number, green: number, blue: number];
 export interface GradientPalette {
 	readonly stops: readonly GradientStop[];
 	readonly ramp256: readonly number[];
+	readonly ramp16: readonly number[];
 }
 
 export interface ProductSourceArtProvenance {
@@ -47,9 +48,13 @@ export interface ProductIdentity {
 	readonly sourceArt?: ProductSourceArtProvenance;
 }
 
-function freezePalette(stops: GradientStop[], ramp256: number[]): GradientPalette {
+function freezePalette(stops: GradientStop[], ramp256: number[], ramp16: number[]): GradientPalette {
 	for (const stop of stops) Object.freeze(stop);
-	return Object.freeze({ stops: Object.freeze(stops), ramp256: Object.freeze(ramp256) });
+	return Object.freeze({
+		stops: Object.freeze(stops),
+		ramp256: Object.freeze(ramp256),
+		ramp16: Object.freeze(ramp16),
+	});
 }
 
 const OMP_GRADIENT = freezePalette(
@@ -61,6 +66,7 @@ const OMP_GRADIENT = freezePalette(
 		[120, 255, 220],
 	],
 	[199, 171, 135, 99, 75, 51, 87],
+	[95, 95, 94, 96, 92],
 );
 
 const BREADBOARD_DARK_GRADIENT = freezePalette(
@@ -71,6 +77,7 @@ const BREADBOARD_DARK_GRADIENT = freezePalette(
 		[255, 196, 112],
 	],
 	[130, 166, 172, 208, 214, 220],
+	[31, 91, 33, 93],
 );
 
 const BREADBOARD_LIGHT_GRADIENT = freezePalette(
@@ -81,6 +88,7 @@ const BREADBOARD_LIGHT_GRADIENT = freezePalette(
 		[204, 88, 8],
 	],
 	[52, 94, 130, 166, 172],
+	[31, 31, 91, 33],
 );
 
 const OMP_LOGO = Object.freeze(["▀██████████▀", " ╘██    ██  ", "  ██    ██  ", "  ██    ██  ", " ▄██▄  ▄██▄ "]);

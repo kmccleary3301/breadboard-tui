@@ -4,9 +4,9 @@ import { detectMacOSAppearance, MacAppearanceObserver } from "@oh-my-pi/pi-nativ
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
 import { colorLuma, getCustomThemesDir, logger } from "@oh-my-pi/pi-utils";
 import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
-import { ansi256ToHex, resolveThemeColors, resolveVarRefs } from "./color";
+import { ansi256ToHex, detectColorMode, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
-import type { ThemeColor, ThemeJson } from "./schema";
+import type { ColorMode, ThemeColor, ThemeJson } from "./schema";
 import type { SymbolPreset } from "./symbols";
 import type { Theme } from "./theme-class";
 
@@ -97,6 +97,7 @@ export interface ThemeChangeEvent {
 
 var currentSymbolPresetOverride: SymbolPreset | undefined;
 var currentColorBlindMode: boolean = false;
+var currentColorMode: ColorMode = detectColorMode();
 var themeWatcher: fs.FSWatcher | undefined;
 var themeReloadTimer: NodeJS.Timeout | undefined;
 var sigwinchHandler: (() => void) | undefined;
@@ -111,6 +112,7 @@ function getCurrentThemeOptions(): CreateThemeOptions {
 	return {
 		symbolPresetOverride: currentSymbolPresetOverride,
 		colorBlindMode: currentColorBlindMode,
+		mode: currentColorMode,
 	};
 }
 function configureTheme(
@@ -118,12 +120,14 @@ function configureTheme(
 	colorBlindMode?: boolean,
 	darkTheme?: string,
 	lightTheme?: string,
+	mode?: ColorMode,
 ): string {
 	autoDetectedTheme = true;
 	autoDarkTheme = darkTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.dark;
 	autoLightTheme = lightTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.light;
 	currentSymbolPresetOverride = symbolPreset;
 	currentColorBlindMode = colorBlindMode ?? false;
+	currentColorMode = mode ?? detectColorMode();
 	const name = getDefaultTheme();
 	currentThemeName = name;
 	return name;
@@ -135,11 +139,13 @@ export function initThemeSync(
 	colorBlindMode?: boolean,
 	darkTheme?: string,
 	lightTheme?: string,
+	mode?: ColorMode,
 ): void {
-	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme);
+	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme, mode);
 	const options: CreateThemeOptions = {
 		symbolPresetOverride: currentSymbolPresetOverride,
 		colorBlindMode: currentColorBlindMode,
+		mode: currentColorMode,
 	};
 	try {
 		theme = loadThemeSync(name, options);
@@ -162,8 +168,9 @@ export async function initTheme(
 	colorBlindMode?: boolean,
 	darkTheme?: string,
 	lightTheme?: string,
+	mode?: ColorMode,
 ): Promise<void> {
-	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme);
+	const name = configureTheme(symbolPreset, colorBlindMode, darkTheme, lightTheme, mode);
 	try {
 		theme = await loadTheme(name, getCurrentThemeOptions());
 		if (enableWatcher) {
@@ -274,6 +281,7 @@ export function onTerminalAppearanceChange(
 export function setThemeInstance(themeInstance: Theme): void {
 	autoDetectedTheme = false;
 	theme = themeInstance;
+	currentColorMode = themeInstance.getColorMode();
 	currentThemeName = "<in-memory>";
 	stopThemeWatcher();
 	notifyThemeChange({ ephemeral: true });

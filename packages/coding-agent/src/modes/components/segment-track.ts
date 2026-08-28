@@ -8,14 +8,13 @@
  * Used by the plan-mode model-tier slider ({@link HookSelectorComponent}) and
  * the ctrl+p role-cycle status so both surfaces read identically.
  */
+
+import { paintAnsi } from "../theme/color";
 import { type ThemeColor, theme } from "../theme/theme";
 
 export interface TrackSegment {
 	label: string;
 }
-
-const FG_RESET = "\x1b[39m";
-const BG_RESET = "\x1b[49m";
 
 /** Vivid theme colors for position-based segment coloring, in preference
  *  order. Themes alias many of these to the same value (titanium maps most of
@@ -76,14 +75,17 @@ export function renderSegmentTrack(segments: TrackSegment[], activeIndex: number
 			track += i === activeIndex || i - 1 === activeIndex ? "  " : ` ${thinSep} `;
 		}
 		const color = palette[i % palette.length];
-		const fg = theme.getFgAnsi(color);
 		if (i !== activeIndex) {
-			track += `${fg}${segment.label}${FG_RESET}`;
+			track += theme.fg(color, segment.label);
 			return;
 		}
-		const bg = fg.replace("\x1b[38;", "\x1b[48;");
-		const label = `${bg}${theme.getContrastFgAnsi(color)}\x1b[1m ${segment.label} \x1b[22m${BG_RESET}`;
-		track += `${fg}${capLeft}${label}${fg}${capRight}${FG_RESET}`;
+		const bg = theme.getCustomBgAnsi(theme.getColorHex(color));
+		const label = paintAnsi(
+			bg,
+			paintAnsi(theme.getContrastFgAnsi(color), theme.bold(` ${segment.label} `), "\x1b[39m"),
+			"\x1b[49m",
+		);
+		track += theme.fg(color, capLeft) + label + theme.fg(color, capRight);
 	});
 	return track;
 }

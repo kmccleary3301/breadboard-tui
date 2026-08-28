@@ -46,10 +46,9 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 	const palette = (): readonly string[] => {
 		const mode = theme.getColorMode();
 		if (cachedPalette && cachedMode === mode) return cachedPalette;
-		const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
 		const next: string[] = [];
 		for (let i = 0; i < stops; i++) {
-			next.push(Bun.color(`hsl(${Math.round(hue(i / stops))}, ${saturation}%, ${lightness}%)`, format) ?? "");
+			next.push(theme.getCustomColorAnsi(`hsl(${Math.round(hue(i / stops))}, ${saturation}%, ${lightness}%)`));
 		}
 		cachedMode = mode;
 		cachedPalette = next;
@@ -79,19 +78,18 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 		return `${out}${resetTo}`;
 	};
 
-	return (text: string, resetTo: string = FG_RESET, phase: number = 0): string => {
+	return (text: string, resetTo?: string, phase: number = 0): string => {
 		if (!probe.test(text)) return text;
-		// Wrap phase into [0, 1) so negative inputs and values ≥ 1 stay well-defined.
+		if (theme.getColorMode() === "none") return text;
+		const effectiveReset = resetTo ?? FG_RESET;
 		const wrappedPhase = ((phase % 1) + 1) % 1;
-		// Match against a code/markup-masked copy so keywords inside code spans,
-		// fenced blocks, or XML sections never paint; indices still address `text`.
 		const masked = maskNonProse(text);
 		let out = "";
 		let last = 0;
-		for (const m of masked.matchAll(highlight)) {
-			const start = m.index ?? 0;
-			const end = start + m[0].length;
-			out += text.slice(last, start) + paint(text.slice(start, end), resetTo, wrappedPhase);
+		for (const match of masked.matchAll(highlight)) {
+			const start = match.index ?? 0;
+			const end = start + match[0].length;
+			out += text.slice(last, start) + paint(text.slice(start, end), effectiveReset, wrappedPhase);
 			last = end;
 		}
 		return out + text.slice(last);

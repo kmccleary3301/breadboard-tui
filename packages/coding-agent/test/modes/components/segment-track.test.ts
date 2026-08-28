@@ -7,7 +7,7 @@ import {
 import { initTheme, type ThemeColor, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 beforeAll(async () => {
-	await initTheme();
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 const SEGMENTS: TrackSegment[] = [{ label: "smol" }, { label: "default" }, { label: "slow" }];

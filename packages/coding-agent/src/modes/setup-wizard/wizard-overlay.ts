@@ -11,7 +11,7 @@ import {
 import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import type { ProductAppearance, ProductIdentity } from "../../product-identity";
 import { gradientLogo } from "../components/welcome";
-import { getCurrentThemeName, isLightTheme, theme } from "../theme/theme";
+import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
@@ -31,7 +31,7 @@ export interface SetupWizardComponentOptions {
 }
 
 function currentAppearance(): ProductAppearance {
-	return isLightTheme(getCurrentThemeName()) ? "light" : "dark";
+	return theme.isLight ? "light" : "dark";
 }
 
 function centerLine(line: string, width: number): string {
@@ -187,6 +187,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const safeWidth = Math.max(1, width);
 		const height = Math.max(1, this.ctx.ui.terminal.rows);
 		const appearance = currentAppearance();
+		const mode = theme.getColorMode();
 		let lines: string[];
 		switch (this.#phase) {
 			case "splash":
@@ -196,6 +197,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 					this.#now() - this.#phaseStartedAt,
 					this.options.identity,
 					appearance,
+					mode,
 				);
 				break;
 			case "transition": {
@@ -207,6 +209,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 					SETUP_SPLASH_MS + elapsed,
 					this.options.identity,
 					appearance,
+					mode,
 				);
 				const scene = this.#renderScene(safeWidth, height, appearance);
 				lines = dissolveFrames(splash, scene, progress, height);
@@ -219,6 +222,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 					this.#now() - this.#phaseStartedAt,
 					this.options.identity,
 					appearance,
+					mode,
 				);
 				break;
 			case "scene":
@@ -237,7 +241,13 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const subtitle = this.#activeScene?.subtitle;
 		const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - SCENE_MARGIN_X * 2);
 		const identity = this.options.identity;
-		const logo = gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes[appearance]);
+		const logo = gradientLogo(
+			identity.logoArt,
+			0,
+			undefined,
+			identity.gradientPalettes[appearance],
+			theme.getColorMode(),
+		);
 		const header = [
 			"",
 			...logo.map(line => centerLine(line, width)),

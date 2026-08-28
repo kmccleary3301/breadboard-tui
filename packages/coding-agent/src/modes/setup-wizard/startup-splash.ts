@@ -1,6 +1,6 @@
 import { type Component, matchesKey, type OverlayFocusOwner } from "@oh-my-pi/pi-tui";
 import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
-import { getCurrentThemeName, isLightTheme } from "../theme/theme";
+import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 
@@ -69,7 +69,8 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 			Math.max(1, this.ctx.ui.terminal.rows),
 			elapsedMs,
 			this.options.identity,
-			isLightTheme(getCurrentThemeName()) ? "light" : "dark",
+			theme.isLight ? "light" : "dark",
+			theme.getColorMode(),
 		);
 	}
 

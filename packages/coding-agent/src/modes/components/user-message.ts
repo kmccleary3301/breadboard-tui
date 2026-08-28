@@ -4,6 +4,7 @@ import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { attachmentSgr, collapseImageMarkers, renderPlaceholders } from "../composer-attachments";
 import { imageReferenceHyperlink } from "../image-references";
 import { highlightMagicKeywords } from "../magic-keywords";
+import { paintAnsi } from "../theme/color";
 
 // OSC 133 shell integration: marks prompt zones for terminal multiplexers.
 //
@@ -50,7 +51,7 @@ export class UserMessageComponent extends Container {
 		// fenced blocks through its own code styling (never `color`), so those are already excluded;
 		// `highlightMagicKeywords` additionally restores the bubble's own foreground after each
 		// painted keyword so the gradient never bleeds into the rest of the line.
-		const keywordReset = theme.getFgAnsi("userMessageText") || "\x1b[39m";
+		const keywordReset = theme.getFgAnsi("userMessageText");
 		const baseText = synthetic
 			? (value: string) => theme.fg("dim", value)
 			: (value: string) => theme.fg("userMessageText", highlightMagicKeywords(value, keywordReset));
@@ -62,8 +63,8 @@ export class UserMessageComponent extends Container {
 					// foreground resumes after the token (same pattern as keywords).
 					const styled =
 						form === "chip"
-							? `${attachmentSgr(kind, index)}\x1b[1m${label}\x1b[22m${keywordReset}`
-							: theme.fg("accent", `\x1b[1m${label}\x1b[22m`);
+							? paintAnsi(attachmentSgr(kind, index), theme.bold(label), keywordReset)
+							: theme.fg("accent", theme.bold(label));
 					return kind === "image" ? imageReferenceHyperlink(label, index, imageLinks, () => styled) : styled;
 				},
 			});

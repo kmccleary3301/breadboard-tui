@@ -18,7 +18,7 @@ function makeBand(): { editor: CustomEditor; band: AttachmentChipsBand } {
 }
 
 beforeAll(async () => {
-	await initTheme(false);
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 describe("AttachmentChipsBand", () => {

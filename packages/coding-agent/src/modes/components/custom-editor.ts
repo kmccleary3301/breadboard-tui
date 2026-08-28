@@ -23,6 +23,7 @@ import {
 import { MacOSSpellingProvider, type SpellingFeatures } from "../macos-spelling";
 import { hasMagicKeyword, highlightMagicKeywords } from "../magic-keywords";
 import { isQueuedMessageList, parseQueueShorthand, QUEUE_LIST_MARKER_RE } from "../queue-input";
+import { paintAnsi } from "../theme/color";
 import { fgOrPlain, theme } from "../theme/theme";
 
 type ConfigurableEditorAction = Extract<
@@ -625,16 +626,20 @@ export class CustomEditor extends Editor {
 				locateSource(value);
 				if (form === "chip") {
 					// Chip tokens carry their attachment identity color (matches the band card).
-					const styled = `${attachmentSgr(kind, index)}\x1b[1m${value}\x1b[22m\x1b[39m`;
+					const styled = paintAnsi(attachmentSgr(kind, index), theme.bold(value), "\x1b[39m");
 					return kind === "image"
 						? this.imageReferenceHyperlink(value, index, this.imageLinks, () => styled)
 						: styled;
 				}
 				return kind === "image"
 					? this.imageReferenceHyperlink(value, index, this.imageLinks, label =>
-							fgOrPlain("accent", label, `\x1b[1m\x1b[4m${label}\x1b[24m\x1b[22m`),
+							fgOrPlain(
+								"accent",
+								label,
+								typeof theme === "undefined" ? label : theme.bold(theme.underline(label)),
+							),
 						)
-					: fgOrPlain("accent", value, `\x1b[1m${value}\x1b[22m`);
+					: fgOrPlain("accent", value, typeof theme === "undefined" ? value : theme.bold(value));
 			},
 		});
 	};

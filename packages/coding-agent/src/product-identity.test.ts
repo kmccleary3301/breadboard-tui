@@ -13,6 +13,7 @@ function expectFrozenIdentity(identity: ProductIdentity): void {
 		expect(Object.isFrozen(palette)).toBe(true);
 		expect(Object.isFrozen(palette.stops)).toBe(true);
 		expect(Object.isFrozen(palette.ramp256)).toBe(true);
+		expect(Object.isFrozen(palette.ramp16)).toBe(true);
 		for (const stop of palette.stops) expect(Object.isFrozen(stop)).toBe(true);
 	}
 	if (identity.sourceArt) expect(Object.isFrozen(identity.sourceArt)).toBe(true);

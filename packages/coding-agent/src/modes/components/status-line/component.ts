@@ -18,7 +18,7 @@ import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/activ
 import { type ActiveRepoContext, resolveActiveRepoContextSync } from "../../../utils/active-repo-context";
 import * as git from "../../../utils/git";
 import * as jj from "../../../utils/jj";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
+import { getSessionAccentHex } from "../../../utils/session-color";
 import { calculateTokensPerSecond } from "../../../utils/token-rate";
 import { sanitizeStatusText } from "../../shared";
 import { theme } from "../../theme/theme";
@@ -1854,18 +1854,15 @@ export class StatusLineComponent implements Component {
 			? { left: "·", right: "·" }
 			: getSeparator(effectiveSettings.separator ?? "powerline-thin", theme);
 
-		// `transparent` reuses the empty-string sentinel (`\x1b[49m`) so the bar
-		// inherits the terminal's default background, matching custom themes that
-		// set `statusLineBg: ""`. Powerline end caps need a contrasting fill to
-		// bridge the bar into the surrounding terminal; without one they read as
-		// stray glyphs, so the cap renderer drops them when the fill is empty.
-		const TRANSPARENT_BG_ANSI = "\x1b[49m";
+		// Transparent bars inherit the terminal's default background. Powerline
+		// end caps need a contrasting fill, so they are also dropped in plain mode.
+		const colorEnabled = theme.getColorMode() !== "none";
+		const transparentBgAnsi = colorEnabled ? "\x1b[49m" : "";
 		const themeBgAnsi = theme.getBgAnsi("statusLineBg");
-		// Plain bottom bars drop the background entirely; the claude top-rule
-		// chip (`plain-right`) keeps it so the group reads as a chip on the rule.
 		const transparentLayout = layout === "plain-full" || layout === "plain-left";
-		const bgAnsi = transparentLayout || effectiveSettings.transparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
-		const transparentBg = bgAnsi === TRANSPARENT_BG_ANSI;
+		const transparentBg =
+			!colorEnabled || transparentLayout || effectiveSettings.transparent || themeBgAnsi === "\x1b[49m";
+		const bgAnsi = transparentBg ? transparentBgAnsi : themeBgAnsi;
 		const fgAnsi = theme.getFgAnsi("text");
 		const sepAnsi = theme.getFgAnsi("statusLineSep");
 		const subagentBadge = this.#subagentBadgeText();
@@ -2026,7 +2023,7 @@ export class StatusLineComponent implements Component {
 
 			let content = bgAnsi + fgAnsi;
 			content += ` ${parts.join(` ${sepAnsi}${sep}${fgAnsi} `)} `;
-			content += "\x1b[0m";
+			if (colorEnabled) content += "\x1b[0m";
 
 			if (capText) {
 				return direction === "right" ? capText + content : content + capText;
@@ -2075,12 +2072,13 @@ export class StatusLineComponent implements Component {
 		const accentHex = sessionName
 			? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
 			: undefined;
-		const usedColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("borderAccent");
+		const usedColor = accentHex ? theme.getCustomColorAnsi(accentHex) : theme.getFgAnsi("borderAccent");
 		const horizontal = theme.boxRound.horizontal;
-		const mode = effectiveSettings.contextLine ?? "embedded";
+		const contextMode = effectiveSettings.contextLine ?? "embedded";
 		const pct = ctx.contextPercent;
-		if (mode === "off" || pct === null || pct === undefined) {
-			return `\x1b[49m${usedColor}${horizontal.repeat(gapWidth)}\x1b[39m`;
+		if (contextMode === "off" || pct === null || pct === undefined) {
+			const line = horizontal.repeat(gapWidth);
+			return usedColor ? `\x1b[49m${usedColor}${line}\x1b[39m` : line;
 		}
 
 		const clampedPct = Math.min(100, Math.max(0, pct));
@@ -2118,7 +2116,7 @@ export class StatusLineComponent implements Component {
 		// the line is long enough for the markers to read as positions.
 		let speculationIdx = -1;
 		let thresholdIdx = -1;
-		if ((mode === "annotated" || mode === "embedded") && ctx.autoCompactEnabled && gapWidth >= 8) {
+		if ((contextMode === "annotated" || contextMode === "embedded") && ctx.autoCompactEnabled && gapWidth >= 8) {
 			const boundaries = this.#compactionBoundaries(ctx.contextWindow);
 			if (boundaries) {
 				const cellFor = (percent: number) =>
@@ -2159,9 +2157,10 @@ export class StatusLineComponent implements Component {
 		const overflowColor = theme.getFgAnsi("error");
 		const rawAccentHex = accentHex ?? theme.getColorHex("borderAccent");
 		const dimmedAccentHex = adjustHsv(rawAccentHex, { s: 0.7, v: 0.75 });
-		const thresholdColor = getSessionAccentAnsi(dimmedAccentHex) ?? usedColor;
+		const thresholdColor = theme.getCustomColorAnsi(dimmedAccentHex) || usedColor;
 
-		let out = "\x1b[49m";
+		const colorEnabled = theme.getColorMode() !== "none";
+		let out = colorEnabled ? "\x1b[49m" : "";
 		let activeColor = "";
 		for (let i = 0; i < gapWidth; i++) {
 			let color = i < usedCount ? usedColor : unusedColor;
@@ -2185,7 +2184,7 @@ export class StatusLineComponent implements Component {
 			}
 			out += glyph;
 		}
-		return `${out}\x1b[39m`;
+		return colorEnabled ? `${out}\x1b[39m` : out;
 	}
 
 	/** Auto-compaction boundary percents, or null when unavailable (disabled, no window). */
@@ -2205,7 +2204,7 @@ export class StatusLineComponent implements Component {
 
 	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
 		let content = this.#buildStatusLine(width, "box", previewTitle);
-		if (this.#focusedAgentId && content) {
+		if (this.#focusedAgentId && content && theme.getColorMode() !== "none") {
 			// Dim the whole bar while focus-proxied. Group/cap terminators emit full
 			// `\x1b[0m` resets that would cancel faint mid-bar, so re-open it after each.
 			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
@@ -2238,7 +2237,7 @@ export class StatusLineComponent implements Component {
 	/** Plain right-group content for the claude composer's top rule. */
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
 		let content = this.#buildStatusLine(width, "plain-right", previewTitle);
-		if (this.#focusedAgentId && content) {
+		if (this.#focusedAgentId && content && theme.getColorMode() !== "none") {
 			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
 		}
 		return {
@@ -2256,7 +2255,7 @@ export class StatusLineComponent implements Component {
 	 */
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string {
 		let content = this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle);
-		if (this.#focusedAgentId && content) {
+		if (this.#focusedAgentId && content && theme.getColorMode() !== "none") {
 			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
 		}
 		return content;

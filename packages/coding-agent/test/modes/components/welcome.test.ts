@@ -123,10 +123,12 @@ describe("WelcomeComponent native identity", () => {
 				dark: Object.freeze({
 					stops: Object.freeze([[255, 0, 0] as const, [128, 0, 0] as const]),
 					ramp256: Object.freeze([196]),
+					ramp16: Object.freeze([91]),
 				}),
 				light: Object.freeze({
 					stops: Object.freeze([[0, 0, 255] as const, [0, 0, 128] as const]),
 					ramp256: Object.freeze([21]),
+					ramp16: Object.freeze([94]),
 				}),
 			}),
 			defaultThemes: Object.freeze({ dark: "dark", light: "light" }),

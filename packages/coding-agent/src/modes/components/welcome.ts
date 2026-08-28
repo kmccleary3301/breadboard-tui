@@ -2,12 +2,13 @@ import {
 	type Component,
 	padding,
 	replaceTabs,
-	TERMINAL,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import { getCurrentThemeName, isLightTheme, theme } from "../../modes/theme/theme";
+import { paintAnsi } from "../../modes/theme/color";
+import type { ColorMode } from "../../modes/theme/schema";
+import { theme } from "../../modes/theme/theme";
 import {
 	ACTIVE_PRODUCT_IDENTITY,
 	type GradientPalette,
@@ -89,28 +90,17 @@ export function pickWeightedTip(tips: readonly string[], r: number): string {
 	return tips[tips.length - 1] ?? "";
 }
 
-type ColorEncoding = "ansi-16m" | "ansi-256";
-
-/** Paint each glyph of {@link NEW_TAG_TEXT} on a moving HSL rainbow. `phase`
- *  rotates the hue offset cyclically; successive renders with increasing phase
- *  shimmer, while a fixed phase yields a still rainbow. */
-function renderNewTag(phase: number, encoding: ColorEncoding): string {
-	const bold = "\x1b[1m";
-	const reset = "\x1b[0m";
+/** Paint each glyph of {@link NEW_TAG_TEXT} on a moving HSL rainbow. */
+function renderNewTag(phase: number): string {
 	const wrapped = ((phase % 1) + 1) % 1;
 	const chars = [...NEW_TAG_TEXT];
-	let out = bold;
-	let prev = "";
-	for (let i = 0; i < chars.length; i++) {
-		const hue = Math.round(((i / chars.length + wrapped) % 1) * 360);
-		const color = Bun.color(`hsl(${hue}, 95%, 60%)`, encoding) ?? "";
-		if (color !== prev) {
-			out += color;
-			prev = color;
-		}
-		out += chars[i];
-	}
-	return out + reset;
+	const painted = chars
+		.map((char, index) => {
+			const hue = Math.round(((index / chars.length + wrapped) % 1) * 360);
+			return theme.customColor(`hsl(${hue}, 95%, 60%)`, char);
+		})
+		.join("");
+	return theme.bold(painted);
 }
 export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): string[] {
 	const label = "Tip: ";
@@ -140,8 +130,7 @@ export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): stri
 		// Append the rainbow tag to the final body line when it fits within the
 		// box; otherwise drop it onto its own indented continuation line so the
 		// styled glyphs never overflow or reflow the wrapped body.
-		const encoding: ColorEncoding = TERMINAL.trueColor ? "ansi-16m" : "ansi-256";
-		const tag = renderNewTag(phase, encoding);
+		const tag = renderNewTag(phase);
 		const tagWidth = 1 + visibleWidth(NEW_TAG_TEXT); // 1 = space separator
 		const lastLine = lines[lines.length - 1];
 		if (lastLine !== undefined && visibleWidth(lastLine) + tagWidth <= boxWidth) {
@@ -180,8 +169,7 @@ export class WelcomeComponent implements Component {
 	#cachedWidth = -1;
 	#cachedLines: string[] | undefined;
 
-	#restFrames: Readonly<Record<ProductAppearance, readonly string[]>>;
-
+	#restFrames = new Map<string, readonly string[]>();
 	constructor(
 		private version: string,
 		private modelName: string,
@@ -192,12 +180,6 @@ export class WelcomeComponent implements Component {
 		private readonly appearance?: ProductAppearance,
 	) {
 		this.#tips = getWelcomeTips(identity);
-		const dark = gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes.dark);
-		const light =
-			identity.gradientPalettes.light === identity.gradientPalettes.dark
-				? dark
-				: gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes.light);
-		this.#restFrames = Object.freeze({ dark, light });
 	}
 	get tip(): string | undefined {
 		if (this.#selectedTip === undefined) {
@@ -516,11 +498,29 @@ export class WelcomeComponent implements Component {
 
 	/** Pick the logo frame for the current intro phase, or the resting frame. */
 	#currentLogoFrame(): readonly string[] {
-		const appearance = this.appearance ?? (isLightTheme(getCurrentThemeName()) ? "light" : "dark");
-		if (this.#animStart == null) return this.#restFrames[appearance];
+		const appearance = this.appearance ?? (theme.isLight ? "light" : "dark");
+		const mode = theme.getColorMode();
+		const key = `${this.identity.id}:${appearance}:${mode}`;
+		let restFrame = this.#restFrames.get(key);
+		if (!restFrame) {
+			restFrame = gradientLogo(
+				this.identity.logoArt,
+				0,
+				undefined,
+				this.identity.gradientPalettes[appearance],
+				mode,
+			);
+			this.#restFrames.set(key, restFrame);
+		}
+		if (this.#animStart == null) return restFrame;
 		const elapsed = performance.now() - this.#animStart;
-		if (elapsed >= INTRO_MS) return this.#restFrames[appearance];
-		return introLogoFrame(elapsed / INTRO_MS, this.identity.logoArt, this.identity.gradientPalettes[appearance]);
+		if (elapsed >= INTRO_MS) return restFrame;
+		return introLogoFrame(
+			elapsed / INTRO_MS,
+			this.identity.logoArt,
+			this.identity.gradientPalettes[appearance],
+			mode,
+		);
 	}
 }
 
@@ -537,19 +537,19 @@ export interface ShineConfig {
 /**
  * Resolve the gradient SGR foreground escape for a normalized position `t`
  * (0..1) along the diagonal, compositing the optional sliding shine highlight.
- * Shared by {@link gradientLogo} and the setup splash so both stay
- * color-identical (truecolor when available, 256-color ramp otherwise).
+ * Shared by {@link gradientLogo} and the setup splash so both encode identical
+ * truecolor, indexed, basic-color, or plain output.
  */
 export function gradientEscape(
 	t: number,
 	shine?: ShineConfig,
 	palette: GradientPalette = OMP_PRODUCT_IDENTITY.gradientPalettes.dark,
+	mode: ColorMode = theme.getColorMode(),
 ): string {
+	if (mode === "none") return "";
 	const shineStrength = shine && shine.strength > 0 ? shine.strength : 0;
 	const shinePos = shine ? shine.pos : 0;
-	if (TERMINAL.trueColor) {
-		// 5-stop palette widens the visible color range and avoids the
-		// deep-blue valley a naive HSL lerp falls into.
+	if (mode === "truecolor") {
 		const stops = palette.stops;
 		const seg = t * (stops.length - 1);
 		const i = Math.min(stops.length - 2, Math.floor(seg));
@@ -570,15 +570,15 @@ export function gradientEscape(
 		}
 		return `\x1b[38;2;${Math.round(r)};${Math.round(g)};${Math.round(bl)}m`;
 	}
-	const ramp = palette.ramp256;
-	let idx = Math.min(ramp.length - 1, Math.max(0, Math.floor(t * (ramp.length - 1) + 0.5)));
+	const ramp = mode === "16color" ? palette.ramp16 : palette.ramp256;
+	let index = Math.min(ramp.length - 1, Math.max(0, Math.floor(t * (ramp.length - 1) + 0.5)));
 	if (shineStrength > 0) {
 		const dist = Math.abs(t - shinePos);
 		const intensity = Math.max(0, 1 - dist / SHINE_HALF_WIDTH) * shineStrength;
-		// Promote to the brightest ramp slot when the shine band peaks here.
-		if (intensity > 0.5) idx = ramp.length - 1;
+		if (intensity > 0.5) index = ramp.length - 1;
 	}
-	return `\x1b[38;5;${ramp[idx]}m`;
+	const color = ramp[index];
+	return mode === "16color" ? `\x1b[${color}m` : `\x1b[38;5;${color}m`;
 }
 
 /**
@@ -592,12 +592,11 @@ export function gradientLogo(
 	phase = 0,
 	shine?: ShineConfig,
 	palette: GradientPalette = OMP_PRODUCT_IDENTITY.gradientPalettes.dark,
+	mode: ColorMode = theme.getColorMode(),
 ): string[] {
-	const reset = "\x1b[0m";
+	if (mode === "none") return [...lines];
 	const rows = lines.length;
-	const cols = Math.max(...lines.map(l => l.length));
-	// span+1 so `base` stays strictly < 1: avoids the wrap-around at the
-	// far corner mapping back to t=0 (hot pink) on the resting frame.
+	const cols = Math.max(...lines.map(line => line.length));
 	const span = Math.max(1, cols + rows - 1);
 	return lines.map((line, y) => {
 		let result = "";
@@ -607,10 +606,9 @@ export function gradientLogo(
 				result += char;
 				continue;
 			}
-			// Diagonal: bottom-left (x=0, y=rows-1) → top-right (x=cols-1, y=0)
 			const base = (x + (rows - 1 - y)) / span;
 			const t = (((base + phase) % 1) + 1) % 1;
-			result += gradientEscape(t, shine, palette) + char + reset;
+			result += paintAnsi(gradientEscape(t, shine, palette, mode), char);
 		}
 		return result;
 	});
@@ -639,10 +637,11 @@ function introLogoFrame(
 	progress: number,
 	art: readonly string[] = OMP_PRODUCT_IDENTITY.logoArt,
 	palette: GradientPalette = OMP_PRODUCT_IDENTITY.gradientPalettes.dark,
+	mode: ColorMode = theme.getColorMode(),
 ): string[] {
 	const eased = 1 - (1 - progress) ** 3;
 	const phase = ((((1 - eased) * INTRO_SWEEPS) % 1) + 1) % 1;
 	const shinePos = (((progress * INTRO_SHINE_TRAVERSALS) % 1) + 1) % 1;
 	const shineStrength = (1 - eased) ** 1.5;
-	return gradientLogo(art, phase, { strength: shineStrength, pos: shinePos }, palette);
+	return gradientLogo(art, phase, { strength: shineStrength, pos: shinePos }, palette, mode);
 }

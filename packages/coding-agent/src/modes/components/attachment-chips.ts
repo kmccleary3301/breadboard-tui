@@ -14,6 +14,7 @@ import {
 import { convertImageToPng } from "../../utils/image-loading";
 import { attachmentSgr } from "../composer-attachments";
 import { cachedImageDimensions, setCachedImageDimensions } from "../image-references";
+import { paintAnsi } from "../theme/color";
 import { theme } from "../theme/theme";
 import type { ComposerChipDescriptor, CustomEditor, TextAttachment } from "./custom-editor";
 
@@ -22,7 +23,6 @@ const INNER_COLS = 12;
 const INNER_ROWS = 4;
 const CARD_COLS = INNER_COLS + 2;
 const CARD_GAP = 2;
-const RESET_FG = "\x1b[39m";
 /** Symbol-keyed PNG conversion cache on the draft image (same pattern as the dimension
  *  probe cache): Kitty's `f=100` transmit accepts only PNG, so non-PNG attachments
  *  (pastes are usually re-encoded JPEG/WebP) convert before transmit — the same pipeline
@@ -77,7 +77,7 @@ export class AttachmentChipsBand implements Component {
 			bottomCaption = chip.text.lineCount > 1 ? `+${chip.text.lineCount} lines` : `${chip.text.charCount} chars`;
 			interior = this.#textInterior(chip.text);
 		}
-		const vertical = `${sgr}${theme.symbol("boxRound.vertical")}${RESET_FG}`;
+		const vertical = paintAnsi(sgr, theme.symbol("boxRound.vertical"), "\x1b[39m");
 		return [
 			this.#borderRow(sgr, `${icon} #${chip.n}`, "top"),
 			...interior.map(row => vertical + row + vertical),
@@ -90,12 +90,16 @@ export class AttachmentChipsBand implements Component {
 		const left = theme.symbol(edge === "top" ? "boxRound.topLeft" : "boxRound.bottomLeft");
 		const right = theme.symbol(edge === "top" ? "boxRound.topRight" : "boxRound.bottomRight");
 		const horizontal = theme.symbol("boxRound.horizontal");
-		if (!caption) return `${sgr}${left}${horizontal.repeat(INNER_COLS)}${right}${RESET_FG}`;
+		if (!caption) return paintAnsi(sgr, `${left}${horizontal.repeat(INNER_COLS)}${right}`, "\x1b[39m");
 		const cut = truncateToWidth(caption, INNER_COLS - 2);
 		const fill = INNER_COLS - visibleWidth(cut) - 2;
 		const leftFill = Math.max(0, Math.floor(fill / 2));
 		const rightFill = Math.max(0, fill - leftFill);
-		return `${sgr}${left}${horizontal.repeat(leftFill)} \x1b[1m${cut}\x1b[22m ${horizontal.repeat(rightFill)}${right}${RESET_FG}`;
+		return paintAnsi(
+			sgr,
+			`${left}${horizontal.repeat(leftFill)} ${theme.bold(cut)} ${horizontal.repeat(rightFill)}${right}`,
+			"\x1b[39m",
+		);
 	}
 
 	/** Pixel dimensions for the caption/thumbnail fit, probed once from the header bytes and

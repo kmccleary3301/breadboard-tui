@@ -6,9 +6,8 @@ import type {
 } from "@oh-my-pi/pi-tui/components/editor";
 import { logger } from "@oh-my-pi/pi-utils";
 import { maskNonProse } from "./markdown-prose";
+import { theme } from "./theme/theme";
 
-const TYPO_START = "\x1b[4:3m\x1b[58:2::255:95:95m";
-const TYPO_END = "\x1b[4:0m\x1b[59m";
 const WORD_SUFFIX = /[\p{L}\p{M}']+$/u;
 const COMPLETED_WORD = /([\p{L}\p{M}']+)([\s.,;:!?"\])}])$/u;
 const CODEISH_CHARACTERS = "\\/@_=:{}[]<>";
@@ -144,7 +143,8 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 				continue;
 			}
 			rendered += decorate(text.slice(cursor, range.start));
-			rendered += TYPO_START + decorate(text.slice(range.start, end)) + TYPO_END;
+			const decorated = decorate(text.slice(range.start, end));
+			rendered += typeof theme === "undefined" ? decorated : theme.underline(theme.fg("error", decorated));
 			cursor = end;
 		}
 		return rendered + decorate(text.slice(cursor));
