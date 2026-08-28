@@ -170,7 +170,6 @@ interface PendingSubmit {
 	readonly canonicalDigest: string;
 	readonly input: StructuredSubmit;
 	recoveringAfterAbort: boolean;
-	acceptedWithoutReceipt: boolean;
 	turnId: TurnId | undefined;
 }
 
@@ -453,36 +452,22 @@ export class E4AgentStreamBridge {
 			notifyWaiters,
 		);
 	}
-	async #recoverAcceptedSubmissionWithoutReceipt(attempt: PendingSubmit, error: unknown): Promise<SubmitReceipt> {
-		attempt.recoveringAfterAbort = true;
-		attempt.acceptedWithoutReceipt = true;
-		this.#pendingSubmit ??= attempt;
-		if (this.#pendingSubmit !== attempt) throw error;
-		this.#notifyOwnershipWaiters();
-		while (attempt.turnId === undefined && !this.#closed && !this.#observeFailure) {
-			await this.#waitForOwnershipChange();
-		}
-		if (!attempt.turnId) throw error;
-		const owned = this.#ownedSubmissions.get(String(attempt.turnId));
-		if (!owned) throw error;
-		return {
-			clientMessageId: owned.clientMessageId as SubmitReceipt["clientMessageId"],
-			inputId: owned.inputId as SubmitReceipt["inputId"],
-			turnId: owned.turnId as SubmitReceipt["turnId"],
-			disposition: "started",
-			originalDisposition: "started",
-		};
-	}
 
 	async #finishInterruptedSubmission(attempt: PendingSubmit, receipt: SubmitReceipt): Promise<void> {
 		const turnKey = String(receipt.turnId);
+		if (this.#closed || this.#observeFailure) {
+			attempt.turnId = receipt.turnId;
+			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
+			await this.#cancel(receipt.turnId, "user_requested");
+			return;
+		}
 		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
 			attempt.turnId = receipt.turnId;
 			this.#rememberObservedSubmit(attempt);
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			return;
 		}
-		if (!this.#closed) await this.#recordOwnedSubmission(receipt);
+		await this.#recordOwnedSubmission(receipt);
 		attempt.turnId = receipt.turnId;
 		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
 			this.#rememberObservedSubmit(attempt);
@@ -507,18 +492,13 @@ export class E4AgentStreamBridge {
 	}
 
 	#handleInterruptedSubmissionRejection(attempt: PendingSubmit, error: unknown): void {
-		if (isAcceptedWithoutReceipt(error)) {
-			this.#trackLateSubmissionRecovery(
-				this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error).then(receipt =>
-					this.#finishInterruptedSubmission(attempt, receipt),
-				),
-			);
-			return;
-		}
 		attempt.recoveringAfterAbort = false;
 		if (this.#pendingSubmit === attempt && !isAmbiguousSubmitFailure(error)) {
 			this.#pendingSubmit = undefined;
 			this.#notifyOwnershipWaiters();
+		}
+		if (isUncorrelatedSubmitReceiptFailure(error)) {
+			this.#invalidateBridge("BreadBoard submission response lost canonical ownership correlation");
 		}
 	}
 
@@ -543,8 +523,10 @@ export class E4AgentStreamBridge {
 		try {
 			result = await Promise.race([submission, interrupted]);
 		} catch (error) {
-			if (!isAcceptedWithoutReceipt(error)) throw error;
-			return await this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error);
+			if (isUncorrelatedSubmitReceiptFailure(error)) {
+				this.#invalidateBridge("BreadBoard submission response lost canonical ownership correlation");
+			}
+			throw error;
 		} finally {
 			signal?.removeEventListener("abort", interruptSubmission);
 			closeSignal.removeEventListener("abort", interruptSubmission);
@@ -557,7 +539,13 @@ export class E4AgentStreamBridge {
 			receipt => this.#trackLateSubmissionRecovery(this.#finishInterruptedSubmission(attempt, receipt)),
 			error => this.#handleInterruptedSubmissionRejection(attempt, error),
 		);
-		this.#failSink(sink, "BreadBoard submission cancelled while admission was in progress", "aborted");
+		const failure = this.#currentObserveFailure();
+		this.#failSink(
+			sink,
+			failure?.message ?? "BreadBoard submission cancelled while admission was in progress",
+			failure ? "error" : "aborted",
+			failure ? this.#observeFailureProjectionEventId : undefined,
+		);
 		return undefined;
 	}
 
@@ -619,7 +607,6 @@ export class E4AgentStreamBridge {
 					input: { ...input, clientMessageId: crypto.randomUUID() },
 					recoveringAfterAbort: false,
 					turnId: undefined,
-					acceptedWithoutReceipt: false,
 				};
 			const receipt = await this.#submitAttempt(attempt, sink, signal);
 			if (!receipt) return;
@@ -665,7 +652,13 @@ export class E4AgentStreamBridge {
 			else signal?.addEventListener("abort", cancel, { once: true });
 		} catch (error) {
 			if (attempt && isAmbiguousSubmitFailure(error)) this.#pendingSubmit ??= attempt;
-			this.#failSink(sink, safeErrorMessage(error), "error");
+			const failure = this.#currentObserveFailure();
+			this.#failSink(
+				sink,
+				failure?.message ?? safeErrorMessage(error),
+				"error",
+				failure ? this.#observeFailureProjectionEventId : undefined,
+			);
 		} finally {
 			if (ownershipNotificationPending) this.#notifyOwnershipWaiters();
 			this.#submittingSinks.delete(sink);
@@ -721,38 +714,10 @@ export class E4AgentStreamBridge {
 		let ownership = this.#ownedSubmissions.get(turnKey);
 		const pendingAttempt = this.#pendingSubmit;
 		if (!sink && !ownership && pendingAttempt && pendingAttempt.turnId === undefined) {
-			if (!pendingAttempt.acceptedWithoutReceipt) {
-				await this.#waitForOwnershipChange();
-				if (this.#closed || this.#observeFailure) return;
-				sink = this.#sinks.get(turnKey);
-				ownership = this.#ownedSubmissions.get(turnKey);
-			}
-			if (
-				!sink &&
-				!ownership &&
-				this.#pendingSubmit === pendingAttempt &&
-				pendingAttempt.acceptedWithoutReceipt &&
-				pendingAttempt.turnId === undefined
-			) {
-				const clientMessageId = pendingAttempt.input.clientMessageId;
-				if (clientMessageId === undefined) {
-					throw new Error("BreadBoard pending submission is missing its idempotency key");
-				}
-				pendingAttempt.turnId = event.turnId;
-				await this.#recordOwnedCorrelation(
-					{
-						clientMessageId: String(clientMessageId),
-						inputId: String(event.inputId),
-						turnId: String(event.turnId),
-					},
-					event.turnId,
-				);
-				ownership = this.#ownedSubmissions.get(turnKey);
-			}
-		}
-		if (pendingAttempt?.acceptedWithoutReceipt && ownership && !sink) {
-			await Promise.all([...this.#submissionsInFlight]);
+			await this.#waitForOwnershipChange();
+			if (this.#closed || this.#observeFailure) return;
 			sink = this.#sinks.get(turnKey);
+			ownership = this.#ownedSubmissions.get(turnKey);
 		}
 		if (!sink && !ownership) {
 			await this.#trackEventApplication(this.#commit(event, []));
@@ -1233,6 +1198,7 @@ export class E4AgentStreamBridge {
 		if (!this.#recordObserveFailure(message)) return;
 		this.#observeFailureProjectionEventId = String(event.eventId);
 		this.#observeAbort.abort();
+		this.#closeAdmissionAbort.abort();
 		this.#notifyOwnershipWaiters();
 		const sinks = [...this.#sinks.values()];
 		for (const sink of sinks) {
@@ -1418,11 +1384,13 @@ export class E4AgentStreamBridge {
 	#failSink(sink: TurnSink, message: string, reason: "error" | "aborted", projectionEventId?: string): void {
 		if (sink.terminal) return;
 		sink.terminal = true;
-		sink.stream?.push({
-			type: "error",
-			reason,
-			error: assistantMessage(sink.model, sink.text, reason, message, projectionEventId),
-		});
+		if (!sink.failureDelivered) {
+			sink.stream?.push({
+				type: "error",
+				reason,
+				error: assistantMessage(sink.model, sink.text, reason, message, projectionEventId),
+			});
+		}
 		this.#removeSink(sink);
 	}
 
@@ -1561,7 +1529,7 @@ function streamedToolCallMessage(
 		timestamp: Date.now(),
 	};
 }
-function isAcceptedWithoutReceipt(error: unknown): boolean {
+function isUncorrelatedSubmitReceiptFailure(error: unknown): boolean {
 	return (
 		error instanceof CanonicalE4ClientError &&
 		error.failure.kind === "protocol" &&

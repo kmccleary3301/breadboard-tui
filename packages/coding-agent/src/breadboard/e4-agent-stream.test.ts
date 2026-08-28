@@ -576,33 +576,29 @@ describe("E4AgentStreamBridge", () => {
 		}
 	});
 
-	test("reconciles an accepted turn from events when admission returns no usable receipt", async () => {
+	test("fails closed rather than claiming a foreign turn when receipt correlation is unusable", async () => {
 		const submitted: SubmitInput[] = [];
 		const submitStarted = Promise.withResolvers<void>();
+		const foreignEventYielded = Promise.withResolvers<void>();
 		const ownership: Array<{ clientMessageId: string; inputId: string; turnId: string }> = [];
+		const projected: AgentEvent[] = [];
 		const session: OpenedSession = {
 			...openedSession([], []),
 			async submit(input) {
 				submitted.push(input);
 				submitStarted.resolve();
+				await foreignEventYielded.promise;
 				throw new CanonicalE4ClientError({
 					kind: "protocol",
 					code: "invalid_client_message_id",
 				});
 			},
-			async *events(request) {
+			async *events() {
 				await submitStarted.promise;
-				await Bun.sleep(0);
-				if (request?.signal?.aborted) return;
-				yield started;
-				yield wireEvent(3, "assistant.message.delta", { text: "recovered" });
-				yield wireEvent(4, "assistant.message.end", { text: "recovered" });
-				yield wireEvent(5, "turn_completed", {});
-				if (!request?.signal?.aborted) {
-					await new Promise<void>(resolve =>
-						request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
-					);
-				}
+				foreignEventYielded.resolve();
+				yield wireEvent(2, "turn_start", {}, "turn-2");
+				yield wireEvent(3, "assistant.message.delta", { text: "foreign" }, "turn-2");
+				yield wireEvent(4, "turn_completed", {}, "turn-2");
 			},
 		};
 		const bridge = new E4AgentStreamBridge({
@@ -613,24 +609,19 @@ describe("E4AgentStreamBridge", () => {
 			durableCursor: undefined,
 			releaseAgentEvent() {},
 			async projectionCommitted() {},
-			async emitAgentEvent() {},
+			async emitAgentEvent(event) {
+				projected.push(event);
+			},
 			modelPolicy: { kind: "fixed", model },
 		});
 
 		try {
-			const stream = await startBridgeStream(bridge, model, context);
-			const result = await Promise.race([stream.result(), Bun.sleep(500).then(() => "timed-out" as const)]);
-			if (result === "timed-out") throw new Error("accepted submission recovery did not settle");
-			expect(result.stopReason).toBe("stop");
-			expect(result.content).toEqual([{ type: "text", text: "recovered" }]);
+			const result = await (await startBridgeStream(bridge, model, context)).result();
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toBe("BreadBoard submission response lost canonical ownership correlation");
 			expect(submitted).toHaveLength(1);
-			expect(ownership).toEqual([
-				{
-					clientMessageId: String((submitted[0] as StructuredSubmit).clientMessageId),
-					inputId: String(receipt.inputId),
-					turnId: String(receipt.turnId),
-				},
-			]);
+			expect(ownership).toEqual([]);
+			expect(projected).toEqual([]);
 		} finally {
 			await bridge.close();
 		}
@@ -1662,6 +1653,40 @@ describe("E4AgentStreamBridge", () => {
 			{ sequence: 2, owned: ["turn-1", "turn-2"] },
 			{ sequence: 3, owned: [] },
 		]);
+	});
+
+	test("interrupts an unbounded admission with the authoritative session failure", async () => {
+		const submitStarted = Promise.withResolvers<void>();
+		const unresolvedSubmission = Promise.withResolvers<SubmitReceipt>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async submit() {
+				submitStarted.resolve();
+				return await unresolvedSubmission.promise;
+			},
+			async *events() {
+				await submitStarted.promise;
+				yield wireEvent(1, "error", { code: "runtime_failure", message: "sensitive backend detail" }, null);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		try {
+			const result = await (await startBridgeStream(bridge, model, context)).result();
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
+			expect(result.responseId).toBe("breadboard:e4:event-1");
+		} finally {
+			await bridge.close();
+		}
 	});
 
 	for (const runtimeFamily of [
