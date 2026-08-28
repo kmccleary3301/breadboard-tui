@@ -12,7 +12,7 @@
     "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 220,
+    "maxTotalChangedPaths": 222,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
@@ -47,6 +47,8 @@
         "packages/coding-agent/src/modes/interactive-mode.ts",
         "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
         "packages/coding-agent/test/breadboard/**",
+        "packages/coding-agent/test/cli-argv-routing.test.ts",
+        "packages/coding-agent/test/cli/completions.test.ts",
         "packages/coding-agent/DEVELOPMENT.md",
         "packages/utils/src/dirs.ts",
         "packages/natives/native/loader-state.js",
@@ -313,6 +315,7 @@
       "packages/coding-agent/src/cli-commands.ts",
       "packages/coding-agent/src/cli/**",
       "packages/coding-agent/test/cli/update-cli.test.ts",
+      "packages/coding-agent/test/cli-argv-routing.test.ts",
       "packages/coding-agent/src/commands/engine.ts",
       "packages/coding-agent/src/commands/launch-help.ts",
       "packages/coding-agent/src/commands/launch.ts",
