@@ -76,12 +76,17 @@ jobs:
           repository: kmccleary3301/breadboard
           ref: ${{ steps.backend.outputs.commit }}
           path: breadboard-backend
-      - name: Build candidate binary
+      - name: Build native candidate binary
         env:
           BREADBOARD_P30_BACKEND_ROOT: ${{ github.workspace }}/breadboard-backend
-        run: bun run --cwd packages/coding-agent build:bb
-      - name: Smoke candidate binary
+        run: bun run --cwd packages/coding-agent build:omp
+      - name: Smoke native candidate binary
         run: |
-          ./packages/coding-agent/dist/bb --version
-          ./packages/coding-agent/dist/bb --help
-          ./packages/coding-agent/dist/bb --smoke-test
+          ./packages/coding-agent/dist/omp --version
+          ./packages/coding-agent/dist/omp --help
+          ./packages/coding-agent/dist/omp --smoke-test
+      - name: Smoke BreadBoard source entrypoint
+        run: |
+          bun packages/coding-agent/src/bb.ts --version
+          bun packages/coding-agent/src/bb.ts --help
+          bun packages/coding-agent/src/bb.ts --smoke-test

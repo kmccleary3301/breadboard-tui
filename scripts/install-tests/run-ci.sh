@@ -66,11 +66,11 @@ if [ "${BB_INSTALL_TEST_SKIP_NATIVE_BUILD:-0}" != "1" ]; then
    bun --cwd=packages/natives run build
 fi
 align_native_manifest
-bun --cwd=packages/coding-agent run build:bb
+bun --cwd=packages/coding-agent run build:omp
 
 BINARY_DIR="$WORK_DIR/binary-bin"
 mkdir -p "$BINARY_DIR"
-cp packages/coding-agent/dist/bb "$BINARY_DIR/bb"
-smoke_cli "$BINARY_DIR/bb"
+cp packages/coding-agent/dist/omp "$BINARY_DIR/omp"
+smoke_cli "$BINARY_DIR/omp"
 
-echo "Product binary install smoke passed"
+echo "Binary install smoke passed"

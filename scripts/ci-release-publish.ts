@@ -386,7 +386,9 @@ export async function rewritePackedBundledDependencies(
 			for (const runtimeDependency in dependencyManifest.dependencies ?? {}) {
 				const requiredRange = dependencyManifest.dependencies?.[runtimeDependency];
 				if (typeof requiredRange !== "string") {
-					throw new Error(`Bundled dependency ${dependency} has an invalid runtime dependency ${runtimeDependency}`);
+					throw new Error(
+						`Bundled dependency ${dependency} has an invalid runtime dependency ${runtimeDependency}`,
+					);
 				}
 				if (manifest.dependencies?.[runtimeDependency] !== requiredRange) {
 					throw new Error(

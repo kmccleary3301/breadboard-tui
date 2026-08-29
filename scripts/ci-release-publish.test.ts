@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { $ } from "bun";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { $ } from "bun";
 import {
 	legalPayloadFiles,
 	packages,

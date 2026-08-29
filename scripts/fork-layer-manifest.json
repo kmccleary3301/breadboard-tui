@@ -529,6 +529,11 @@
       "rule": "upstream-ordinary-omp"
     },
     {
+      "path": "packages/coding-agent/src/native-product-env.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/src/omp.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
