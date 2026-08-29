@@ -9,6 +9,7 @@
  * flags.
  */
 import { describe, expect, test } from "bun:test";
+import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
 
 describe("resolveCliArgv routes subcommands hidden behind leading global flags", () => {
@@ -90,5 +91,64 @@ describe("resolveCliArgv strips launch-global flags before non-launch subcommand
 
 	test("launch-shaped `acp` still receives forwarded launch-global flags", () => {
 		expect(resolveCliArgv(["--cwd", "/x", "acp"])).toEqual({ argv: ["acp", "--cwd", "/x"] });
+	});
+});
+
+describe("BreadBoard engine flags preserve native launch parsing", () => {
+	test("parses spaced and equals forms without changing prompt position", () => {
+		const spaced = parseArgs(["--engine-mode", "local-external", "hello", "--engine-url", "http://127.0.0.1:9099"]);
+		expect(spaced).toMatchObject({
+			engineMode: "local-external",
+			engineUrl: "http://127.0.0.1:9099",
+			messages: ["hello"],
+			unrecognizedFlags: [],
+		});
+
+		const equals = parseArgs(["hello", "--engine-mode=off", "--engine-url=http://127.0.0.1:9191"]);
+		expect(equals).toMatchObject({
+			engineMode: "off",
+			engineUrl: "http://127.0.0.1:9191",
+			messages: ["hello"],
+			unrecognizedFlags: [],
+		});
+	});
+
+	test("leaves bare value flags unset and does not invent prompt text", () => {
+		const missingMode = parseArgs(["--engine-mode"]);
+		expect(missingMode.engineMode).toBeUndefined();
+		expect(missingMode.messages).toEqual([]);
+		expect(missingMode.unrecognizedFlags).toEqual([]);
+
+		const missingUrl = parseArgs(["--engine-url"]);
+		expect(missingUrl.engineUrl).toBeUndefined();
+		expect(missingUrl.messages).toEqual([]);
+		expect(missingUrl.unrecognizedFlags).toEqual([]);
+	});
+
+	test("treats engine-shaped tokens after the end-of-options marker as prompt text", () => {
+		expect(parseArgs(["--", "--engine-mode", "off", "--engine-url=http://127.0.0.1:9099"]).messages).toEqual([
+			"--engine-mode",
+			"off",
+			"--engine-url=http://127.0.0.1:9099",
+		]);
+	});
+
+	test("keeps unknown-flag reporting beside valid engine flags", () => {
+		const parsed = parseArgs(["--engine-mode", "off", "--engine-mod", "local-owned", "hello"]);
+		expect(parsed.engineMode).toBe("off");
+		expect(parsed.unrecognizedFlags).toEqual(["--engine-mod"]);
+		expect(parsed.messages).toEqual(["local-owned", "hello"]);
+	});
+
+	test("strips launch engine flags from the engine subcommand and forwards them to ACP", () => {
+		expect(resolveCliArgv(["--engine-mode", "off", "engine", "status"])).toEqual({
+			argv: ["engine", "status"],
+		});
+		expect(resolveCliArgv(["--engine-url=http://127.0.0.1:9099", "engine", "status"])).toEqual({
+			argv: ["engine", "status"],
+		});
+		expect(resolveCliArgv(["--engine-mode", "off", "acp"])).toEqual({
+			argv: ["acp", "--engine-mode", "off"],
+		});
 	});
 });

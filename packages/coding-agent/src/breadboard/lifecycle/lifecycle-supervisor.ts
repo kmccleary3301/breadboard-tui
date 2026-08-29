@@ -1,6 +1,6 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { constants } from "node:fs";
-import { type FileHandle, mkdtemp, open, rm } from "node:fs/promises";
+import { chmod, type FileHandle, mkdir, open, realpath, rm } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,12 @@ import {
 } from "@breadboard/sdk/internal";
 import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
+	EngineRuntimeBundleError,
+	type ExtractedEngineRuntimeBundle,
+	extractVerifiedEngineRuntimeBundle,
+} from "./engine-runtime-bundle";
+import { InstalledEngineDiscoveryError } from "./installed-engine-manifest";
+import {
 	type LifecycleReadyHandle,
 	type LifecycleResult,
 	type LifecycleState,
@@ -27,15 +33,27 @@ import {
 	lifecycleFailure,
 	lifecycleState,
 } from "./lifecycle-state";
-import type { LocalAuthorityRecord, LocalStartClaim } from "./local-authority-store";
-import { type LocalAuthorityStore, LocalAuthorityStoreError } from "./local-authority-store";
+import {
+	type LocalAuthorityRecord,
+	LocalAuthorityStore,
+	LocalAuthorityStoreError,
+	type LocalStartClaim,
+} from "./local-authority-store";
 import {
 	type BreadboardAuth,
 	type BreadboardRunConfig,
+	type BundledEngineArtifact,
 	type EngineArtifact,
-	executablePathSha256,
+	engineArtifactLocationSha256,
 	type OwnerExitPolicy,
 } from "./run-config";
+import {
+	type ExitedEngineIdentity,
+	type RuntimeCleanupDirectoryAuthority,
+	RuntimeCleanupReconciliationError,
+	RuntimeCleanupStore,
+	type RuntimeCleanupStoreSeams,
+} from "./runtime-cleanup-store";
 
 export interface SpawnedEngineProcess {
 	readonly pid: number;
@@ -62,6 +80,8 @@ export interface LifecycleProcessAdapter {
 	): Promise<SpawnVerifiedResult>;
 	observe(pid: number): Promise<ProcessObservation>;
 	controlFor(pid: number, expectedStartToken: string): Promise<SpawnedEngineProcess | null>;
+	cleanupExited(identity: ExitedEngineIdentity): Promise<void>;
+	cleanupPreparedStart(launchId: string): Promise<void>;
 }
 
 export interface LifecycleClock {
@@ -114,6 +134,7 @@ export interface LifecycleSupervisorDependencies {
 	readonly clock?: LifecycleClock;
 	readonly stateChanged?: (state: LifecycleState) => void;
 	readonly endpointAbsent?: (client: LifecycleE4Client) => Promise<boolean | "ambiguous">;
+	readonly restartOnUnexpectedChildExit?: boolean;
 }
 
 export interface StopOptions {
@@ -140,7 +161,11 @@ interface ReadyContext {
 class EngineArtifactValidationError extends Error {}
 class ProcessIdentityValidationError extends Error {}
 
+const TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000] as const;
+const STARTUP_TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000, 4_000] as const;
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
+// Reserve the global process-cleanup deadline for governed hard-signal authorization and authority retirement.
+const LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS = 2_000;
 function randomOwnerCredential(): Buffer {
 	const source = randomBytes(32);
 	const encoded = Buffer.allocUnsafe(source.byteLength * 2);
@@ -160,6 +185,53 @@ function randomOwnerCredential(): Buffer {
 function credentialText(credential: Uint8Array): string {
 	return Buffer.from(credential.buffer, credential.byteOffset, credential.byteLength).toString("utf8");
 }
+const BASE64URL_ALPHABET = Buffer.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "ascii");
+
+function encodeBootstrapCredential(secret: Uint8Array): Buffer {
+	if (secret.byteLength !== 32) {
+		throw new LocalAuthorityStoreError("secret_integrity", "pending launch credential is invalid");
+	}
+	const encoded = Buffer.allocUnsafe(43);
+	let sourceOffset = 0;
+	let outputOffset = 0;
+	while (sourceOffset < 30) {
+		const first = secret[sourceOffset] as number;
+		const second = secret[sourceOffset + 1] as number;
+		const third = secret[sourceOffset + 2] as number;
+		encoded[outputOffset] = BASE64URL_ALPHABET[first >>> 2] as number;
+		encoded[outputOffset + 1] = BASE64URL_ALPHABET[((first & 0x03) << 4) | (second >>> 4)] as number;
+		encoded[outputOffset + 2] = BASE64URL_ALPHABET[((second & 0x0f) << 2) | (third >>> 6)] as number;
+		encoded[outputOffset + 3] = BASE64URL_ALPHABET[third & 0x3f] as number;
+		sourceOffset += 3;
+		outputOffset += 4;
+	}
+	const first = secret[30] as number;
+	const second = secret[31] as number;
+	encoded[40] = BASE64URL_ALPHABET[first >>> 2] as number;
+	encoded[41] = BASE64URL_ALPHABET[((first & 0x03) << 4) | (second >>> 4)] as number;
+	encoded[42] = BASE64URL_ALPHABET[(second & 0x0f) << 2] as number;
+	return encoded;
+}
+
+async function acquireInitialOwner(
+	bound: BoundLifecycleE4Client,
+	secret: Uint8Array,
+	ownerCredential: string,
+	signal: AbortSignal | undefined,
+) {
+	const bootstrapCredential = encodeBootstrapCredential(secret);
+	try {
+		return await bound.acquireOwner({
+			expectedOwnerGeneration: 0,
+			bootstrapCredential,
+			ownerCredential,
+			signal,
+		});
+	} finally {
+		bootstrapCredential.fill(0);
+	}
+}
+
 const RESTART_WINDOW_MS = 60_000;
 const INITIAL_STATES = new Set<LifecycleStateName>(["off", "claiming", "connecting", "backing-off"]);
 const ALLOWED_TRANSITIONS: Readonly<Partial<Record<LifecycleStateName, ReadonlySet<LifecycleStateName>>>> = {
@@ -188,16 +260,29 @@ const ALLOWED_TRANSITIONS: Readonly<Partial<Record<LifecycleStateName, ReadonlyS
 function randomCredential(): string {
 	return randomBytes(32).toString("base64url");
 }
-export function lifecycleChildEnvironment(launchId: string): Readonly<Record<string, string>> {
+export function lifecycleChildEnvironment(
+	launchId: string,
+	engineStateRoot?: string,
+	rayRuntimeRoot?: string,
+): Readonly<Record<string, string>> {
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 		BREADBOARD_LEGACY_ROUTES: "1",
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+		RAY_BACKEND_LOG_LEVEL: "error",
+		RAY_LOG_TO_DRIVER: "0",
+		RAY_LOGGER_LEVEL: "error",
+		RAY_LOG_TO_STDERR: "0",
+		RAY_ROTATION_BACKUP_COUNT: "1",
+		RAY_ROTATION_MAX_BYTES: "262144",
+		...(engineStateRoot === undefined ? {} : { BREADBOARD_ENGINE_STATE_ROOT: engineStateRoot }),
+		...(rayRuntimeRoot === undefined ? {} : { RAY_TMPDIR: rayRuntimeRoot }),
 	});
 }
 
 function mappedFailure(mode: BreadboardRunConfig["mode"], error: unknown, attempt = 0): LifecycleResult {
+	if (error instanceof InstalledEngineDiscoveryError) throw error;
 	if (error instanceof EngineArtifactValidationError)
 		return lifecycleFailure(mode, "failed", "engine_artifact_mismatch", attempt);
 	if (error instanceof ProcessIdentityValidationError)
@@ -260,8 +345,232 @@ function unrefDelay(milliseconds: number): Promise<void> {
 	return promise;
 }
 
+// The prepared start claim durably records launchId before any of these exact roots can be created.
+const LAUNCH_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+type LaunchRuntimePrefix = "bb-engine-runtime-" | "bb-ray-" | "omp-engine-snapshot-";
+
+async function launchRuntimeRootPath(prefix: LaunchRuntimePrefix, launchId: string): Promise<string> {
+	if (!LAUNCH_ID_PATTERN.test(launchId)) {
+		throw new ProcessIdentityValidationError("engine launch identity is invalid");
+	}
+	return join(await realpath(tmpdir()), `${prefix}${launchId}`);
+}
+
+async function createPrivateLaunchDirectory(prefix: LaunchRuntimePrefix, launchId: string): Promise<string> {
+	const path = await launchRuntimeRootPath(prefix, launchId);
+	await mkdir(path, { mode: 0o700 });
+	await chmod(path, 0o700);
+	return path;
+}
+
 class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
+	readonly #runtimeCleanup: RuntimeCleanupStore;
+	readonly #installedEngine: boolean;
+
+	constructor(
+		directoryAuthority?: RuntimeCleanupDirectoryAuthority,
+		installedEngine = false,
+		cleanupSeams: RuntimeCleanupStoreSeams = {},
+	) {
+		this.#runtimeCleanup = new RuntimeCleanupStore(directoryAuthority, cleanupSeams);
+		this.#installedEngine = installedEngine;
+	}
+
+	async cleanupExited(identity: ExitedEngineIdentity): Promise<void> {
+		if ((await this.observe(identity.pid)).kind !== "dead") {
+			throw new ProcessIdentityValidationError("engine runtime cleanup requires confirmed process death");
+		}
+		if (!(await this.#runtimeCleanup.remove(identity))) {
+			await this.#runtimeCleanup.removePrepared(identity.launchId);
+		}
+	}
+
+	async cleanupPreparedStart(launchId: string): Promise<void> {
+		await this.#runtimeCleanup.removePrepared(launchId);
+	}
+
+	async #failedSpawnCleanupRecord(
+		identity: ExitedEngineIdentity,
+	): Promise<"death_unconfirmed" | "record_absent" | "removed"> {
+		if ((await this.observe(identity.pid)).kind !== "dead") return "death_unconfirmed";
+		return (await this.#runtimeCleanup.remove(identity)) ? "removed" : "record_absent";
+	}
+
+	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
+		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot);
+	}
+
+	async #spawnBundledVerified(
+		artifact: BundledEngineArtifact,
+		launchId: string,
+		bootstrap: Buffer,
+		bindIdentity: (pid: number, startToken: string) => Promise<void>,
+	): Promise<SpawnVerifiedResult> {
+		let extracted: ExtractedEngineRuntimeBundle | undefined;
+		let rayRuntimeRoot: string | undefined;
+		let failedSpawnOwnership:
+			| {
+					readonly extracted: ExtractedEngineRuntimeBundle;
+					readonly rayRuntimeRoot: string;
+			  }
+			| undefined;
+		let cleanupPersisted = false;
+		let cleanupIdentity: ExitedEngineIdentity | undefined;
+		try {
+			const runtimeRootPath = await launchRuntimeRootPath("bb-engine-runtime-", launchId);
+			extracted = await extractVerifiedEngineRuntimeBundle({
+				bundle: artifact.runtimeBundle,
+				executablePath: artifact.executablePath,
+				executableSizeBytes: artifact.executableSizeBytes,
+				executableSha256: artifact.executableSha256,
+				runtimeRootPath,
+			});
+			rayRuntimeRoot = await createPrivateLaunchDirectory("bb-ray-", launchId);
+			const retainedRayRuntimeRoot = rayRuntimeRoot;
+			const retained = extracted;
+			failedSpawnOwnership = { extracted: retained, rayRuntimeRoot: retainedRayRuntimeRoot };
+			const verified = await spawnDarwinVerified({
+				executablePath: retained.executablePath,
+				executableBytes: retained.executableBytes,
+				argv: artifact.argv,
+				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
+				bootstrap,
+				bindIdentity: async (pid, startToken) => {
+					await bindIdentity(pid, startToken);
+					cleanupIdentity = { launchId, pid, startToken };
+					cleanupPersisted = await this.#runtimeCleanup.persist(
+						cleanupIdentity,
+						retained.rootPath,
+						retainedRayRuntimeRoot,
+					);
+					if (cleanupPersisted) {
+						extracted = undefined;
+						rayRuntimeRoot = undefined;
+					}
+				},
+			});
+			const identity: ExitedEngineIdentity = {
+				launchId,
+				pid: verified.pid,
+				startToken: verified.startToken,
+			};
+			const exited = verified.exited.then(async exitCode => {
+				if (cleanupPersisted) {
+					await this.#runtimeCleanup.remove(identity);
+					return exitCode;
+				}
+				await Promise.allSettled([
+					retained.cleanup(),
+					rm(retainedRayRuntimeRoot, { recursive: true, force: true }),
+				]);
+				return exitCode;
+			});
+			extracted = undefined;
+			rayRuntimeRoot = undefined;
+			const handle: SpawnedEngineProcess = {
+				pid: verified.pid,
+				startToken: verified.startToken,
+				exited,
+				unref: () => verified.unref(),
+				sendHardSignal: async authorizationExpiresAtUnix => {
+					if (Date.now() >= authorizationExpiresAtUnix * 1_000) return "authorization_expired";
+					const outcome = await verified.signalIfSame("SIGKILL");
+					if (outcome === "sent") return "sent";
+					if (outcome === "process-exited") return "process_exited";
+					return "abandoned";
+				},
+				waitForExit: async timeoutMs => {
+					const didExit = await verified.waitForExit(timeoutMs);
+					if (didExit) await exited;
+					return didExit;
+				},
+			};
+			this.#children.set(verified.pid, handle);
+			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
+			return handle;
+		} catch (error) {
+			if (cleanupIdentity !== undefined) {
+				const ownership = failedSpawnOwnership;
+				if (ownership === undefined) {
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed bundled-engine spawn cleanup ownership is unavailable",
+						error,
+					);
+				}
+				const removeLocallyOwnedRoots = async (): Promise<void> => {
+					const outcomes = await Promise.allSettled([
+						ownership.extracted.cleanup(),
+						rm(ownership.rayRuntimeRoot, { recursive: true, force: true }),
+					]);
+					for (const outcome of outcomes) {
+						if (outcome.status === "rejected") throw outcome.reason;
+					}
+				};
+				let cleanupOutcome: "death_unconfirmed" | "record_absent" | "removed";
+				try {
+					cleanupOutcome = await this.#failedSpawnCleanupRecord(cleanupIdentity);
+				} catch (cleanupError) {
+					try {
+						await removeLocallyOwnedRoots();
+					} catch (rootCleanupError) {
+						throw new RuntimeCleanupReconciliationError(
+							"failed bundled-engine spawn roots could not be removed after cleanup record reconciliation failed",
+							rootCleanupError,
+						);
+					}
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed bundled-engine spawn cleanup record could not be reconciled after locally owned roots were removed",
+						cleanupError,
+					);
+				}
+				if (cleanupOutcome === "death_unconfirmed") {
+					extracted = undefined;
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed bundled-engine spawn death could not be confirmed",
+						error,
+					);
+				}
+				if (cleanupOutcome === "record_absent") {
+					try {
+						await removeLocallyOwnedRoots();
+					} catch (cleanupError) {
+						extracted = undefined;
+						rayRuntimeRoot = undefined;
+						throw new RuntimeCleanupReconciliationError(
+							"failed bundled-engine spawn roots could not be removed",
+							cleanupError,
+						);
+					}
+				}
+				extracted = undefined;
+				rayRuntimeRoot = undefined;
+				cleanupPersisted = false;
+			}
+			if (error instanceof EngineRuntimeBundleError) {
+				if (this.#installedEngine) {
+					throw new InstalledEngineDiscoveryError("engine_artifact_mismatch");
+				}
+				throw new EngineArtifactValidationError("engine runtime bundle verification failed", { cause: error });
+			}
+			if (error instanceof DarwinVerifiedSpawnError) {
+				if (error.cause instanceof LocalAuthorityStoreError) throw error.cause;
+				throw new ProcessIdentityValidationError("Darwin verified engine spawn failed", { cause: error });
+			}
+			throw error;
+		} finally {
+			bootstrap.fill(0);
+			await extracted?.cleanup().catch(() => undefined);
+			if (rayRuntimeRoot !== undefined) {
+				await rm(rayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+			}
+		}
+	}
 
 	async spawnVerified(
 		artifact: EngineArtifact,
@@ -269,12 +578,20 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		bootstrap: Buffer,
 		bindIdentity: (pid: number, startToken: string) => Promise<void>,
 	): Promise<SpawnVerifiedResult> {
-		const source = await open(artifact.executablePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-		const snapshotRoot = await mkdtemp(join(tmpdir(), "omp-engine-snapshot-"));
+		if (artifact.kind === "runtime-bundle") {
+			return await this.#spawnBundledVerified(artifact, launchId, bootstrap, bindIdentity);
+		}
+		const snapshotRoot = await createPrivateLaunchDirectory("omp-engine-snapshot-", launchId);
 		const snapshotPath = join(snapshotRoot, "engine");
+		let source: FileHandle | undefined;
 		let snapshot: FileHandle | undefined;
 		let execution: FileHandle | undefined;
+		let rayRuntimeRoot: string | undefined;
+		let failedSpawnRayRuntimeRoot: string | undefined;
+		let cleanupPersisted = false;
+		let cleanupIdentity: ExitedEngineIdentity | undefined;
 		try {
+			source = await open(artifact.executablePath, constants.O_RDONLY | constants.O_NOFOLLOW);
 			const sourceMetadata = await source.stat();
 			if (!sourceMetadata.isFile() || sourceMetadata.nlink !== 1) {
 				throw new EngineArtifactValidationError("engine executable identity is invalid");
@@ -312,18 +629,44 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			await execution.close();
 			execution = undefined;
 
+			rayRuntimeRoot = await createPrivateLaunchDirectory("bb-ray-", launchId);
+			const retainedRayRuntimeRoot = rayRuntimeRoot;
+			failedSpawnRayRuntimeRoot = retainedRayRuntimeRoot;
 			const verified = await spawnDarwinVerified({
 				executablePath: snapshotPath,
 				executableBytes,
 				argv: artifact.argv,
-				env: lifecycleChildEnvironment(launchId),
+				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
 				bootstrap,
-				bindIdentity,
+				bindIdentity: async (pid, startToken) => {
+					await bindIdentity(pid, startToken);
+					cleanupIdentity = { launchId, pid, startToken };
+					cleanupPersisted = await this.#runtimeCleanup.persist(
+						cleanupIdentity,
+						undefined,
+						retainedRayRuntimeRoot,
+					);
+					if (cleanupPersisted) rayRuntimeRoot = undefined;
+				},
 			});
+			const identity: ExitedEngineIdentity = {
+				launchId,
+				pid: verified.pid,
+				startToken: verified.startToken,
+			};
+			const exited = verified.exited.then(async exitCode => {
+				if (cleanupPersisted) {
+					await this.#runtimeCleanup.remove(identity);
+					return exitCode;
+				}
+				await rm(retainedRayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+				return exitCode;
+			});
+			rayRuntimeRoot = undefined;
 			const handle: SpawnedEngineProcess = {
 				pid: verified.pid,
 				startToken: verified.startToken,
-				exited: verified.exited,
+				exited,
 				unref: () => verified.unref(),
 				sendHardSignal: async authorizationExpiresAtUnix => {
 					if (Date.now() >= authorizationExpiresAtUnix * 1_000) return "authorization_expired";
@@ -332,24 +675,83 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 					if (outcome === "process-exited") return "process_exited";
 					return "abandoned";
 				},
-				waitForExit: timeoutMs => verified.waitForExit(timeoutMs),
+				waitForExit: async timeoutMs => {
+					const didExit = await verified.waitForExit(timeoutMs);
+					if (didExit) await exited;
+					return didExit;
+				},
 			};
 			this.#children.set(verified.pid, handle);
-			void verified.exited.finally(() => this.#children.delete(verified.pid));
+			void exited.finally(() => this.#children.delete(verified.pid)).catch(() => undefined);
 			return handle;
 		} catch (error) {
+			if (cleanupIdentity !== undefined) {
+				const retainedRayRuntimeRoot = failedSpawnRayRuntimeRoot;
+				if (retainedRayRuntimeRoot === undefined) {
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed direct-engine spawn cleanup ownership is unavailable",
+						error,
+					);
+				}
+				const removeLocallyOwnedRoot = async (): Promise<void> => {
+					await rm(retainedRayRuntimeRoot, { recursive: true, force: true });
+				};
+				let cleanupOutcome: "death_unconfirmed" | "record_absent" | "removed";
+				try {
+					cleanupOutcome = await this.#failedSpawnCleanupRecord(cleanupIdentity);
+				} catch (cleanupError) {
+					try {
+						await removeLocallyOwnedRoot();
+					} catch (rootCleanupError) {
+						throw new RuntimeCleanupReconciliationError(
+							"failed direct-engine spawn root could not be removed after cleanup record reconciliation failed",
+							rootCleanupError,
+						);
+					}
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed direct-engine spawn cleanup record could not be reconciled after locally owned root was removed",
+						cleanupError,
+					);
+				}
+				if (cleanupOutcome === "death_unconfirmed") {
+					rayRuntimeRoot = undefined;
+					throw new RuntimeCleanupReconciliationError(
+						"failed direct-engine spawn death could not be confirmed",
+						error,
+					);
+				}
+				if (cleanupOutcome === "record_absent") {
+					try {
+						await removeLocallyOwnedRoot();
+					} catch (cleanupError) {
+						rayRuntimeRoot = undefined;
+						throw new RuntimeCleanupReconciliationError(
+							"failed direct-engine spawn root could not be removed",
+							cleanupError,
+						);
+					}
+				}
+				rayRuntimeRoot = undefined;
+				cleanupPersisted = false;
+			}
 			if (error instanceof DarwinVerifiedSpawnError) {
+				if (error.cause instanceof LocalAuthorityStoreError) throw error.cause;
 				throw new ProcessIdentityValidationError("Darwin verified engine spawn failed", { cause: error });
 			}
 			throw error;
 		} finally {
 			bootstrap.fill(0);
 			await Promise.allSettled([
-				source.close(),
+				source?.close(),
 				snapshot?.close(),
 				execution?.close(),
 				rm(snapshotRoot, { recursive: true, force: true }),
 			]);
+			if (rayRuntimeRoot !== undefined) {
+				await rm(rayRuntimeRoot, { recursive: true, force: true }).catch(() => undefined);
+			}
 		}
 	}
 
@@ -415,6 +817,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			},
 		};
 	}
+}
+
+export function createDefaultLifecycleProcessAdapter(
+	directoryAuthority?: RuntimeCleanupDirectoryAuthority,
+	installedEngine = false,
+	cleanupSeams: RuntimeCleanupStoreSeams = {},
+): LifecycleProcessAdapter {
+	return new DefaultLifecycleProcessAdapter(directoryAuthority, installedEngine, cleanupSeams);
 }
 
 const KEYCHAIN_OUTPUT_LIMIT = 64 * 1024;
@@ -758,14 +1168,14 @@ abstract class ModeStrategy {
 
 	async withReconnect<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
 		let failure: unknown;
-		for (let attempt = 0; attempt < RESTART_DELAYS_MS.length; attempt++) {
+		for (let attempt = 0; attempt <= TRANSPORT_RECONNECT_DELAYS_MS.length; attempt++) {
 			try {
 				return await operation(attempt);
 			} catch (error) {
 				failure = error;
-				if (!this.isRetryableTransport(error) || attempt === RESTART_DELAYS_MS.length - 1) throw error;
+				if (!this.isRetryableTransport(error) || attempt === TRANSPORT_RECONNECT_DELAYS_MS.length) throw error;
 				this.transition("reconnecting", attempt + 1);
-				await this.clock.sleep(RESTART_DELAYS_MS[attempt] as number);
+				await this.clock.sleep(TRANSPORT_RECONNECT_DELAYS_MS[attempt] as number);
 			}
 		}
 		throw failure;
@@ -977,12 +1387,28 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	#releaseReplayClient: BoundLifecycleE4Client | undefined;
 	#hardSignalCommitActive = false;
 	#connectPromise: Promise<LifecycleResult> | undefined;
+	#childRecoveryPromise: Promise<void> | undefined;
+	readonly #restartOnUnexpectedChildExit: boolean;
+	#unexpectedDeathRecord: LocalAuthorityRecord | undefined;
 
 	constructor(config: BreadboardRunConfig, dependencies: LifecycleSupervisorDependencies) {
 		super(config, dependencies);
 		if (!dependencies.store) throw new Error("local-owned requires a local authority store");
+		if (!config.endpoint) throw new Error("local-owned requires one endpoint");
 		this.#store = dependencies.store;
-		this.#process = dependencies.process ?? new DefaultLifecycleProcessAdapter();
+		const stateRootRelativePath = join("engine-state", LocalAuthorityStore.endpointKey(config.endpoint));
+		this.#process =
+			dependencies.process ??
+			createDefaultLifecycleProcessAdapter(
+				{
+					stateRootPath: join(this.#store.root, stateRootRelativePath),
+					ensure: relativePath =>
+						this.#store.ensurePrivateDirectory(
+							relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+						),
+				},
+				config.installedEngineIdentity !== undefined,
+			);
 		this.#endpointAbsent =
 			dependencies.endpointAbsent ??
 			(async client => {
@@ -997,6 +1423,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						: "ambiguous";
 				}
 			});
+		this.#restartOnUnexpectedChildExit = dependencies.restartOnUnexpectedChildExit ?? true;
 	}
 	override abortRequiresQuiescence(): boolean {
 		return this.#hardSignalCommitActive;
@@ -1035,6 +1462,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					if (claimed.kind !== "dead-bound") return claimed;
 					const absent = await this.#endpointAbsent(await this.unboundClient());
 					if (absent !== true) return claimed;
+					await this.#cleanupExitedStartClaim(claimed.claim);
 					await this.#store.retireDeadStartClaim(endpoint, claimed.claim);
 					return await this.#store.claimStart(endpoint);
 				});
@@ -1174,12 +1602,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			try {
 				const owner =
 					priorAttemptGeneration === 1
-						? await bound.acquireOwner({
-								expectedOwnerGeneration: 0,
-								bootstrapCredential: pending.bootstrapCredential,
+						? await acquireInitialOwner(
+								bound,
+								pending.bootstrapCredential,
 								ownerCredential,
-								signal: this.abortController.signal,
-							})
+								this.abortController.signal,
+							)
 						: await bound.acquireOwner({
 								expectedOwnerGeneration: priorAttemptGeneration - 1,
 								ownerCredential,
@@ -1199,12 +1627,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		const attemptedClaim = await this.#store.withExclusiveLock(endpoint, () =>
 			this.#store.markOwnerAttempt(endpoint, claim),
 		);
-		const owner = await bound.acquireOwner({
-			expectedOwnerGeneration: 0,
-			bootstrapCredential: pending.bootstrapCredential,
+		const owner = await acquireInitialOwner(
+			bound,
+			pending.bootstrapCredential,
 			ownerCredential,
-			signal: this.abortController.signal,
-		});
+			this.abortController.signal,
+		);
 		return { owner, claim: attemptedClaim };
 	}
 	async #resumeUnboundPendingStart(
@@ -1219,7 +1647,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			!endpoint ||
 			claim.launchId === undefined ||
 			claim.executableSha256 !== artifact.executableSha256 ||
-			claim.executablePathSha256 !== executablePathSha256(artifact.executablePath) ||
+			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
 			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
 			claim.servedBackendCommit !== artifact.servedBackendCommit
@@ -1280,6 +1708,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			await this.#store.verifyStartClaim(endpoint, claim);
 			const absent = await this.#endpointAbsent(await this.unboundClient());
 			if (absent !== true) return null;
+			await this.#cleanupExitedStartClaim(claim);
 			await this.#store.retireDeadStartClaim(endpoint, claim);
 			const next = await this.#store.claimStart(endpoint);
 			return next.kind === "claimed" ? next.claim : null;
@@ -1305,26 +1734,45 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			claim.engineProcessStartToken === undefined ||
 			claim.launchId === undefined ||
 			claim.executableSha256 !== artifact.executableSha256 ||
-			claim.executablePathSha256 !== executablePathSha256(artifact.executablePath) ||
+			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
 			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
 			claim.servedBackendCommit !== artifact.servedBackendCommit
 		)
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		const control = await this.#process.controlFor(claim.enginePid, claim.engineProcessStartToken);
-		if (!control) return lifecycleFailure("local-owned", "identity-changed", "process_identity_unavailable", attempt);
+		if (!control) {
+			let observation = await this.#process.observe(claim.enginePid);
+			const polls = Math.max(1, Math.ceil(this.config.startupTimeoutMs / 25));
+			for (let poll = 0; poll < polls; poll++) {
+				if (observation.kind === "dead") return await this.#recoverStartupDeath(claim, attempt);
+				if (observation.kind !== "alive" || observation.startToken !== claim.engineProcessStartToken) break;
+				await this.clock.sleep(25);
+				observation = await this.#process.observe(claim.enginePid);
+			}
+			if (observation.kind === "dead") return await this.#recoverStartupDeath(claim, attempt);
+			return lifecycleFailure("local-owned", "identity-changed", "process_identity_unavailable", attempt);
+		}
 		const pending = await this.#store.withExclusiveLock(endpoint, async () => {
 			await this.#store.verifyStartClaim(endpoint, claim);
 			return await this.#store.readPendingSecret(claim);
 		});
 		try {
-			const bound =
-				recoveredBound ??
-				(await this.withReconnect(async reconnectAttempt => {
-					this.transition("connecting", reconnectAttempt);
-					this.transition("handshaking", reconnectAttempt);
-					return await this.handshake();
-				}));
+			let bound: BoundLifecycleE4Client;
+			try {
+				bound =
+					recoveredBound ??
+					(await this.withReconnect(async reconnectAttempt => {
+						this.transition("connecting", reconnectAttempt);
+						this.transition("handshaking", reconnectAttempt);
+						return await this.handshake();
+					}));
+			} catch (error) {
+				if ((await this.#process.observe(claim.enginePid)).kind === "dead") {
+					return await this.#recoverStartupDeath(claim, attempt);
+				}
+				throw error;
+			}
 			if (
 				bound.binding.process.pid !== claim.enginePid ||
 				bound.binding.process.osProcessStartToken !== claim.engineProcessStartToken ||
@@ -1358,7 +1806,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						osProcessStartToken: claim.engineProcessStartToken as string,
 						normalizedEndpoint: endpoint,
 						executableSha256: artifact.executableSha256,
-						executablePathSha256: executablePathSha256(artifact.executablePath),
+						executablePathSha256: engineArtifactLocationSha256(artifact),
 						argvSha256: artifact.argvSha256,
 						engineArtifactSha256: artifact.engineSourceSha256,
 						servedBackendCommit: artifact.servedBackendCommit,
@@ -1433,6 +1881,20 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		}
 	}
 
+	async #retireDeadAuthority(record: LocalAuthorityRecord): Promise<boolean> {
+		return await this.#store.withExclusiveLock(record.normalizedEndpoint, async () => {
+			const current = await this.#store.readCurrentForRecovery(record.normalizedEndpoint);
+			if (!current) return true;
+			if (!this.#sameAuthorityRecord(current, record)) return false;
+			if ((await this.#process.observe(current.pid)).kind !== "dead") return false;
+			const absent = await this.#endpointAbsent(await this.unboundClient());
+			if (absent !== true) return false;
+			await this.#cleanupExitedRuntime(current);
+			await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
+			return true;
+		});
+	}
+
 	async #adoptOrRecover(record: LocalAuthorityRecord, attempt: number, recoverDead = true): Promise<LifecycleResult> {
 		if (!this.#recordMatchesConfig(record))
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
@@ -1444,16 +1906,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
 				};
 			}
-			const retired = await this.#store.withExclusiveLock(record.normalizedEndpoint, async () => {
-				const current = await this.#store.readCurrentForRecovery(record.normalizedEndpoint);
-				if (!current) return true;
-				const lockedObservation = await this.#process.observe(current.pid);
-				if (lockedObservation.kind !== "dead") return false;
-				const absent = await this.#endpointAbsent(await this.unboundClient());
-				if (absent !== true) return false;
-				await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
-				return true;
-			});
+			const retired = await this.#retireDeadAuthority(record);
 			if (!retired) return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable", attempt);
 			return await this.#connectAttempt(attempt);
 		}
@@ -1567,7 +2020,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				{
 					launchId,
 					executableSha256: artifact.executableSha256,
-					executablePathSha256: executablePathSha256(artifact.executablePath),
+					executablePathSha256: engineArtifactLocationSha256(artifact),
 					argvSha256: artifact.argvSha256,
 					engineArtifactSha256: artifact.engineSourceSha256,
 					servedBackendCommit: artifact.servedBackendCommit,
@@ -1579,7 +2032,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			bootstrapCredential.fill(0);
 			return await this.#abortUnspawnedStart(prepared, attempt);
 		}
-		const bootstrap = Buffer.from(bootstrapCredential);
+		const bootstrap = encodeBootstrapCredential(bootstrapCredential);
 		let child: SpawnedEngineProcess;
 		try {
 			const spawned = await this.#process.spawnVerified(artifact, launchId, bootstrap, async (pid, startToken) => {
@@ -1599,7 +2052,15 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		} catch (error) {
 			bootstrap.fill(0);
 			bootstrapCredential.fill(0);
-			await this.#store.withExclusiveLock(endpoint, () => this.#store.releaseStartClaim(endpoint, prepared.token));
+			const retainCleanupAuthority =
+				error instanceof RuntimeCleanupReconciliationError &&
+				prepared.enginePid !== undefined &&
+				prepared.engineProcessStartToken !== undefined;
+			if (!retainCleanupAuthority) {
+				await this.#store.withExclusiveLock(endpoint, () =>
+					this.#store.releaseStartClaim(endpoint, prepared.token),
+				);
+			}
 			return mappedFailure("local-owned", error, attempt);
 		} finally {
 			bootstrap.fill(0);
@@ -1626,7 +2087,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		let bound: BoundLifecycleE4Client | undefined;
 		for (
 			let reconnectAttempt = 0;
-			reconnectAttempt < RESTART_DELAYS_MS.length && this.clock.now() < deadline;
+			reconnectAttempt <= STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length && this.clock.now() < deadline;
 			reconnectAttempt++
 		) {
 			this.transition("connecting", reconnectAttempt);
@@ -1652,9 +2113,9 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				bootstrapCredential.fill(0);
 				return mappedFailure("local-owned", raced.error, attempt);
 			}
-			if (reconnectAttempt < RESTART_DELAYS_MS.length - 1) {
+			if (reconnectAttempt < STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length) {
 				this.transition("reconnecting", reconnectAttempt + 1);
-				await this.clock.sleep(RESTART_DELAYS_MS[reconnectAttempt] as number);
+				await this.clock.sleep(STARTUP_TRANSPORT_RECONNECT_DELAYS_MS[reconnectAttempt] as number);
 			}
 		}
 		if (!bound) {
@@ -1679,12 +2140,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		this.transition("acquiring-owner", attempt);
 		let owner: Awaited<ReturnType<BoundLifecycleE4Client["acquireOwner"]>>;
 		try {
-			owner = await bound.acquireOwner({
-				expectedOwnerGeneration: 0,
+			owner = await acquireInitialOwner(
+				bound,
 				bootstrapCredential,
-				ownerCredential: credentialText(ownerCredential),
-				signal: this.abortController.signal,
-			});
+				credentialText(ownerCredential),
+				this.abortController.signal,
+			);
 		} catch (error) {
 			if (this.abortController.signal.aborted) {
 				return lifecycleFailure("local-owned", "request-aborted", "request_aborted", attempt);
@@ -1710,7 +2171,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						osProcessStartToken: observation.startToken,
 						normalizedEndpoint: endpoint,
 						executableSha256: artifact.executableSha256,
-						executablePathSha256: executablePathSha256(artifact.executablePath),
+						executablePathSha256: engineArtifactLocationSha256(artifact),
 						argvSha256: artifact.argvSha256,
 						engineArtifactSha256: artifact.engineSourceSha256,
 						servedBackendCommit: artifact.servedBackendCommit,
@@ -1763,6 +2224,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			}
 			const absent = await this.#endpointAbsent(await this.unboundClient());
 			if (absent !== true) return false;
+			await this.#cleanupExitedStartClaim(claim);
 			await this.#store.releaseStartClaim(endpoint, claim.token);
 			return true;
 		});
@@ -1778,6 +2240,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			if (observation.kind !== "dead") return false;
 			const absent = await this.#endpointAbsent(await this.unboundClient());
 			if (absent !== true) return false;
+			await this.#cleanupExitedRuntime(current);
 			await this.#store.retireDeadGeneration(record.normalizedEndpoint, record);
 			return true;
 		});
@@ -1790,7 +2253,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		return (
 			artifact !== undefined &&
 			record.executableSha256 === artifact.executableSha256 &&
-			record.executablePathSha256 === executablePathSha256(artifact.executablePath) &&
+			record.executablePathSha256 === engineArtifactLocationSha256(artifact) &&
 			record.argvSha256 === artifact.argvSha256 &&
 			record.engineArtifactSha256 === artifact.engineSourceSha256 &&
 			record.servedBackendCommit === artifact.servedBackendCommit
@@ -1814,14 +2277,43 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	#monitorOwnedChild(context: ReadyContext): void {
 		const child = context.process;
 		if (!child) return;
-		void child.exited.then(async () => {
-			if (this.#plannedProcesses.has(child) || this.context !== context) return;
-			this.stopLeaseRenewal();
-			this.context = undefined;
-			context.ownerCredential?.fill(0);
-			const result = await this.restartAfterConfirmedDeath();
-			this.stateChanged(result.state);
-		});
+		void child.exited.then(
+			() => {
+				if (this.#plannedProcesses.has(child) || this.context !== context) return;
+				this.#unexpectedDeathRecord = context.record;
+				if (!this.#restartOnUnexpectedChildExit) {
+					this.stopLeaseRenewal();
+					this.context = undefined;
+					context.ownerCredential?.fill(0);
+					this.stateChanged(lifecycleState("local-owned", "backing-off", 1));
+					return;
+				}
+				const completion = Promise.withResolvers<void>();
+				this.#childRecoveryPromise = completion.promise;
+				void (async () => {
+					this.stopLeaseRenewal();
+					this.context = undefined;
+					context.ownerCredential?.fill(0);
+					try {
+						const result = await this.restartAfterConfirmedDeath();
+						this.stateChanged(result.state);
+					} catch (error) {
+						this.stateChanged(mappedFailure("local-owned", error).state);
+					} finally {
+						if (this.#childRecoveryPromise === completion.promise) this.#childRecoveryPromise = undefined;
+						completion.resolve();
+					}
+				})();
+			},
+			error => {
+				if (this.#plannedProcesses.has(child) || this.context !== context) return;
+				this.#unexpectedDeathRecord = context.record;
+				this.stopLeaseRenewal();
+				this.context = undefined;
+				context.ownerCredential?.fill(0);
+				this.stateChanged(mappedFailure("local-owned", error).state);
+			},
+		);
 	}
 
 	async #withRevalidatedAuthority<T>(
@@ -1936,11 +2428,39 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		return false;
 	}
 
+	async #cleanupExitedStartClaim(claim: LocalStartClaim): Promise<void> {
+		if (claim.enginePid === undefined && claim.engineProcessStartToken === undefined) {
+			if (claim.launchId !== undefined) await this.#process.cleanupPreparedStart(claim.launchId);
+			return;
+		}
+		if (
+			claim.launchId === undefined ||
+			claim.enginePid === undefined ||
+			claim.engineProcessStartToken === undefined
+		) {
+			throw new ProcessIdentityValidationError("dead startup cleanup identity is incomplete");
+		}
+		await this.#process.cleanupExited({
+			launchId: claim.launchId,
+			pid: claim.enginePid,
+			startToken: claim.engineProcessStartToken,
+		});
+	}
+
+	async #cleanupExitedRuntime(record: LocalAuthorityRecord): Promise<void> {
+		await this.#process.cleanupExited({
+			launchId: record.launchId,
+			pid: record.pid,
+			startToken: record.osProcessStartToken,
+		});
+	}
+
 	async #retireObservedExit(record: LocalAuthorityRecord): Promise<boolean> {
 		return await this.#store.withExclusiveLock(record.normalizedEndpoint, async () => {
 			const current = await this.#store.readCurrentForRecovery(record.normalizedEndpoint);
 			if (!current || !this.#sameAuthorityRecord(current, record)) return false;
 			if ((await this.#process.observe(current.pid)).kind !== "dead") return false;
+			await this.#cleanupExitedRuntime(current);
 			await this.#store.retireDeadGeneration(record.normalizedEndpoint, current);
 			return true;
 		});
@@ -1963,12 +2483,19 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		this.transition("draining");
 		let drainGeneration: number | undefined;
 		let hardDecisionRecorded = false;
+		const refreshedRegistration = await context.client.renewClient({
+			registrationId: context.registration.registrationId,
+			registrationGeneration: context.registration.registrationGeneration,
+			clientInstanceId: context.clientInstanceId,
+			registrationCredential: context.registrationCredential,
+			signal: this.abortController.signal,
+		});
 		const currentRequester = {
 			registrationId: context.registration.registrationId,
 			registrationGeneration: context.registration.registrationGeneration,
 			clientInstanceId: context.clientInstanceId,
 			registrationCredential: context.registrationCredential,
-			admissionEpoch: context.registration.admissionEpoch,
+			admissionEpoch: refreshedRegistration.admissionEpoch,
 		};
 		let controlAttempt = await this.#store.withExclusiveLock(record.normalizedEndpoint, () =>
 			this.#store.prepareControlAttempt(
@@ -2126,7 +2653,11 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			let exited =
 				controlAttempt.phase === "hard-signal-pending" || controlAttempt.phase === "hard-signal-commit-pending"
 					? false
-					: await this.#waitForExactExit(record, control, this.config.requestTimeoutMs);
+					: await this.#waitForExactExit(
+							record,
+							control,
+							Math.min(this.config.requestTimeoutMs, LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS),
+						);
 			if (!exited) {
 				if (
 					controlAttempt.phase !== "hard-signal-pending" &&
@@ -2319,7 +2850,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			this.#hardSignalCommitActive = false;
 		}
 	}
+	async #settleChildRecovery(): Promise<void> {
+		while (this.#childRecoveryPromise) await this.#childRecoveryPromise;
+	}
+
 	async stop(options: StopOptions): Promise<LifecycleResult> {
+		await this.#settleChildRecovery();
 		if (!options.consumerClosed) return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
 		if (!this.context) {
 			const endpoint = this.config.endpoint;
@@ -2331,6 +2867,29 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
 				};
 			}
+			if (this.#unexpectedDeathRecord && !this.#sameAuthorityRecord(record, this.#unexpectedDeathRecord)) {
+				this.#unexpectedDeathRecord = undefined;
+				return {
+					kind: "stopped",
+					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
+				};
+			}
+			if (!this.#recordMatchesConfig(record)) {
+				return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
+			}
+			if ((await this.#process.observe(record.pid)).kind === "dead") {
+				try {
+					if (!(await this.#retireDeadAuthority(record))) {
+						return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable");
+					}
+					return {
+						kind: "stopped",
+						state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
+					};
+				} catch (error) {
+					return mappedFailure("local-owned", error);
+				}
+			}
 			const adopted = await this.#adoptOrRecover(record, 0, false);
 			if (adopted.kind !== "ready") return adopted;
 		}
@@ -2338,6 +2897,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async restart(options: StopOptions): Promise<LifecycleResult> {
+		await this.#settleChildRecovery();
 		if (!options.consumerClosed) return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
 		if (!this.context) {
 			const endpoint = this.config.endpoint;
@@ -2418,6 +2978,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async close(options: StopOptions): Promise<LifecycleResult> {
+		await this.#settleChildRecovery();
 		const context = this.context;
 		const policy = context?.effectiveExitPolicy ?? context?.record?.ownerExitPolicy ?? this.config.ownerExitPolicy;
 		if (policy !== "detached") return await this.stop(options);

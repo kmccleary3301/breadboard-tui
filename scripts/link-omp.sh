@@ -2,7 +2,7 @@
 # Install the dev `omp` wrapper into Bun's global bin directory.
 #
 # Replaces the bun-shebang symlink that `bun --cwd=packages/coding-agent link`
-# creates (pointing at `src/cli.ts`) with the safer wrapper at
+# creates (pointing at `src/omp.ts`) with the safer wrapper at
 # `packages/coding-agent/scripts/omp`. See that wrapper's header comment for the
 # bunfig.toml-preload bug it works around.
 #

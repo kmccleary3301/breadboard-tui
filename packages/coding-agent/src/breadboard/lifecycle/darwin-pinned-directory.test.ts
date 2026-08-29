@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { fstatSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { fstatSync, lstatSync, mkdirSync, renameSync, watch } from "node:fs";
+import { chmod, lstat, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import {
 	DARWIN_PINNED_DIRECTORY_LIMITS,
 	DarwinPinnedDirectoryError,
 	openPinnedDirectory,
+	openPinnedDirectoryWithMountIdentityForTesting,
 	type PinnedDirectory,
 } from "./darwin-pinned-directory";
 
@@ -53,6 +54,245 @@ describe.skipIf(process.platform !== "darwin")("Darwin pinned directory", () => 
 		await rename(parked, root);
 		expect(await pinned.readFile("nested/original.txt", 64)).toEqual(Buffer.from("original dirty bytes"));
 	});
+
+	test("removes only one inode-bound direct-child tree through directory descriptors", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const outside = join(root, "outside.txt");
+		await mkdir(join(target, "nested"), { recursive: true });
+		await writeFile(join(target, "nested", "value"), "remove");
+		await writeFile(outside, "retain");
+		await symlink("../outside.txt", join(target, "escape"));
+		await chmod(join(target, "nested"), 0o500);
+		await chmod(target, 0o500);
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+
+		await pinned.removeDirectoryTree("target", {
+			dev: BigInt(targetMetadata.dev),
+			ino: BigInt(targetMetadata.ino),
+		});
+		await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await Bun.file(outside).text()).toBe("retain");
+	});
+
+	test("resumes deletion from a verified crash-retirement name", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		await mkdir(target);
+		const targetMetadata = await lstat(target);
+		const expected = {
+			dev: BigInt(targetMetadata.dev),
+			ino: BigInt(targetMetadata.ino),
+		};
+		const retainedName = `.bb-retire-${BigInt.asUintN(64, expected.dev).toString(16)}-${BigInt.asUintN(64, expected.ino).toString(16)}`;
+		await rename(target, join(root, retainedName));
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+
+		await pinned.removeDirectoryTree("target", expected);
+		await expect(lstat(join(root, retainedName))).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	test("rejects a substituted cleanup root without deleting either tree", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const parked = join(root, "parked");
+		await mkdir(target);
+		await writeFile(join(target, "original"), "original");
+		const targetMetadata = await lstat(target);
+		await rename(target, parked);
+		await mkdir(target);
+		await writeFile(join(target, "replacement"), "replacement");
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toBeInstanceOf(DarwinPinnedDirectoryError);
+		expect(await Bun.file(join(parked, "original")).text()).toBe("original");
+		expect(await Bun.file(join(target, "replacement")).text()).toBe("replacement");
+	});
+
+	test("rejects a simulated direct-child mount before mutation", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const outside = join(root, "outside");
+		await mkdir(target);
+		await mkdir(outside);
+		await writeFile(join(target, "value"), "retain");
+		await writeFile(join(outside, "value"), "outside");
+		await chmod(target, 0o500);
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(root, (_fd, relativePath, actualIdentity) =>
+			relativePath === "target" ? `${actualIdentity}:foreign-mount` : actualIdentity,
+		);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup refuses to cross a mount boundary");
+		expect((await lstat(target)).mode & 0o777).toBe(0o500);
+		expect(await Bun.file(join(target, "value")).text()).toBe("retain");
+		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
+		await chmod(target, 0o700);
+	});
+
+	test("rejects a simulated same-device mount before recursive mutation", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const nested = join(target, "nested");
+		const outside = join(root, "outside");
+		await mkdir(nested, { recursive: true });
+		await mkdir(outside);
+		await writeFile(join(nested, "value"), "retain");
+		await writeFile(join(outside, "value"), "outside");
+		await chmod(nested, 0o500);
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(root, (_fd, relativePath, actualIdentity) =>
+			relativePath === "target/nested" ? `${actualIdentity}:foreign-mount` : actualIdentity,
+		);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup refuses to cross a mount boundary");
+		expect((await lstat(nested)).mode & 0o777).toBe(0o500);
+		expect(await Bun.file(join(nested, "value")).text()).toBe("retain");
+		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
+		await chmod(nested, 0o700);
+	});
+
+	test("rejects a simulated same-device mount replacement after traversal", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const nested = join(target, "nested");
+		const outside = join(root, "outside");
+		await mkdir(nested, { recursive: true });
+		await mkdir(outside);
+		await writeFile(join(nested, "value"), "remove-before-race");
+		await writeFile(join(outside, "value"), "outside");
+		const targetMetadata = await lstat(target);
+		let nestedMountObservations = 0;
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(root, (_fd, relativePath, actualIdentity) => {
+			if (relativePath !== "target/nested") return actualIdentity;
+			nestedMountObservations += 1;
+			return nestedMountObservations === 1 ? actualIdentity : `${actualIdentity}:replacement-mount`;
+		});
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup refuses to cross a mount boundary");
+		expect(nestedMountObservations).toBe(2);
+		expect((await lstat(nested)).isDirectory()).toBeTrue();
+		await expect(lstat(join(nested, "value"))).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await Bun.file(join(outside, "value")).text()).toBe("outside");
+	});
+
+	test("restores an empty replacement swapped immediately before atomic retirement", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const parked = join(root, "parked");
+		await mkdir(target);
+		const targetMetadata = await lstat(target);
+		const replacementIdentity: { value?: { readonly dev: bigint; readonly ino: bigint } } = {};
+		const pinned = await openPinnedDirectoryWithMountIdentityForTesting(
+			root,
+			(_fd, _relativePath, actualIdentity) => actualIdentity,
+			(_parentFd, name, relativePath) => {
+				if (relativePath !== "target" || replacementIdentity.value !== undefined) return;
+				renameSync(join(root, name), parked);
+				mkdirSync(join(root, name));
+				const replacement = lstatSync(join(root, name), { bigint: true });
+				replacementIdentity.value = { dev: replacement.dev, ino: replacement.ino };
+			},
+		);
+		handles.push(pinned);
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toThrow("cleanup directory identity changed during atomic retirement");
+		expect(replacementIdentity.value).toBeDefined();
+		const expectedReplacement = replacementIdentity.value;
+		if (expectedReplacement === undefined) throw new Error("replacement hook did not run");
+		const restoredReplacement = await lstat(target);
+		expect(BigInt(restoredReplacement.dev)).toBe(expectedReplacement.dev);
+		expect(BigInt(restoredReplacement.ino)).toBe(expectedReplacement.ino);
+		expect((await lstat(parked)).isDirectory()).toBeTrue();
+	});
+
+	test("fails closed when the cleanup root name is replaced after descriptor traversal starts", async () => {
+		const root = await temporaryDirectory();
+		const target = join(root, "target");
+		const parked = join(root, "parked");
+		const ready = join(root, "attacker-ready");
+		const work = join(target, "zzz-work");
+		await mkdir(work, { recursive: true });
+		await writeFile(join(target, "000-marker"), "marker");
+		for (let batch = 0; batch < 16; batch += 1) {
+			await Promise.all(
+				Array.from({ length: 128 }, async (_, index) => {
+					await writeFile(join(work, `${batch}-${index}`), "");
+				}),
+			);
+		}
+		const targetMetadata = await lstat(target);
+		const pinned = await openPinnedDirectory(root);
+		handles.push(pinned);
+		// An external process must race native syscalls here; fake timers cannot drive this boundary.
+		const readySignal = Promise.withResolvers<void>();
+		const readyWatcher = watch(root, (_event, filename) => {
+			if (filename?.toString() === "attacker-ready") readySignal.resolve();
+		});
+		const attacker = Bun.spawn([
+			process.execPath,
+			"-e",
+			`import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const [target, parked, ready] = process.argv.slice(1);
+writeFileSync(ready, "ready");
+const marker = join(target, "000-marker");
+const deadline = Date.now() + 10_000;
+while (existsSync(marker) && Date.now() < deadline) {}
+if (existsSync(marker)) process.exit(2);
+renameSync(target, parked);
+mkdirSync(target);
+writeFileSync(join(target, "replacement"), "replacement");`,
+			target,
+			parked,
+			ready,
+		]);
+		if (await Bun.file(ready).exists()) readySignal.resolve();
+		await readySignal.promise;
+		readyWatcher.close();
+
+		await expect(
+			pinned.removeDirectoryTree("target", {
+				dev: BigInt(targetMetadata.dev),
+				ino: BigInt(targetMetadata.ino),
+			}),
+		).rejects.toBeInstanceOf(DarwinPinnedDirectoryError);
+		expect(await attacker.exited).toBe(0);
+		expect(await Bun.file(join(target, "replacement")).text()).toBe("replacement");
+		expect((await lstat(parked)).isDirectory()).toBeTrue();
+	}, 20_000);
 
 	test("reads nested regular bytes and mode, symlink targets, active Git exclude, and untracked leaves", async () => {
 		const root = await temporaryDirectory();

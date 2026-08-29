@@ -34,6 +34,7 @@
   "scripts": {
     "build": "bun run gate:distribution && bun scripts/build-binary.ts",
     "build:bb": "bun run gate:distribution && BUILD_PRODUCT=bb bun scripts/build-binary.ts",
+    "build:engine": "bun scripts/build-engine-distribution.ts",
     "build:omp": "bun run gate:distribution && BUILD_PRODUCT=omp bun scripts/build-binary.ts",
     "check": "biome check . && bun run check:types",
     "check:types": "tsgo -p tsconfig.json --noEmit",
@@ -79,8 +80,12 @@
     "@opentelemetry/sdk-metrics": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@opentelemetry/sdk-trace-node": "catalog:",
+    "eventsource-parser": "^1.1.2",
     "puppeteer-core": "catalog:"
   },
+  "bundledDependencies": [
+    "@breadboard/sdk"
+  ],
   "optionalDependencies": {
     "@huggingface/transformers": "catalog:",
     "sherpa-onnx-node": "1.13.2"
@@ -94,6 +99,7 @@
   "files": [
     "src",
     "dist/cli.js",
+    "dist/THIRD_PARTY_NOTICES-*.txt",
     "dist/docs-index.generated.txt",
     "dist/CHANGELOG-*.md",
     "dist/*.node",

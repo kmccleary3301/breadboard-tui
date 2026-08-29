@@ -20,9 +20,10 @@ export class LoginDialogComponent extends OverlayPanel {
 		tui: TUI,
 		providerId: string,
 		private onComplete: (success: boolean, message?: string) => void,
+		providerDisplayName?: string,
 	) {
-		const providerInfo = getOAuthProviders().find(p => p.id === providerId);
-		const providerName = providerInfo?.name || providerId;
+		const providerInfo = providerDisplayName ? undefined : getOAuthProviders().find(p => p.id === providerId);
+		const providerName = providerDisplayName ?? providerInfo?.name ?? providerId;
 		super(`Login to ${providerName}`);
 		this.#tui = tui;
 
@@ -34,7 +35,9 @@ export class LoginDialogComponent extends OverlayPanel {
 		this.#input = new Input();
 		this.#input.onSubmit = () => {
 			if (this.#inputResolver) {
-				this.#inputResolver(this.#input.getValue());
+				const value = this.#input.getValue();
+				this.#input.setValue("");
+				this.#inputResolver(value);
 				this.#inputResolver = undefined;
 				this.#inputRejecter = undefined;
 			}
@@ -50,6 +53,8 @@ export class LoginDialogComponent extends OverlayPanel {
 
 	#cancel(): void {
 		this.#abortController.abort();
+		this.#input.setValue("");
+		this.#input.mask = false;
 		if (this.#inputRejecter) {
 			this.#inputRejecter(new Error("Login cancelled"));
 			this.#inputResolver = undefined;
@@ -117,6 +122,7 @@ export class LoginDialogComponent extends OverlayPanel {
 			this.#contentContainer.addChild(this.#input);
 			this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 0, 0));
 		}
+		this.#input.mask = false;
 		this.#input.setValue("");
 		this.#tui.requestRender();
 
@@ -130,10 +136,10 @@ export class LoginDialogComponent extends OverlayPanel {
 	 * Called by onPrompt callback - show prompt and wait for input
 	 * Note: Does NOT clear content, appends to existing (preserves URL from showAuth)
 	 */
-	showPrompt(message: string, placeholder?: string): Promise<string> {
+	showPrompt(message: string, placeholder?: string, options: { readonly secret?: boolean } = {}): Promise<string> {
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("text", message), 0, 0));
-		if (placeholder) {
+		if (placeholder && !options.secret) {
 			this.#contentContainer.addChild(new Text(theme.fg("dim", `e.g., ${placeholder}`), 0, 0));
 		}
 		if (!this.#contentContainer.children.includes(this.#input)) {
@@ -142,6 +148,7 @@ export class LoginDialogComponent extends OverlayPanel {
 		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel, Enter to submit)"), 0, 0));
 
 		this.#input.setValue("");
+		this.#input.mask = options.secret === true;
 		this.#tui.requestRender();
 
 		const { promise, resolve, reject } = Promise.withResolvers<string>();

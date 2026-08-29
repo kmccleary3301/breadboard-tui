@@ -6,15 +6,20 @@ import type { AuthStorage, StoredAuthCredential } from "../../session/auth-stora
 function providerView(provider: OAuthProviderInfo): AuthProviderView {
 	return {
 		providerId: provider.id,
+		aliases: [],
 		displayName: provider.name,
+		supportTier: "core",
+		authOwner: "provider",
 		storeCredentialsAs: provider.storeCredentialsAs,
 		available: provider.available,
 		authSchemes: ["oauth2"],
 		loginAvailable: provider.available,
+		oauthFlows: [],
+		modelDiscovery: "configured_only",
 	};
 }
 
-function credentialView(row: StoredAuthCredential, authStorage: AuthStorage): AuthCredentialView {
+function credentialView(row: StoredAuthCredential): AuthCredentialView {
 	const credential = row.credential;
 	const isOAuth = credential.type === "oauth";
 	const expiresAtUtc =
@@ -22,6 +27,7 @@ function credentialView(row: StoredAuthCredential, authStorage: AuthStorage): Au
 	return {
 		schemaVersion: "bb.auth.credential_summary.v1",
 		credentialRef: String(row.id),
+		accountId: isOAuth ? (credential.accountId ?? String(row.id)) : String(row.id),
 		providerId: row.provider,
 		authSchemeId: isOAuth ? "oauth2" : "api_key",
 		credentialKind: isOAuth ? "oauth2" : "api_key",
@@ -30,10 +36,7 @@ function credentialView(row: StoredAuthCredential, authStorage: AuthStorage): Au
 			: `API key #${row.id}`,
 		status: row.disabledCause ? "disabled" : "active",
 		source: isOAuth ? "oauth" : (credential.source ?? "login"),
-		isDefault: authStorage.getCredentialOrigin(row.provider)?.kind === (isOAuth ? "oauth" : "api_key"),
 		expiresAtUtc,
-		createdAtUtc: "",
-		lastUsedAtUtc: null,
 	};
 }
 
@@ -44,13 +47,13 @@ export function createNativeProviderAuthDataSource(authStorage: AuthStorage): Pr
 			return getOAuthProviders().map(providerView);
 		},
 		listCredentialsSync(providerId) {
-			return authStorage.listStoredCredentials?.(providerId).map(row => credentialView(row, authStorage)) ?? [];
+			return authStorage.listStoredCredentials?.(providerId).map(credentialView) ?? [];
 		},
 		async listProviders() {
 			return getOAuthProviders().map(providerView);
 		},
 		async listCredentials(providerId) {
-			return authStorage.listStoredCredentials?.(providerId).map(row => credentialView(row, authStorage)) ?? [];
+			return authStorage.listStoredCredentials?.(providerId).map(credentialView) ?? [];
 		},
 	};
 }

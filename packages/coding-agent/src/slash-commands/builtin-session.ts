@@ -235,7 +235,9 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 				return;
 			}
 			if (verb === "pin") {
-				if (rest) {
+				if (runtime.ctx.usesProviderAuthBroker?.() === true) {
+					await runtime.ctx.showSessionPinSelector();
+				} else if (rest) {
 					await handleSessionPinCommand(rest, runtime.ctx.session, text => runtime.ctx.showStatus(text));
 					refreshStatusLine(runtime.ctx);
 				} else {
@@ -520,6 +522,11 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			const manualInput = runtime.ctx.oauthManualInput;
 			const args = command.args.trim();
 			if (args.length > 0) {
+				if (runtime.ctx.usesProviderAuthBroker?.() === true) {
+					void runtime.ctx.showOAuthSelector("login", args);
+					runtime.ctx.editor.setText("");
+					return;
+				}
 				const matchedProvider = getOAuthProviders().find(provider => provider.id === args);
 				if (matchedProvider) {
 					if (manualInput.hasPending()) {
@@ -568,6 +575,11 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		handleTui: (command, runtime) => {
 			const providerId = command.args.trim();
 			if (providerId) {
+				if (runtime.ctx.usesProviderAuthBroker?.() === true) {
+					void runtime.ctx.showOAuthSelector("logout", providerId);
+					runtime.ctx.editor.setText("");
+					return;
+				}
 				const matchedProvider = getOAuthProviders().find(provider => provider.id === providerId);
 				if (!matchedProvider) {
 					runtime.ctx.showWarning(`Unknown OAuth provider: ${providerId}`);
@@ -579,6 +591,18 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 				return;
 			}
 			void runtime.ctx.showOAuthSelector("logout");
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
+		name: "revoke",
+		icon: "signOut",
+		description: "Permanently revoke a BreadBoard provider credential",
+		inlineHint: "[provider]",
+		allowArgs: true,
+		handleTui: (command, runtime) => {
+			const providerId = command.args.trim();
+			void runtime.ctx.showProviderRevokeSelector(providerId || undefined);
 			runtime.ctx.editor.setText("");
 		},
 	},

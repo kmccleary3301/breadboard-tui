@@ -18,6 +18,7 @@ import {
 	type LifecycleReadyHandle,
 	type LifecycleResult,
 	type LifecycleState,
+	lifecycleFailure,
 } from "./lifecycle/lifecycle-state";
 import {
 	LifecycleSupervisor,
@@ -30,7 +31,7 @@ import type { ModelRolePort } from "./model-role-port";
 import { createBreadboardModelRolePort } from "./model-role-port";
 import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
 import type { ProviderAuthPort } from "./provider-auth-port";
-import type { OpenedSession, OpenSession } from "./session-port";
+import type { BreadboardCreateSessionRequest, OpenedSession, OpenSession } from "./session-port";
 
 type BreadboardEngineReadyHandle = Pick<
 	LifecycleReadyHandle,
@@ -40,8 +41,23 @@ type BreadboardEngineReadyHandle = Pick<
 export type BreadboardLifecycleFailureResult = Extract<LifecycleResult, { readonly kind: "failure" }>;
 export type BreadboardEngineConnectionFailure = Exclude<LifecycleResult, { readonly kind: "ready" }>;
 
+export interface BreadboardEngineAuthorityIdentity {
+	readonly mode: LifecycleReadyHandle["mode"];
+	readonly engineInstanceId: string;
+	readonly engineBootId: string;
+	readonly registrationId: string;
+	readonly registrationGeneration: number;
+	readonly ownerGeneration?: number;
+}
+
+export interface BreadboardEngineAuthorityDiscontinuity {
+	readonly previous: BreadboardEngineAuthorityIdentity;
+	readonly trigger: LifecycleState;
+}
+
 export interface BreadboardLifecycleFailureSignal {
 	failure(): BreadboardLifecycleFailureResult | undefined;
+	authorityDiscontinuity(): BreadboardEngineAuthorityDiscontinuity | undefined;
 	subscribe(listener: (state: LifecycleState) => void): () => void;
 }
 
@@ -67,6 +83,7 @@ export interface BreadboardEnginePort {
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
 	getFeatures(): Promise<EngineStatusResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
+	setSessionModel(sessionId: string, model: string): Promise<void>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
 	readonly modelRoles: ModelRolePort;
 	attachProviderAuth(request: ProviderAuthAttachRequest): Promise<ProviderAuthAttachResponse>;
@@ -85,28 +102,50 @@ export type BreadboardEngineConnectionResult =
 	| { readonly kind: "ready"; readonly port: BreadboardEnginePort }
 	| { readonly kind: "failure"; readonly result: BreadboardEngineConnectionFailure };
 
-interface LifecycleMonitor {
+export interface LifecycleMonitor {
 	readonly signal: BreadboardLifecycleFailureSignal;
 	readonly stateChanged: (state: LifecycleState) => void;
+	activateAuthority(authority: BreadboardEngineAuthorityIdentity): void;
 }
 
 function isLifecycleFailureState(state: LifecycleState): state is BreadboardLifecycleFailureResult["state"] {
 	return (LIFECYCLE_FAILURE_STATES as readonly LifecycleState["name"][]).includes(state.name);
 }
 
-function createLifecycleMonitor(
+const AUTHORITY_DISCONTINUITY_STATES: ReadonlySet<LifecycleState["name"]> = new Set([
+	"backing-off",
+	"restart-stopping",
+	"restart-starting",
+]);
+
+export function createLifecycleMonitor(
 	onLifecycleFailure?: BreadboardEngineConnectionOptions["onLifecycleFailure"],
 ): LifecycleMonitor {
 	let failure: BreadboardLifecycleFailureResult | undefined;
+	let activeAuthority: BreadboardEngineAuthorityIdentity | undefined;
+	let discontinuity: BreadboardEngineAuthorityDiscontinuity | undefined;
 	const listeners = new Set<(state: LifecycleState) => void>();
+	const latchFailure = (next: BreadboardLifecycleFailureResult): void => {
+		if (failure !== undefined) return;
+		failure = next;
+		try {
+			onLifecycleFailure?.(next);
+		} catch (error) {
+			logger.warn("BreadBoard lifecycle failure presentation failed", { error: String(error) });
+		}
+	};
 	const stateChanged = (state: LifecycleState): void => {
-		if (failure === undefined && isLifecycleFailureState(state)) {
-			failure = { kind: "failure", state };
-			try {
-				onLifecycleFailure?.(failure);
-			} catch (error) {
-				logger.warn("BreadBoard lifecycle failure presentation failed", { error: String(error) });
-			}
+		if (
+			failure === undefined &&
+			activeAuthority !== undefined &&
+			(state.name === "ready" || AUTHORITY_DISCONTINUITY_STATES.has(state.name))
+		) {
+			discontinuity = Object.freeze({ previous: activeAuthority, trigger: state });
+			const result = lifecycleFailure(activeAuthority.mode, "identity-changed", "identity_changed", state.attempt);
+			if (result.kind !== "failure") throw new Error("BreadBoard authority discontinuity was not terminal");
+			latchFailure(result);
+		} else if (failure === undefined && isLifecycleFailureState(state)) {
+			latchFailure({ kind: "failure", state });
 		}
 		for (const listener of listeners) {
 			try {
@@ -119,12 +158,19 @@ function createLifecycleMonitor(
 	return {
 		signal: Object.freeze({
 			failure: () => failure,
+			authorityDiscontinuity: () => discontinuity,
 			subscribe: (listener: (state: LifecycleState) => void) => {
 				listeners.add(listener);
 				return () => listeners.delete(listener);
 			},
 		}),
 		stateChanged,
+		activateAuthority(authority) {
+			if (activeAuthority !== undefined) {
+				throw new Error("BreadBoard lifecycle monitor authority is already active");
+			}
+			activeAuthority = Object.freeze({ ...authority });
+		},
 	};
 }
 
@@ -136,93 +182,62 @@ function authorityFacts(handle: BreadboardEngineReadyHandle): BreadboardEngineAu
 		ownerGeneration: handle.ownerGeneration,
 	});
 }
-const SESSION_SCOPED_EVENT_TYPES = new Set([
-	"todo_updated",
-	"checkpoint_list",
-	"checkpoint_restored",
-	"skills_catalog",
-	"skills_selection",
-	"ctree_node",
-	"ctree_snapshot",
-]);
 
-function visibleAssistantText(payload: unknown): string {
-	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
-	const text = (payload as Record<string, unknown>).text;
-	return typeof text === "string" ? text.replace(/\n*>>>>>> END RESPONSE\s*$/, "") : "";
+function authorityIdentity(handle: BreadboardEngineReadyHandle): BreadboardEngineAuthorityIdentity {
+	return Object.freeze({
+		mode: handle.mode,
+		engineInstanceId: handle.binding.engineInstanceId,
+		engineBootId: handle.binding.engineBootId,
+		registrationId: handle.registration.id,
+		registrationGeneration: handle.registration.generation,
+		ownerGeneration: handle.ownerGeneration,
+	});
 }
 
-export function filterUncorrelatedCanonicalEvents(response: Response): Response {
-	if (!response.body) return response;
-	const decoder = new TextDecoder();
-	const encoder = new TextEncoder();
-	let pending = "";
-	let block = "";
-	const transform = new TransformStream<Uint8Array, Uint8Array>({
-		transform(chunk, controller) {
-			pending += decoder.decode(chunk, { stream: true });
-			for (;;) {
-				const newline = pending.indexOf("\n");
-				if (newline < 0) break;
-				const line = pending.slice(0, newline);
-				pending = pending.slice(newline + 1);
-				if (line.length > 0) {
-					block += `${line}\n`;
-					continue;
-				}
-				let drop = false;
-				const data = block
-					.split("\n")
-					.filter(line => line.startsWith("data:"))
-					.map(line => line.slice(5).trimStart())
-					.join("\n");
-				if (data) {
-					try {
-						const raw = JSON.parse(data) as Record<string, unknown>;
-						if (raw.type === "assistant_message") {
-							raw.type = "assistant.message.end";
-							raw.payload = { text: visibleAssistantText(raw.payload) };
-						}
-						const turn = raw.turn;
-						if (
-							raw.stable_cursor === true &&
-							Number.isSafeInteger(turn) &&
-							raw.turn_id == null &&
-							raw.input_id == null
-						) {
-							raw.turn_id = `turn-${turn}`;
-							raw.input_id = `input-${turn}`;
-						}
-						if (raw.stable_cursor === true && raw.turn_id != null && raw.input_id != null) {
-							const lines = block.split("\n");
-							const dataIndex = lines.findIndex(line => line.startsWith("data:"));
-							if (dataIndex >= 0) lines[dataIndex] = `data: ${JSON.stringify(raw)}`;
-							block = lines.join("\n");
-						}
-						drop =
-							raw.stable_cursor === true &&
-							(raw.turn_id == null || raw.input_id == null) &&
-							typeof raw.type === "string" &&
-							!SESSION_SCOPED_EVENT_TYPES.has(raw.type);
-					} catch {
-						drop = false;
-					}
-				}
-				if (!drop) controller.enqueue(encoder.encode(`${block}\n`));
-				block = "";
+interface BreadboardSessionCreatePayload {
+	readonly config_path?: string;
+	readonly task: string;
+	readonly overrides?: BreadboardCreateSessionRequest["overrides"];
+	readonly metadata?: BreadboardCreateSessionRequest["metadata"];
+	readonly workspace: string;
+	readonly max_steps?: BreadboardCreateSessionRequest["maxSteps"];
+	readonly permission_mode?: BreadboardCreateSessionRequest["permissionMode"];
+	readonly stream?: BreadboardCreateSessionRequest["stream"];
+}
+
+export function buildBreadboardSessionCreatePayload(
+	request: BreadboardCreateSessionRequest,
+): BreadboardSessionCreatePayload {
+	if (request.workspace.length === 0) {
+		throw new Error("BreadBoard session create request requires a workspace");
+	}
+	if (request.configPath !== undefined && request.configPath.length === 0) {
+		throw new Error("BreadBoard session create request contains an empty config path");
+	}
+	return {
+		...(request.configPath === undefined ? {} : { config_path: request.configPath }),
+		task: request.task ?? "",
+		...(request.overrides === undefined ? {} : { overrides: request.overrides }),
+		...(request.metadata === undefined ? {} : { metadata: request.metadata }),
+		workspace: request.workspace,
+		...(request.maxSteps === undefined ? {} : { max_steps: request.maxSteps }),
+		...(request.permissionMode === undefined ? {} : { permission_mode: request.permissionMode }),
+		...(request.stream === undefined ? {} : { stream: request.stream }),
+	};
+}
+
+export function createCanonicalEventFetch(requestFetch: typeof fetch): typeof fetch {
+	return Object.assign(
+		async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+			const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+			if (url.pathname.endsWith("/events")) {
+				url.searchParams.set("schema", "2");
+				url.searchParams.set("include_legacy", "false");
 			}
+			return await requestFetch(url, init);
 		},
-		flush(controller) {
-			pending += decoder.decode();
-			if (pending.length > 0) block += pending;
-			if (block.length > 0) controller.enqueue(encoder.encode(block));
-		},
-	});
-	return new Response(response.body.pipeThrough(transform), {
-		status: response.status,
-		statusText: response.statusText,
-		headers: response.headers,
-	});
+		{ preconnect: requestFetch.preconnect },
+	);
 }
 
 function createConnectedPort(
@@ -231,18 +246,9 @@ function createConnectedPort(
 	monitor: LifecycleMonitor,
 	options: BreadboardEngineConnectionOptions,
 ): BreadboardEnginePort {
-	const strictEventFetch = Object.assign(
-		async (input: Parameters<typeof handle.requestFetch>[0], init: Parameters<typeof handle.requestFetch>[1]) => {
-			const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
-			if (url.pathname.endsWith("/events")) {
-				url.searchParams.set("schema", "2");
-				url.searchParams.set("include_legacy", "false");
-			}
-			const response = await handle.requestFetch(url, init);
-			return url.pathname.endsWith("/events") ? filterUncorrelatedCanonicalEvents(response) : response;
-		},
-		{ preconnect: handle.requestFetch.preconnect },
-	);
+	const authority = authorityFacts(handle);
+	monitor.activateAuthority(authorityIdentity(handle));
+	const strictEventFetch = createCanonicalEventFetch(handle.requestFetch);
 	const clientConfig = {
 		baseUrl: handle.binding.endpoint,
 		requestTimeoutMs: supervisor.config.requestTimeoutMs,
@@ -252,12 +258,9 @@ function createConnectedPort(
 	const controlClient = createBreadboardClient(clientConfig);
 	const sessionClient = {
 		...canonicalClient,
-		async create(request: Parameters<typeof canonicalClient.create>[0]) {
-			if (request.task === undefined) {
-				const created = await controlClient.createSession({ config_path: request.configPath } as never);
-				return await canonicalClient.attach({ sessionId: created.session_id });
-			}
-			return await canonicalClient.create(request);
+		async create(request: BreadboardCreateSessionRequest) {
+			const created = await controlClient.createSession(buildBreadboardSessionCreatePayload(request));
+			return await canonicalClient.attach({ sessionId: created.session_id });
 		},
 	};
 	const sessionPort = new CanonicalE4SessionPort(sessionClient, {
@@ -325,8 +328,52 @@ function createConnectedPort(
 		})();
 		return closePromise;
 	};
+	const modelRoles = createBreadboardModelRolePort({
+		resolveModelRoles(input) {
+			assertOperational();
+			return controlClient.resolveModelRoles(input);
+		},
+	});
+	const providerAuth = createBreadboardProviderAuthPort({
+		listProviders() {
+			assertOperational();
+			return controlClient.listProviders();
+		},
+		listCredentials(providerId) {
+			assertOperational();
+			return controlClient.listCredentials(providerId);
+		},
+		beginLogin(input) {
+			assertOperational();
+			return controlClient.beginLogin(input);
+		},
+		getLogin(loginSessionId) {
+			assertOperational();
+			return controlClient.getLogin(loginSessionId);
+		},
+		completeLogin(input) {
+			assertOperational();
+			return controlClient.completeLogin(input);
+		},
+		cancelLogin(loginSessionId) {
+			assertOperational();
+			return controlClient.cancelLogin(loginSessionId);
+		},
+		putApiKey(providerId, accountLabel, input) {
+			assertOperational();
+			return controlClient.putApiKey(providerId, accountLabel, input);
+		},
+		logout(input) {
+			assertOperational();
+			return controlClient.logout(input);
+		},
+		revoke(input) {
+			assertOperational();
+			return controlClient.revoke(input);
+		},
+	});
 	const port: BreadboardEnginePort = {
-		authority: authorityFacts(handle),
+		authority,
 		lifecycleFailure: monitor.signal,
 		openSession,
 		getFeatures: async () => {
@@ -336,6 +383,16 @@ function createConnectedPort(
 		getModelCatalog: async configPath => {
 			assertOperational();
 			return controlClient.getModelCatalog(configPath);
+		},
+		setSessionModel: async (sessionId, model) => {
+			assertOperational();
+			const response = await controlClient.postCommand(sessionId, {
+				command: "set_model",
+				payload: { model },
+			});
+			if (response.detail?.status !== "ok" || response.detail.model !== model) {
+				throw new Error("BreadBoard engine returned an invalid model-selection receipt");
+			}
 		},
 		getProviderAuthStatus: async () => {
 			assertOperational();
@@ -349,9 +406,9 @@ function createConnectedPort(
 			assertOperational();
 			return controlClient.providerAuthDetach(request);
 		},
-		modelRoles: createBreadboardModelRolePort(controlClient),
+		modelRoles,
 		close,
-		providerAuth: createBreadboardProviderAuthPort(controlClient),
+		providerAuth,
 	};
 	return Object.freeze(port);
 }
@@ -375,6 +432,7 @@ export async function connectCanonicalBreadboardEnginePort(
 		...suppliedDependencies,
 		...(store === undefined ? { store: undefined } : { store }),
 		stateChanged: monitor.stateChanged,
+		restartOnUnexpectedChildExit: false,
 	});
 	const connected = await supervisor.connect();
 	if (connected.kind !== "ready") {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -13,10 +13,12 @@ import type {
 	PrepareHardSignalInput,
 } from "@breadboard/sdk/internal";
 import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
+import { createEngineRuntimeBundle } from "./engine-runtime-bundle";
 import { presentLifecycle, writeLifecyclePresentation } from "./lifecycle-presenter";
 import { type LifecycleState, lifecycleFailure } from "./lifecycle-state";
 import * as lifecycleModule from "./lifecycle-supervisor";
 import {
+	createDefaultLifecycleProcessAdapter,
 	dispatchLifecycleAction,
 	type LifecycleController,
 	type LifecycleDispatchResult,
@@ -36,12 +38,14 @@ import {
 	executablePathSha256,
 	resolveBreadboardRunConfig,
 } from "./run-config";
+import { RuntimeCleanupReconciliationError, RuntimeCleanupStoreError } from "./runtime-cleanup-store";
 
 const roots: string[] = [];
 const executableSha256 = `sha256:${"a".repeat(64)}` as const;
 const engineSourceSha256 = `sha256:${"b".repeat(64)}` as const;
 const backendCommit = "c".repeat(40);
 const artifact: EngineArtifact = {
+	kind: "direct-executable",
 	executablePath: "/usr/bin/false",
 	argv: ["--serve"],
 	argvSha256: "sha256:b76470afe32d50ae8194866d39a872e4dc846e89ac409f390884db522242a6b4",
@@ -159,7 +163,7 @@ function boundClient(
 			if (
 				!("bootstrapCredential" in input) ||
 				!ArrayBuffer.isView(input.bootstrapCredential) ||
-				input.bootstrapCredential.byteLength !== 32
+				input.bootstrapCredential.byteLength !== 43
 			)
 				throw new Error("bootstrap rotation missing");
 			return { result: "acquired", ownerGeneration: 1 } as never;
@@ -184,7 +188,7 @@ function boundClient(
 				expiresAtUnix: 100,
 			} as never;
 		},
-		renewClient: async () => ({ result: "renewed" }) as never,
+		renewClient: async () => ({ result: "renewed", admissionEpoch: 7 }) as never,
 		detachClient: async () => {
 			calls.push("detach-client");
 			return { result: "detached" } as never;
@@ -244,8 +248,200 @@ async function temporaryStore(
 	return new LocalAuthorityStore(root, seams);
 }
 
+interface CleanupRecordRootPaths {
+	readonly engineRuntimeRoot?: string;
+	readonly rayRuntimeRoot: string;
+}
+
+function cleanupRecordRootPaths(contents: string): CleanupRecordRootPaths {
+	const parsed: unknown = JSON.parse(contents);
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("cleanup record fixture is not an object");
+	}
+	const record = parsed as Record<string, unknown>;
+	const rayRuntime = record.rayRuntime;
+	if (rayRuntime === null || typeof rayRuntime !== "object" || Array.isArray(rayRuntime)) {
+		throw new Error("cleanup record fixture has no Ray root");
+	}
+	const rayRuntimeRoot = (rayRuntime as Record<string, unknown>).path;
+	if (typeof rayRuntimeRoot !== "string") throw new Error("cleanup record fixture Ray root is invalid");
+	const engineRuntime = record.engineRuntime;
+	if (engineRuntime === undefined) return { rayRuntimeRoot };
+	if (engineRuntime === null || typeof engineRuntime !== "object" || Array.isArray(engineRuntime)) {
+		throw new Error("cleanup record fixture engine root is invalid");
+	}
+	const engineRuntimeRoot = (engineRuntime as Record<string, unknown>).path;
+	if (typeof engineRuntimeRoot !== "string") throw new Error("cleanup record fixture engine root is invalid");
+	return { engineRuntimeRoot, rayRuntimeRoot };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+	try {
+		await stat(path);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+		throw error;
+	}
+}
+
+async function exerciseRejectedCleanupPersistence(
+	artifact: EngineArtifact,
+	obstructRecordReadback = false,
+): Promise<void> {
+	const authorityRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-fault-"));
+	roots.push(authorityRoot);
+	const authority = new LocalAuthorityStore(authorityRoot);
+	const stateRootRelativePath = join("engine-state", "fault-endpoint");
+	const launchId = "f".repeat(43);
+	const cleanupRecordPath = join(authorityRoot, stateRootRelativePath, "runtime-cleanup", `${launchId}.json`);
+	let cleanupRoots: CleanupRecordRootPaths | undefined;
+	const adapter = createDefaultLifecycleProcessAdapter(
+		{
+			stateRootPath: join(authorityRoot, stateRootRelativePath),
+			ensure: relativePath =>
+				authority.ensurePrivateDirectory(
+					relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+				),
+		},
+		artifact.kind === "runtime-bundle",
+		{
+			writeRecord: async (_handle, contents) => {
+				cleanupRoots = cleanupRecordRootPaths(contents);
+				if (obstructRecordReadback) {
+					await rm(cleanupRecordPath);
+					await mkdir(cleanupRecordPath);
+				}
+				throw new Error("synthetic cleanup persistence failure");
+			},
+		},
+	);
+	const bound = Promise.withResolvers<{ readonly pid: number; readonly startToken: string }>();
+	const bootstrap = Buffer.from("fixture\n", "utf8");
+	const error = await adapter
+		.spawnVerified(artifact, launchId, bootstrap, async (pid, startToken) => {
+			bound.resolve({ pid, startToken });
+		})
+		.catch(cause => cause);
+
+	if (obstructRecordReadback) expect(error).toBeInstanceOf(RuntimeCleanupReconciliationError);
+	else expect(error).toBeInstanceOf(RuntimeCleanupStoreError);
+	const identity = await bound.promise;
+	expect(await adapter.observe(identity.pid)).toEqual({ kind: "dead" });
+	expect(bootstrap.every(byte => byte === 0)).toBeTrue();
+	if (cleanupRoots === undefined) throw new Error("cleanup persistence fixture was not captured");
+	const temporaryRoot = await realpath(tmpdir());
+	expect(cleanupRoots.rayRuntimeRoot).toBe(join(temporaryRoot, `bb-ray-${launchId}`));
+	if (artifact.kind === "runtime-bundle") {
+		expect(cleanupRoots.engineRuntimeRoot).toBe(join(temporaryRoot, `bb-engine-runtime-${launchId}`));
+	} else expect(await pathExists(join(temporaryRoot, `omp-engine-snapshot-${launchId}`))).toBeFalse();
+	expect(await pathExists(cleanupRoots.rayRuntimeRoot)).toBeFalse();
+	if (cleanupRoots.engineRuntimeRoot !== undefined) {
+		expect(await pathExists(cleanupRoots.engineRuntimeRoot)).toBeFalse();
+	}
+	if (obstructRecordReadback) expect((await stat(cleanupRecordPath)).isDirectory()).toBeTrue();
+	else expect(await readdir(join(authorityRoot, stateRootRelativePath, "runtime-cleanup"))).toEqual([]);
+}
 afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+
+describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter persistence faults", () => {
+	test("kills the bootstrap-gated direct engine and removes its Ray root across rejected record states", async () => {
+		const executableBytes = await readFile("/bin/sh");
+		const executableDigest = `sha256:${createHash("sha256").update(executableBytes).digest("hex")}` as const;
+		await exerciseRejectedCleanupPersistence({
+			kind: "direct-executable",
+			executablePath: "/bin/sh",
+			argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+			argvSha256: artifact.argvSha256,
+			executableSha256: executableDigest,
+			engineSourceSha256: executableDigest,
+			servedBackendCommit: backendCommit,
+		});
+		await exerciseRejectedCleanupPersistence(
+			{
+				kind: "direct-executable",
+				executablePath: "/bin/sh",
+				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				argvSha256: artifact.argvSha256,
+				executableSha256: executableDigest,
+				engineSourceSha256: executableDigest,
+				servedBackendCommit: backendCommit,
+			},
+			true,
+		);
+	});
+
+	test("kills the bootstrap-gated bundled engine and removes both runtime roots across rejected record states", async () => {
+		const bundleRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-bundle-"));
+		roots.push(bundleRoot);
+		const sourceRoot = join(bundleRoot, "source");
+		await mkdir(sourceRoot, { recursive: true });
+		await writeFile(join(sourceRoot, "breadboard-engine"), await readFile("/bin/sh"), { mode: 0o500 });
+		const created = await createEngineRuntimeBundle({
+			sourceRoot,
+			executablePath: "breadboard-engine",
+			outputPath: join(bundleRoot, "engine.bundle"),
+		});
+
+		await exerciseRejectedCleanupPersistence({
+			kind: "runtime-bundle",
+			runtimeBundle: created.bundle,
+			executablePath: created.executablePath,
+			executableSizeBytes: created.executableSizeBytes,
+			argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+			argvSha256: artifact.argvSha256,
+			executableSha256: created.executableSha256,
+			engineSourceSha256: created.bundle.sha256,
+			servedBackendCommit: backendCommit,
+		});
+		await exerciseRejectedCleanupPersistence(
+			{
+				kind: "runtime-bundle",
+				runtimeBundle: created.bundle,
+				executablePath: created.executablePath,
+				executableSizeBytes: created.executableSizeBytes,
+				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				argvSha256: artifact.argvSha256,
+				executableSha256: created.executableSha256,
+				engineSourceSha256: created.bundle.sha256,
+				servedBackendCommit: backendCommit,
+			},
+			true,
+		);
+	});
+
+	test("removes deterministic prepared roots for a confirmed-dead engine without a cleanup record", async () => {
+		const authorityRoot = await mkdtemp(join(tmpdir(), "omp-dead-engine-cleanup-"));
+		roots.push(authorityRoot);
+		const stateRootRelativePath = join("engine-state", "dead-engine");
+		const authority = new LocalAuthorityStore(authorityRoot);
+		const adapter = createDefaultLifecycleProcessAdapter({
+			stateRootPath: join(authorityRoot, stateRootRelativePath),
+			ensure: relativePath =>
+				authority.ensurePrivateDirectory(
+					relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
+				),
+		});
+		const launchId = "d".repeat(43);
+		const temporaryRoot = await realpath(tmpdir());
+		const launchRoots = [
+			join(temporaryRoot, `bb-engine-runtime-${launchId}`),
+			join(temporaryRoot, `bb-ray-${launchId}`),
+			join(temporaryRoot, `omp-engine-snapshot-${launchId}`),
+		];
+		roots.push(...launchRoots);
+		for (const root of launchRoots) await mkdir(root, { mode: 0o700 });
+
+		await adapter.cleanupExited({
+			launchId,
+			pid: 999_999,
+			startToken: "darwin:999999:1",
+		});
+
+		for (const root of launchRoots) expect(await pathExists(root)).toBeFalse();
+	});
 });
 
 describe("LifecycleSupervisor mode authority", () => {
@@ -508,6 +704,32 @@ describe("LifecycleSupervisor mode authority", () => {
 				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				RAY_BACKEND_LOG_LEVEL: "error",
+				RAY_LOG_TO_DRIVER: "0",
+				RAY_LOGGER_LEVEL: "error",
+				RAY_LOG_TO_STDERR: "0",
+				RAY_ROTATION_BACKUP_COUNT: "1",
+				RAY_ROTATION_MAX_BYTES: "262144",
+			});
+			expect(
+				lifecycleChildEnvironment(
+					"launch_environment_abcdefghijklmnopqrstuvwxyz",
+					"/private/engine/state",
+					"/tmp/bb-ray-private",
+				),
+			).toEqual({
+				PATH: "/usr/bin:/bin",
+				BREADBOARD_LEGACY_ROUTES: "1",
+				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
+				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				RAY_BACKEND_LOG_LEVEL: "error",
+				RAY_LOG_TO_DRIVER: "0",
+				RAY_LOGGER_LEVEL: "error",
+				RAY_LOG_TO_STDERR: "0",
+				RAY_ROTATION_BACKUP_COUNT: "1",
+				RAY_ROTATION_MAX_BYTES: "262144",
+				BREADBOARD_ENGINE_STATE_ROOT: "/private/engine/state",
+				RAY_TMPDIR: "/tmp/bb-ray-private",
 			});
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
 				"BREADBOARD_HOSTILE_PARENT_SECRET",
@@ -558,7 +780,7 @@ describe("LifecycleSupervisor mode authority", () => {
 		}
 	});
 
-	test("typed transport failures remain distinct", async () => {
+	test("typed remote transport failures remain distinct without local fallback", async () => {
 		const cases = [
 			[
 				new LifecycleE4ClientError({
@@ -583,14 +805,32 @@ describe("LifecycleSupervisor mode authority", () => {
 			],
 		] as const;
 		for (const [failure, state] of cases) {
-			const supervisor = new LifecycleSupervisor(resolved("remote"), {
-				createClient: () => ({
-					handshake: async () => {
-						throw failure;
+			let clientCreations = 0;
+			let localDependencyTouches = 0;
+			const forbiddenLocalDependency = new Proxy(
+				{},
+				{
+					get() {
+						localDependencyTouches++;
+						throw new Error("remote mode touched a local lifecycle dependency");
 					},
-				}),
+				},
+			);
+			const supervisor = new LifecycleSupervisor(resolved("remote"), {
+				store: forbiddenLocalDependency as never,
+				process: forbiddenLocalDependency as never,
+				createClient: () => {
+					clientCreations++;
+					return {
+						handshake: async () => {
+							throw failure;
+						},
+					};
+				},
 			});
 			expect((await supervisor.connect()).state.name).toBe(state);
+			expect(clientCreations).toBe(1);
+			expect(localDependencyTouches).toBe(0);
 		}
 	});
 });
@@ -606,11 +846,16 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const bootstrapBuffers: Buffer[] = [];
 		const handles = new Map<number, SpawnedEngineProcess>();
 		const exitResolvers = new Map<number, (code: number | null) => void>();
+		const exitRejectors = new Map<number, (reason?: unknown) => void>();
 		const processTokens = new Map<number, string>();
 		const waitResults: boolean[] = [];
+		const waitTimeouts: number[] = [];
+		const cleanups: Array<{ readonly launchId: string; readonly pid: number; readonly startToken: string }> = [];
+		const preparedCleanups: string[] = [];
 		let gracefulExitOnWait = false;
 		let suppressNextExitNotification = false;
 		let returnUnbound = false;
+		let spawnFailure: { readonly error: unknown } | undefined;
 		const adapter: LifecycleProcessAdapter = {
 			spawnVerified: async (_artifact, launchId, bootstrap, bindIdentity) => {
 				spawnCount++;
@@ -620,8 +865,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				const startToken = `darwin:${pid}:1`;
 				processTokens.set(pid, startToken);
 				bootstrapBuffers.push(bootstrap);
-				const { promise: exited, resolve } = Promise.withResolvers<number | null>();
+				const { promise: exited, resolve, reject } = Promise.withResolvers<number | null>();
 				exitResolvers.set(pid, resolve);
+				exitRejectors.set(pid, reject);
 				const handle: SpawnedEngineProcess = {
 					pid,
 					startToken,
@@ -637,6 +883,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 						return "sent";
 					},
 					waitForExit: async timeoutMs => {
+						waitTimeouts.push(timeoutMs);
 						if (timeoutMs > 0 && gracefulExitOnWait) {
 							gracefulExitOnWait = false;
 							dead.add(pid);
@@ -654,6 +901,14 @@ describe("LifecycleSupervisor local-owned authority", () => {
 					dead.add(pid);
 					resolve(1);
 					return { kind: "spawn-failed-dead" as const };
+				}
+				if (spawnFailure !== undefined) {
+					const failure = spawnFailure.error;
+					spawnFailure = undefined;
+					bootstrap.fill(0);
+					dead.add(pid);
+					resolve(1);
+					throw failure;
 				}
 				if (returnUnbound) {
 					returnUnbound = false;
@@ -673,18 +928,31 @@ describe("LifecycleSupervisor local-owned authority", () => {
 							startToken: processTokens.get(pid) ?? `darwin:${pid}:unknown`,
 						} as ProcessObservation),
 			controlFor: async (pid, token) => (token === processTokens.get(pid) ? (handles.get(pid) ?? null) : null),
+			cleanupExited: async identity => {
+				cleanups.push(identity);
+			},
+			cleanupPreparedStart: async launchId => {
+				preparedCleanups.push(launchId);
+			},
 		};
 		return {
 			adapter,
 			dead,
 			events,
 			waitResults,
+			waitTimeouts,
 			bootstrapBuffers,
+			cleanups,
+			preparedCleanups,
 			current: () => ({ pid: currentPid, launchId: currentLaunch }),
 			spawnCount: () => spawnCount,
 			crash: (pid = currentPid) => {
 				dead.add(pid);
 				exitResolvers.get(pid)?.(1);
+			},
+			cleanupFailure: (error: unknown, pid = currentPid) => {
+				dead.add(pid);
+				exitRejectors.get(pid)?.(error);
 			},
 			rotateIdentity: (pid = currentPid) => processTokens.set(pid, `darwin:${pid}:2`),
 			exitOnNextWait: () => {
@@ -696,6 +964,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 			unboundNext: () => {
 				returnUnbound = true;
+			},
+			failSpawnAfterBinding: (error: unknown) => {
+				spawnFailure = { error };
 			},
 		};
 	}
@@ -732,6 +1003,75 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			executablePathSha256: executablePathSha256(artifact.executablePath),
 			argvSha256: artifact.argvSha256,
 		});
+	});
+	test("keeps probing through packaged engine startup beyond the generic transport schedule", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const sleeps: number[] = [];
+		let now = 0;
+		let handshakeAttempts = 0;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: () => ({
+				handshake: async () => {
+					handshakeAttempts++;
+					if (handshakeAttempts <= 4) throw new LifecycleE4ClientError({ kind: "timeout" });
+					const current = process.current();
+					return boundClient(bindingFor(current.pid, current.launchId), calls);
+				},
+			}),
+			clock: {
+				now: () => now,
+				sleep: async milliseconds => {
+					sleeps.push(milliseconds);
+					now += milliseconds;
+				},
+			},
+		});
+
+		expect((await supervisor.connect()).kind).toBe("ready");
+		expect({ handshakeAttempts, sleeps, elapsed: now }).toEqual({
+			handshakeAttempts: 5,
+			sleeps: [250, 1_000, 4_000, 4_000],
+			elapsed: 9_250,
+		});
+	});
+	test("reports installed bundle digest drift as a complete-distribution failure before spawn", async () => {
+		const root = await mkdtemp(join(tmpdir(), "bb-installed-bundle-tamper-"));
+		roots.push(root);
+		const bundlePath = join(root, "breadboard-engine-runtime.v1.bundle");
+		const bundleBytes = Buffer.alloc(256, 0x41);
+		await writeFile(bundlePath, bundleBytes, { mode: 0o400 });
+		const installedArtifact = {
+			...artifact,
+			kind: "runtime-bundle" as const,
+			executablePath: "breadboard-engine",
+			executableSizeBytes: 1,
+			runtimeBundle: {
+				schemaVersion: "bb.engine_runtime_bundle.v1" as const,
+				path: bundlePath,
+				sizeBytes: bundleBytes.byteLength,
+				sha256: `sha256:${"e".repeat(64)}` as const,
+			},
+		};
+		const config = resolveBreadboardRunConfig({
+			...common,
+			environment: { BREADBOARD_PRODUCT: "1" },
+			installedEngineArtifact: installedArtifact,
+			installedEngineIdentity: {} as NonNullable<BreadboardRunConfig["installedEngineIdentity"]>,
+		});
+		const store = await temporaryStore();
+		const supervisor = new LifecycleSupervisor(config, { store });
+
+		await expect(supervisor.connect()).rejects.toMatchObject({
+			name: "InstalledEngineDiscoveryError",
+			code: "engine_artifact_mismatch",
+			remediation:
+				"Reinstall BreadBoard from one complete trusted distribution; do not edit the manifest or supply replacement hashes.",
+		});
+		expect(await store.readCurrent(config.endpoint as string)).toBeNull();
 	});
 	test("shares one same-object local-owned initial connect", async () => {
 		const store = await temporaryStore();
@@ -880,6 +1220,47 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const authorityText = await readFile(join(store.root, authorityName as string), "utf8");
 		expect(authorityText).not.toContain(canonicalExecutablePath);
 		expect(authorityText).toContain(expectedPathDigest);
+	});
+
+	test("retains a bound start claim only when failed-spawn cleanup still needs reconciliation", async () => {
+		const cases = [
+			{
+				error: new RuntimeCleanupStoreError("synthetic reconciled persistence failure"),
+				retained: false,
+			},
+			{
+				error: new RuntimeCleanupReconciliationError(
+					"synthetic ambiguous persistence failure",
+					new Error("synthetic cleanup failure"),
+				),
+				retained: true,
+			},
+		] as const;
+		for (const scenario of cases) {
+			const store = await temporaryStore();
+			const process = processHarness();
+			process.failSpawnAfterBinding(scenario.error);
+			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				store,
+				process: process.adapter,
+				createClient: clientFactory(process, []),
+			});
+
+			const result = await supervisor.connect();
+			expect(result.state).toMatchObject({
+				name: "recovery-needed",
+				reason: "authority_store_unavailable",
+			});
+			const claimName = (await readdir(store.root)).find(name => name.endsWith(".starting.json"));
+			expect(claimName !== undefined).toBe(scenario.retained);
+			if (claimName !== undefined) {
+				const claim = JSON.parse(await readFile(join(store.root, claimName), "utf8"));
+				expect(claim).toMatchObject({
+					enginePid: process.current().pid,
+					launchId: process.current().launchId,
+				});
+			}
+		}
 	});
 
 	test("registration failure leaves one adoptable committed engine and never respawns", async () => {
@@ -1124,6 +1505,8 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(absenceChecks).toBe(1);
 		expect(process.spawnCount()).toBe(1);
 		expect(await store.readCurrent(endpoint)).toMatchObject({ pid: process.current().pid });
+		if (orphaned.launchId === undefined) throw new Error("prepared claim launch identity is unavailable");
+		expect(process.preparedCleanups).toEqual([orphaned.launchId]);
 		await expect(
 			store.withExclusiveLock(endpoint, () =>
 				store.bindStartClaimProcess(endpoint, orphaned.token, 9999, "darwin:9999:late"),
@@ -1426,6 +1809,11 @@ describe("LifecycleSupervisor local-owned authority", () => {
 								expiresAtUnix: 100,
 							} as never;
 						},
+						renewClient: async input => {
+							const registration = registrations.find(item => item.registrationId === input.registrationId);
+							if (!registration) throw new Error("renewed registration missing");
+							return { result: "renewed", admissionEpoch: registration.admissionEpoch } as never;
+						},
 						beginControlDrain: async input => {
 							const { signal: _, ...request } = input;
 							beginRequests.push(request);
@@ -1536,6 +1924,11 @@ describe("LifecycleSupervisor local-owned authority", () => {
 							admissionEpoch,
 							expiresAtUnix: 100,
 						} as never;
+					},
+					renewClient: async input => {
+						const registration = registrations.find(item => item.registrationId === input.registrationId);
+						if (!registration) throw new Error("renewed registration missing");
+						return { result: "renewed", admissionEpoch: registration.admissionEpoch } as never;
 					},
 					beginControlDrain: async input => {
 						const { signal: _, ...request } = input;
@@ -2090,7 +2483,79 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls.some(call => call.startsWith("hard-signal:"))).toBe(false);
 		expect(calls).not.toContain("rollback");
 		expect(process.events).not.toContain("hard-control");
+		expect(process.cleanups).toEqual([
+			{
+				launchId: process.current().launchId,
+				pid: process.current().pid,
+				startToken: `darwin:${process.current().pid}:1`,
+			},
+		]);
 		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+	test("fails closed without retiring dead authority when runtime cleanup fails", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.exitOnNextWait();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: {
+				...process.adapter,
+				cleanupExited: async () => {
+					throw new RuntimeCleanupStoreError("synthetic runtime cleanup failure");
+				},
+			},
+			createClient: clientFactory(process, []),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const result = await supervisor.stop({ consumerClosed: true });
+		expect(result).toMatchObject({ kind: "failure", state: { reason: "drain_recovery_failed" } });
+		expect(await store.readCurrent("http://127.0.0.1:7777")).not.toBeNull();
+	});
+
+	test("refreshes the admission epoch before beginning an attached control drain", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.exitOnNextWait();
+		const calls: string[] = [];
+		let observedAdmissionEpoch: number | undefined;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: () => ({
+				handshake: async () => {
+					const current = process.current();
+					const base = boundClient(bindingFor(current.pid, current.launchId), calls);
+					return {
+						...base,
+						renewClient: async () => ({ result: "renewed", admissionEpoch: 8 }) as never,
+						beginControlDrain: async input => {
+							observedAdmissionEpoch = input.expectedAdmissionEpoch;
+							return await base.beginControlDrain(input);
+						},
+					};
+				},
+			}),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(observedAdmissionEpoch).toBe(8);
+	});
+
+	test("bounds attached graceful exit wait before governed hard-signal cleanup", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.waitResults.push(false);
+		const calls: string[] = [];
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(process.waitTimeouts.filter(timeout => timeout > 0)[0]).toBe(2_000);
+		expect(calls).toContain("graceful:timeout");
+		expect(calls).toContain("hard-signal:sent");
 	});
 
 	test("hard signal delivery never rolls back when exit observation times out", async () => {
@@ -2573,6 +3038,184 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(sleeps).toContain(250);
 		expect(process.spawnCount()).toBe(2);
 	});
+	test("can hand unexpected child death to a higher-level runtime owner", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const failed = Promise.withResolvers<LifecycleState>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+			restartOnUnexpectedChildExit: false,
+			stateChanged: state => {
+				if (state.name === "backing-off") failed.resolve(state);
+			},
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		expect(await failed.promise).toMatchObject({
+			name: "backing-off",
+			attempt: 1,
+		});
+		expect(process.spawnCount()).toBe(1);
+		const successor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+		});
+		expect((await successor.connect()).kind).toBe("ready");
+		const successorRecord = await store.readCurrent("http://127.0.0.1:7777");
+		expect(successorRecord).not.toBeNull();
+
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toEqual(successorRecord);
+		expect(process.spawnCount()).toBe(2);
+		process.exitOnNextWait();
+		expect((await successor.stop({ consumerClosed: true })).kind).toBe("stopped");
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+	test("close waits for an in-flight child replacement and stops its successor", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const sleepStarted = Promise.withResolvers<void>();
+		const releaseSleep = Promise.withResolvers<void>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => 1_000,
+				sleep: async () => {
+					sleepStarted.resolve();
+					await releaseSleep.promise;
+				},
+			},
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		await sleepStarted.promise;
+		process.exitOnNextWait();
+		const closing = supervisor.close({ consumerClosed: true });
+		releaseSleep.resolve();
+
+		expect((await closing).kind).toBe("stopped");
+		expect(process.spawnCount()).toBe(2);
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+	test("restart waits for an in-flight child replacement before replacing its successor", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const sleeps: number[] = [];
+		const sleepStarted = Promise.withResolvers<void>();
+		const releaseSleep = Promise.withResolvers<void>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => 1_000,
+				sleep: async milliseconds => {
+					sleeps.push(milliseconds);
+					sleepStarted.resolve();
+					await releaseSleep.promise;
+				},
+			},
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		await sleepStarted.promise;
+		process.exitOnNextWait();
+		const restarting = supervisor.restart({ consumerClosed: true });
+		releaseSleep.resolve();
+
+		expect((await restarting).kind).toBe("ready");
+		expect(sleeps).toEqual([250]);
+		expect(process.spawnCount()).toBe(3);
+	});
+	test("restart waits through chained child replacements before starting another generation", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const sleeps: number[] = [];
+		const firstSleepStarted = Promise.withResolvers<void>();
+		const secondSleepStarted = Promise.withResolvers<void>();
+		const releaseFirstSleep = Promise.withResolvers<void>();
+		const releaseSecondSleep = Promise.withResolvers<void>();
+		let readyCount = 0;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => 1_000,
+				sleep: async milliseconds => {
+					sleeps.push(milliseconds);
+					if (sleeps.length === 1) {
+						firstSleepStarted.resolve();
+						await releaseFirstSleep.promise;
+						return;
+					}
+					if (sleeps.length === 2) {
+						secondSleepStarted.resolve();
+						await releaseSecondSleep.promise;
+						return;
+					}
+					throw new Error("unexpected concurrent child recovery");
+				},
+			},
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+			stateChanged: state => {
+				if (state.name === "ready" && ++readyCount === 2) process.crash();
+			},
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+
+		process.crash();
+		await firstSleepStarted.promise;
+		process.exitOnNextWait();
+		const restarting = supervisor.restart({ consumerClosed: true });
+		releaseFirstSleep.resolve();
+		await secondSleepStarted.promise;
+		releaseSecondSleep.resolve();
+
+		expect((await restarting).kind).toBe("ready");
+		expect(sleeps).toEqual([250, 1_000]);
+		expect(process.spawnCount()).toBe(4);
+	});
+	test("surfaces unexpected runtime cleanup failure without restarting or retiring authority", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const failed = Promise.withResolvers<LifecycleState>();
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: clientFactory(process, []),
+			stateChanged: state => {
+				if (state.name === "recovery-needed") failed.resolve(state);
+			},
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const exited = process.current();
+
+		process.cleanupFailure(new RuntimeCleanupStoreError("synthetic runtime cleanup failure"), exited.pid);
+		expect(await failed.promise).toMatchObject({
+			name: "recovery-needed",
+			reason: "authority_store_unavailable",
+		});
+		expect(process.spawnCount()).toBe(1);
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toMatchObject({
+			pid: exited.pid,
+			launchId: exited.launchId,
+		});
+	});
+
 	test("monitors an adopted child and replaces it once after confirmed death", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();
@@ -2630,6 +3273,37 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(current?.pid).toBe(process.current().pid);
 	});
 
+	test("confirmed startup death cleans the bound runtime identity before one replacement", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		let first: { readonly pid: number; readonly launchId: string } | undefined;
+		let handshakes = 0;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			endpointAbsent: async () => true,
+			createClient: () => ({
+				handshake: async () => {
+					handshakes++;
+					if (handshakes === 1) {
+						first = process.current();
+						process.crash(first.pid);
+						return await new Promise<never>(() => {});
+					}
+					const current = process.current();
+					return boundClient(bindingFor(current.pid, current.launchId), []);
+				},
+			}),
+		});
+
+		expect((await supervisor.connect()).kind).toBe("ready");
+		if (first === undefined) throw new Error("expected first startup identity");
+		expect(process.spawnCount()).toBe(2);
+		expect(process.cleanups).toEqual([
+			{ launchId: first.launchId, pid: first.pid, startToken: `darwin:${first.pid}:1` },
+		]);
+	});
+
 	test("durable identity bind failure closes the unreleased child before one safe replacement", async () => {
 		let startingRenames = 0;
 		const store = await temporaryStore({
@@ -2679,6 +3353,35 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			store.claimStart("http://127.0.0.1:7777"),
 		);
 		expect(claim.kind).toBe("claimed");
+	});
+
+	test("explicit stop retires a confirmed-dead authority and its runtime cleanup identity without reconnecting", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const endpoint = "http://127.0.0.1:7777";
+		const starter = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, []),
+		});
+		expect((await starter.connect()).kind).toBe("ready");
+		const exited = process.current();
+		process.crash(exited.pid);
+		const calls: string[] = [];
+		const stopper = new LifecycleSupervisor(resolved("local-owned"), {
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+			endpointAbsent: async () => true,
+		});
+
+		expect((await stopper.stop({ consumerClosed: true })).kind).toBe("stopped");
+		expect(process.spawnCount()).toBe(1);
+		expect(calls).toEqual([]);
+		expect(process.cleanups).toEqual([
+			{ launchId: exited.launchId, pid: exited.pid, startToken: `darwin:${exited.pid}:1` },
+		]);
+		expect(await store.readCurrent(endpoint)).toBeNull();
 	});
 
 	test("explicit restart of an absent engine starts exactly one process without a drain cycle", async () => {
@@ -2765,6 +3468,9 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				const preserved = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
 				expect(preserved.kind).toBe("dead-bound");
 			}
+			expect(process.cleanups).toEqual(
+				absent === true ? [{ launchId, pid: enginePid, startToken: `darwin:${enginePid}:1` }] : [],
+			);
 			expect(process.events).not.toContain("hard-control");
 		}
 	});
@@ -3690,6 +4396,31 @@ describe("CLI lifecycle composition boundary", () => {
 		expect(`${result.stdout}${result.stderr}`).not.toContain("BreadBoard engine:");
 		expect(result.stderr).not.toContain("missing_engine_artifact");
 	});
+
+	test("native default and explicit off preserve print, RPC, RPC UI, and ACP surfaces", async () => {
+		const home = await temporaryLifecycleHome();
+		const missingModel = "definitely-missing-native-model";
+		const surfaces = [
+			{
+				args: ["--print", "hello", "--model", missingModel],
+				exitCode: 1,
+				output: `Model "${missingModel}" not found`,
+			},
+			{ args: ["--mode", "rpc"], exitCode: 0, output: '"type":"ready"' },
+			{ args: ["--mode", "rpc-ui"], exitCode: 0, output: '"type":"ready"' },
+			{ args: ["--mode", "acp"], exitCode: 0 },
+		] as const;
+		for (const engineSelection of [[], ["--engine-mode", "off"]] as const) {
+			for (const surface of surfaces) {
+				const result = await runLifecycleCli(["launch", ...engineSelection, ...surface.args], home);
+				const output = `${result.stdout}${result.stderr}`;
+				expect(result.exitCode).toBe(surface.exitCode);
+				if ("output" in surface) expect(output).toContain(surface.output);
+				expect(output).not.toContain("BreadBoard engine:");
+				expect(output).not.toContain("missing_engine_artifact");
+			}
+		}
+	}, 30_000);
 
 	test("explicit BreadBoard engine selection rejects native surfaces on stderr only", async () => {
 		const home = await temporaryLifecycleHome();

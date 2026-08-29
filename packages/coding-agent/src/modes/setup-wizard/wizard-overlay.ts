@@ -9,6 +9,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
+import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import { gradientLogo, PI_LOGO } from "../components/welcome";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
@@ -77,6 +78,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	constructor(
 		readonly ctx: InteractiveModeContext,
 		readonly scenes: readonly SetupScene[],
+		private readonly providerAuthPort?: ProviderAuthPort,
 	) {}
 
 	run(): Promise<void> {
@@ -273,6 +275,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const scene = this.scenes[this.#sceneIndex];
 		const host: SetupSceneHost = {
 			ctx: this.ctx,
+			providerAuthPort: this.providerAuthPort,
 			requestRender: () => this.ctx.ui.requestRender(),
 			finish: (_result: SetupSceneResult) => this.#finishScene(),
 			setFocus: component => {

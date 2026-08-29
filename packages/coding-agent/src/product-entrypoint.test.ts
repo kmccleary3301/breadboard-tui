@@ -30,6 +30,7 @@ async function runProcess(
 		XDG_CACHE_HOME: path.join(home, "xdg-cache"),
 	};
 	delete env.BREADBOARD_PRODUCT;
+	delete env.BREADBOARD_CONFIG_DIR;
 	delete env.PI_CONFIG_DIR;
 	delete env.PI_CODING_AGENT_DIR;
 	Object.assign(env, overrides);
@@ -58,7 +59,7 @@ describe("BreadBoard product entrypoint", () => {
 		const result = await runProcess(["src/bb.ts", "--version"], await temporaryHome());
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout.trim()).toBe("bb/0.1.0-rc.3 omp/18.0.1 sdk/0.3.0 engine-api >=0.1.0 <0.4.0");
+		expect(result.stdout.trim()).toBe("bb/0.1.0-rc.4 omp/18.0.1 sdk/0.3.0 engine-api >=0.1.0 <0.4.0");
 	});
 
 	test("uses the bb identity and never touches a native ~/.omp tree", async () => {
@@ -71,7 +72,7 @@ describe("BreadBoard product entrypoint", () => {
 		const result = await runProcess(["src/bb.ts", "--help"], home);
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout).toContain("bb v0.1.0-rc.3");
+		expect(result.stdout).toContain("bb v0.1.0-rc.4");
 		expect(result.stdout).toContain("~/.breadboard/agent");
 		expect(await readFile(sentinel, "utf8")).toBe("native-only\n");
 		expect(await Bun.file(path.join(home, ".breadboard")).exists()).toBe(false);
@@ -83,6 +84,123 @@ describe("BreadBoard product entrypoint", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.trim()).toBe("omp/18.0.1");
 		expect(await Bun.file(path.join(home, ".breadboard")).exists()).toBe(false);
+	});
+
+	test("ignores BreadBoard config overrides in the native entrypoint", async () => {
+		const home = await temporaryHome();
+		const nativeConfigDir = "native-config";
+		const productRoot = path.join(home, "product-config");
+		const dirsModule = path.join(packageDir, "..", "utils", "src", "dirs.ts");
+		const probe =
+			'await import("./src/omp.ts"); const dirs = await import(process.env.BB_DIRS_MODULE); process.stdout.write(JSON.stringify({ product: dirs.IS_BREADBOARD_PRODUCT, root: dirs.getConfigRootDir() }));';
+		const result = await runProcess(["-e", probe], home, {
+			BREADBOARD_PRODUCT: "1",
+			BREADBOARD_CONFIG_DIR: productRoot,
+			PI_CONFIG_DIR: nativeConfigDir,
+			BB_DIRS_MODULE: dirsModule,
+		});
+
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout)).toEqual({ product: false, root: path.join(home, nativeConfigDir) });
+	});
+
+	test("keeps native identity when the selected profile env reintroduces the product marker", async () => {
+		const home = await temporaryHome();
+		const agentDir = path.join(home, ".omp", "agent");
+		const productRoot = path.join(home, "hostile-product-config");
+		await mkdir(agentDir, { recursive: true });
+		await writeFile(path.join(agentDir, ".env"), "BREADBOARD_PRODUCT=1\n");
+
+		const result = await runProcess(["src/omp.ts", "--help"], home, {
+			BREADBOARD_PRODUCT: "1",
+			BREADBOARD_CONFIG_DIR: productRoot,
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("omp v18.0.1");
+		expect(result.stdout).toContain("~/.omp/agent");
+		expect(result.stdout).toContain("--engine-mode");
+		expect(result.stdout).toContain("--engine-url");
+		expect(result.stdout).toContain("engine         Manage the governed BreadBoard engine lifecycle");
+		expect(result.stdout).not.toContain("~/.breadboard");
+		expect(await Bun.file(productRoot).exists()).toBe(false);
+	});
+
+	test("pins native identity across profile env and native-loader initialization", async () => {
+		const home = await temporaryHome();
+		const agentDir = path.join(home, ".omp", "agent");
+		const productRoot = path.join(home, "hostile-product-config");
+		const nativeLoaderModule = path.join(packageDir, "..", "natives", "native", "loader-state.js");
+		await mkdir(agentDir, { recursive: true });
+		await writeFile(path.join(agentDir, ".env"), "BREADBOARD_PRODUCT=1\n");
+		const probe =
+			'await import("./src/omp.ts"); await import("@oh-my-pi/pi-utils/env"); const dirs = await import("@oh-my-pi/pi-utils/dirs"); const loader = await import(process.env.BB_NATIVE_LOADER_MODULE); process.stdout.write(JSON.stringify({ marker: process.env.BREADBOARD_PRODUCT, root: dirs.getConfigRootDir(), natives: loader.resolveNativesDir({ homeDir: process.env.HOME, pathExists: () => false }) }));';
+
+		const result = await runProcess(["-e", probe], home, {
+			BREADBOARD_PRODUCT: "1",
+			BREADBOARD_CONFIG_DIR: productRoot,
+			BB_NATIVE_LOADER_MODULE: nativeLoaderModule,
+		});
+
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout)).toEqual({
+			marker: "0",
+			root: path.join(home, ".omp"),
+			natives: path.join(home, ".omp", "natives"),
+		});
+		expect(await Bun.file(productRoot).exists()).toBe(false);
+	});
+
+	test("renders BreadBoard welcome copy only in an isolated product process", async () => {
+		const probe = String.raw`
+			const { Settings } = await import("./src/config/settings.ts");
+			const { initTheme } = await import("./src/modes/theme/theme.ts");
+			await Settings.init({ inMemory: true });
+			await initTheme(false);
+			const { BB_LOGO, PI_LOGO, WelcomeComponent } = await import("./src/modes/components/welcome.ts");
+			const stripAnsi = value => value.replace(/\x1b\[[0-9;]*m/g, "");
+			const hasRow = (lines, row) => lines.some(line => line.includes(row.trimEnd()));
+			const welcome = new WelcomeComponent("0.1.0-rc.4", "model", "provider");
+			const lines = welcome.render(90).map(stripAnsi);
+			const widths = [20, 12, 6].map(width => {
+				welcome.invalidate();
+				return welcome.render(width).every(line => [...stripAnsi(line)].length <= width);
+			});
+			process.stdout.write(JSON.stringify({
+				header: lines[0],
+				breadboardLogo: BB_LOGO.every(row => hasRow(lines, row)),
+				ompLogo: hasRow(lines, PI_LOGO[1]),
+				widths,
+			}));
+		`;
+		const result = await runProcess(["-e", probe], await temporaryHome(), { BREADBOARD_PRODUCT: "1" });
+
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout)).toEqual({
+			header: expect.stringContaining("BreadBoard v0.1.0-rc.4"),
+			breadboardLogo: true,
+			ompLogo: false,
+			widths: [true, true, true],
+		});
+	});
+
+	test("selects product theme defaults only in an isolated product process", async () => {
+		const probe = String.raw`
+			const { Settings } = await import("./src/config/settings.ts");
+			const theme = await import("./src/modes/theme/theme.ts");
+			await Settings.init({ inMemory: true });
+			await theme.initTheme(false);
+			const defaultTheme = theme.getCurrentThemeName();
+			await theme.initTheme(false, undefined, undefined, "dark", "light");
+			process.stdout.write(JSON.stringify({ defaultTheme, explicitTheme: theme.getCurrentThemeName() }));
+		`;
+		const result = await runProcess(["-e", probe], await temporaryHome(), {
+			BREADBOARD_PRODUCT: "1",
+			COLORFGBG: "15;0",
+		});
+
+		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
+		expect(JSON.parse(result.stdout)).toEqual({ defaultTheme: "breadboard", explicitTheme: "dark" });
 	});
 
 	test("bootstraps explicit BreadBoard config and agent path overrides", async () => {

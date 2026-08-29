@@ -27,6 +27,11 @@ export interface SessionTeardownDeps {
 	 */
 	saveDraft: (text: string) => Promise<void>;
 	/**
+	 * Finish runtime-owned durable writes while the session manager is still
+	 * open. Failures are rethrown only after disposeSession has run.
+	 */
+	beforeDispose?: () => Promise<void>;
+	/**
 	 * Dispose the session — emits `session_shutdown`, drains async jobs, closes
 	 * the manager. Receives the postmortem reason that triggered the teardown
 	 * (undefined on the keypress/`/exit` path) so `AgentSession.dispose()` can
@@ -73,7 +78,21 @@ export function createSessionTeardown(deps: SessionTeardownDeps): SessionTeardow
 		} catch (err) {
 			logger.warn("Failed to save session draft during teardown", { error: String(err) });
 		}
-		await deps.disposeSession(reason);
+		let beforeDisposeError: unknown;
+		try {
+			await deps.beforeDispose?.();
+		} catch (error) {
+			beforeDisposeError = error;
+		}
+		try {
+			await deps.disposeSession(reason);
+		} catch (error) {
+			if (beforeDisposeError !== undefined) {
+				throw new AggregateError([beforeDisposeError, error], "Pre-dispose barrier and session disposal failed");
+			}
+			throw error;
+		}
+		if (beforeDisposeError !== undefined) throw beforeDisposeError;
 	};
 	return (reason?: postmortem.Reason) => {
 		if (!pending) pending = run(reason);

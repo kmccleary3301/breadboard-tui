@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
-import { resolveBreadboardBackendModel, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
+import {
+	resolveBreadboardBackendModel,
+	resolveStartupNetworkPolicy,
+	runRootCommand,
+} from "@oh-my-pi/pi-coding-agent/main";
 import { getConfigRootDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 
 const SESSION_FIXTURE = path.join(import.meta.dir, "fixtures", "large-session.jsonl");
@@ -100,6 +104,19 @@ describe("runRootCommand — startup early exits", () => {
 	});
 });
 
+describe("BreadBoard startup network policy", () => {
+	it("keeps BreadBoard startup offline without changing native OMP policy", () => {
+		expect(resolveStartupNetworkPolicy(true)).toEqual({
+			backgroundUpdates: false,
+			modelRefreshStrategy: "offline",
+		});
+		expect(resolveStartupNetworkPolicy(false)).toEqual({
+			backgroundUpdates: true,
+			modelRefreshStrategy: "online-if-uncached",
+		});
+	});
+});
+
 describe("BreadBoard backend model authority", () => {
 	it("maps the engine codex runtime id to OMP's openai-codex catalog id", () => {
 		const model = { provider: "openai-codex", id: "gpt-5.5" } as Model;
@@ -109,5 +126,45 @@ describe("BreadBoard backend model authority", () => {
 				getAll: () => [model],
 			}),
 		).toBe(model);
+	});
+
+	it.each(["mock", "cli_mock", "smoke", "replay"])(
+		"builds a provider-free %s model only for BreadBoard's custom stream",
+		provider => {
+			const model = resolveBreadboardBackendModel(`${provider}/reference`, {
+				getAll: () => [],
+			});
+
+			expect(model).toMatchObject({
+				provider,
+				id: "reference",
+				name: `${provider}/reference`,
+				api: "openai-completions",
+				baseUrl: "http://127.0.0.1:9/v1",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 1_000_000,
+				maxTokens: 32_768,
+			});
+		},
+	);
+
+	it("prefers an exact configured model over the provider-free fallback", () => {
+		const model = { provider: "mock", id: "reference" } as Model;
+
+		expect(
+			resolveBreadboardBackendModel("mock/reference", {
+				getAll: () => [model],
+			}),
+		).toBe(model);
+	});
+
+	it("rejects provider-free model ids outside the explicit local allowlist", () => {
+		expect(() =>
+			resolveBreadboardBackendModel("openai/reference", {
+				getAll: () => [],
+			}),
+		).toThrow("BreadBoard backend model openai/reference is not present in the loaded OMP model registry.");
 	});
 });

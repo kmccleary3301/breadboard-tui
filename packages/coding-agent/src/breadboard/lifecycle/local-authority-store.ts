@@ -147,12 +147,13 @@ export type AuthorityStoreErrorCode =
 	| "start_claim_integrity";
 
 export class LocalAuthorityStoreError extends Error {
-	override readonly name = "LocalAuthorityStoreError";
+	override readonly name: string = "LocalAuthorityStoreError";
 	constructor(
 		readonly code: AuthorityStoreErrorCode,
 		message: string,
+		options?: ErrorOptions,
 	) {
-		super(message);
+		super(message, options);
 	}
 }
 
@@ -201,10 +202,12 @@ const CONTROL_SECRET_MAGIC = Buffer.from("p30.local-control-secret.v1\0", "utf8"
 const LOCK_EX = 2;
 const LOCK_NB = 4;
 const LOCK_UN = 8;
+const O_CLOEXEC = process.platform === "darwin" ? 0x01000000 : 0x00080000;
 
 function loadNativeSystem() {
 	const symbols = {
 		flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+		mkdirat: { args: [FFIType.i32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
 		openat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 		renameat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
 		unlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
@@ -216,6 +219,7 @@ function loadNativeSystem() {
 		});
 		return {
 			flock: library.symbols.flock,
+			mkdirat: library.symbols.mkdirat,
 			openat: library.symbols.openat,
 			renameat: library.symbols.renameat,
 			unlinkat: library.symbols.unlinkat,
@@ -229,6 +233,7 @@ function loadNativeSystem() {
 		});
 		return {
 			flock: library.symbols.flock,
+			mkdirat: library.symbols.mkdirat,
 			openat: library.symbols.openat,
 			renameat: library.symbols.renameat,
 			unlinkat: library.symbols.unlinkat,
@@ -421,6 +426,26 @@ function relativeName(pathOrName: string): string {
 		throw new LocalAuthorityStoreError("root_integrity", "authority child name is invalid");
 	}
 	return name;
+}
+
+function relativeDirectoryComponents(relativePath: string): readonly string[] {
+	const components = relativePath.split("/");
+	if (
+		relativePath.length === 0 ||
+		relativePath.length > 4095 ||
+		components.join("/") !== relativePath ||
+		components.some(
+			component =>
+				component.length === 0 ||
+				component === "." ||
+				component === ".." ||
+				component.includes("\0") ||
+				Buffer.byteLength(component) > 255,
+		)
+	) {
+		throw new LocalAuthorityStoreError("root_integrity", "authority private directory path is invalid");
+	}
+	return components;
 }
 
 function cPath(name: string): Buffer {
@@ -740,6 +765,104 @@ export class LocalAuthorityStore {
 
 	static endpointKey(endpoint: string): string {
 		return endpointKey(endpoint);
+	}
+
+	async ensurePrivateDirectory(relativePath: string): Promise<string> {
+		const components = relativeDirectoryComponents(relativePath);
+		await this.initialize();
+		await this.#assertRootIdentity();
+		const native = requireNativeSystem();
+		let directoryFd = this.#rootFd();
+		let ownsDirectoryFd = false;
+		try {
+			for (const component of components) {
+				const encoded = cPath(component);
+				let created = false;
+				let childFd = Number(
+					native.openat(
+						directoryFd,
+						ptr(encoded),
+						constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC,
+						0,
+					),
+				);
+				if (childFd < 0) {
+					const openError = systemError("openat", component);
+					if (!isErrno(openError, "ENOENT")) {
+						throw new LocalAuthorityStoreError(
+							"root_integrity",
+							"authority private directory component is invalid",
+						);
+					}
+					if (Number(native.mkdirat(directoryFd, ptr(encoded), 0o700)) === 0) {
+						created = true;
+					} else {
+						const createError = systemError("mkdirat", component);
+						if (!isErrno(createError, "EEXIST")) {
+							throw new LocalAuthorityStoreError(
+								"root_integrity",
+								"authority private directory component could not be created",
+							);
+						}
+					}
+					childFd = Number(
+						native.openat(
+							directoryFd,
+							ptr(encoded),
+							constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC,
+							0,
+						),
+					);
+					if (childFd < 0) {
+						throw new LocalAuthorityStoreError(
+							"root_integrity",
+							"authority private directory component changed during creation",
+						);
+					}
+				}
+				try {
+					if (created) fchmodSync(childFd, 0o700);
+					const metadata = fstatSync(childFd);
+					if (!metadata.isDirectory() || metadata.uid !== this.#uid() || (metadata.mode & 0o777) !== 0o700) {
+						throw new LocalAuthorityStoreError(
+							"root_integrity",
+							"authority private directory owner, type, or permissions are invalid",
+						);
+					}
+					if (created) {
+						fsyncSync(childFd);
+						fsyncSync(directoryFd);
+					}
+					await this.#assertRootIdentity();
+				} catch (error) {
+					closeSync(childFd);
+					throw error;
+				}
+				if (ownsDirectoryFd) closeSync(directoryFd);
+				directoryFd = childFd;
+				ownsDirectoryFd = true;
+			}
+			const path = join(this.root, ...components);
+			const descriptorMetadata = fstatSync(directoryFd);
+			const namedMetadata = await lstat(path);
+			if (
+				!namedMetadata.isDirectory() ||
+				namedMetadata.isSymbolicLink() ||
+				namedMetadata.uid !== this.#uid() ||
+				(namedMetadata.mode & 0o777) !== 0o700 ||
+				namedMetadata.dev !== descriptorMetadata.dev ||
+				namedMetadata.ino !== descriptorMetadata.ino
+			) {
+				throw new LocalAuthorityStoreError("root_integrity", "authority private directory identity changed");
+			}
+			await this.#assertRootIdentity();
+			return path;
+		} catch (error) {
+			if (error instanceof LocalAuthorityStoreError) throw error;
+			throw new LocalAuthorityStoreError("root_integrity", "authority private directory operation failed");
+		} finally {
+			if (ownsDirectoryFd) closeSync(directoryFd);
+		}
 	}
 
 	#validateRoot(metadata: Stats): void {

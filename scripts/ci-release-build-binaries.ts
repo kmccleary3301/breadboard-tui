@@ -15,7 +15,7 @@ interface BinaryTarget {
 
 const repoRoot = path.join(import.meta.dir, "..");
 const binariesDir = path.join(repoRoot, "packages", "coding-agent", "binaries");
-const entrypoint = path.join(repoRoot, "packages", "coding-agent", "src", "cli.ts");
+const entrypoint = path.join(repoRoot, "packages", "coding-agent", "src", "omp.ts");
 const transformersManifest: unknown = createRequire(import.meta.url)("@huggingface/transformers/package.json");
 if (
 	typeof transformersManifest !== "object" ||
@@ -134,7 +134,7 @@ async function buildBinary(target: BinaryTarget): Promise<void> {
 	await embedNative(target);
 	if (isDryRun) {
 		console.log(
-			`DRY RUN Bun.build target=${target.target} outfile=${target.outfile} external=${COMPILED_EXTERNAL_DEPENDENCIES.join(",")}`,
+			`DRY RUN Bun.build entrypoint=${path.relative(repoRoot, entrypoint)} target=${target.target} outfile=${target.outfile} external=${COMPILED_EXTERNAL_DEPENDENCIES.join(",")}`,
 		);
 		return;
 	}

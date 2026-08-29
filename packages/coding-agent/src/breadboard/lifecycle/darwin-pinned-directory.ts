@@ -6,6 +6,16 @@ const O_NOFOLLOW = 0x00000100;
 const O_DIRECTORY = 0x00100000;
 const O_CLOEXEC = 0x01000000;
 const EINTR = 4;
+const EPERM = 1;
+const ENOENT = 2;
+const EEXIST = 17;
+const ENOTDIR = 20;
+const EISDIR = 21;
+const ELOOP = 62;
+const ENOTEMPTY = 66;
+const AT_REMOVEDIR = 0x80;
+const RENAME_EXCL = 0x04;
+const RENAME_NOFOLLOW_ANY = 0x10;
 
 const S_IFMT = 0xf000;
 const S_IFREG = 0x8000;
@@ -31,6 +41,10 @@ const DIRENT_NAMLEN_OFFSET = 18;
 const DIRENT_TYPE_OFFSET = 20;
 const DIRENT_NAME_OFFSET = 21;
 const DIRECTORY_BUFFER_BYTES = 64 * 1024;
+const STATFS_BYTES = 2168;
+const STATFS_FSID_OFFSET = 48;
+const STATFS_MNTONNAME_OFFSET = 88;
+const STATFS_MNTONNAME_BYTES = 1024;
 
 export const DARWIN_PINNED_DIRECTORY_LIMITS = Object.freeze({
 	maxRootPathBytes: 1023,
@@ -73,6 +87,7 @@ export interface PinnedDirectory {
 	readFile(relativePath: string, maxBytes: number): Promise<Buffer>;
 	readlink(relativePath: string, maxBytes: number): Promise<Buffer>;
 	listLeaves(options: PinnedDirectoryListOptions): Promise<readonly string[]>;
+	removeDirectoryTree(relativePath: string, expected?: Readonly<Pick<PinnedStat, "dev" | "ino">>): Promise<void>;
 	close(): Promise<void>;
 }
 
@@ -101,9 +116,16 @@ const SYSTEM_SYMBOLS = {
 	open: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	openat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	fstat: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+	fstatfs: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
 	pread: { args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.i64], returns: FFIType.i64 },
 	readlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
 	__getdirentries64: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+	fchmod: { args: [FFIType.i32, FFIType.u16], returns: FFIType.i32 },
+	renameatx_np: {
+		args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32],
+		returns: FFIType.i32,
+	},
+	unlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
 	close: { args: [FFIType.i32], returns: FFIType.i32 },
 	__error: { args: [], returns: FFIType.ptr },
 } as const;
@@ -124,8 +146,13 @@ function currentErrno(lib: SystemLibrary): number {
 	return address === null ? 0 : read.i32(address);
 }
 
-function nativeError(lib: SystemLibrary, operation: string, relativePath?: string): DarwinPinnedDirectoryError {
-	const errno = currentErrno(lib);
+function nativeError(
+	lib: SystemLibrary,
+	operation: string,
+	relativePath?: string,
+	errnoOverride?: number,
+): DarwinPinnedDirectoryError {
+	const errno = errnoOverride ?? currentErrno(lib);
 	const suffix = relativePath === undefined ? "" : ` for ${JSON.stringify(relativePath)}`;
 	return new DarwinPinnedDirectoryError(`${operation}${suffix} failed with errno ${errno}`, {
 		operation,
@@ -199,6 +226,23 @@ function fstatFd(lib: SystemLibrary, fd: number, operation: string, relativePath
 	const bytes = Buffer.alloc(STAT_BYTES);
 	if (Number(lib.symbols.fstat(fd, ptr(bytes))) !== 0) throw nativeError(lib, operation, relativePath);
 	return parseStat(bytes);
+}
+
+type MountIdentityReader = (fd: number, relativePath: string) => string;
+type MountIdentityTransform = (fd: number, relativePath: string, actualIdentity: string) => string;
+type BeforeRetirementRename = (parentFd: number, name: string, relativePath: string) => void;
+
+function mountIdentityFd(lib: SystemLibrary, fd: number, relativePath: string, bytes: Buffer): string {
+	for (;;) {
+		if (Number(lib.symbols.fstatfs(fd, ptr(bytes))) === 0) break;
+		if (currentErrno(lib) !== EINTR) throw nativeError(lib, "fstatfs", relativePath);
+	}
+	const mountName = bytes.subarray(STATFS_MNTONNAME_OFFSET, STATFS_MNTONNAME_OFFSET + STATFS_MNTONNAME_BYTES);
+	const terminator = mountName.indexOf(0);
+	if (terminator < 0) throw invalid("fstatfs returned an unterminated mount name", relativePath);
+	return `${bytes.subarray(STATFS_FSID_OFFSET, STATFS_FSID_OFFSET + 8).toString("hex")}:${mountName
+		.subarray(0, terminator)
+		.toString("hex")}`;
 }
 
 function sameIdentity(left: PinnedStat, right: Readonly<Pick<PinnedStat, "dev" | "ino">>): boolean {
@@ -418,6 +462,183 @@ function directoryEntries(lib: SystemLibrary, fd: number): readonly DirectoryEnt
 	return entries;
 }
 
+interface RemovalBudget {
+	remainingEntries: number;
+	rootDev?: bigint;
+	rootMountIdentity?: string;
+	readonly readMountIdentity: MountIdentityReader;
+	readonly beforeRetirementRename?: BeforeRetirementRename;
+}
+
+function assertCleanupMount(directoryFd: number, relativePath: string, budget: RemovalBudget): void {
+	const identity = budget.readMountIdentity(directoryFd, relativePath);
+	if (budget.rootMountIdentity === undefined) budget.rootMountIdentity = identity;
+	else if (identity !== budget.rootMountIdentity) {
+		throw invalid("cleanup refuses to cross a mount boundary", relativePath);
+	}
+}
+
+function makeDirectoryWritable(lib: SystemLibrary, fd: number, relativePath: string): void {
+	for (;;) {
+		if (Number(lib.symbols.fchmod(fd, 0o700)) === 0) break;
+		if (currentErrno(lib) !== EINTR) throw nativeError(lib, "fchmod", relativePath);
+	}
+	if (fstatFd(lib, fd, "fstat", relativePath).type !== "directory") {
+		throw invalid("directory identity changed while making cleanup writable", relativePath);
+	}
+}
+
+function unlinkAtErrno(lib: SystemLibrary, directoryFd: number, name: string, flags: number): number | undefined {
+	const encoded = cString(name);
+	for (;;) {
+		if (Number(lib.symbols.unlinkat(directoryFd, ptr(encoded), flags)) === 0) return undefined;
+		const code = currentErrno(lib);
+		if (code !== EINTR) return code;
+	}
+}
+
+function renameAtExclusiveErrno(lib: SystemLibrary, parentFd: number, from: string, to: string): number | undefined {
+	const encodedFrom = cString(from);
+	const encodedTo = cString(to);
+	for (;;) {
+		if (
+			Number(
+				lib.symbols.renameatx_np(
+					parentFd,
+					ptr(encodedFrom),
+					parentFd,
+					ptr(encodedTo),
+					RENAME_EXCL | RENAME_NOFOLLOW_ANY,
+				),
+			) === 0
+		) {
+			return undefined;
+		}
+		const code = currentErrno(lib);
+		if (code !== EINTR) return code;
+	}
+}
+
+function retirementName(identity: Readonly<Pick<PinnedStat, "dev" | "ino">>): string {
+	return `.bb-retire-${BigInt.asUintN(64, identity.dev).toString(16)}-${BigInt.asUintN(64, identity.ino).toString(16)}`;
+}
+
+function removeDirectoryContents(lib: SystemLibrary, directoryFd: number, prefix: string, budget: RemovalBudget): void {
+	assertCleanupMount(directoryFd, prefix, budget);
+	makeDirectoryWritable(lib, directoryFd, prefix);
+	for (;;) {
+		const enumerationFd = openDirectoryAt(lib, directoryFd, ".", prefix);
+		let entries: readonly DirectoryEntry[];
+		try {
+			entries = directoryEntries(lib, enumerationFd);
+		} finally {
+			closeQuietly(lib, enumerationFd);
+		}
+		if (entries.length === 0) return;
+		for (const entry of entries) {
+			if (budget.remainingEntries-- <= 0) {
+				throw invalid("directory cleanup exceeds its entry limit", prefix);
+			}
+			const relativePath = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+			removeDirectoryEntry(lib, directoryFd, entry.name, relativePath, budget);
+		}
+	}
+}
+
+// Recursive mutation stays on same-mount opened descriptors. Empty directories
+// move atomically to an exclusive retirement name before identity verification.
+function removeDirectoryEntry(
+	lib: SystemLibrary,
+	parentFd: number,
+	name: string,
+	relativePath: string,
+	budget: RemovalBudget,
+	expected?: Readonly<Pick<PinnedStat, "dev" | "ino">>,
+	requireDirectory = false,
+): void {
+	for (;;) {
+		let childFd: number;
+		try {
+			childFd = openDirectoryAt(lib, parentFd, name, relativePath);
+		} catch (error) {
+			const code = error instanceof DarwinPinnedDirectoryError ? error.errno : undefined;
+			if (code === ENOENT) return;
+			if (!requireDirectory && (code === ENOTDIR || code === ELOOP)) {
+				const unlinkCode = unlinkAtErrno(lib, parentFd, name, 0);
+				if (unlinkCode === undefined || unlinkCode === ENOENT) return;
+				if (unlinkCode === EPERM || unlinkCode === EISDIR) continue;
+				throw nativeError(lib, "unlinkat", relativePath, unlinkCode);
+			}
+			throw error;
+		}
+		try {
+			const identity = fstatFd(lib, childFd, "fstat", relativePath);
+			if (budget.rootDev === undefined) budget.rootDev = identity.dev;
+			else if (identity.dev !== budget.rootDev) {
+				throw invalid("cleanup refuses to cross a filesystem boundary", relativePath);
+			}
+			if (expected !== undefined && !sameIdentity(identity, expected)) {
+				throw invalid("cleanup directory identity changed", relativePath);
+			}
+			removeDirectoryContents(lib, childFd, relativePath, budget);
+			const retiredName = retirementName(identity);
+			if (name !== retiredName) {
+				budget.beforeRetirementRename?.(parentFd, name, relativePath);
+				const renameCode = renameAtExclusiveErrno(lib, parentFd, name, retiredName);
+				if (renameCode !== undefined) {
+					if (renameCode === EEXIST) {
+						throw invalid("cleanup retirement name already exists", relativePath);
+					}
+					throw nativeError(lib, "renameatx_np", relativePath, renameCode);
+				}
+				let movedMatches = false;
+				let movedVerificationFailed = false;
+				let movedVerificationError: unknown;
+				try {
+					const movedFd = openDirectoryAt(lib, parentFd, retiredName, relativePath);
+					try {
+						assertCleanupMount(movedFd, relativePath, budget);
+						movedMatches = sameIdentity(fstatFd(lib, movedFd, "fstat", relativePath), identity);
+					} finally {
+						closeQuietly(lib, movedFd);
+					}
+				} catch (error) {
+					movedVerificationFailed = true;
+					movedVerificationError = error;
+				}
+				if (movedVerificationFailed || !movedMatches) {
+					const restoreCode = renameAtExclusiveErrno(lib, parentFd, retiredName, name);
+					if (restoreCode !== undefined) {
+						throw invalid("cleanup preserved an unverified directory under its retirement name", relativePath);
+					}
+					if (movedVerificationFailed) throw movedVerificationError;
+					throw invalid("cleanup directory identity changed during atomic retirement", relativePath);
+				}
+			}
+			for (;;) {
+				const currentFd = openDirectoryAt(lib, parentFd, retiredName, relativePath);
+				try {
+					assertCleanupMount(currentFd, relativePath, budget);
+					if (!sameIdentity(fstatFd(lib, currentFd, "fstat", relativePath), identity)) {
+						throw invalid("cleanup retirement name no longer identifies its descriptor", relativePath);
+					}
+					const unlinkCode = unlinkAtErrno(lib, parentFd, retiredName, AT_REMOVEDIR);
+					if (unlinkCode === undefined) return;
+					if (unlinkCode === ENOTEMPTY) {
+						removeDirectoryContents(lib, childFd, relativePath, budget);
+						continue;
+					}
+					throw nativeError(lib, "unlinkat", relativePath, unlinkCode);
+				} finally {
+					closeQuietly(lib, currentFd);
+				}
+			}
+		} finally {
+			closeQuietly(lib, childFd);
+		}
+	}
+}
+
 function verifyRegularEntry(
 	lib: SystemLibrary,
 	directoryFd: number,
@@ -511,10 +732,20 @@ class NativePinnedDirectory implements PinnedDirectory {
 	readonly fd: number;
 	readonly identity: Readonly<Pick<PinnedStat, "dev" | "ino">>;
 	readonly #lib: SystemLibrary;
+	readonly #readMountIdentity: MountIdentityReader;
+	readonly #beforeRetirementRename?: BeforeRetirementRename;
 	#closed = false;
 
-	constructor(lib: SystemLibrary, fd: number, stat: PinnedStat) {
+	constructor(
+		lib: SystemLibrary,
+		fd: number,
+		stat: PinnedStat,
+		readMountIdentity: MountIdentityReader,
+		beforeRetirementRename?: BeforeRetirementRename,
+	) {
 		this.#lib = lib;
+		this.#readMountIdentity = readMountIdentity;
+		this.#beforeRetirementRename = beforeRetirementRename;
 		this.fd = fd;
 		this.identity = Object.freeze({ dev: stat.dev, ino: stat.ino });
 	}
@@ -604,6 +835,31 @@ class NativePinnedDirectory implements PinnedDirectory {
 		return Object.freeze(leaves);
 	}
 
+	async removeDirectoryTree(
+		relativePath: string,
+		expected?: Readonly<Pick<PinnedStat, "dev" | "ino">>,
+	): Promise<void> {
+		this.#assertRoot();
+		const components = relativeComponents(relativePath);
+		if (components.length !== 1) throw invalid("directory cleanup requires one direct child", relativePath);
+		const name = components[0] as string;
+		const budget: RemovalBudget = {
+			remainingEntries: DARWIN_PINNED_DIRECTORY_LIMITS.maxEntries,
+			rootDev: expected?.dev,
+			rootMountIdentity: this.#readMountIdentity(this.fd, "."),
+			readMountIdentity: this.#readMountIdentity,
+			beforeRetirementRename: this.#beforeRetirementRename,
+		};
+		removeDirectoryEntry(this.#lib, this.fd, name, relativePath, budget, expected, true);
+		if (expected !== undefined) {
+			const retainedName = retirementName(expected);
+			if (retainedName !== name) {
+				removeDirectoryEntry(this.#lib, this.fd, retainedName, relativePath, budget, expected, true);
+			}
+		}
+		this.#assertRoot();
+	}
+
 	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
@@ -619,7 +875,11 @@ class NativePinnedDirectory implements PinnedDirectory {
 	}
 }
 
-export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirectory> {
+async function openPinnedDirectoryInternal(
+	rootPath: string,
+	transformMountIdentity?: MountIdentityTransform,
+	beforeRetirementRename?: BeforeRetirementRename,
+): Promise<PinnedDirectory> {
 	validateRootPath(rootPath);
 	const lib = system();
 	const path = cString(rootPath);
@@ -628,9 +888,27 @@ export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirec
 	try {
 		const stat = fstatFd(lib, fd, "fstat", rootPath);
 		if (stat.type !== "directory") throw invalid("opened root is not a directory", rootPath);
-		return new NativePinnedDirectory(lib, fd, stat);
+		const mountIdentityBytes = Buffer.alloc(STATFS_BYTES);
+		const readMountIdentity: MountIdentityReader = (descriptor, relativePath) => {
+			const actualIdentity = mountIdentityFd(lib, descriptor, relativePath, mountIdentityBytes);
+			return transformMountIdentity?.(descriptor, relativePath, actualIdentity) ?? actualIdentity;
+		};
+		return new NativePinnedDirectory(lib, fd, stat, readMountIdentity, beforeRetirementRename);
 	} catch (error) {
 		closeQuietly(lib, fd);
 		throw error;
 	}
+}
+
+export async function openPinnedDirectory(rootPath: string): Promise<PinnedDirectory> {
+	return openPinnedDirectoryInternal(rootPath);
+}
+
+/** @internal Deterministic fault injection for cleanup regression tests. */
+export async function openPinnedDirectoryWithMountIdentityForTesting(
+	rootPath: string,
+	transformMountIdentity: MountIdentityTransform,
+	beforeRetirementRename?: BeforeRetirementRename,
+): Promise<PinnedDirectory> {
+	return openPinnedDirectoryInternal(rootPath, transformMountIdentity, beforeRetirementRename);
 }

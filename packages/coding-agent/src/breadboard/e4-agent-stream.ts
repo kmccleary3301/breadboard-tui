@@ -55,6 +55,85 @@ type AssistantToolStreamEvent = Extract<
 	}
 >;
 
+type SessionObservationEvent = Extract<
+	LoggedSessionEvent,
+	{
+		readonly kind:
+			| "todo_updated"
+			| "stream_gap_observed"
+			| "session_control_observed"
+			| "checkpoint_list_observed"
+			| "checkpoint_restored"
+			| "skills_catalog_observed"
+			| "skills_selection_observed"
+			| "ctree_node_observed"
+			| "ctree_snapshot_observed";
+	}
+>;
+type RuntimeErrorEvent = Extract<LoggedSessionEvent, { readonly kind: "runtime_error_observed" }>;
+type SessionRuntimeErrorEvent = Extract<RuntimeErrorEvent, { readonly scope: "session" }>;
+type TurnRuntimeErrorEvent = Extract<RuntimeErrorEvent, { readonly scope: "turn" }>;
+type TurnEvent = Exclude<LoggedSessionEvent, SessionObservationEvent | RuntimeErrorEvent> | TurnRuntimeErrorEvent;
+
+type ClassifiedEvent =
+	| { readonly scope: "session-observation"; readonly event: SessionObservationEvent }
+	| { readonly scope: "session-failure"; readonly event: SessionRuntimeErrorEvent }
+	| { readonly scope: "turn"; readonly event: TurnEvent };
+
+function assertNever(_value: never): never {
+	throw new Error("BreadBoard unsupported canonical runtime event family");
+}
+
+function classifyEvent(event: LoggedSessionEvent): ClassifiedEvent {
+	switch (event.kind) {
+		case "todo_updated":
+		case "stream_gap_observed":
+		case "session_control_observed":
+		case "checkpoint_list_observed":
+		case "checkpoint_restored":
+		case "skills_catalog_observed":
+		case "skills_selection_observed":
+		case "ctree_node_observed":
+		case "ctree_snapshot_observed":
+			return { scope: "session-observation", event };
+		case "runtime_error_observed":
+			return event.scope === "session" ? { scope: "session-failure", event } : { scope: "turn", event };
+		case "input_observed":
+		case "turn_started":
+		case "assistant_text_delta":
+		case "assistant_text_completed":
+		case "turn_completed":
+		case "turn_failed":
+		case "turn_cancelled":
+		case "conversation_compaction_started":
+		case "conversation_compaction_completed":
+		case "assistant_message_started":
+		case "assistant_reasoning_delta":
+		case "assistant_thought_summary_delta":
+		case "assistant_tool_call_started":
+		case "assistant_tool_call_delta":
+		case "assistant_tool_call_completed":
+		case "tool_execution_started":
+		case "tool_execution_stdout_delta":
+		case "tool_execution_stderr_delta":
+		case "tool_execution_completed":
+		case "tool_called":
+		case "tool_result_observed":
+		case "permission_requested":
+		case "permission_responded":
+		case "task_event_observed":
+		case "warning_observed":
+		case "reward_updated":
+		case "limits_updated":
+		case "completion_observed":
+		case "log_linked":
+		case "run_finished":
+			return { scope: "turn", event };
+		default:
+			return assertNever(event);
+	}
+}
+
 interface StreamedToolCallState {
 	readonly callId: string;
 	index: number;
@@ -91,7 +170,6 @@ interface PendingSubmit {
 	readonly canonicalDigest: string;
 	readonly input: StructuredSubmit;
 	recoveringAfterAbort: boolean;
-	acceptedWithoutReceipt: boolean;
 	turnId: TurnId | undefined;
 }
 
@@ -134,6 +212,7 @@ export interface E4AgentStreamBridgeOptions {
 		ownedSubmissions: readonly E4OwnedSubmission[],
 	) => Promise<void>;
 	readonly modelPolicy?: E4BackendModelPolicy;
+	readonly selectModel?: (model: E4BackendModelAttribution) => Promise<E4BackendModelAttribution>;
 	readonly requestPermission?: E4PermissionHandler;
 }
 
@@ -154,7 +233,7 @@ export class E4AgentStreamBridge {
 	readonly #projectionCommitted: E4AgentStreamBridgeOptions["projectionCommitted"];
 	readonly #submissionOwned: E4AgentStreamBridgeOptions["submissionOwned"];
 	readonly #receipts: ReadonlySet<string>;
-	readonly #modelPolicy: E4BackendModelPolicy | undefined;
+	readonly #selectModel: E4AgentStreamBridgeOptions["selectModel"];
 	readonly #requestPermission: E4PermissionHandler | undefined;
 	readonly #initialCursor: E4DurableCursor | undefined;
 	readonly #observeAbort = new AbortController();
@@ -171,9 +250,12 @@ export class E4AgentStreamBridge {
 	readonly #cancellationsInFlight = new Set<Promise<boolean>>();
 	readonly #eventApplicationsInFlight = new Set<Promise<void>>();
 	readonly #ownershipWaiters = new Set<() => void>();
+	#activeModel: E4BackendModelAttribution | undefined;
+	#modelSelectionBarrier = Promise.resolve();
 	#started = false;
 	#closed = false;
 	#observeFailure: Error | undefined;
+	#observeFailureProjectionEventId: string | undefined;
 	#pendingSubmit: PendingSubmit | undefined;
 	#terminalCursor: E4DurableCursor | undefined;
 	#closePromise: Promise<void> | undefined;
@@ -185,7 +267,8 @@ export class E4AgentStreamBridge {
 		this.#projectionCommitted = options.projectionCommitted;
 		this.#submissionOwned = options.submissionOwned;
 		this.#receipts = options.projectionReceiptEventIds ?? new Set();
-		this.#modelPolicy = options.modelPolicy;
+		this.#activeModel = options.modelPolicy?.model;
+		this.#selectModel = options.selectModel;
 		this.#requestPermission = options.requestPermission;
 		this.#initialCursor = options.durableCursor;
 		for (const submission of options.ownedSubmissions ?? []) {
@@ -373,36 +456,22 @@ export class E4AgentStreamBridge {
 			notifyWaiters,
 		);
 	}
-	async #recoverAcceptedSubmissionWithoutReceipt(attempt: PendingSubmit, error: unknown): Promise<SubmitReceipt> {
-		attempt.recoveringAfterAbort = true;
-		attempt.acceptedWithoutReceipt = true;
-		this.#pendingSubmit ??= attempt;
-		if (this.#pendingSubmit !== attempt) throw error;
-		this.#notifyOwnershipWaiters();
-		while (attempt.turnId === undefined && !this.#closed && !this.#observeFailure) {
-			await this.#waitForOwnershipChange();
-		}
-		if (!attempt.turnId) throw error;
-		const owned = this.#ownedSubmissions.get(String(attempt.turnId));
-		if (!owned) throw error;
-		return {
-			clientMessageId: owned.clientMessageId as SubmitReceipt["clientMessageId"],
-			inputId: owned.inputId as SubmitReceipt["inputId"],
-			turnId: owned.turnId as SubmitReceipt["turnId"],
-			disposition: "started",
-			originalDisposition: "started",
-		};
-	}
 
 	async #finishInterruptedSubmission(attempt: PendingSubmit, receipt: SubmitReceipt): Promise<void> {
 		const turnKey = String(receipt.turnId);
+		if (this.#closed || this.#observeFailure) {
+			attempt.turnId = receipt.turnId;
+			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
+			await this.#cancel(receipt.turnId, "user_requested");
+			return;
+		}
 		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
 			attempt.turnId = receipt.turnId;
 			this.#rememberObservedSubmit(attempt);
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			return;
 		}
-		if (!this.#closed) await this.#recordOwnedSubmission(receipt);
+		await this.#recordOwnedSubmission(receipt);
 		attempt.turnId = receipt.turnId;
 		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
 			this.#rememberObservedSubmit(attempt);
@@ -427,18 +496,13 @@ export class E4AgentStreamBridge {
 	}
 
 	#handleInterruptedSubmissionRejection(attempt: PendingSubmit, error: unknown): void {
-		if (isAcceptedWithoutReceipt(error)) {
-			this.#trackLateSubmissionRecovery(
-				this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error).then(receipt =>
-					this.#finishInterruptedSubmission(attempt, receipt),
-				),
-			);
-			return;
-		}
 		attempt.recoveringAfterAbort = false;
 		if (this.#pendingSubmit === attempt && !isAmbiguousSubmitFailure(error)) {
 			this.#pendingSubmit = undefined;
 			this.#notifyOwnershipWaiters();
+		}
+		if (isUncorrelatedSubmitReceiptFailure(error)) {
+			this.#invalidateBridge("BreadBoard submission response lost canonical ownership correlation");
 		}
 	}
 
@@ -463,8 +527,10 @@ export class E4AgentStreamBridge {
 		try {
 			result = await Promise.race([submission, interrupted]);
 		} catch (error) {
-			if (!isAcceptedWithoutReceipt(error)) throw error;
-			return await this.#recoverAcceptedSubmissionWithoutReceipt(attempt, error);
+			if (isUncorrelatedSubmitReceiptFailure(error)) {
+				this.#invalidateBridge("BreadBoard submission response lost canonical ownership correlation");
+			}
+			throw error;
 		} finally {
 			signal?.removeEventListener("abort", interruptSubmission);
 			closeSignal.removeEventListener("abort", interruptSubmission);
@@ -477,7 +543,13 @@ export class E4AgentStreamBridge {
 			receipt => this.#trackLateSubmissionRecovery(this.#finishInterruptedSubmission(attempt, receipt)),
 			error => this.#handleInterruptedSubmissionRejection(attempt, error),
 		);
-		this.#failSink(sink, "BreadBoard submission cancelled while admission was in progress", "aborted");
+		const failure = this.#currentObserveFailure();
+		this.#failSink(
+			sink,
+			failure?.message ?? "BreadBoard submission cancelled while admission was in progress",
+			failure ? "error" : "aborted",
+			failure ? this.#observeFailureProjectionEventId : undefined,
+		);
 		return undefined;
 	}
 
@@ -493,6 +565,7 @@ export class E4AgentStreamBridge {
 				model,
 				this.#observeFailure?.message ?? "BreadBoard session is closed",
 				"error",
+				this.#observeFailure ? this.#observeFailureProjectionEventId : undefined,
 			);
 			return;
 		}
@@ -506,19 +579,49 @@ export class E4AgentStreamBridge {
 				return;
 			}
 		}
-		const backendModel = this.#modelPolicy?.model;
+		let backendModel = this.#activeModel;
 		if (!backendModel) {
 			this.#pushStandaloneError(stream, model, "BreadBoard backend model attribution is not configured", "error");
 			return;
 		}
 		if (backendModel.api !== model.api || backendModel.provider !== model.provider || backendModel.id !== model.id) {
-			this.#pushStandaloneError(
-				stream,
-				model,
-				`BreadBoard E4 session uses ${backendModel.provider}/${backendModel.id} (${backendModel.api}), but OMP selected ${model.provider}/${model.id} (${model.api}); E4 does not support per-turn model selection`,
-				"error",
+			const selectedModel = { api: model.api, provider: model.provider, id: model.id };
+			const selection = this.#modelSelectionBarrier.then(async () => {
+				const current = this.#activeModel;
+				if (
+					current &&
+					current.api === selectedModel.api &&
+					current.provider === selectedModel.provider &&
+					current.id === selectedModel.id
+				) {
+					return current;
+				}
+				if (!this.#selectModel) {
+					throw new Error(
+						`BreadBoard E4 session uses ${current?.provider}/${current?.id} (${current?.api}), but OMP selected ${model.provider}/${model.id} (${model.api}); E4 does not support per-turn model selection`,
+					);
+				}
+				const selected = await this.#selectModel(selectedModel);
+				if (
+					selected.api !== selectedModel.api ||
+					selected.provider !== selectedModel.provider ||
+					selected.id !== selectedModel.id
+				) {
+					throw new Error("BreadBoard backend selected a different model than requested");
+				}
+				this.#activeModel = selected;
+				return selected;
+			});
+			this.#modelSelectionBarrier = selection.then(
+				() => {},
+				() => {},
 			);
-			return;
+			try {
+				backendModel = await selection;
+			} catch (error) {
+				this.#pushStandaloneError(stream, model, safeErrorMessage(error), "error");
+				return;
+			}
 		}
 		const sink = this.#newSink(backendModel, stream);
 		this.#submittingSinks.add(sink);
@@ -539,7 +642,6 @@ export class E4AgentStreamBridge {
 					input: { ...input, clientMessageId: crypto.randomUUID() },
 					recoveringAfterAbort: false,
 					turnId: undefined,
-					acceptedWithoutReceipt: false,
 				};
 			const receipt = await this.#submitAttempt(attempt, sink, signal);
 			if (!receipt) return;
@@ -565,9 +667,15 @@ export class E4AgentStreamBridge {
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			sink.turnId = receipt.turnId;
 			const failure = this.#currentObserveFailure();
-			if (failure || this.#closed) {
-				this.#failSink(sink, failure ? failure.message : "BreadBoard session is closed", "error");
-				this.#cancelSink(sink, failure ? "timeout" : "user_requested");
+			if (failure) {
+				const cancellation = this.#trackCancellation(sink, "timeout");
+				if (cancellation) await cancellation;
+				this.#failSink(sink, failure.message, "error", this.#observeFailureProjectionEventId);
+				return;
+			}
+			if (this.#closed) {
+				this.#failSink(sink, "BreadBoard session is closed", "error");
+				this.#cancelSink(sink, "user_requested");
 				return;
 			}
 			this.#sinks.set(turnKey, sink);
@@ -579,7 +687,13 @@ export class E4AgentStreamBridge {
 			else signal?.addEventListener("abort", cancel, { once: true });
 		} catch (error) {
 			if (attempt && isAmbiguousSubmitFailure(error)) this.#pendingSubmit ??= attempt;
-			this.#failSink(sink, safeErrorMessage(error), "error");
+			const failure = this.#currentObserveFailure();
+			this.#failSink(
+				sink,
+				failure?.message ?? safeErrorMessage(error),
+				"error",
+				failure ? this.#observeFailureProjectionEventId : undefined,
+			);
 		} finally {
 			if (ownershipNotificationPending) this.#notifyOwnershipWaiters();
 			this.#submittingSinks.delete(sink);
@@ -600,80 +714,20 @@ export class E4AgentStreamBridge {
 			const after = this.#initialCursor && this.#initialCursor.sequence > 0 ? this.#initialCursor : undefined;
 			for await (const event of this.#session.events({ signal: this.#observeAbort.signal, after })) {
 				if (this.#closed) break;
-				if (event.kind === "runtime_error_observed" && (event.scope === "session" || event.turnId === null)) {
-					throw new Error(
-						`BreadBoard runtime error [${event.payload.error.code}]: ${event.payload.error.message}`,
-					);
+				const classified = classifyEvent(event);
+				switch (classified.scope) {
+					case "session-observation":
+						await this.#trackEventApplication(this.#commit(classified.event, []));
+						break;
+					case "session-failure":
+						await this.#trackEventApplication(this.#terminalSessionFailure(classified.event));
+						return;
+					case "turn":
+						await this.#applyTurnEvent(classified.event);
+						break;
+					default:
+						assertNever(classified);
 				}
-				if (event.turnId === null) {
-					switch (event.kind) {
-						case "todo_updated":
-						case "checkpoint_list_observed":
-						case "checkpoint_restored":
-						case "skills_catalog_observed":
-						case "skills_selection_observed":
-						case "ctree_node_observed":
-						case "ctree_snapshot_observed":
-							await this.#trackEventApplication(this.#commit(event, []));
-							continue;
-						default:
-							throw new Error("BreadBoard unsupported canonical runtime event family");
-					}
-				}
-				const turnKey = String(event.turnId);
-				let sink = this.#sinks.get(turnKey);
-				if (!sink && this.#submissionsInFlight.size && !this.#pendingSubmit?.recoveringAfterAbort) {
-					await this.#waitForSubmissionsOrOwnershipChange([...this.#submissionsInFlight]);
-					sink = this.#sinks.get(turnKey);
-					if (this.#closed || this.#observeFailure) break;
-				}
-				let ownership = this.#ownedSubmissions.get(turnKey);
-				const pendingAttempt = this.#pendingSubmit;
-				if (!sink && !ownership && pendingAttempt && pendingAttempt.turnId === undefined) {
-					if (!pendingAttempt.acceptedWithoutReceipt) {
-						await this.#waitForOwnershipChange();
-						if (this.#closed || this.#observeFailure) break;
-						sink = this.#sinks.get(turnKey);
-						ownership = this.#ownedSubmissions.get(turnKey);
-					}
-					if (
-						!sink &&
-						!ownership &&
-						this.#pendingSubmit === pendingAttempt &&
-						pendingAttempt.acceptedWithoutReceipt &&
-						pendingAttempt.turnId === undefined
-					) {
-						pendingAttempt.turnId = event.turnId;
-						const syntheticReceipt = {
-							clientMessageId: pendingAttempt.input.clientMessageId,
-							inputId: event.inputId,
-							turnId: event.turnId,
-							disposition: "started",
-							originalDisposition: "started",
-						} as SubmitReceipt;
-						await this.#recordOwnedSubmission(syntheticReceipt);
-						ownership = this.#ownedSubmissions.get(turnKey);
-					}
-				}
-				if (pendingAttempt?.acceptedWithoutReceipt && ownership && !sink) {
-					await Promise.all([...this.#submissionsInFlight]);
-					sink = this.#sinks.get(turnKey);
-				}
-				if (!sink && !ownership) {
-					await this.#trackEventApplication(this.#commit(event, []));
-					continue;
-				}
-				if (ownership && ownership.inputId !== String(event.inputId)) {
-					throw new Error(`BreadBoard owned turn ${turnKey} changed input correlation`);
-				}
-				if (!sink) {
-					const backendModel = this.#modelPolicy?.model;
-					if (!backendModel) throw new Error("BreadBoard backend model attribution is not configured");
-					sink = this.#newSink(backendModel);
-					sink.turnId = event.turnId;
-					this.#sinks.set(turnKey, sink);
-				}
-				await this.#trackEventApplication(this.#applyEvent(sink, event));
 			}
 			if (!this.#closed) throw new Error("BreadBoard event observer ended unexpectedly");
 		} catch (error) {
@@ -681,7 +735,43 @@ export class E4AgentStreamBridge {
 		}
 	}
 
-	async #applyEvent(sink: TurnSink, event: LoggedSessionEvent): Promise<void> {
+	async #applyTurnEvent(event: TurnEvent): Promise<void> {
+		if (event.turnId === null || event.inputId === null) {
+			throw new Error("BreadBoard turn-owned canonical event is missing correlation");
+		}
+		const turnKey = String(event.turnId);
+		let sink = this.#sinks.get(turnKey);
+		if (!sink && this.#submissionsInFlight.size && !this.#pendingSubmit?.recoveringAfterAbort) {
+			await this.#waitForSubmissionsOrOwnershipChange([...this.#submissionsInFlight]);
+			sink = this.#sinks.get(turnKey);
+			if (this.#closed || this.#observeFailure) return;
+		}
+		let ownership = this.#ownedSubmissions.get(turnKey);
+		const pendingAttempt = this.#pendingSubmit;
+		if (!sink && !ownership && pendingAttempt && pendingAttempt.turnId === undefined) {
+			await this.#waitForOwnershipChange();
+			if (this.#closed || this.#observeFailure) return;
+			sink = this.#sinks.get(turnKey);
+			ownership = this.#ownedSubmissions.get(turnKey);
+		}
+		if (!sink && !ownership) {
+			await this.#trackEventApplication(this.#commit(event, []));
+			return;
+		}
+		if (ownership && ownership.inputId !== String(event.inputId)) {
+			throw new Error(`BreadBoard owned turn ${turnKey} changed input correlation`);
+		}
+		if (!sink) {
+			const backendModel = this.#activeModel;
+			if (!backendModel) throw new Error("BreadBoard backend model attribution is not configured");
+			sink = this.#newSink(backendModel);
+			sink.turnId = event.turnId;
+			this.#sinks.set(turnKey, sink);
+		}
+		await this.#trackEventApplication(this.#applyEvent(sink, event));
+	}
+
+	async #applyEvent(sink: TurnSink, event: TurnEvent): Promise<void> {
 		if (sink.terminal) return;
 		switch (event.kind) {
 			case "turn_started":
@@ -753,16 +843,10 @@ export class E4AgentStreamBridge {
 			case "runtime_error_observed": {
 				await this.#flushReasoning(sink);
 				const message = `BreadBoard runtime error [${event.payload.error.code}]: ${event.payload.error.message}`;
-				if (sink.adopted) throw new Error(message);
-				this.#failSinkPendingTerminal(sink, message, "error");
+				this.#failSinkPendingTerminal(sink, message, "error", String(event.eventId));
 				const cancellation = this.#trackCancellation(sink, "timeout");
-				if (cancellation && !(await cancellation)) return;
-				this.#undurableSinks.delete(sink);
-				this.#deferredProjectionKeys.push(...sink.pendingProjectionKeys.splice(0));
-				if (sink.turnId !== undefined) this.#ownedSubmissions.delete(String(sink.turnId));
-				this.#terminalCursor = cursorFor(event);
-				sink.terminal = true;
-				this.#removeSink(sink);
+				if (cancellation) await cancellation;
+				await this.#terminalFailure(sink, event, message, "error");
 				return;
 			}
 			case "input_observed":
@@ -772,14 +856,7 @@ export class E4AgentStreamBridge {
 			case "tool_execution_stdout_delta":
 			case "tool_execution_stderr_delta":
 			case "tool_execution_completed":
-			case "todo_updated":
 			case "permission_responded":
-			case "checkpoint_list_observed":
-			case "checkpoint_restored":
-			case "skills_catalog_observed":
-			case "skills_selection_observed":
-			case "ctree_node_observed":
-			case "ctree_snapshot_observed":
 			case "task_event_observed":
 			case "warning_observed":
 			case "reward_updated":
@@ -792,7 +869,7 @@ export class E4AgentStreamBridge {
 				}
 				return;
 			default:
-				throw new Error("BreadBoard unsupported canonical runtime event family");
+				return assertNever(event);
 		}
 	}
 
@@ -1018,7 +1095,7 @@ export class E4AgentStreamBridge {
 		sink.projectedToolResultIds.add(toolCallId);
 		sink.streamedToolCallsByCallId.delete(toolCallId);
 		if (!this.#receipts.has(String(event.eventId))) {
-			const toolName = event.payload.tool ?? toolCall.payload.tool;
+			const toolName = toolCall.payload.tool;
 			const result = toolResult(event.payload.result, event.payload.artifactRef, String(event.eventId));
 			await this.#emit(
 				event,
@@ -1054,26 +1131,26 @@ export class E4AgentStreamBridge {
 				"BreadBoard permission request requires OMP permission UI wiring",
 				"error",
 			);
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 		let decision: E4PermissionDecision;
 		try {
 			decision = await requestPermission(event.payload, sink.permissionAbort.signal);
 		} catch (error) {
 			this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 		if (sink.terminal || sink.permissionAbort.signal.aborted || this.#closed) return false;
 		if (decision === "cancel") {
 			this.#failSinkPendingTerminal(sink, "BreadBoard permission request cancelled in OMP", "aborted");
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 		try {
 			await this.#session.respondPermission({ requestId: event.payload.requestId, decision });
 			return true;
 		} catch (error) {
 			this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-			return this.#cancelAfterPermissionFailure(sink);
+			return this.#denyPermissionAndCancel(sink, event.payload.requestId);
 		}
 	}
 
@@ -1151,27 +1228,54 @@ export class E4AgentStreamBridge {
 		}
 	}
 
+	async #terminalSessionFailure(event: SessionRuntimeErrorEvent): Promise<void> {
+		const message = `BreadBoard runtime error [${event.payload.error.code}]: ${event.payload.error.message}`;
+		if (!this.#recordObserveFailure(message)) return;
+		this.#observeFailureProjectionEventId = String(event.eventId);
+		this.#observeAbort.abort();
+		this.#closeAdmissionAbort.abort();
+		this.#notifyOwnershipWaiters();
+		const sinks = [...this.#sinks.values()];
+		for (const sink of sinks) {
+			this.#failSinkPendingTerminal(sink, message, "error", String(event.eventId));
+			this.#trackCancellation(sink, "timeout");
+		}
+		await Promise.all([...this.#submissionsInFlight]);
+		await Promise.all([...this.#cancellationsInFlight]);
+		for (const sink of sinks) {
+			await this.#terminalFailure(sink, event, message, "error", true);
+		}
+		this.#ownedSubmissions.clear();
+		this.#pendingSubmit = undefined;
+		this.#terminalCursor = cursorFor(event);
+		this.#notifyOwnershipWaiters();
+	}
+
 	async #completeSink(
 		sink: TurnSink,
 		event: Extract<LoggedSessionEvent, { readonly kind: "turn_completed" }>,
 	): Promise<void> {
 		this.#ensureStarted(sink);
-		if (sink.turnId !== undefined) this.#ownedSubmissions.delete(String(sink.turnId));
+		const reason = completionStopReason(event);
+		const usage = completionUsage(event);
+		const errorMessage = completionErrorMessage(reason);
 		if (sink.adopted) {
-			if (sink.messageText) {
-				if (!sink.pendingTextCompletion) {
-					throw new Error("BreadBoard replay ended mid-message without a completion boundary");
-				}
-				await this.#projectAdoptedTerminal(sink, event, "stop", undefined, sink.messageText);
-				this.#undurableSinks.delete(sink);
+			if (sink.messageText && !sink.pendingTextCompletion) {
+				throw new Error("BreadBoard replay ended mid-message without a completion boundary");
 			}
+			await this.#projectAdoptedTerminal(sink, event, reason, errorMessage, sink.messageText, usage);
+			this.#undurableSinks.delete(sink);
 			await this.#commit(event, sink.pendingProjectionKeys.splice(0));
 		} else {
-			const message = assistantMessage(sink.model, sink.text, "stop", undefined, String(event.eventId));
+			const message = assistantMessage(sink.model, sink.text, reason, errorMessage, String(event.eventId), usage);
 			if (sink.textStarted) {
 				sink.stream?.push({ type: "text_end", contentIndex: 0, content: sink.text, partial: message });
 			}
-			sink.stream?.push({ type: "done", reason: "stop", message });
+			if (reason === "error" || reason === "aborted") {
+				sink.stream?.push({ type: "error", reason, error: message });
+			} else {
+				sink.stream?.push({ type: "done", reason, message });
+			}
 			this.#undurableSinks.delete(sink);
 			this.#deferredProjectionKeys.push(...sink.pendingProjectionKeys.splice(0));
 			this.#terminalCursor = cursorFor(event);
@@ -1184,18 +1288,24 @@ export class E4AgentStreamBridge {
 
 	async #terminalFailure(
 		sink: TurnSink,
-		event: Extract<LoggedSessionEvent, { readonly kind: "turn_failed" | "turn_cancelled" }>,
+		event: Extract<
+			LoggedSessionEvent,
+			{ readonly kind: "turn_failed" | "turn_cancelled" | "runtime_error_observed" }
+		>,
 		message: string,
 		reason: "error" | "aborted",
+		holdCursor = false,
 	): Promise<void> {
 		if (sink.turnId !== undefined) this.#ownedSubmissions.delete(String(sink.turnId));
 		if (sink.adopted) {
-			if (sink.messageText && !sink.pendingTextCompletion) {
+			if (event.kind !== "runtime_error_observed" && sink.messageText && !sink.pendingTextCompletion) {
 				throw new Error("BreadBoard replay ended mid-message without a completion boundary");
 			}
 			await this.#projectAdoptedTerminal(sink, event, reason, message, sink.messageText);
 			this.#undurableSinks.delete(sink);
-			await this.#commit(event, sink.pendingProjectionKeys.splice(0));
+			const projectionKeys = sink.pendingProjectionKeys.splice(0);
+			if (holdCursor) this.#deferredProjectionKeys.push(...projectionKeys);
+			else await this.#commit(event, projectionKeys);
 		} else {
 			if (!sink.failureDelivered) {
 				sink.stream?.push({
@@ -1220,11 +1330,13 @@ export class E4AgentStreamBridge {
 		reason: AssistantMessage["stopReason"],
 		errorMessage?: string,
 		text = "",
+		usage?: Usage,
 	): Promise<void> {
-		if ((!text && !errorMessage) || this.#receipts.has(String(event.eventId))) return;
-		const message = assistantMessage(sink.model, text, reason, errorMessage, String(event.eventId));
-		await this.#emit(event, "message_start", { type: "message_start", message }, sink);
-		await this.#emit(event, "message_end", { type: "message_end", message }, sink);
+		if ((!text && !errorMessage && usage === undefined) || this.#receipts.has(String(event.eventId))) return;
+		const message = assistantMessage(sink.model, text, reason, errorMessage, String(event.eventId), usage);
+		const turnSuffix = event.turnId === null && sink.turnId !== undefined ? `:${String(sink.turnId)}` : "";
+		await this.#emit(event, `message_start${turnSuffix}`, { type: "message_start", message }, sink);
+		await this.#emit(event, `message_end${turnSuffix}`, { type: "message_end", message }, sink);
 	}
 
 	async #emit(event: LoggedSessionEvent, suffix: string, agentEvent: AgentEvent, sink: TurnSink): Promise<void> {
@@ -1268,14 +1380,14 @@ export class E4AgentStreamBridge {
 		return cancellation;
 	}
 
-	async #cancelAfterPermissionFailure(sink: TurnSink): Promise<boolean> {
+	async #denyPermissionAndCancel(sink: TurnSink, requestId: string): Promise<boolean> {
 		const cancellation = this.#trackCancellation(sink, "user_requested");
-		if (!cancellation) return false;
-		if (!sink.adopted) {
-			void cancellation;
-			return false;
+		try {
+			await this.#session.respondPermission({ requestId, decision: "deny" });
+		} catch (error) {
+			this.#invalidateBridge(`BreadBoard permission rejection failed: ${safeErrorMessage(error)}`);
 		}
-		return cancellation;
+		return cancellation ? await cancellation : false;
 	}
 
 	#cancelSink(sink: TurnSink, reason: "user_requested" | "timeout"): void {
@@ -1283,9 +1395,14 @@ export class E4AgentStreamBridge {
 		void this.#trackCancellation(sink, reason);
 	}
 
-	#invalidateBridge(message: string): void {
-		if (this.#observeFailure) return;
+	#recordObserveFailure(message: string): boolean {
+		if (this.#observeFailure) return false;
 		this.#observeFailure = new Error(message);
+		return true;
+	}
+
+	#invalidateBridge(message: string): void {
+		if (!this.#recordObserveFailure(message)) return;
 		this.#observeAbort.abort();
 		this.#notifyOwnershipWaiters();
 		for (const sink of [...this.#sinks.values(), ...this.#submittingSinks]) {
@@ -1299,17 +1416,32 @@ export class E4AgentStreamBridge {
 		return this.#observeFailure;
 	}
 
-	#failSink(sink: TurnSink, message: string, reason: "error" | "aborted"): void {
+	#failSink(sink: TurnSink, message: string, reason: "error" | "aborted", projectionEventId?: string): void {
 		if (sink.terminal) return;
 		sink.terminal = true;
-		sink.stream?.push({ type: "error", reason, error: assistantMessage(sink.model, sink.text, reason, message) });
+		if (!sink.failureDelivered) {
+			sink.stream?.push({
+				type: "error",
+				reason,
+				error: assistantMessage(sink.model, sink.text, reason, message, projectionEventId),
+			});
+		}
 		this.#removeSink(sink);
 	}
 
-	#failSinkPendingTerminal(sink: TurnSink, message: string, reason: "error" | "aborted"): void {
+	#failSinkPendingTerminal(
+		sink: TurnSink,
+		message: string,
+		reason: "error" | "aborted",
+		projectionEventId?: string,
+	): void {
 		if (sink.terminal || sink.failureDelivered) return;
 		sink.failureDelivered = true;
-		sink.stream?.push({ type: "error", reason, error: assistantMessage(sink.model, sink.text, reason, message) });
+		sink.stream?.push({
+			type: "error",
+			reason,
+			error: assistantMessage(sink.model, sink.text, reason, message, projectionEventId),
+		});
 	}
 
 	#pushStandaloneError(
@@ -1317,8 +1449,13 @@ export class E4AgentStreamBridge {
 		model: E4BackendModelAttribution,
 		message: string,
 		reason: "error" | "aborted",
+		projectionEventId?: string,
 	): void {
-		stream.push({ type: "error", reason, error: assistantMessage(model, "", reason, message) });
+		stream.push({
+			type: "error",
+			reason,
+			error: assistantMessage(model, "", reason, message, projectionEventId),
+		});
 	}
 
 	#removeSink(sink: TurnSink): void {
@@ -1432,7 +1569,7 @@ function streamedToolCallMessage(
 		timestamp: Date.now(),
 	};
 }
-function isAcceptedWithoutReceipt(error: unknown): boolean {
+function isUncorrelatedSubmitReceiptFailure(error: unknown): boolean {
 	return (
 		error instanceof CanonicalE4ClientError &&
 		error.failure.kind === "protocol" &&
@@ -1462,12 +1599,59 @@ function extensionForMimeType(mimeType: string): string {
 	return subtype === "jpeg" ? "jpg" : subtype.replace(/[^a-z0-9.+-]/g, "") || "bin";
 }
 
+type TurnCompletedEvent = Extract<LoggedSessionEvent, { readonly kind: "turn_completed" }>;
+
+function completionStopReason(event: TurnCompletedEvent): AssistantMessage["stopReason"] {
+	const reason = event.payload.finishReason;
+	if (reason === null) throw new Error("BreadBoard turn completion omitted the provider finish reason");
+	return reason;
+}
+
+function completionUsage(event: TurnCompletedEvent): Usage {
+	const usage = event.payload.usage;
+	if (
+		usage === null ||
+		usage.inputTokens === undefined ||
+		usage.outputTokens === undefined ||
+		usage.cacheReadTokens === undefined ||
+		usage.cacheWriteTokens === undefined ||
+		usage.totalTokens === undefined
+	) {
+		throw new Error("BreadBoard turn completion omitted exact provider usage");
+	}
+	return {
+		input: usage.inputTokens,
+		output: usage.outputTokens,
+		cacheRead: usage.cacheReadTokens,
+		cacheWrite: usage.cacheWriteTokens,
+		totalTokens: usage.totalTokens,
+		...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
+function completionErrorMessage(reason: AssistantMessage["stopReason"]): string | undefined {
+	switch (reason) {
+		case "error":
+			return "BreadBoard provider reported an error finish";
+		case "aborted":
+			return "BreadBoard provider reported an aborted finish";
+		case "stop":
+		case "length":
+		case "toolUse":
+			return undefined;
+		default:
+			return assertNever(reason);
+	}
+}
+
 function assistantMessage(
 	model: E4BackendModelAttribution,
 	text: string,
 	stopReason: AssistantMessage["stopReason"],
 	errorMessage?: string,
 	projectionEventId?: string,
+	usage: Usage = ZERO_USAGE,
 ): AssistantMessage {
 	return {
 		role: "assistant",
@@ -1475,7 +1659,7 @@ function assistantMessage(
 		api: model.api,
 		provider: model.provider,
 		model: model.id,
-		usage: ZERO_USAGE,
+		usage,
 		stopReason,
 		errorMessage,
 		responseId: projectionEventId ? `${E4_PROJECTION_RECEIPT_PREFIX}${projectionEventId}` : undefined,

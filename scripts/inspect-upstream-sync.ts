@@ -1,7 +1,5 @@
 import * as path from "node:path";
 
-export const UPSTREAM_ORACLE_COMMIT = "7b141199d524b859c357fc89654f10b62b9f3df1";
-export const DEFAULT_UPSTREAM_REF = UPSTREAM_ORACLE_COMMIT;
 export const POLICY_PATH = path.join(import.meta.dir, "p31", "upstream-sync-policy.json");
 
 export const SYNC_CLASSES = ["breadboard-owned", "upstream-owned", "generated", "manual-review"] as const;
@@ -20,6 +18,11 @@ export interface PolicyRule {
 export interface SyncPolicy {
 	schemaVersion: string;
 	classes: SyncClass[];
+	upstream: {
+		tag: string;
+		commit: string;
+		tree: string;
+	};
 	rules: PolicyRule[];
 }
 
@@ -119,6 +122,14 @@ export function matchesPolicyPattern(filePath: string, pattern: string): boolean
 function validatePolicy(policy: SyncPolicy): void {
 	if (!Array.isArray(policy.classes) || !Array.isArray(policy.rules) || policy.rules.length === 0) {
 		throw new Error("sync policy must contain classes and ordered rules");
+	}
+	if (
+		!policy.upstream ||
+		!/^v\d+\.\d+\.\d+$/.test(policy.upstream.tag) ||
+		!/^[0-9a-f]{40}$/.test(policy.upstream.commit) ||
+		!/^[0-9a-f]{40}$/.test(policy.upstream.tree)
+	) {
+		throw new Error("sync policy must contain an exact upstream tag, commit, and tree");
 	}
 	for (const expectedClass of SYNC_CLASSES) {
 		if (!policy.classes.includes(expectedClass)) {
@@ -276,11 +287,11 @@ function relationFor(
 }
 
 export async function inspectUpstreamSync(options: InspectOptions = {}): Promise<UpstreamSyncInspection> {
-	const upstreamRef = options.upstreamRef ?? DEFAULT_UPSTREAM_REF;
-	if (upstreamRef.trim().length === 0) throw new Error("upstream ref must not be empty");
-	const git = options.git ?? createGitRunner(options.repoRoot);
 	const policy = options.policy ?? (await loadSyncPolicy(options.policyPath));
 	validatePolicy(policy);
+	const upstreamRef = options.upstreamRef ?? policy.upstream.commit;
+	if (upstreamRef.trim().length === 0) throw new Error("upstream ref must not be empty");
+	const git = options.git ?? createGitRunner(options.repoRoot);
 	const upstream = (
 		await checkedGitText(
 			git,
@@ -323,15 +334,16 @@ export async function inspectUpstreamSync(options: InspectOptions = {}): Promise
 	};
 }
 
-function parseArgs(argv: readonly string[]): { upstreamRef: string } {
+export interface InspectCliArgs {
+	readonly help: boolean;
+	readonly upstreamRef?: string;
+}
+
+export function parseInspectArgs(argv: readonly string[]): InspectCliArgs {
 	let upstreamRef: string | undefined;
 	for (let index = 0; index < argv.length; index++) {
 		const argument = argv[index];
-		if (argument === "--help" || argument === "-h") {
-			console.log("Usage: bun scripts/inspect-upstream-sync.ts [--ref <upstream-ref>]");
-			console.log(`Default upstream ref: ${DEFAULT_UPSTREAM_REF}`);
-			process.exit(0);
-		}
+		if (argument === "--help" || argument === "-h") return { help: true };
 		if (argument === "--ref") {
 			upstreamRef = argv[++index];
 			if (!upstreamRef) throw new Error("--ref requires an upstream ref");
@@ -346,7 +358,15 @@ function parseArgs(argv: readonly string[]): { upstreamRef: string } {
 		if (upstreamRef) throw new Error("only one upstream ref may be supplied");
 		upstreamRef = argument;
 	}
-	return { upstreamRef: upstreamRef ?? DEFAULT_UPSTREAM_REF };
+	return upstreamRef === undefined ? { help: false } : { help: false, upstreamRef };
+}
+
+export function formatInspectHelp(policy: SyncPolicy): string {
+	validatePolicy(policy);
+	return [
+		"Usage: bun scripts/inspect-upstream-sync.ts [--ref <upstream-ref>]",
+		`Default upstream ref: ${policy.upstream.commit}`,
+	].join("\n");
 }
 
 function errorPayload(error: unknown): {
@@ -366,9 +386,14 @@ function errorPayload(error: unknown): {
 
 if (import.meta.main) {
 	try {
-		const { upstreamRef } = parseArgs(process.argv.slice(2));
-		const result = await inspectUpstreamSync({ upstreamRef });
-		console.log(JSON.stringify(result, null, 2));
+		const policy = await loadSyncPolicy();
+		const options = parseInspectArgs(process.argv.slice(2));
+		if (options.help) {
+			console.log(formatInspectHelp(policy));
+		} else {
+			const result = await inspectUpstreamSync({ upstreamRef: options.upstreamRef, policy });
+			console.log(JSON.stringify(result, null, 2));
+		}
 	} catch (error) {
 		console.error(JSON.stringify(errorPayload(error), null, 2));
 		process.exitCode = 1;

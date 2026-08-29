@@ -9,11 +9,13 @@ import { describe, expect, it, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { BreadboardSessionTransitionError } from "@oh-my-pi/pi-coding-agent/breadboard/session-binding";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	createBreadboardStartupForkPolicy,
 	createSessionManager,
+	resolveBreadboardSessionTarget,
 	SessionResolutionError,
 	writeStartupNotice,
 } from "@oh-my-pi/pi-coding-agent/main";
@@ -205,5 +207,133 @@ describe("createSessionManager — missing session (#2084)", () => {
 	it("keeps unconfigured startup forks on the native OMP path", () => {
 		const policy = createBreadboardStartupForkPolicy({}, stubSettings, os.tmpdir());
 		expect(policy).not.toThrow();
+	});
+
+	it("rejects product startup forks without forcing installed artifact resolution", () => {
+		const selectedLocalOwned = {
+			get: () => undefined,
+			getRaw: (key: string) => (key === "breadboard" ? { engineMode: "local-owned" } : undefined),
+		} as unknown as Settings;
+		const cases: Array<{
+			readonly parsed: Pick<Args, "engineMode" | "engineUrl">;
+			readonly settings: Settings;
+		}> = [
+			{ parsed: {}, settings: stubSettings },
+			{ parsed: { engineMode: "local-owned" }, settings: stubSettings },
+			{ parsed: {}, settings: selectedLocalOwned },
+		];
+		for (const testCase of cases) {
+			const policy = createBreadboardStartupForkPolicy(testCase.parsed, testCase.settings, os.tmpdir(), true, true);
+			let thrown: unknown;
+			try {
+				policy();
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown).toBeInstanceOf(BreadboardSessionTransitionError);
+			expect(thrown).toMatchObject({ code: "unsupported_resume_transition" });
+		}
+	});
+
+	it("allows an explicit product off mode startup fork", () => {
+		const policy = createBreadboardStartupForkPolicy({ engineMode: "off" }, stubSettings, os.tmpdir(), true, true);
+		expect(policy).not.toThrow();
+	});
+});
+
+describe("resolveBreadboardSessionTarget", () => {
+	const workspace = "/canonical/project";
+	const binding = (overrides: Record<string, unknown> = {}) => ({
+		schemaVersion: "breadboard.session-binding.v3",
+		sessionId: "bb-session",
+		replayConfigurationDigest: "sha256:replay",
+		cursor: { eventId: "event-1", sequence: 1 },
+		ownedSubmissions: [],
+		...overrides,
+	});
+	const manager = (...bindings: unknown[]) =>
+		({
+			getBranch: () =>
+				bindings.map(data => ({
+					type: "custom" as const,
+					customType: "breadboard.session-binding",
+					data,
+				})),
+		}) as Parameters<typeof resolveBreadboardSessionTarget>[1];
+
+	it("creates a default-profile session with the canonical workspace", () => {
+		expect(resolveBreadboardSessionTarget({}, undefined, undefined, workspace, true)).toEqual({
+			kind: "create",
+			request: { permissionMode: "configured", workspace },
+		});
+	});
+
+	it("preserves an explicit session config path with the canonical workspace", () => {
+		const configPath = "/profiles/daily_driver.v1.yaml";
+		expect(resolveBreadboardSessionTarget({}, undefined, configPath, workspace, true)).toEqual({
+			kind: "create",
+			request: { configPath, permissionMode: "configured", workspace },
+		});
+	});
+
+	it("keeps native explicit-engine creation invalid without a selected config", () => {
+		let thrown: unknown;
+		try {
+			resolveBreadboardSessionTarget({}, undefined, undefined, workspace, false);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toMatchObject({
+			code: "invalid_session_config",
+			field: "sessionConfigPath",
+		});
+	});
+
+	it("attaches the durable binding for resume and continue before create logic", () => {
+		const sessionManager = manager(binding());
+		const parsedCases: Pick<Args, "continue" | "resume">[] = [
+			{ resume: true },
+			{ resume: "session-file" },
+			{ continue: true },
+		];
+		for (const parsed of parsedCases) {
+			expect(resolveBreadboardSessionTarget(parsed, sessionManager, undefined, workspace, true)).toEqual({
+				kind: "attach",
+				sessionId: "bb-session",
+			});
+		}
+	});
+
+	it("rejects colliding or stale durable bindings", () => {
+		expect(() =>
+			resolveBreadboardSessionTarget(
+				{ resume: true },
+				manager(binding(), binding({ sessionId: "other-session" })),
+				undefined,
+				workspace,
+				true,
+			),
+		).toThrow("conflicts with the active transcript");
+		expect(() =>
+			resolveBreadboardSessionTarget(
+				{ resume: true },
+				manager(binding(), binding({ cursor: { eventId: null, sequence: 0 } })),
+				undefined,
+				workspace,
+				true,
+			),
+		).toThrow("conflicts with the active transcript");
+	});
+
+	it("rejects malformed durable bindings instead of creating a new session", () => {
+		expect(() =>
+			resolveBreadboardSessionTarget(
+				{ continue: true },
+				manager({ schemaVersion: "breadboard.session-binding.v3" }),
+				undefined,
+				workspace,
+				true,
+			),
+		).toThrow("malformed or incompatible");
 	});
 });

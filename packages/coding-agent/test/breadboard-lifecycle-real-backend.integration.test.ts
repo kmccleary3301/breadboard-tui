@@ -2,8 +2,9 @@ import { expect, test } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { type AddressInfo, createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk/internal";
@@ -185,6 +186,7 @@ test("real backend rolls back an expired cross-process drain exactly once and re
 	const bootstrapCredential = Buffer.from(authorityId(), "ascii");
 	const ownerCredential = authorityId();
 	const launchId = authorityId();
+	const engineStateRoot = await realpath(await mkdtemp(resolve(tmpdir(), "breadboard-engine-state-")));
 	let stderrText = "";
 	let backend: ChildProcess | undefined;
 	const diagnosticState: IntegrationDiagnosticState = { phase: "backend-startup", fetchFailure: null };
@@ -193,7 +195,7 @@ test("real backend rolls back an expired cross-process drain exactly once and re
 		backend = spawn(backendPython!, ["-m", "breadboard_engine.api.cli_bridge.server"], {
 			cwd: verifiedBackend.root,
 			env: {
-				...lifecycleChildEnvironment(launchId),
+				...lifecycleChildEnvironment(launchId, engineStateRoot),
 				PYTHONPATH: verifiedBackend.root,
 				PYTHONUNBUFFERED: "1",
 				BREADBOARD_CLI_HOST: "127.0.0.1",
@@ -758,6 +760,7 @@ test("real backend rolls back an expired cross-process drain exactly once and re
 			await Promise.race([once(backend, "exit"), Bun.sleep(2_000)]);
 			if (backend.exitCode === null) backend.kill("SIGKILL");
 		}
+		await rm(engineStateRoot, { recursive: true, force: true });
 		await verifiedBackend.close();
 	}
 }, 240_000);

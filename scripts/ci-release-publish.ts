@@ -14,7 +14,10 @@
  *      that points at `./src/*.ts(x)` is repointed to `./dist/types/*.d.ts`,
  *      `dist/types` (plus `dist/client` for `stats`) is added to `files`,
  *      and packages with a `publishBin` override get their `bin` swapped to
- *      the prepack bundle (coding-agent: `src/cli.ts` → `dist/cli.js`).
+ *      the prepack bundle (coding-agent: `src/omp.ts` → `dist/cli.js`).
+ *      Bundled source-only dependencies are embedded under `node_modules` and
+ *      removed from the final archive manifest after Bun resolves workspace
+ *      protocols, so both npm and Bun installs remain self-contained.
  *      Packages flagged `publishJs` (omptype) additionally emit transpiled
  *      per-module JS into `dist/js/` and get their runtime entries (`main`,
  *      `exports[*]` import paths) repointed there, with a `bun` condition
@@ -63,6 +66,12 @@ export interface PublishPackage {
 	 * without a build; publish swaps in the `prepack` bundle.
 	 */
 	publishBin?: Readonly<Record<string, string>>;
+	/**
+	 * Dependencies staged under this package's node_modules and embedded in the
+	 * tarball. Their source-only file: references are removed from the published
+	 * manifest so npm and Bun never resolve paths outside the installed package.
+	 */
+	publishBundledDependencies?: readonly string[];
 }
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
@@ -76,6 +85,8 @@ interface PackageManifest {
 	private?: boolean;
 	license?: string;
 	files?: JsonValue[];
+	dependencies?: JsonObject;
+	bundledDependencies?: JsonValue[];
 	optionalDependencies?: JsonObject;
 }
 
@@ -151,7 +162,12 @@ export const packages: PublishPackage[] = [
 		extraTypeConfigs: ["tsconfig.publish.client.json"],
 	},
 	{ dir: "packages/agent", kind: "typescript" },
-	{ dir: "packages/coding-agent", kind: "typescript", publishBin: { omp: "dist/cli.js" } },
+	{
+		dir: "packages/coding-agent",
+		kind: "typescript",
+		publishBin: { omp: "dist/cli.js" },
+		publishBundledDependencies: ["@breadboard/sdk"],
+	},
 ];
 
 function rewriteSrcToTypes(value: string): string {
@@ -202,11 +218,24 @@ function rewriteExports(exports: JsonValue, publishJs: boolean): JsonValue {
 	return out;
 }
 
+function rewriteBundledDependencies(manifest: PackageManifest, pkg: PublishPackage): void {
+	for (const dependency of pkg.publishBundledDependencies ?? []) {
+		if (!manifest.bundledDependencies?.includes(dependency)) {
+			throw new Error(`${pkg.dir} must list ${dependency} in bundledDependencies`);
+		}
+		if (typeof manifest.dependencies?.[dependency] !== "string") {
+			throw new Error(`${pkg.dir} must declare source dependency ${dependency}`);
+		}
+		delete manifest.dependencies[dependency];
+	}
+}
+
 /** Compute (and optionally write) the published manifest for a package. */
 export async function rewriteManifest(pkg: PublishPackage, write: boolean): Promise<PackageManifest> {
 	const manifestPath = path.join(repoRoot, pkg.dir, "package.json");
 	const manifest = (await Bun.file(manifestPath).json()) as PackageManifest;
 	if (pkg.publishBin) manifest.bin = { ...pkg.publishBin };
+	rewriteBundledDependencies(manifest, pkg);
 	if (typeof manifest.types === "string" && manifest.types.startsWith("./src/")) {
 		manifest.types = rewriteSrcToTypes(manifest.types);
 	}
@@ -254,10 +283,10 @@ async function preparePackage(pkg: PublishPackage): Promise<PackageManifest> {
 }
 
 /**
- * Apply only the published `bin` rewrite to a package's working-tree
- * manifest. Used by `scripts/install-tests/run-ci.sh` to pack the coding
- * agent with its published topology (bin → prepack bundle) without running
- * the type-emission steps; the caller backs up and restores the manifest.
+ * Apply the published runtime topology to a package's working-tree manifest.
+ * Used by `scripts/install-tests/run-ci.sh` to pack the coding agent with its
+ * bundled CLI and self-contained SDK dependency; the caller restores the
+ * manifest after packing.
  */
 export async function applyPublishBin(pkgRelDir: string, write: boolean): Promise<PackageManifest> {
 	const pkg = packages.find(entry => entry.dir === pkgRelDir);
@@ -265,6 +294,7 @@ export async function applyPublishBin(pkgRelDir: string, write: boolean): Promis
 	const manifestPath = path.join(repoRoot, pkgRelDir, "package.json");
 	const manifest = (await Bun.file(manifestPath).json()) as PackageManifest;
 	manifest.bin = { ...pkg.publishBin };
+	rewriteBundledDependencies(manifest, pkg);
 	if (write) await Bun.write(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
 	return manifest;
 }
@@ -326,6 +356,58 @@ export interface PackedTarball {
 	path: string;
 }
 
+/**
+ * Remove source-only file dependencies from Bun's resolved archive manifest.
+ * Bun restores workspace dependency entries while packing, even when the
+ * working manifest was rewritten. The bundled bytes must already be present.
+ */
+export async function rewritePackedBundledDependencies(
+	tarballPath: string,
+	dependencies: readonly string[],
+): Promise<void> {
+	if (dependencies.length === 0) return;
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-packed-rewrite-"));
+	try {
+		const extracted = await $`tar -xzf ${tarballPath} -C ${root}`.quiet().nothrow();
+		if (extracted.exitCode !== 0) {
+			throw new Error(`Could not extract packed archive ${tarballPath}: ${extracted.stderr.toString().trim()}`);
+		}
+		const manifestPath = path.join(root, "package", "package.json");
+		const manifest = (await Bun.file(manifestPath).json()) as PackageManifest;
+		for (const dependency of dependencies) {
+			if (!manifest.bundledDependencies?.includes(dependency)) {
+				throw new Error(`Packed manifest does not declare bundled dependency ${dependency}`);
+			}
+			const dependencyManifestPath = path.join(root, "package", "node_modules", dependency, "package.json");
+			if (!(await Bun.file(dependencyManifestPath).exists())) {
+				throw new Error(`Packed archive is missing bundled dependency ${dependency}`);
+			}
+			const dependencyManifest = (await Bun.file(dependencyManifestPath).json()) as PackageManifest;
+			for (const runtimeDependency in dependencyManifest.dependencies ?? {}) {
+				const requiredRange = dependencyManifest.dependencies?.[runtimeDependency];
+				if (typeof requiredRange !== "string") {
+					throw new Error(
+						`Bundled dependency ${dependency} has an invalid runtime dependency ${runtimeDependency}`,
+					);
+				}
+				if (manifest.dependencies?.[runtimeDependency] !== requiredRange) {
+					throw new Error(
+						`Packed manifest must retain ${runtimeDependency}@${requiredRange} required by bundled dependency ${dependency}`,
+					);
+				}
+			}
+			if (manifest.dependencies) delete manifest.dependencies[dependency];
+		}
+		await Bun.write(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
+		const repacked = await $`tar -czf ${tarballPath} -C ${root} package`.quiet().nothrow();
+		if (repacked.exitCode !== 0) {
+			throw new Error(`Could not rewrite packed archive ${tarballPath}: ${repacked.stderr.toString().trim()}`);
+		}
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
+	}
+}
+
 /** Read the package identity npm will publish from the packed archive. */
 export async function inspectPackedTarball(tarballPath: string): Promise<PackedTarball> {
 	const extracted = await $`tar -xOzf ${tarballPath} package/package.json`.quiet().nothrow();
@@ -339,7 +421,11 @@ export async function inspectPackedTarball(tarballPath: string): Promise<PackedT
 	return { name: manifest.name, version: manifest.version, path: tarballPath };
 }
 
-async function packAndPublish(dir: string, name: string): Promise<void> {
+async function packAndPublish(
+	dir: string,
+	name: string,
+	publishBundledDependencies: readonly string[] = [],
+): Promise<void> {
 	if (isDryRun) {
 		console.log(`DRY RUN bun pm pack && npm publish --access public (${path.relative(repoRoot, dir)})`);
 		return;
@@ -355,7 +441,9 @@ async function packAndPublish(dir: string, name: string): Promise<void> {
 		}
 		const tarball = (await fs.readdir(packDir)).find(entry => entry.endsWith(".tgz"));
 		if (!tarball) throw new Error(`bun pm pack produced no tarball for ${name} (${path.relative(repoRoot, dir)})`);
-		const packedTarball = await inspectPackedTarball(path.join(packDir, tarball));
+		const tarballPath = path.join(packDir, tarball);
+		await rewritePackedBundledDependencies(tarballPath, publishBundledDependencies);
+		const packedTarball = await inspectPackedTarball(tarballPath);
 		// Preflight the exact packed version so reruns skip deterministically.
 		// Fail open on lookup errors; only a confirmed published version may skip publishing.
 		const preflight = await $`npm view ${`${packedTarball.name}@${packedTarball.version}`} version`.quiet().nothrow();
@@ -437,7 +525,7 @@ async function publishPackage(pkg: PublishPackage): Promise<void> {
 		console.log(`Skipping ${name} (private)`);
 		return;
 	}
-	await packAndPublish(pkgDir, name);
+	await packAndPublish(pkgDir, name, pkg.publishBundledDependencies);
 }
 
 if (import.meta.main) {

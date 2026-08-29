@@ -18,6 +18,8 @@ const manifest = JSON.parse(
 	await readFile(resolve(packageRoot, "breadboard-sdk-provenance.json"), "utf8"),
 ) as BreadboardSdkProvenance;
 const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8")) as {
+	bin: Record<string, string>;
+	bundledDependencies: string[];
 	dependencies: Record<string, string>;
 	scripts: Record<string, string>;
 };
@@ -42,7 +44,7 @@ describe("BreadBoard SDK provenance", () => {
 			await expect(verifyBreadboardSdkProvenance(packageRoot, packageRoot, clean)).resolves.toMatchObject({
 				packageName: "@breadboard/sdk",
 				packageVersion: "0.3.0",
-				artifactSha256: "c5f3ca334a475cd4fcb638336aa447c05066136641bd9e56572ec0a65516975a",
+				artifactSha256: "181309cc011c7a43dda2308aaf25fc7674965010b4275720f06d2e78fa7be80f",
 			});
 		} finally {
 			if (previous === undefined) delete process.env[environmentName];
@@ -63,6 +65,29 @@ describe("BreadBoard SDK provenance", () => {
 				{
 					dependencies: { ...packageJson.dependencies, "@breadboard/sdk": "file:/tmp/foreign-sdk.tgz" },
 				},
+				lockText,
+			),
+		).toThrow("package.json dependency is not the pinned artifact");
+	});
+
+	test("accepts only the self-contained published SDK topology", () => {
+		const publishedDependencies = { ...packageJson.dependencies };
+		delete publishedDependencies[manifest.packageName];
+		expect(() =>
+			verifyPinnedReferences(
+				manifest,
+				{
+					bin: { omp: "dist/cli.js" },
+					bundledDependencies: packageJson.bundledDependencies,
+					dependencies: publishedDependencies,
+				},
+				lockText,
+			),
+		).not.toThrow();
+		expect(() =>
+			verifyPinnedReferences(
+				manifest,
+				{ bundledDependencies: packageJson.bundledDependencies, dependencies: publishedDependencies },
 				lockText,
 			),
 		).toThrow("package.json dependency is not the pinned artifact");

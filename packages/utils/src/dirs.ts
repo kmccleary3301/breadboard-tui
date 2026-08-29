@@ -29,7 +29,7 @@ export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
 export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
 
 /** BreadBoard product version. */
-export const BREADBOARD_VERSION = "0.1.0-rc.3";
+export const BREADBOARD_VERSION = "0.1.0-rc.4";
 
 /** Canonical SDK dependency version used by the BreadBoard product. */
 export const BREADBOARD_SDK_VERSION = "0.3.0";
@@ -135,7 +135,7 @@ function readProfileFromEnvSafe(): string | undefined {
 }
 
 function getBaseConfigRoot(): string {
-	const breadboardOverride = process.env.BREADBOARD_CONFIG_DIR;
+	const breadboardOverride = IS_BREADBOARD_PRODUCT ? process.env.BREADBOARD_CONFIG_DIR : undefined;
 	if (breadboardOverride && path.isAbsolute(breadboardOverride)) return path.resolve(breadboardOverride);
 	return path.join(os.homedir(), getConfigDirName());
 }
@@ -235,9 +235,13 @@ export async function directoryExists(dir: string): Promise<boolean> {
 	}
 }
 
-/** Get the config directory name or explicit path override. */
+/** Get the active product's config directory name or explicit path override. */
 export function getConfigDirName(): string {
-	return process.env.BREADBOARD_CONFIG_DIR || process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
+	return (
+		(IS_BREADBOARD_PRODUCT ? process.env.BREADBOARD_CONFIG_DIR : undefined) ||
+		process.env.PI_CONFIG_DIR ||
+		CONFIG_DIR_NAME
+	);
 }
 
 /** Get the config agent directory name (or path) relative to the config root. */

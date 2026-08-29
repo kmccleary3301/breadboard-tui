@@ -169,7 +169,7 @@ RUN printf '%s\n' \
     '  echo "pi: PI_ROOT=$PI_ROOT does not look like a pi checkout" >&2' \
     '  exit 127' \
     'fi' \
-    'exec bun "$PI_ROOT/packages/coding-agent/src/cli.ts" "$@"' \
+    'exec bun "$PI_ROOT/packages/coding-agent/src/omp.ts" "$@"' \
     > /usr/local/bin/omp \
     && chmod +x /usr/local/bin/omp
 

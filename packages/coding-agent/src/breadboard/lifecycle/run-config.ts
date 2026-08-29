@@ -2,10 +2,15 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { extname, isAbsolute, resolve } from "node:path";
 import { JSONC, YAML } from "bun";
-
+import {
+	ENGINE_RUNTIME_BUNDLE_SCHEMA,
+	type EngineRuntimeBundleReference,
+	parseEngineRuntimeBundleRelativePath,
+} from "./engine-runtime-bundle";
+import type { InstalledEngineIdentity } from "./installed-engine-manifest";
 export const BREADBOARD_ENGINE_MODES = ["local-owned", "local-external", "remote", "off"] as const;
 export type BreadboardEngineMode = (typeof BREADBOARD_ENGINE_MODES)[number];
-export type ConfigSource = "cli" | "environment" | "selected-config" | "derived-default";
+export type ConfigSource = "cli" | "environment" | "selected-config" | "derived-installed-artifact" | "derived-default";
 export type OwnerExitPolicy = "attached" | "detached";
 
 export type BreadboardAuth =
@@ -17,8 +22,7 @@ export type BreadboardTls =
 	| { readonly kind: "local-loopback" }
 	| { readonly kind: "system-trust"; readonly spkiPin?: string };
 
-export interface EngineArtifact {
-	readonly executablePath: string;
+interface EngineArtifactIdentity {
 	readonly argv: readonly string[];
 	readonly argvSha256: `sha256:${string}`;
 	readonly executableSha256: `sha256:${string}`;
@@ -26,12 +30,27 @@ export interface EngineArtifact {
 	readonly servedBackendCommit: string;
 }
 
+export interface DirectEngineArtifact extends EngineArtifactIdentity {
+	readonly kind: "direct-executable";
+	readonly executablePath: string;
+}
+
+export interface BundledEngineArtifact extends EngineArtifactIdentity {
+	readonly kind: "runtime-bundle";
+	readonly runtimeBundle: EngineRuntimeBundleReference;
+	readonly executablePath: string;
+	readonly executableSizeBytes: number;
+}
+
+export type EngineArtifact = DirectEngineArtifact | BundledEngineArtifact;
+
 export interface BreadboardRunConfig {
 	readonly mode: BreadboardEngineMode;
 	readonly endpoint?: string;
 	readonly auth?: BreadboardAuth;
 	readonly tls?: BreadboardTls;
 	readonly engineArtifact?: EngineArtifact;
+	readonly installedEngineIdentity?: InstalledEngineIdentity;
 	readonly sessionConfigPath?: string;
 	readonly workspaceId: `workspace:v1:sha256:${string}`;
 	readonly startupTimeoutMs: number;
@@ -73,6 +92,8 @@ export interface ResolveBreadboardRunConfigInput {
 	readonly workspacePath: string;
 	readonly derivedOwnerExitPolicy?: OwnerExitPolicy;
 	readonly canonicalizeWorkspace?: (path: string) => string;
+	readonly installedEngineArtifact?: unknown;
+	readonly installedEngineIdentity?: InstalledEngineIdentity;
 }
 
 export type RunConfigErrorCode =
@@ -124,6 +145,39 @@ const SELECTED_CONFIG_FIELDS = new Set([
 	"ownerExitPolicy",
 	"sessionConfigPath",
 ]);
+const SELECTED_ENGINE_SELECTION_FIELDS = ["engineMode", "baseUrl", "auth", "tls", "engineArtifact"] as const;
+const ENGINE_SELECTION_ENVIRONMENT_FIELDS = [
+	"BREADBOARD_ENGINE_MODE",
+	"BREADBOARD_API_URL",
+	"BREADBOARD_API_TOKEN",
+	"BREADBOARD_API_TOKEN_REF",
+	"BREADBOARD_MTLS_IDENTITY_REF",
+	"BREADBOARD_TLS_SPKI_PIN",
+	"BREADBOARD_ENGINE_EXECUTABLE",
+	"BREADBOARD_ENGINE_ARGV_JSON",
+	"BREADBOARD_ENGINE_EXECUTABLE_SHA256",
+	"BREADBOARD_ENGINE_SOURCE_SHA256",
+	"BREADBOARD_ENGINE_BACKEND_COMMIT",
+] as const;
+
+export function hasExplicitEngineSelection(
+	input: Pick<ResolveBreadboardRunConfigInput, "cli" | "environment" | "selectedConfig">,
+): boolean {
+	if (input.cli?.engineMode !== undefined || input.cli?.engineUrl !== undefined) return true;
+	if (
+		input.selectedConfig !== undefined &&
+		typeof input.selectedConfig === "object" &&
+		input.selectedConfig !== null &&
+		!Array.isArray(input.selectedConfig) &&
+		SELECTED_ENGINE_SELECTION_FIELDS.some(field => hasOwn(input.selectedConfig as object, field))
+	) {
+		return true;
+	}
+	return (
+		input.environment !== undefined &&
+		ENGINE_SELECTION_ENVIRONMENT_FIELDS.some(field => input.environment?.[field] !== undefined)
+	);
+}
 
 function fail(code: RunConfigErrorCode, field: RunConfigField, message: string): never {
 	throw new BreadboardRunConfigError(code, field, message);
@@ -273,11 +327,95 @@ export function executablePathSha256(canonicalPath: string): `sha256:${string}` 
 	return `sha256:${createHash("sha256").update("breadboard-engine-executable-path-v1\0").update(canonicalPath).digest("hex")}`;
 }
 
+export function engineArtifactLocationSha256(artifact: EngineArtifact): `sha256:${string}` {
+	if (artifact.kind === "direct-executable") return executablePathSha256(artifact.executablePath);
+	return `sha256:${createHash("sha256")
+		.update("breadboard-engine-runtime-bundle-location-v1\0")
+		.update(
+			JSON.stringify({
+				bundlePath: artifact.runtimeBundle.path,
+				bundleSha256: artifact.runtimeBundle.sha256,
+				bundleSizeBytes: artifact.runtimeBundle.sizeBytes,
+				executablePath: artifact.executablePath,
+			}),
+		)
+		.digest("hex")}`;
+}
+
 function parseArtifact(value: unknown): EngineArtifact | undefined {
 	if (value === undefined) return undefined;
-	if (typeof value !== "object" || value === null || Array.isArray(value))
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		fail("invalid_artifact", "engineArtifact", "engine artifact must be an object");
+	}
 	const record = value as Record<string, unknown>;
+	if (!Array.isArray(record.argv) || record.argv.some(arg => typeof arg !== "string" || arg.includes("\0"))) {
+		fail("invalid_artifact", "engineArtifact", "engine artifact argv must be an array of strings");
+	}
+	if (typeof record.executableSha256 !== "string" || !SHA256.test(record.executableSha256)) {
+		fail("invalid_artifact", "engineArtifact", "engine executable digest is invalid");
+	}
+	if (typeof record.engineSourceSha256 !== "string" || !SHA256.test(record.engineSourceSha256)) {
+		fail("invalid_artifact", "engineArtifact", "engine source digest is invalid");
+	}
+	if (typeof record.servedBackendCommit !== "string" || !COMMIT_ID.test(record.servedBackendCommit)) {
+		fail("invalid_artifact", "engineArtifact", "served backend commit is invalid");
+	}
+	const argv = Object.freeze([...(record.argv as string[])]);
+	const argvSha256 =
+		`sha256:${createHash("sha256").update("breadboard-engine-argv-v1\0").update(JSON.stringify(argv)).digest("hex")}` as const;
+	const identity = {
+		argv,
+		argvSha256,
+		executableSha256: record.executableSha256 as `sha256:${string}`,
+		engineSourceSha256: record.engineSourceSha256 as `sha256:${string}`,
+		servedBackendCommit: record.servedBackendCommit,
+	};
+	if (record.kind === "runtime-bundle") {
+		const rawBundle = record.runtimeBundle;
+		if (typeof rawBundle !== "object" || rawBundle === null || Array.isArray(rawBundle)) {
+			fail("invalid_artifact", "engineArtifact", "engine runtime bundle identity must be an object");
+		}
+		const bundle = rawBundle as Record<string, unknown>;
+		if (
+			Object.keys(bundle).sort().join("\0") !== ["path", "schemaVersion", "sha256", "sizeBytes"].sort().join("\0") ||
+			bundle.schemaVersion !== ENGINE_RUNTIME_BUNDLE_SCHEMA ||
+			typeof bundle.path !== "string" ||
+			!isAbsolute(bundle.path) ||
+			bundle.path.includes("\0") ||
+			!Number.isSafeInteger(bundle.sizeBytes) ||
+			(bundle.sizeBytes as number) <= 0 ||
+			typeof bundle.sha256 !== "string" ||
+			!SHA256.test(bundle.sha256)
+		) {
+			fail("invalid_artifact", "engineArtifact", "engine runtime bundle identity is invalid");
+		}
+		let bundlePath: string;
+		let executablePath: string;
+		try {
+			bundlePath = realpathSync(bundle.path);
+			executablePath = parseEngineRuntimeBundleRelativePath(record.executablePath);
+		} catch {
+			fail("invalid_artifact", "engineArtifact", "engine runtime bundle path cannot be canonicalized");
+		}
+		if (!Number.isSafeInteger(record.executableSizeBytes) || (record.executableSizeBytes as number) <= 0) {
+			fail("invalid_artifact", "engineArtifact", "engine executable size is invalid");
+		}
+		return Object.freeze({
+			kind: "runtime-bundle",
+			runtimeBundle: Object.freeze({
+				schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
+				path: bundlePath,
+				sizeBytes: bundle.sizeBytes as number,
+				sha256: bundle.sha256 as `sha256:${string}`,
+			}),
+			executablePath,
+			executableSizeBytes: record.executableSizeBytes as number,
+			...identity,
+		});
+	}
+	if (record.kind !== undefined && record.kind !== "direct-executable") {
+		fail("invalid_artifact", "engineArtifact", "engine artifact kind is invalid");
+	}
 	if (
 		typeof record.executablePath !== "string" ||
 		!isAbsolute(record.executablePath) ||
@@ -285,31 +423,16 @@ function parseArtifact(value: unknown): EngineArtifact | undefined {
 	) {
 		fail("invalid_artifact", "engineArtifact", "engine artifact executable path must be absolute");
 	}
-	if (!Array.isArray(record.argv) || record.argv.some(arg => typeof arg !== "string" || arg.includes("\0"))) {
-		fail("invalid_artifact", "engineArtifact", "engine artifact argv must be an array of strings");
-	}
-	if (typeof record.executableSha256 !== "string" || !SHA256.test(record.executableSha256))
-		fail("invalid_artifact", "engineArtifact", "engine executable digest is invalid");
-	if (typeof record.engineSourceSha256 !== "string" || !SHA256.test(record.engineSourceSha256))
-		fail("invalid_artifact", "engineArtifact", "engine source digest is invalid");
-	if (typeof record.servedBackendCommit !== "string" || !COMMIT_ID.test(record.servedBackendCommit))
-		fail("invalid_artifact", "engineArtifact", "served backend commit is invalid");
 	let executablePath: string;
 	try {
 		executablePath = realpathSync(record.executablePath);
 	} catch {
 		fail("invalid_artifact", "engineArtifact", "engine artifact executable path cannot be canonicalized");
 	}
-	const argv = Object.freeze([...(record.argv as string[])]);
-	const argvSha256 =
-		`sha256:${createHash("sha256").update("breadboard-engine-argv-v1\0").update(JSON.stringify(argv)).digest("hex")}` as const;
 	return Object.freeze({
+		kind: "direct-executable",
 		executablePath,
-		argv,
-		argvSha256,
-		executableSha256: record.executableSha256 as `sha256:${string}`,
-		engineSourceSha256: record.engineSourceSha256 as `sha256:${string}`,
-		servedBackendCommit: record.servedBackendCommit,
+		...identity,
 	});
 }
 
@@ -400,7 +523,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 	else if (envMode !== undefined) modeChoice = { value: parseMode(envMode), source: "environment", explicit: true };
 	else if (selectedMode !== undefined)
 		modeChoice = { value: parseMode(selectedMode), source: "selected-config", explicit: true };
-	else if (normalizedEndpoint === undefined)
+	else if (normalizedEndpoint === undefined || (environment.BREADBOARD_PRODUCT === "1" && !endpointChoice.explicit))
 		modeChoice = { value: "local-owned", source: "derived-default", explicit: false };
 	else
 		modeChoice = {
@@ -429,12 +552,17 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 				: { value: undefined, source: "derived-default" as const };
 
 	const envArtifact = environmentArtifact(environment);
+	const installedArtifact = modeChoice.value === "local-owned" ? input.installedEngineArtifact : undefined;
 	const artifactChoice =
 		envArtifact !== undefined
 			? { value: parseArtifact(envArtifact), source: "environment" as const }
 			: hasOwn(selected, "engineArtifact")
 				? { value: parseArtifact(selected.engineArtifact), source: "selected-config" as const }
-				: { value: undefined, source: "derived-default" as const };
+				: installedArtifact !== undefined
+					? { value: parseArtifact(installedArtifact), source: "derived-installed-artifact" as const }
+					: { value: undefined, source: "derived-default" as const };
+	const installedEngineIdentity =
+		artifactChoice.source === "derived-installed-artifact" ? input.installedEngineIdentity : undefined;
 
 	const workspaceChoice =
 		environment.BREADBOARD_WORKSPACE_ID !== undefined
@@ -487,7 +615,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 		if (authChoice.value !== undefined)
 			fail("mode_auth_conflict", "auth", "local-owned does not accept endpoint authentication");
 		if (!artifactChoice.value)
-			fail("missing_engine_artifact", "engineArtifact", "local-owned requires an explicit engine artifact identity");
+			fail("missing_engine_artifact", "engineArtifact", "local-owned requires an engine artifact identity");
 		tls = { kind: "local-loopback" };
 	} else if (mode === "local-external") {
 		if ((!endpointChoice.explicit && environment.BREADBOARD_PRODUCT !== "1") || endpoint === undefined)
@@ -538,12 +666,13 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 			artifactChoice.value === undefined
 				? undefined
 				: {
-						executablePathSha256: executablePathSha256(artifactChoice.value.executablePath),
+						artifactLocationSha256: engineArtifactLocationSha256(artifactChoice.value),
 						argvSha256: artifactChoice.value.argvSha256,
 						executableSha256: artifactChoice.value.executableSha256,
 						engineSourceSha256: artifactChoice.value.engineSourceSha256,
 						servedBackendCommit: artifactChoice.value.servedBackendCommit,
 					},
+		installedEngineIdentity,
 		workspaceId: workspaceChoice.value,
 		startupTimeoutMs,
 		requestTimeoutMs,
@@ -561,11 +690,12 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 		...(authChoice.value === undefined ? {} : { auth: authChoice.value }),
 		...(tls === undefined ? {} : { tls }),
 		...(artifactChoice.value === undefined ? {} : { engineArtifact: artifactChoice.value }),
-		...(sessionConfigPath === undefined ? {} : { sessionConfigPath }),
+		...(installedEngineIdentity === undefined ? {} : { installedEngineIdentity }),
 		workspaceId: workspaceChoice.value as `workspace:v1:sha256:${string}`,
 		startupTimeoutMs,
 		requestTimeoutMs,
 		...(mode === "local-owned" ? { ownerExitPolicy } : {}),
+		...(sessionConfigPath === undefined ? {} : { sessionConfigPath }),
 		sources,
 		configDigest: `sha256:${configHash.digest("hex")}`,
 	});

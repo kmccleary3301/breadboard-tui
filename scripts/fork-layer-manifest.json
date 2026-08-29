@@ -500,8 +500,8 @@
     },
     {
       "path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/src/modes/theme/defaults/breadboard-light.json",
@@ -527,6 +527,11 @@
       "path": "packages/coding-agent/src/modes/types.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "packages/coding-agent/src/native-product-env.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/src/omp.ts",
@@ -565,8 +570,8 @@
     },
     {
       "path": "packages/coding-agent/src/slash-commands/builtin-session.ts",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/src/tools/hub/index.ts",
@@ -629,6 +634,16 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/test/cli-argv-routing.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/coding-agent/test/cli/completions.test.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/test/cli/update-cli.test.ts",
       "class": "manual-review",
       "rule": "manual-review-boundaries",
@@ -672,8 +687,8 @@
     },
     {
       "path": "packages/coding-agent/test/main-session-resolution-error.test.ts",
-      "class": "upstream-owned",
-      "rule": "upstream-ordinary-omp"
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
     },
     {
       "path": "packages/coding-agent/test/main-startup-initialization.test.ts",
@@ -811,6 +826,13 @@
       "path": "scripts/install-tests/run-ci.sh",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
+    },
+    {
+      "path": "scripts/link-omp.sh",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
     },
     {
       "path": "scripts/p31/upstream-sync-policy.json",

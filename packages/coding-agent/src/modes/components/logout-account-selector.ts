@@ -14,14 +14,17 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 	#statusMessage: string | undefined;
 	#onSelectCallback: (account: LogoutAccount) => void;
 	#onCancelCallback: () => void;
+	#action: "log out" | "revoke";
 
 	constructor(
 		providerName: string,
 		accounts: LogoutAccount[],
 		onSelect: (account: LogoutAccount) => void,
 		onCancel: () => void,
+		action: "log out" | "revoke" = "log out",
 	) {
-		super(`Select ${providerName} account to log out`);
+		super(`Select ${providerName} account to ${action}`);
+		this.#action = action;
 		this.#accounts = accounts;
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
@@ -69,11 +72,13 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		}
 
 		if (total === 0) {
-			this.#listContainer.addChild(new TruncatedText(theme.fg("muted", "No stored accounts to log out"), 0, 0));
+			this.#listContainer.addChild(
+				new TruncatedText(theme.fg("muted", `No stored accounts to ${this.#action}`), 0, 0),
+			);
 		}
 
 		this.#listContainer.addChild(
-			new TruncatedText(theme.fg("muted", "↑/↓ select · ↵ log out account · Esc cancel"), 0, 0),
+			new TruncatedText(theme.fg("muted", `↑/↓ select · ↵ ${this.#action} account · Esc cancel`), 0, 0),
 		);
 
 		if (this.#statusMessage) {

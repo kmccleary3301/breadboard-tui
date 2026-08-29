@@ -66,7 +66,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#visibleCount = 0;
 	/** Visible list window, shrunk by {@link setMaxHeight} on short screens. */
 	#maxVisible = OAUTH_SELECTOR_MAX_VISIBLE;
-	#mode: "login" | "logout";
+	#mode: "login" | "logout" | "revoke";
 	#dataSource: ProviderAuthDataSource;
 	#credentials: AuthCredentialView[] = [];
 	#onSelectCallback: (providerId: string) => void;
@@ -80,7 +80,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#validationGeneration: number = 0;
 	readonly ready: Promise<void>;
 	constructor(
-		mode: "login" | "logout",
+		mode: "login" | "logout" | "revoke",
 		dataSource: ProviderAuthDataSource,
 		onSelect: (providerId: string) => void,
 		onCancel: () => void,
@@ -89,7 +89,13 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			requestRender?: () => void;
 		},
 	) {
-		super(mode === "login" ? "Select provider to login" : "Select provider to logout");
+		super(
+			mode === "login"
+				? "Select provider to login"
+				: mode === "logout"
+					? "Select provider to logout"
+					: "Select provider credential to revoke",
+		);
 		this.#mode = mode;
 		this.#dataSource = dataSource;
 		this.#onSelectCallback = onSelect;
@@ -136,10 +142,35 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		this.#updateList();
 	}
 	#hasSelectableAuth(providerId: string): boolean {
-		return this.#credentials.some(
-			credential => credential.providerId === providerId && credential.status === "active",
+		return this.#credentials.some(credential => {
+			if (credential.providerId !== providerId) return false;
+			return this.#mode === "revoke" ? credential.status !== "revoked" : credential.status === "active";
+		});
+	}
+	#canLogin(provider: AuthProviderView): boolean {
+		if (
+			provider.supportTier !== "core" ||
+			provider.availabilityReason === "provider_managed" ||
+			(!provider.available && provider.availabilityReason !== "missing_auth")
+		) {
+			return false;
+		}
+		return (
+			provider.authSchemes.includes("api_key") ||
+			(provider.authSchemes.includes("oauth2") && provider.loginAvailable)
 		);
 	}
+
+	#availabilityLabel(provider: AuthProviderView): string {
+		if (this.#mode !== "login") return "";
+		if (provider.availabilityReason === "missing_auth") {
+			return theme.fg("muted", " (credentials required)");
+		}
+		if (this.#canLogin(provider)) return "";
+		const reason = provider.availabilityReason === "provider_managed" ? "provider managed" : "unavailable";
+		return theme.fg("muted", ` (${reason})`);
+	}
+
 	#applyProviders(providers: ReadonlyArray<AuthProviderView>, credentials: ReadonlyArray<AuthCredentialView>): void {
 		this.#credentials = credentials.map(credential => ({ ...credential }));
 		const rows = providers.map(provider => ({
@@ -147,7 +178,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			id: provider.providerId,
 			name: provider.displayName,
 		}));
-		if (this.#mode === "logout") {
+		if (this.#mode !== "login") {
 			this.#allProviders = rows.filter(provider => this.#hasSelectableAuth(provider.id));
 		} else {
 			const disabled = getDisabledProviderIds();
@@ -236,8 +267,12 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	 * the list distinguishes a real login from an env var aliasing the provider.
 	 */
 	#getSourceLabel(providerId: string): string {
-		const credential = this.#credentials.find(item => item.providerId === providerId && item.status === "active");
-		if (!credential) return "";
+		const credential = this.#credentials.find(
+			item =>
+				item.providerId === providerId &&
+				(this.#mode === "revoke" ? item.status !== "revoked" : item.status === "active"),
+		);
+		if (!credential?.source) return "";
 		const detail = ORIGIN_LABELS[credential.source] ?? credential.source;
 		return theme.fg("muted", ` (${detail})`);
 	}
@@ -278,8 +313,9 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#getProviderSearchText(provider: SelectorProvider): string {
 		let text = `${provider.name} ${provider.id}`;
 		const credential = this.#credentials.find(item => item.providerId === provider.id && item.status === "active");
-		if (credential) text += ` logged in authenticated ${ORIGIN_LABELS[credential.source] ?? credential.source}`;
-		if (!provider.available) text += " unavailable";
+		if (credential?.source)
+			text += ` logged in authenticated ${ORIGIN_LABELS[credential.source] ?? credential.source}`;
+		if (!this.#canLogin(provider)) text += ` ${provider.availabilityReason ?? "unavailable"}`;
 		return text;
 	}
 
@@ -330,17 +366,18 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			const provider = this.#filteredProviders[i];
 			if (!provider) continue;
 			const isSelected = i === this.#selectedIndex;
-			const isAvailable = provider.available && (this.#mode === "logout" || provider.loginAvailable);
+			const isAvailable = this.#mode !== "login" || this.#canLogin(provider);
 			const statusIndicator = this.#getStatusIndicator(provider.id);
+			const availabilityLabel = this.#availabilityLabel(provider);
 
 			let line = "";
 			if (isSelected) {
 				const prefix = theme.fg("accent", `${theme.nav.cursor} `);
 				const text = isAvailable ? theme.fg("accent", provider.name) : theme.fg("dim", provider.name);
-				line = prefix + text + statusIndicator;
+				line = prefix + text + statusIndicator + availabilityLabel;
 			} else {
 				const text = isAvailable ? `  ${provider.name}` : theme.fg("dim", `  ${provider.name}`);
-				line = text + statusIndicator;
+				line = text + statusIndicator + availabilityLabel;
 			}
 			if (!isSelected && i === this.#hoveredIndex) {
 				line = theme.bg("selectedBg", line);
@@ -433,12 +470,15 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	/** Confirm the selected provider (Enter or mouse click). */
 	#confirmSelection(): void {
 		const selectedProvider = this.#filteredProviders[this.#selectedIndex];
-		if (selectedProvider?.available && (this.#mode === "logout" || selectedProvider.loginAvailable)) {
+		if (selectedProvider && (this.#mode === "logout" || this.#canLogin(selectedProvider))) {
 			this.#statusMessage = undefined;
 			this.stopValidation();
 			this.#onSelectCallback(selectedProvider.id);
 		} else if (selectedProvider) {
-			this.#statusMessage = "Provider unavailable in this environment.";
+			this.#statusMessage =
+				selectedProvider.availabilityReason === "provider_managed"
+					? "This provider manages login outside BreadBoard."
+					: "Provider unavailable in this environment.";
 			this.#updateList();
 		}
 	}

@@ -836,7 +836,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		mcpManager?: MCPManager,
 		eventBus?: EventBus,
 		composer?: Composer,
-		providerAuthPort?: ProviderAuthPort,
+		private readonly providerAuthPort?: ProviderAuthPort,
+		private readonly beforeSessionDispose?: () => Promise<void>,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -1103,6 +1104,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			getDraftText: () => this.#inputController.getDraftText(),
 			beginDispose: () => this.session.beginDispose(),
 			saveDraft: text => this.sessionManager.saveDraft(text),
+			beforeDispose: this.beforeSessionDispose,
 			disposeSession: reason =>
 				this.session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS, reason }),
 		});
@@ -5432,6 +5434,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
 		return this.#selectorController.showOAuthSelector(mode, providerId);
 	}
+	usesProviderAuthBroker(): boolean {
+		return this.providerAuthPort !== undefined;
+	}
+	showProviderRevokeSelector(providerId?: string): Promise<void> {
+		return this.#selectorController.showProviderRevokeSelector(providerId);
+	}
 
 	showSessionPinSelector(): Promise<void> {
 		return this.#selectorController.showSessionPinSelector();
@@ -5442,7 +5450,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	showProviderSetup(): Promise<void> {
-		return runProviderSetupWizard(this);
+		return runProviderSetupWizard(this, this.providerAuthPort);
 	}
 
 	showHookConfirm(title: string, message: string): Promise<boolean> {

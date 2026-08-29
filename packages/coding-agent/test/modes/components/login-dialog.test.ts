@@ -43,4 +43,28 @@ describe("LoginDialogComponent", () => {
 			openSpy.mockRestore();
 		}
 	});
+
+	it("masks API-key prompts and clears the submitted input", async () => {
+		const secretCanary = "sk-dialog-secret-canary";
+		const tui = { requestRender() {} } as unknown as TUI;
+		const dialog = new LoginDialogComponent(tui, "broker-only", () => {}, "Broker Only");
+		const submitted = dialog.showPrompt("API key:", undefined, { secret: true });
+
+		for (const character of secretCanary) dialog.handleInput(character);
+		expect(
+			dialog
+				.renderContent(80)
+				.map(line => Bun.stripANSI(line))
+				.join("\n"),
+		).not.toContain(secretCanary);
+		dialog.handleInput("\n");
+
+		expect(await submitted).toBe(secretCanary);
+		expect(
+			dialog
+				.renderContent(80)
+				.map(line => Bun.stripANSI(line))
+				.join("\n"),
+		).not.toContain(secretCanary);
+	});
 });

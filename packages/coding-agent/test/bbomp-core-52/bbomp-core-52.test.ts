@@ -47,12 +47,33 @@ const provenance = JSON.parse(await readFile(resolve(PACKAGE_ROOT, "breadboard-s
 const model = { api: "test", provider: "test-provider", id: "test-model" } as never;
 const context = { messages: [{ role: "user", content: "run the requested turn", timestamp: 1 }] } as never;
 
+const ZERO_COMPLETION_PAYLOAD = {
+	finish_reason: "stop",
+	raw_provider_finish: null,
+	output_emitted: true,
+	usage: {
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		totalTokens: 0,
+	},
+};
+
 function wireEvent(
 	sequence: number,
 	type: string,
 	payload: unknown,
 	turnId: string | null = "turn-1",
 ): LoggedSessionEvent {
+	const normalizedPayload =
+		type === "turn_completed" &&
+		payload !== null &&
+		typeof payload === "object" &&
+		!Array.isArray(payload) &&
+		Object.keys(payload).length === 0
+			? ZERO_COMPLETION_PAYLOAD
+			: payload;
 	return decodeLoggedSessionEvent({
 		stable_cursor: true,
 		id: `event-${sequence}`,
@@ -62,7 +83,7 @@ function wireEvent(
 		turn_id: turnId,
 		timestamp_ms: sequence,
 		type,
-		payload,
+		payload: normalizedPayload,
 	});
 }
 
@@ -210,7 +231,7 @@ describe("BBOMP-CORE-52 — SDK event envelope, decoding, ordering, and cursor b
 
 describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)", () => {
 	test("[fast] creates a session through the canonical port without changing the request", async () => {
-		const request = { configPath: "agent.yaml", task: "task" };
+		const request = { configPath: "agent.yaml", task: "task", workspace: "/canonical/project" };
 		let received: unknown;
 		const runtime = openedSession([]);
 		const port = new CanonicalE4SessionPort(
@@ -258,7 +279,10 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 		const abort = new AbortController();
 		abort.abort();
 		await expect(
-			port.open({ kind: "create", request: { configPath: "agent.yaml" } }, abort.signal),
+			port.open(
+				{ kind: "create", request: { configPath: "agent.yaml", workspace: "/canonical/project" } },
+				abort.signal,
+			),
 		).rejects.toThrow();
 		expect(calls).toBe(0);
 	});
@@ -271,7 +295,10 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 			{ onLateCloseError: () => {} },
 		);
 		const abort = new AbortController();
-		const opening = port.open({ kind: "create", request: { configPath: "agent.yaml" } }, abort.signal);
+		const opening = port.open(
+			{ kind: "create", request: { configPath: "agent.yaml", workspace: "/canonical/project" } },
+			abort.signal,
+		);
 		abort.abort();
 		resolve({
 			...openedSession([]),
@@ -362,7 +389,10 @@ describe("BBOMP-CORE-52 — session create/resume/reconnect/cancel/replay (12)",
 			{ create: async () => runtime, attach: async () => runtime },
 			{ onLateCloseError: () => {} },
 		);
-		const opened = await port.open({ kind: "create", request: { configPath: "agent.yaml" } });
+		const opened = await port.open({
+			kind: "create",
+			request: { configPath: "agent.yaml", workspace: "/canonical/project" },
+		});
 		await Promise.all([opened.close(), opened.close()]);
 		expect(closes).toBe(1);
 	});
@@ -492,6 +522,12 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 			BREADBOARD_LEGACY_ROUTES: "1",
 			BREADBOARD_ENGINE_LAUNCH_ID: "launch-1",
 			BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+			RAY_BACKEND_LOG_LEVEL: "error",
+			RAY_LOGGER_LEVEL: "error",
+			RAY_LOG_TO_DRIVER: "0",
+			RAY_LOG_TO_STDERR: "0",
+			RAY_ROTATION_BACKUP_COUNT: "1",
+			RAY_ROTATION_MAX_BYTES: "262144",
 		});
 	});
 	test("[fast] child process environment excludes inherited credentials and HOME", () => {
