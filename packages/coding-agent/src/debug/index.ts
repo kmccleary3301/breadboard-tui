@@ -23,6 +23,7 @@ import { OverlayPanel } from "../modes/components/overlay-box";
 import { TranscriptBlock } from "../modes/components/transcript-container";
 import { getSelectListTheme, getSymbolTheme, theme } from "../modes/theme/theme";
 import type { InteractiveModeContext } from "../modes/types";
+import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 import { formatBytes } from "../tools/render-utils";
 import { openPath } from "../utils/open";
 import { DebugLogViewerComponent } from "./log-viewer";
@@ -456,7 +457,8 @@ export class DebugSelectorComponent extends OverlayPanel {
 		if (!suppressed) {
 			const sessionName = this.ctx.sessionManager.getSessionName();
 			const notification: TerminalNotification = {
-				title: sessionName || "Oh My Pi",
+				applicationName: ACTIVE_PRODUCT_IDENTITY.displayName,
+				title: sessionName || ACTIVE_PRODUCT_IDENTITY.displayName,
 				body: "Terminal protocol test",
 				type: "test",
 				actions: "focus",

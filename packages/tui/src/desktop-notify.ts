@@ -104,6 +104,7 @@ export function resolveDesktopNotifier(): DesktopNotifier | null {
 }
 
 interface ResolvedNotificationFields {
+	applicationName: string;
 	title: string;
 	body: string;
 	urgency: "low" | "normal" | "critical";
@@ -111,12 +112,13 @@ interface ResolvedNotificationFields {
 
 function resolveFields(message: string | TerminalNotification): ResolvedNotificationFields {
 	if (typeof message === "string") {
-		return { title: APP_NAME, body: message, urgency: "normal" };
+		return { applicationName: APP_NAME, title: APP_NAME, body: message, urgency: "normal" };
 	}
-	const title = message.title?.trim() || APP_NAME;
+	const applicationName = message.applicationName?.trim() || APP_NAME;
+	const title = message.title?.trim() || applicationName;
 	const body = message.body ?? "";
 	const urgency = message.urgency === "critical" || message.urgency === "low" ? message.urgency : "normal";
-	return { title, body, urgency };
+	return { applicationName, title, body, urgency };
 }
 
 const URGENCY_BYTE: Record<ResolvedNotificationFields["urgency"], number> = {
@@ -136,9 +138,9 @@ const URGENCY_BYTE: Record<ResolvedNotificationFields["urgency"], number> = {
  *   the daemon classifies the toast identically to `notify-send`.
  */
 export function buildDesktopNotifyCommand(notifier: DesktopNotifier, message: string | TerminalNotification): string[] {
-	const { title, body, urgency } = resolveFields(message);
+	const { applicationName, title, body, urgency } = resolveFields(message);
 	if (notifier.kind === "notify-send") {
-		return [notifier.path, "--app-name", APP_NAME, `--urgency=${urgency}`, "--expire-time=5000", title, body];
+		return [notifier.path, "--app-name", applicationName, `--urgency=${urgency}`, "--expire-time=5000", title, body];
 	}
 	const hints = `{"urgency": <byte ${URGENCY_BYTE[urgency]}>}`;
 	return [
@@ -151,7 +153,7 @@ export function buildDesktopNotifyCommand(notifier: DesktopNotifier, message: st
 		"/org/freedesktop/Notifications",
 		"--method",
 		"org.freedesktop.Notifications.Notify",
-		APP_NAME,
+		applicationName,
 		"0",
 		"",
 		title,

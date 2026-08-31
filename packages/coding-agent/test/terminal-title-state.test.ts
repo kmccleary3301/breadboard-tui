@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn, vi } from "bun:test";
+import * as path from "node:path";
 import {
 	buildTerminalTitleWithState,
 	disposeTerminalTitleState,
@@ -53,6 +54,31 @@ describe("buildTerminalTitleWithState", () => {
 		expect(buildTerminalTitleWithState(LABEL, "idle", 0, false)).toBe(`π: ${LABEL}`);
 		expect(buildTerminalTitleWithState(LABEL, "attention", 0, false)).toBe(`π: ${LABEL}`);
 		expect(buildTerminalTitleWithState(undefined, "idle", 0, false)).toBe("π");
+	});
+
+	it("uses the BreadBoard compact mark in every product title state", async () => {
+		const script = `
+			const { buildTerminalTitleWithState } = await import("./src/utils/title-generator.ts");
+			process.stdout.write(JSON.stringify([
+				buildTerminalTitleWithState("project", "idle", 0, true),
+				buildTerminalTitleWithState("project", "working", 0, true, "linux"),
+				buildTerminalTitleWithState("project", "attention", 0, true),
+				buildTerminalTitleWithState("project", "idle", 0, false),
+			]));
+		`;
+		const child = Bun.spawn([process.execPath, "--eval", script], {
+			cwd: path.resolve(import.meta.dir, ".."),
+			env: { ...process.env, BREADBOARD_PRODUCT: "1" },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout, stderr] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+		]);
+		expect(exitCode, stderr).toBe(0);
+		expect(JSON.parse(stdout)).toEqual(["bb > project", "bb ⠋ project", "bb ! project", "bb: project"]);
 	});
 });
 

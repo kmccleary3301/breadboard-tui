@@ -124,6 +124,7 @@ import {
 import { ensureTheme, initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
 import { createWarpEventBridgeExtension } from "./modes/warp-events";
+import { BREADBOARD_PRODUCT_IDENTITY } from "./product-identity";
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import {
 	type CreateAgentSessionOptions,
@@ -366,7 +367,7 @@ export function buildModelScopeNotification(
 export class BreadboardProductApiKeyError extends Error {
 	constructor() {
 		super(
-			"--api-key is not accepted in BreadBoard product mode; use /login to add an API key through the auth broker",
+			`--api-key is not accepted in ${BREADBOARD_PRODUCT_IDENTITY.displayName} product mode; use /login to add an API key through the auth broker`,
 		);
 		this.name = "BreadboardProductApiKeyError";
 	}

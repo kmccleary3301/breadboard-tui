@@ -1,6 +1,7 @@
 import { registerComposerStyle } from "@oh-my-pi/pi-tui";
 import { BUILTIN_COMPOSER_SHAPES, type SubmenuOption } from "../../config/settings-schema";
 import type { ComposerShapeDefinition } from "../../extensibility/extensions";
+import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
 
 const extensionComposerShapes = new Map<string, SubmenuOption>();
 
@@ -21,6 +22,9 @@ export function installExtensionComposerShape(definition: ComposerShapeDefinitio
 }
 
 /** Available built-in and extension composer choices in selector order. */
-export function getComposerShapeOptions(): readonly SubmenuOption[] {
-	return [...BUILTIN_COMPOSER_SHAPES, ...extensionComposerShapes.values()];
+export function getComposerShapeOptions(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): readonly SubmenuOption[] {
+	const builtins = BUILTIN_COMPOSER_SHAPES.map(option =>
+		option.value === "pi" ? { ...option, label: identity.composerFrameLabel } : option,
+	);
+	return [...builtins, ...extensionComposerShapes.values()];
 }

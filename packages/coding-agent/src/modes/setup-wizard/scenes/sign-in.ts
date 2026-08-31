@@ -11,12 +11,28 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { authenticateProvider } from "../../../breadboard/provider-auth-login";
-import { ProviderAuthError, type ProviderAuthPort } from "../../../breadboard/provider-auth-port";
+import {
+	type ProviderAuthDataSource,
+	ProviderAuthError,
+	type ProviderAuthPort,
+} from "../../../breadboard/provider-auth-port";
+import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "../../../product-identity";
 import { copyToClipboard } from "../../../utils/clipboard";
 import { createNativeProviderAuthDataSource } from "../../components/oauth-provider-data-source";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
+
+const UNAVAILABLE_PRODUCT_PROVIDER_SOURCE: ProviderAuthDataSource = Object.freeze({
+	listProvidersSync: () => [],
+	listCredentialsSync: () => [],
+	async listProviders() {
+		return [];
+	},
+	async listCredentials() {
+		return [];
+	},
+});
 
 function loginUrlLink(url: string): string {
 	return `\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`;
@@ -83,8 +99,9 @@ export class SignInTab implements SetupTab {
 	readonly id = "sign-in";
 	readonly label = "Sign in";
 
-	#authStorage: AuthStorage;
+	#authStorage: AuthStorage | undefined;
 	#providerAuthPort: ProviderAuthPort | undefined;
+	#productAuthUnavailable = false;
 	#selector: OAuthSelectorComponent;
 	#statusLines: string[] = [];
 	#authUrl: string | undefined;
@@ -98,8 +115,14 @@ export class SignInTab implements SetupTab {
 	#selectorRowStart = 2;
 
 	constructor(private readonly host: SetupSceneHost) {
-		this.#authStorage = host.ctx.session.modelRegistry.authStorage;
 		this.#providerAuthPort = host.providerAuthPort;
+		if (!this.#providerAuthPort) {
+			if (host.identity.id === OMP_PRODUCT_IDENTITY.id) {
+				this.#authStorage = host.ctx.session.modelRegistry.authStorage;
+			} else {
+				this.#productAuthUnavailable = true;
+			}
+		}
 		this.#selector = this.#createSelector();
 	}
 
@@ -149,10 +172,17 @@ export class SignInTab implements SetupTab {
 		if (this.#loggingInProvider) {
 			lines.push(theme.bold(`Signing in to ${this.#loggingInProvider}`));
 		} else {
-			// Hint + blank cost two rows; the wizard subtitle already explains
-			// this panel, so on short screens the rows go to the provider list
-			// instead (17 = full selector: 4 chrome above, 10 rows, 3 below).
-			if (maxLines === undefined || maxLines >= 17 + 2) {
+			if (this.#productAuthUnavailable) {
+				lines.push(
+					theme.fg("error", `${this.host.identity.displayName} provider setup is unavailable.`),
+					theme.fg(
+						"dim",
+						`Press Esc to continue; retry with \`${this.host.identity.cliName} setup\` when the auth broker is ready.`,
+					),
+					"",
+				);
+			} else if (maxLines === undefined || maxLines >= 17 + 2) {
+				// Hint + blank cost two rows; on short screens the rows go to the provider list.
 				lines.push(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), "");
 			}
 			this.#selectorRowStart = lines.length;
@@ -187,7 +217,11 @@ export class SignInTab implements SetupTab {
 	}
 
 	#createSelector(): OAuthSelectorComponent {
-		const dataSource = this.#providerAuthPort ?? createNativeProviderAuthDataSource(this.#authStorage);
+		const dataSource =
+			this.#providerAuthPort ??
+			(this.#authStorage
+				? createNativeProviderAuthDataSource(this.#authStorage)
+				: UNAVAILABLE_PRODUCT_PROVIDER_SOURCE);
 		return new OAuthSelectorComponent(
 			"login",
 			dataSource,
@@ -209,7 +243,7 @@ export class SignInTab implements SetupTab {
 
 	async #login(providerId: string): Promise<void> {
 		if (this.#loggingInProvider || this.#disposed) return;
-		const useManualInput = !this.#providerAuthPort && PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
+		const useManualInput = this.#authStorage !== undefined && PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
 		this.#selector.stopValidation();
 		this.#loggingInProvider = providerId;
 		this.#statusLines = [theme.fg("dim", "Starting authentication flow…")];
@@ -274,7 +308,11 @@ export class SignInTab implements SetupTab {
 				});
 				accountLabel = credential.accountLabel;
 			} else {
-				const identity = await this.#authStorage.login(providerId as OAuthProvider, {
+				const authStorage = this.#authStorage;
+				if (!authStorage) {
+					throw new Error(`${this.host.identity.displayName} provider setup is unavailable`);
+				}
+				const identity = await authStorage.login(providerId as OAuthProvider, {
 					signal: this.#loginAbort.signal,
 					onAuth: info => {
 						this.#authUrl = info.url;
@@ -308,7 +346,7 @@ export class SignInTab implements SetupTab {
 				theme.fg(
 					"dim",
 					this.#providerAuthPort
-						? "Credentials managed by BreadBoard auth broker"
+						? `Credentials managed by ${BREADBOARD_PRODUCT_IDENTITY.displayName} auth broker`
 						: `Credentials saved to ${getAgentDbPath()}`,
 				),
 			];
@@ -326,7 +364,7 @@ export class SignInTab implements SetupTab {
 				this.#statusLines = [theme.fg("dim", "Login cancelled.")];
 			} else if (error instanceof ProviderAuthError) {
 				this.#statusLines = [
-					theme.fg("error", `Login failed: ${error.message}`),
+					theme.fg("error", `Login failed [${error.code}]: ${error.message}`),
 					theme.fg("dim", error.nextAction),
 				];
 			} else {

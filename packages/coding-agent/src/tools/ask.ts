@@ -34,6 +34,7 @@ import { prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { ExtensionUISelectItem } from "../extensibility/extensions";
 import { getMarkdownTheme, type Theme, theme } from "../modes/theme/theme";
+import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import { vocalizer } from "../tts/vocalizer";
 import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../tui";
@@ -839,7 +840,8 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		const method = this.session.settings.get("ask.notify");
 		if (method === "off") return;
 		TERMINAL.sendNotification({
-			title: "Oh My Pi",
+			applicationName: ACTIVE_PRODUCT_IDENTITY.displayName,
+			title: ACTIVE_PRODUCT_IDENTITY.displayName,
 			body: "Waiting for input",
 			type: "ask",
 			urgency: "normal",

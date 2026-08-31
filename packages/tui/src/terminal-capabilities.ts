@@ -51,8 +51,11 @@ function sendCmuxNotification(message: string | TerminalNotification, env: NodeJ
 	const surfaceId = env.CMUX_SURFACE_ID?.trim();
 	if (!surfaceId || !CMUX_SURFACE_ID_PATTERN.test(surfaceId)) return false;
 
-	const title =
-		typeof message === "string" ? CMUX_NOTIFICATION_TITLE : message.title?.trim() || CMUX_NOTIFICATION_TITLE;
+	const applicationName =
+		typeof message === "string"
+			? CMUX_NOTIFICATION_TITLE
+			: message.applicationName?.trim() || CMUX_NOTIFICATION_TITLE;
+	const title = typeof message === "string" ? applicationName : message.title?.trim() || applicationName;
 	const body = typeof message === "string" ? message : (message.body ?? "");
 	try {
 		const child = Bun.spawn({
@@ -1163,6 +1166,8 @@ export function imageFallback(mimeType: string, dimensions?: ImageDimensions, fi
  * path collapse to a single `title: body` line.
  */
 export interface TerminalNotification {
+	/** Notification-source metadata and fallback title. Defaults to native Oh My Pi identity. */
+	applicationName?: string;
 	title?: string;
 	body?: string;
 	id?: string;
@@ -1299,7 +1304,8 @@ function osc99Actions(actions: TerminalNotification["actions"]): string | undefi
  */
 function formatOsc99Notification(n: TerminalNotification): string {
 	const id = osc99Id(n.id);
-	const meta: string[] = [`i=${id}`, `f=${base64Utf8(OSC99_APP_NAME)}`];
+	const applicationName = n.applicationName?.trim() || OSC99_APP_NAME;
+	const meta: string[] = [`i=${id}`, `f=${base64Utf8(applicationName)}`];
 	const actions = osc99Actions(n.actions);
 	if (actions) meta.push(`a=${actions}`);
 	const urgency = osc99Urgency(n.urgency);

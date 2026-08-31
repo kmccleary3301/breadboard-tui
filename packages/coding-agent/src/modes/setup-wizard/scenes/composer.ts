@@ -16,7 +16,7 @@ class ComposerSceneController implements SetupSceneController {
 	#listRowStart = 0;
 
 	constructor(private readonly host: SetupSceneHost) {
-		const choices = getComposerShapeOptions();
+		const choices = getComposerShapeOptions(host.identity);
 		this.#shapes = choices.map(choice => choice.value);
 		this.#items = choices.map((choice, index) => ({
 			value: choice.value,
@@ -67,7 +67,12 @@ class ComposerSceneController implements SetupSceneController {
 		const budget = maxLines ?? Number.POSITIVE_INFINITY;
 		const lines = [theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."), ""];
 
-		const previewLines = renderComposerShapePreview(this.#currentShape, width, this.host.ctx.statusLine);
+		const previewLines = renderComposerShapePreview(
+			this.#currentShape,
+			width,
+			this.host.ctx.statusLine,
+			this.host.identity.cliName,
+		);
 		if (budget - lines.length - previewLines.length - 2 >= this.#items.length) {
 			lines.push(theme.fg("muted", "Preview:"), ...previewLines, "");
 		}

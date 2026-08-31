@@ -23,6 +23,7 @@ import {
 } from "../breadboard/lifecycle/run-config";
 import { engineHelp as commandHelp } from "../cli/command-help";
 import { Settings } from "../config/settings";
+import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 
 const ENGINE_ACTIONS = ["start", "status", "stop", "restart"] as const;
 type EngineAction = (typeof ENGINE_ACTIONS)[number];
@@ -40,10 +41,12 @@ export default class Engine extends Command {
 
 	static flags = {
 		"engine-mode": Flags.string({
-			description: "BreadBoard engine mode",
+			description: `${BREADBOARD_PRODUCT_IDENTITY.displayName} engine mode`,
 			options: [...BREADBOARD_ENGINE_MODES],
 		}),
-		"engine-url": Flags.string({ description: "Exact BreadBoard engine endpoint URL" }),
+		"engine-url": Flags.string({
+			description: `Exact ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine endpoint URL`,
+		}),
 		config: Flags.string({
 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
 			multiple: true,
@@ -105,7 +108,7 @@ export default class Engine extends Command {
 		} catch (error) {
 			const message =
 				error instanceof BreadboardRunConfigError
-					? `BreadBoard configuration error [${error.code}/${error.field}]: ${error.message}`
+					? `${BREADBOARD_PRODUCT_IDENTITY.displayName} configuration error [${error.code}/${error.field}]: ${error.message}`
 					: error instanceof InstalledEngineDiscoveryError
 						? formatInstalledEngineDiscoveryError(error)
 						: error instanceof Error

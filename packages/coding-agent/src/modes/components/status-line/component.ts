@@ -11,6 +11,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { adjustHsv, formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
+import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../../../product-identity";
 import type { AgentSession } from "../../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
 import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/active-oauth-account";
@@ -472,7 +473,10 @@ export class StatusLineComponent implements Component {
 	// message list + model window yields a stable result we can return verbatim.
 	#contextUsageCache: ContextUsageMemo | undefined;
 
-	constructor(private session: AgentSession) {
+	constructor(
+		private session: AgentSession,
+		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
+	) {
 		this.#settings = {
 			preset: settings.get("statusLine.preset"),
 			leftSegments: settings.get("statusLine.leftSegments"),
@@ -1727,6 +1731,10 @@ export class StatusLineComponent implements Component {
 			focusedAgentId: this.#focusedAgentId,
 			sessionAccent: this.#resolveSettings().sessionAccent !== false,
 			previewTitle,
+			identityMark:
+				this.identity.id === OMP_PRODUCT_IDENTITY.id
+					? theme.icon.pi
+					: this.identity.compactLogo[theme.getSymbolPreset()],
 			activeRepo: activeRepoCache.activeRepo,
 			width,
 			options: segmentOptions ?? {},

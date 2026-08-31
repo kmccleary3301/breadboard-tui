@@ -15,6 +15,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { $ } from "bun";
 import { theme } from "../modes/theme/theme";
+import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 import {
 	isTimeoutError,
 	isUnsupportedProxyError,
@@ -777,7 +778,9 @@ function breadboardVersionFromReleaseTag(tag: string): string | undefined {
  */
 export function resolveLatestBreadboardRelease(releases: unknown): ReleaseInfo {
 	if (!Array.isArray(releases)) {
-		throw new Error("Malformed BreadBoard GitHub release response: expected an array");
+		throw new Error(
+			`Malformed ${BREADBOARD_PRODUCT_IDENTITY.displayName} GitHub release response: expected an array`,
+		);
 	}
 	let latest: ReleaseInfo | undefined;
 	for (const release of releases) {
@@ -795,7 +798,7 @@ export function resolveLatestBreadboardRelease(releases: unknown): ReleaseInfo {
 		};
 	}
 	if (!latest) {
-		throw new Error("No published canonical BreadBoard release was found");
+		throw new Error(`No published canonical ${BREADBOARD_PRODUCT_IDENTITY.displayName} release was found`);
 	}
 	return latest;
 }
@@ -819,20 +822,25 @@ export async function getLatestBreadboardRelease(
 		});
 	} catch (err) {
 		if (isTimeoutError(err)) {
-			throw new Error(`Timed out fetching BreadBoard release info after ${Math.round(timeoutMs / 1000)}s`, {
-				cause: err,
-			});
+			throw new Error(
+				`Timed out fetching ${BREADBOARD_PRODUCT_IDENTITY.displayName} release info after ${Math.round(timeoutMs / 1000)}s`,
+				{
+					cause: err,
+				},
+			);
 		}
 		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
 		throw err;
 	}
 	if ((response.status === 403 && !githubToken) || response.status === 429) {
 		throw new Error(
-			"GitHub API rate limit exceeded while fetching BreadBoard release metadata; retry later or set GITHUB_TOKEN or GH_TOKEN",
+			`GitHub API rate limit exceeded while fetching ${BREADBOARD_PRODUCT_IDENTITY.displayName} release metadata; retry later or set GITHUB_TOKEN or GH_TOKEN`,
 		);
 	}
 	if (!response.ok) {
-		throw new Error(`Failed to fetch BreadBoard release info: ${response.statusText}`);
+		throw new Error(
+			`Failed to fetch ${BREADBOARD_PRODUCT_IDENTITY.displayName} release info: ${response.statusText}`,
+		);
 	}
 	return resolveLatestBreadboardRelease(await response.json());
 }
@@ -1182,11 +1190,15 @@ function resolveBreadboardUpdateTarget(): UpdateTarget {
 	if (!launcherPath) throw new Error(`Could not resolve ${APP_NAME} binary path in PATH`);
 	const extension = path.extname(launcherPath).toLowerCase();
 	if (extension === ".cmd" || extension === ".ps1" || extension === ".bat") {
-		throw new Error("BreadBoard updates require the standalone bb executable, not a package-manager script launcher");
+		throw new Error(
+			`${BREADBOARD_PRODUCT_IDENTITY.displayName} updates require the standalone bb executable, not a package-manager script launcher`,
+		);
 	}
 	const targetPath = tryRealpath(launcherPath) ?? launcherPath;
 	if (isPathInDirectory(targetPath, NIX_STORE_DIR)) {
-		throw new Error("Cannot replace a BreadBoard binary inside the read-only Nix store");
+		throw new Error(
+			`Cannot replace a ${BREADBOARD_PRODUCT_IDENTITY.displayName} binary inside the read-only Nix store`,
+		);
 	}
 	return { method: "binary", path: targetPath, replacesSymlink: false };
 }

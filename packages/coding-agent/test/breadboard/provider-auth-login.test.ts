@@ -366,6 +366,7 @@ describe("BreadBoard provider login state machine", () => {
 
 		await expect(authenticateProvider(port, "codex", presenter())).rejects.toMatchObject({
 			code: "provider_auth_unavailable",
+			message: "Codex is unavailable for BreadBoard-managed login.",
 			nextAction: "Use the provider's own login flow.",
 		});
 		expect(began).toBe(false);

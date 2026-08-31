@@ -1,3 +1,4 @@
+import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 import {
 	type AuthCredentialView,
 	type AuthLoginSession,
@@ -92,7 +93,7 @@ async function selectScheme(
 	}
 	throw new ProviderAuthError({
 		code: "provider_auth_unavailable",
-		message: `${provider.displayName} has no supported BreadBoard authentication method.`,
+		message: `${provider.displayName} has no supported ${BREADBOARD_PRODUCT_IDENTITY.displayName} authentication method.`,
 		nextAction:
 			provider.availabilityReason === "provider_managed"
 				? "Use the provider's own login flow."
@@ -105,7 +106,7 @@ function requireProvider(providers: readonly AuthProviderView[], requestedId: st
 	if (!provider) {
 		throw new ProviderAuthError({
 			code: "unknown_provider",
-			message: `Unknown BreadBoard provider: ${requestedId}`,
+			message: `Unknown ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider: ${requestedId}`,
 			nextAction: "Open the provider selector and choose a listed provider.",
 		});
 	}
@@ -116,7 +117,7 @@ function requireProvider(providers: readonly AuthProviderView[], requestedId: st
 	) {
 		throw new ProviderAuthError({
 			code: "provider_auth_unavailable",
-			message: `${provider.displayName} is unavailable for BreadBoard-managed login.`,
+			message: `${provider.displayName} is unavailable for ${BREADBOARD_PRODUCT_IDENTITY.displayName}-managed login.`,
 			nextAction:
 				provider.availabilityReason === "provider_managed"
 					? "Use the provider's own login flow."
