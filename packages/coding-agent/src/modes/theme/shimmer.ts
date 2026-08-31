@@ -1,4 +1,5 @@
 import { isSettingsInitialized, settings } from "../../config/settings";
+import { isReducedMotionEnabled } from "../../utils/reduced-motion";
 import type { Theme, ThemeColor } from "./theme";
 
 // ─── Animation velocity ──────────────────────────────────────────────────────
@@ -164,6 +165,7 @@ function tierFor(intensity: number): Tier {
 }
 
 function resolveMode(): ShimmerMode {
+	if (isReducedMotionEnabled()) return "disabled";
 	if (!isSettingsInitialized()) return "classic";
 	return settings.get("display.shimmer");
 }

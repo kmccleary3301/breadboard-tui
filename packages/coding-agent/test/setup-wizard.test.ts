@@ -248,6 +248,51 @@ describe("setup wizard persistence", () => {
 		expect(setFocus).toHaveBeenCalled();
 	});
 });
+
+describe("setup wizard reduced motion", () => {
+	it("shows the first scene immediately and skips decorative timers and outro", async () => {
+		const interval = vi.spyOn(globalThis, "setInterval");
+		let host: SetupSceneHost | undefined;
+		const scene: SetupScene = {
+			id: "static",
+			title: "Static setup",
+			minVersion: 1,
+			mount: nextHost => {
+				host = nextHost;
+				return {
+					title: "Static setup",
+					render: () => ["STATIC-SCENE"],
+					invalidate: () => {},
+				};
+			},
+		};
+		const ctx = {
+			settings: Settings.isolated(),
+			ui: {
+				terminal: { rows: 24 },
+				setFocus: () => {},
+				requestRender: () => {},
+			},
+		} as unknown as InteractiveModeContext;
+		const component = new SetupWizardComponent(ctx, [scene], {
+			identity: OMP_PRODUCT_IDENTITY,
+			reduceMotion: true,
+		});
+
+		try {
+			const completed = component.run();
+			expect(component.render(80).join("\n")).toContain("STATIC-SCENE");
+			expect(interval).not.toHaveBeenCalled();
+			host?.finish("done");
+			await completed;
+			expect(component.render(80).every(line => line.trim().length === 0)).toBe(true);
+			expect(interval).not.toHaveBeenCalled();
+		} finally {
+			component.dispose();
+		}
+	});
+});
+
 describe("setup wizard mouse routing", () => {
 	it("synthesizes arrow keys from wheel notches for scenes without routeMouse", () => {
 		const received: string[] = [];

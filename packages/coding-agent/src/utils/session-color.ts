@@ -14,8 +14,8 @@ function nameToHue(name: string): number {
 
 const ACCENT_SATURATION = 0.9;
 const ACCENT_DARK_LIGHTNESS = 0.72;
-/** Minimum contrast ratio (WCAG AA large text) between a light-theme accent and its surface. */
-const ACCENT_MIN_CONTRAST = 3;
+/** Minimum WCAG AA contrast ratio between a light-theme accent and normal text surfaces. */
+const ACCENT_MIN_CONTRAST = 4.5;
 
 /**
  * Largest relative luminance an accent may have while still meeting

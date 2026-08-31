@@ -16,6 +16,7 @@ import {
 	type ProductAppearance,
 	type ProductIdentity,
 } from "../../product-identity";
+import { isReducedMotionEnabled } from "../../utils/reduced-motion";
 import tipsText from "./tips.txt" with { type: "text" };
 
 const NATIVE_ONLY_TIP_PREFIX = "[native-only]";
@@ -178,6 +179,7 @@ export class WelcomeComponent implements Component {
 		private lspServers: LspServerInfo[] = [],
 		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
 		private readonly appearance?: ProductAppearance,
+		private readonly reduceMotion?: boolean,
 	) {
 		this.#tips = getWelcomeTips(identity);
 	}
@@ -208,15 +210,22 @@ export class WelcomeComponent implements Component {
 	 */
 	playIntro(requestRender: () => void): void {
 		this.#stopAnimation();
+		if (isReducedMotionEnabled(this.reduceMotion)) {
+			requestRender();
+			return;
+		}
 		this.#requestRender = requestRender;
 		this.#animStart = performance.now();
 		this.#requestRender();
 		this.#animTimer = setInterval(() => {
+			const requestCurrentRender = this.#requestRender;
 			const elapsed = performance.now() - (this.#animStart ?? 0);
-			if (elapsed >= INTRO_MS) {
+			if (isReducedMotionEnabled(this.reduceMotion) || elapsed >= INTRO_MS) {
 				this.#stopAnimation();
+				requestCurrentRender?.();
+				return;
 			}
-			this.#requestRender?.();
+			requestCurrentRender?.();
 		}, INTRO_TICK_MS);
 	}
 
@@ -456,7 +465,10 @@ export class WelcomeComponent implements Component {
 		// its hue phase from wall-clock time so it shimmers across the welcome
 		// intro's re-render frames, then settles into a still rainbow once the box
 		// caches its resting frame. Non-"[NEW]" tips ignore the phase entirely.
-		const phase = NEW_TIP_MARKER.test(tip) ? performance.now() / NEW_GLOW_PERIOD_MS : 0;
+		const phase =
+			NEW_TIP_MARKER.test(tip) && !isReducedMotionEnabled(this.reduceMotion)
+				? performance.now() / NEW_GLOW_PERIOD_MS
+				: 0;
 		return renderWelcomeTip(tip, boxWidth, phase);
 	}
 

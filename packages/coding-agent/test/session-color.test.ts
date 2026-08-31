@@ -21,6 +21,8 @@ const names = Array.from({ length: 600 }, (_, i) => `analyze-debian-trixie-${i}`
 
 const SURFACES: Record<string, number> = {
 	"light-catppuccin crust (#dce0e8)": lum("#dce0e8"),
+	"BreadBoard light status (#f4ebdd)": lum("#f4ebdd"),
+	"BreadBoard light page (#fbf3e6)": lum("#fbf3e6"),
 	"light-poimandres (#7390aa)": lum("#7390aa"),
 };
 
@@ -53,12 +55,19 @@ describe("getSessionAccentHex", () => {
 		expect(maxDark).toBeGreaterThan(0.5);
 	});
 
-	it("clears AA-large WCAG contrast against light surfaces, including mid-light", () => {
+	it("clears WCAG AA contrast for normal text against light surfaces, including mid-light", () => {
 		for (const bg of Object.values(SURFACES)) {
 			for (const name of names) {
 				const hex = getSessionAccentHex(name, NO_THEME_COLORS, bg);
-				expect(contrast(lum(hex), bg)).toBeGreaterThanOrEqual(2.99);
+				expect(contrast(lum(hex), bg)).toBeGreaterThanOrEqual(4.49);
 			}
+		}
+	});
+
+	it("clears WCAG AA contrast for normal text against the BreadBoard dark status surface", () => {
+		const background = lum("#211c15");
+		for (const name of names) {
+			expect(contrast(lum(getSessionAccentHex(name, NO_THEME_COLORS)), background)).toBeGreaterThanOrEqual(4.5);
 		}
 	});
 

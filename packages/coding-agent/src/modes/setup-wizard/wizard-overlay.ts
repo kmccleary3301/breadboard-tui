@@ -10,6 +10,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import type { ProductAppearance, ProductIdentity } from "../../product-identity";
+import { isReducedMotionEnabled } from "../../utils/reduced-motion";
 import { gradientLogo } from "../components/welcome";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
@@ -28,6 +29,7 @@ export interface SetupWizardComponentOptions {
 	readonly identity: ProductIdentity;
 	readonly providerAuthPort?: ProviderAuthPort;
 	readonly now?: () => number;
+	readonly reduceMotion?: boolean;
 }
 
 function currentAppearance(): ProductAppearance {
@@ -96,10 +98,25 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	}
 
 	run(): Promise<void> {
-		this.#phase = this.scenes.length === 0 ? "outro" : "splash";
-		this.#phaseStartedAt = this.#now();
-		this.#startTimer();
-		this.ctx.ui.requestRender();
+		if (this.scenes.length === 0) {
+			this.#phase = "outro";
+			this.#phaseStartedAt = this.#now();
+			if (isReducedMotionEnabled(this.options.reduceMotion)) {
+				this.#complete();
+			} else {
+				this.#startTimer();
+			}
+			this.ctx.ui.requestRender();
+			return this.#done.promise;
+		}
+		if (isReducedMotionEnabled(this.options.reduceMotion)) {
+			this.#mountSceneController("scene");
+		} else {
+			this.#phase = "splash";
+			this.#phaseStartedAt = this.#now();
+			this.#startTimer();
+			this.ctx.ui.requestRender();
+		}
 		return this.#done.promise;
 	}
 
@@ -343,7 +360,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 
 	/** Enter the first scene through a dissolve from the splash. */
 	#beginScene(): void {
-		this.#mountSceneController("transition");
+		this.#mountSceneController(isReducedMotionEnabled(this.options.reduceMotion) ? "scene" : "transition");
 	}
 
 	#mountCurrentScene(): void {
@@ -370,7 +387,11 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		this.#phase = "outro";
 		this.#phaseStartedAt = this.#now();
 		this.ctx.ui.setFocus(this);
-		this.#startTimer();
+		if (isReducedMotionEnabled(this.options.reduceMotion)) {
+			this.#complete();
+		} else {
+			this.#startTimer();
+		}
 		this.ctx.ui.requestRender();
 	}
 

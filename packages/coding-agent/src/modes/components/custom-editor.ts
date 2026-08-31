@@ -13,6 +13,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { BracketedPasteHandler } from "@oh-my-pi/pi-tui/bracketed-paste";
 import type { AppKeybinding } from "../../config/keybindings";
+import { isReducedMotionEnabled } from "../../utils/reduced-motion";
 import {
 	attachmentSgr,
 	COMPOSER_TOKEN_REGEX,
@@ -653,6 +654,9 @@ export class CustomEditor extends Editor {
 	 */
 	magicKeywordsEnabled: () => boolean = () => true;
 
+	/** Host-owned reduced-motion reader; safe before the settings graph loads. */
+	reduceMotionEnabled: () => boolean = isReducedMotionEnabled;
+
 	/**
 	 * Late-bound OSC hyperlink renderer. Startup stays plain until the full
 	 * interactive graph supplies the settings-aware implementation.
@@ -665,7 +669,7 @@ export class CustomEditor extends Editor {
 	) => string = (label, _index, _imageLinks, renderLabel) => renderLabel(label);
 
 	#shimmerEnabled(): boolean {
-		return this.magicKeywordsEnabledOverride ?? this.magicKeywordsEnabled();
+		return !this.reduceMotionEnabled() && (this.magicKeywordsEnabledOverride ?? this.magicKeywordsEnabled());
 	}
 
 	/** Bind the host's render request callback. Idempotent — the host wires this

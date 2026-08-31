@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
 import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
@@ -16,6 +16,7 @@ describe("WelcomeComponent", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		settings.set("display.reduceMotion", false);
 	});
 
 	it("selects standard tip when preset is not unicode", () => {
@@ -39,6 +40,47 @@ describe("WelcomeComponent", () => {
 		const welcomeRegular = new WelcomeComponent("1.0.0", "model", "provider");
 		expect(welcomeRegular.tip).not.toBe("Please use nerdfont 😭.");
 		expect(welcomeRegular.tip).toBeDefined();
+	});
+
+	it("settles immediately without timers when reduced motion is enabled", () => {
+		const interval = vi.spyOn(globalThis, "setInterval");
+		const welcome = new WelcomeComponent(
+			"1.0.0",
+			"model",
+			"provider",
+			[],
+			[],
+			BREADBOARD_PRODUCT_IDENTITY,
+			"dark",
+			true,
+		);
+		let renderRequests = 0;
+
+		welcome.playIntro(() => {
+			renderRequests += 1;
+		});
+		const first = welcome.render(90);
+
+		expect(renderRequests).toBe(1);
+		expect(interval).not.toHaveBeenCalled();
+		expect(welcome.isTranscriptBlockFinalized()).toBe(true);
+		expect(welcome.render(90)).toBe(first);
+	});
+
+	it("stops a prepaint intro when persisted settings finish loading reduced motion", async () => {
+		settings.set("display.reduceMotion", false);
+		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
+		let renderRequests = 0;
+		welcome.playIntro(() => {
+			renderRequests += 1;
+		});
+		expect(welcome.isTranscriptBlockFinalized()).toBe(false);
+
+		settings.set("display.reduceMotion", true);
+		await Bun.sleep(50);
+
+		expect(welcome.isTranscriptBlockFinalized()).toBe(true);
+		expect(renderRequests).toBeGreaterThanOrEqual(2);
 	});
 
 	it("weights [NEW] tips above ordinary tips in selection", () => {

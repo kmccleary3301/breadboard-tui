@@ -1264,6 +1264,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"display.reduceMotion": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Reduce Motion",
+			description: "Disable decorative welcome, setup, shimmer, and keyword animations",
+		},
+	},
+
 	"display.smoothStreaming": {
 		type: "boolean",
 		default: true,
