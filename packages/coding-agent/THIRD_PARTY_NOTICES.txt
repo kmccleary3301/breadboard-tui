@@ -1094,9 +1094,9 @@ SOFTWARE.
 ===== BEGIN BUNDLED COMPONENT PROVENANCE =====
 Package: @breadboard/sdk@0.4.0
 Artifact: packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz
-Artifact SHA-256: 74336070ee87e20bcd67deb50760c078ce305d561f01249e09b12279df7aa329
+Artifact SHA-256: 620ccbb6b34a3bf95affe96be713222b6c39a763fbe83c276434c3cc11e87513
 Provenance: packages/coding-agent/breadboard-sdk-provenance.json
-Provenance SHA-256: 536e47946480969d5dbe211549c800e62f26e4a777f652be5af616907f444860
+Provenance SHA-256: b0c8b7c7f7cacb2d71097e1cd4b292c9271a60288a4c82b4691922b8d0eeac19
 License assertion: none; archive inspection found no LICENSE/NOTICE member.
 ===== END BUNDLED COMPONENT PROVENANCE =====
 
