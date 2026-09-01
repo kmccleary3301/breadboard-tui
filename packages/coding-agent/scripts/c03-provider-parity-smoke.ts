@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { createBreadboardClient } from "@breadboard/sdk";
+import { createInternalBreadboardClient } from "@breadboard/sdk/internal";
 import { createBreadboardModelRolePort } from "../src/breadboard/model-role-port";
 import { createBreadboardProviderAuthPort } from "../src/breadboard/provider-auth-adapter";
 
@@ -36,7 +36,7 @@ const modelRoles = {
 	policy: { allow_environment_overrides: false, cross_provider_fallback: "forbidden", account_failover: "forbidden" },
 };
 
-const client = createBreadboardClient({
+const client = createInternalBreadboardClient({
 	baseUrl: engineUrl,
 	authToken: process.env.C03_ENGINE_TOKEN,
 });

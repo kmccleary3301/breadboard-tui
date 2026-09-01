@@ -11,6 +11,7 @@ import {
 	verifyBackendIdentity,
 	verifyBreadboardSdkProvenance,
 	verifyPinnedReferences,
+	verifySdkExportInventory,
 } from "../scripts/verify-breadboard-sdk-provenance";
 
 const packageRoot = resolve(import.meta.dir, "..");
@@ -25,9 +26,10 @@ const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json
 };
 const workspaceRoot = resolve(packageRoot, "../..");
 const lockText = await readFile(resolve(workspaceRoot, "bun.lock"), "utf8");
+const exportInventoryBytes = await readFile(resolve(packageRoot, manifest.exportInventoryPath));
 
 describe("BreadBoard SDK provenance", () => {
-	test("verifies immutable artifact, lock, installed bytes, and type entry with no backend environment", async () => {
+	test("verifies immutable artifact, export inventory, lock, installed bytes, and type entry", async () => {
 		const environmentName = manifest.backendRootEnvironmentVariable;
 		const previous = process.env[environmentName];
 		delete process.env[environmentName];
@@ -44,12 +46,18 @@ describe("BreadBoard SDK provenance", () => {
 			await expect(verifyBreadboardSdkProvenance(packageRoot, packageRoot, clean)).resolves.toMatchObject({
 				packageName: "@breadboard/sdk",
 				packageVersion: "0.3.0",
-				artifactSha256: "181309cc011c7a43dda2308aaf25fc7674965010b4275720f06d2e78fa7be80f",
+				artifactSha256: "a1e43c25cb6485c36efa4a35da3aa1ff05416c790b694f313d6a37327a7427d1",
 			});
 		} finally {
 			if (previous === undefined) delete process.env[environmentName];
 			else process.env[environmentName] = previous;
 		}
+	});
+	test("rejects export inventory tampering", () => {
+		expect(() => verifySdkExportInventory(manifest, exportInventoryBytes)).not.toThrow();
+		const tampered = new Uint8Array(exportInventoryBytes);
+		tampered[tampered.byteLength - 2] ^= 1;
+		expect(() => verifySdkExportInventory(manifest, tampered)).toThrow("export inventory SHA-256 changed");
 	});
 
 	test("runs SDK provenance and notice gates before build or publication", () => {

@@ -1,16 +1,10 @@
 import { join } from "node:path";
 import {
-	createBreadboardClient,
-	type EngineStatusResponse,
-	type ModelCatalogResponse,
-	type ProviderAuthAttachRequest,
-	type ProviderAuthAttachResponse,
-	type ProviderAuthDetachRequest,
-	type ProviderAuthDetachResponse,
-	type ProviderAuthStatusResponse,
-} from "@breadboard/sdk";
-import type { LifecycleEngineBinding } from "@breadboard/sdk/internal";
-import { createCanonicalE4Client } from "@breadboard/sdk/internal";
+	createCanonicalE4Client,
+	createInternalBreadboardClient,
+	type InternalBreadboardClient,
+	type LifecycleEngineBinding,
+} from "@breadboard/sdk/internal";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { CanonicalE4SessionPort } from "./canonical-e4-session-port";
 import {
@@ -32,6 +26,18 @@ import { createBreadboardModelRolePort } from "./model-role-port";
 import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
 import type { ProviderAuthPort } from "./provider-auth-port";
 import type { BreadboardCreateSessionRequest, OpenedSession, OpenSession } from "./session-port";
+
+type AsyncResult<Operation> = Operation extends (...args: never[]) => Promise<infer Result> ? Result : never;
+type FirstParameter<Operation> = Operation extends (input: infer Input, ...args: never[]) => Promise<unknown>
+	? Input
+	: never;
+type EngineStatusResponse = AsyncResult<InternalBreadboardClient["engineStatus"]>;
+type ModelCatalogResponse = AsyncResult<InternalBreadboardClient["getModelCatalog"]>;
+type ProviderAuthAttachRequest = FirstParameter<InternalBreadboardClient["providerAuthAttach"]>;
+type ProviderAuthAttachResponse = AsyncResult<InternalBreadboardClient["providerAuthAttach"]>;
+type ProviderAuthDetachRequest = FirstParameter<InternalBreadboardClient["providerAuthDetach"]>;
+type ProviderAuthDetachResponse = AsyncResult<InternalBreadboardClient["providerAuthDetach"]>;
+type ProviderAuthStatusResponse = AsyncResult<InternalBreadboardClient["providerAuthStatus"]>;
 
 type BreadboardEngineReadyHandle = Pick<
 	LifecycleReadyHandle,
@@ -255,7 +261,7 @@ function createConnectedPort(
 		fetch: strictEventFetch,
 	};
 	const canonicalClient = createCanonicalE4Client(clientConfig);
-	const controlClient = createBreadboardClient(clientConfig);
+	const controlClient = createInternalBreadboardClient(clientConfig);
 	const sessionClient = {
 		...canonicalClient,
 		async create(request: BreadboardCreateSessionRequest) {
