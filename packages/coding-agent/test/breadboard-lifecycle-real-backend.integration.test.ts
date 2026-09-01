@@ -7,7 +7,11 @@ import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { type BoundLifecycleE4Client, createLifecycleE4Client, LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
+import {
+	type BoundLifecycleE4Client,
+	createLifecycleE4Client,
+	LifecycleE4ClientError,
+} from "@breadboard/sdk/lifecycle";
 import { type BreadboardSdkProvenance, openVerifiedBackendSnapshot } from "../scripts/verify-breadboard-sdk-provenance";
 import { lifecycleChildEnvironment } from "../src/breadboard/lifecycle/lifecycle-supervisor";
 import { retryAmbiguousReplay } from "./helpers/retry-ambiguous-replay";

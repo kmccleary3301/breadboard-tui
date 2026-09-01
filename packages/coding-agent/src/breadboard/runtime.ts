@@ -9,13 +9,14 @@ import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
 import type { AgentEvent, StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import {
-	getProjectDir,
-	IS_BREADBOARD_PRODUCT,
-	logger,
-	postmortem,
-} from "@oh-my-pi/pi-utils";
+import { getProjectDir, IS_BREADBOARD_PRODUCT, logger, postmortem } from "@oh-my-pi/pi-utils";
+import type { Args } from "../cli/args";
+import type { ModelRegistry } from "../config/model-registry";
+import { type Settings, settings } from "../config/settings";
+import type { ExtensionUIContext } from "../extensibility/extensions/types";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
+import type { SessionTransitionPlan } from "../session/agent-session";
+import type { AuthStorage } from "../session/auth-storage";
 import {
 	breadboardProjectionEventId,
 	E4AgentStreamBridge,
@@ -59,12 +60,6 @@ import {
 	validateBreadboardSnapshot,
 } from "./session-binding";
 import type { OpenedSession, OpenSession } from "./session-port";
-import type { SessionTransitionPlan } from "../session/agent-session";
-import type { AuthStorage } from "../session/auth-storage";
-import type { Args } from "../cli/args";
-import type { ModelRegistry } from "../config/model-registry";
-import { settings, type Settings } from "../config/settings";
-import type { ExtensionUIContext } from "../extensibility/extensions/types";
 
 export class BreadboardProductApiKeyError extends Error {
 	constructor() {

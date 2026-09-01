@@ -10,21 +10,6 @@ import { createInterface } from "node:readline/promises";
 import { EventLoopKeepalive, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
-	applyCliApiKeyOverride,
-	BreadboardLifecycleStartupError,
-	BreadboardProductApiKeyError,
-	createBreadboardPermissionHandler,
-	createBreadboardStartupForkPolicy,
-	formatBreadboardStartupError,
-	prepareBreadboardRuntime,
-	rejectBreadboardSessionTransition,
-	resolveNativeSurfaceEngineSelection,
-	startupBreadboardModeIsOff,
-	type PreparedBreadboardRuntime,
-} from "./breadboard/runtime";
-import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
-import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
-import {
 	$env,
 	directoryExists,
 	getLogPath,
@@ -39,6 +24,21 @@ import {
 	VERSION,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
+import {
+	applyCliApiKeyOverride,
+	BreadboardLifecycleStartupError,
+	BreadboardProductApiKeyError,
+	createBreadboardPermissionHandler,
+	createBreadboardStartupForkPolicy,
+	formatBreadboardStartupError,
+	type PreparedBreadboardRuntime,
+	prepareBreadboardRuntime,
+	rejectBreadboardSessionTransition,
+	resolveNativeSurfaceEngineSelection,
+	startupBreadboardModeIsOff,
+} from "./breadboard/runtime";
 import { BreadboardSessionTransitionError } from "./breadboard/session-binding";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -1383,7 +1383,6 @@ interface RunRootCommandDependencies {
 	forceSetupWizard?: boolean;
 }
 const DEFAULT_RUN_ROOT_DEPENDENCIES: RunRootCommandDependencies = {};
-
 
 export async function runRootCommand(
 	parsed: Args,

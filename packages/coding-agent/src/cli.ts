@@ -25,9 +25,9 @@ import {
 	setProfile,
 	VERSION,
 } from "@oh-my-pi/pi-utils/dirs";
-import { formatBreadboardVersion } from "@oh-my-pi/pi-utils/product-distribution";
 import { interceptUnhandledRejections } from "@oh-my-pi/pi-utils/postmortem";
 import { setProcessName } from "@oh-my-pi/pi-utils/process-name";
+import { formatBreadboardVersion } from "@oh-my-pi/pi-utils/product-distribution";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
 import noticeBundlePath from "../THIRD_PARTY_NOTICES.txt" with { type: "file" };
 import { BLOB_BROKER_WORKER_ARG } from "./blob-broker/protocol";

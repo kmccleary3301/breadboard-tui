@@ -1,3 +1,4 @@
+import { LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
 import {
 	CanonicalE4ClientError,
 	type CanonicalJsonObject,
@@ -6,7 +7,6 @@ import {
 	type SubmitReceipt,
 	sha256Bytes,
 } from "@breadboard/sdk/session";
-import { LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
 import type { AgentEvent, AgentToolResult, StreamFn } from "@oh-my-pi/pi-agent-core";
 import type {
 	AssistantMessage,

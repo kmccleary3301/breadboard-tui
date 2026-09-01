@@ -12,9 +12,9 @@ import {
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { authenticateProvider } from "../../../breadboard/provider-auth-login";
 import {
-	type ProviderAuthReadPort,
 	ProviderAuthError,
 	type ProviderAuthPort,
+	type ProviderAuthReadPort,
 } from "../../../breadboard/provider-auth-port";
 import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "../../../product-identity";
 import { copyToClipboard } from "../../../utils/clipboard";

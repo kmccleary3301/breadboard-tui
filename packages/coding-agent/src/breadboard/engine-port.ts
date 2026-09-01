@@ -1,21 +1,18 @@
 import { type BreadboardClient, createBreadboardClient } from "@breadboard/sdk/engine";
-import { createCanonicalE4Client } from "@breadboard/sdk/session";
 import type { LifecycleEngineBinding } from "@breadboard/sdk/lifecycle";
+import { createCanonicalE4Client } from "@breadboard/sdk/session";
 import { logger } from "@oh-my-pi/pi-utils";
 import { CanonicalE4SessionPort } from "./canonical-e4-session-port";
+import { createProductionLifecycleSupervisor } from "./lifecycle/lifecycle-production";
 import {
+	isLifecycleAuthorityDiscontinuityState,
+	isLifecycleFailureState as isLifecycleFailureStateName,
 	type LifecycleReadyHandle,
 	type LifecycleResult,
 	type LifecycleState,
-	isLifecycleAuthorityDiscontinuityState,
-	isLifecycleFailureState as isLifecycleFailureStateName,
 	lifecycleFailure,
 } from "./lifecycle/lifecycle-state";
-import { createProductionLifecycleSupervisor } from "./lifecycle/lifecycle-production";
-import {
-	type LifecycleSupervisor,
-	type StopOptions,
-} from "./lifecycle/lifecycle-supervisor";
+import type { LifecycleSupervisor, StopOptions } from "./lifecycle/lifecycle-supervisor";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
 import { createBreadboardModelRolePort, type ModelRolePort } from "./model-role-port";
 import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
@@ -108,10 +105,7 @@ export interface LifecycleMonitor {
 	activateAuthority(authority: BreadboardEngineAuthorityIdentity): void;
 }
 
-
-function isLifecycleFailureResultState(
-	state: LifecycleState,
-): state is BreadboardLifecycleFailureResult["state"] {
+function isLifecycleFailureResultState(state: LifecycleState): state is BreadboardLifecycleFailureResult["state"] {
 	return isLifecycleFailureStateName(state.name) && state.reason !== undefined;
 }
 

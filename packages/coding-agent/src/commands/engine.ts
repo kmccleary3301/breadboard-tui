@@ -6,12 +6,9 @@ import {
 } from "../breadboard/lifecycle/installed-engine-manifest";
 import { formatInstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-selection";
 import { restoreLifecycleTerminal, writeLifecyclePresentation } from "../breadboard/lifecycle/lifecycle-presenter";
-import { type LifecycleResult, lifecycleFailure, lifecycleState } from "../breadboard/lifecycle/lifecycle-state";
 import { createProductionLifecycleSupervisor } from "../breadboard/lifecycle/lifecycle-production";
-import {
-	dispatchLifecycleAction,
-	type LifecycleActionExecution,
-} from "../breadboard/lifecycle/lifecycle-supervisor";
+import { type LifecycleResult, lifecycleFailure, lifecycleState } from "../breadboard/lifecycle/lifecycle-state";
+import { dispatchLifecycleAction, type LifecycleActionExecution } from "../breadboard/lifecycle/lifecycle-supervisor";
 import { resolveProductBreadboardRunConfig } from "../breadboard/lifecycle/product-run-config";
 import {
 	BREADBOARD_ENGINE_MODES,

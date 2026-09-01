@@ -1,5 +1,10 @@
 {
 	"extends": "../tsconfig.workspace.json",
+	"compilerOptions": {
+		"paths": {
+			"@oh-my-pi/pi-coding-agent/*": ["./src/*"]
+		}
+	},
 	"include": [
 		"src",
 		"test",

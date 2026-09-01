@@ -12,12 +12,7 @@ export type AuthProviderAuthOwner = "broker" | "provider";
 export type AuthProviderAvailabilityReason = "provider_managed" | "missing_auth" | "unsupported";
 export type AuthProviderModelDiscovery = "configured_only" | "unsupported";
 export type AuthCredentialKind = "oauth2" | "api_key";
-export type AuthCredentialStatus =
-	| "active"
-	| "disabled"
-	| "revoked"
-	| "reauthorization_required"
-	| "quarantined";
+export type AuthCredentialStatus = "active" | "disabled" | "revoked" | "reauthorization_required" | "quarantined";
 export type AuthCredentialRefreshStatus = "idle" | "refreshing" | "failed" | "blocked" | "unknown";
 export type AuthLoginStatus = "pending" | "awaiting_input" | "completed" | "cancelled" | "failed" | "unavailable";
 export type AuthActionOutcome = "cancelled" | "disabled" | "revoked" | "no_op";

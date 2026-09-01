@@ -40,7 +40,14 @@ export const LIFECYCLE_STATES = [
 
 export type LifecycleStateName = (typeof LIFECYCLE_STATES)[number];
 
-export type LifecyclePresentationCategory = "off" | "progress" | "observed" | "ready" | "detached" | "stopped" | "failure";
+export type LifecyclePresentationCategory =
+	| "off"
+	| "progress"
+	| "observed"
+	| "ready"
+	| "detached"
+	| "stopped"
+	| "failure";
 
 export interface LifecycleStateSemantics {
 	readonly failure: boolean;
@@ -454,7 +461,6 @@ export type LifecycleResult =
 				readonly reason: LifecycleReason;
 			};
 	  };
-
 
 export function lifecycleState(
 	mode: BreadboardEngineMode,

@@ -1,9 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import type {
-	AuthCredentialView,
-	ProviderAuthReadPort,
-} from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
+import type { AuthCredentialView, ProviderAuthReadPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { OAuthSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/oauth-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";

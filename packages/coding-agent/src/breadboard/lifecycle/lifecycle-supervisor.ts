@@ -32,7 +32,7 @@ import {
 } from "./lifecycle-state";
 import {
 	type LocalAuthorityRecord,
-	LocalAuthorityStore,
+	type LocalAuthorityStore,
 	LocalAuthorityStoreError,
 	type LocalStartClaim,
 } from "./local-authority-store";

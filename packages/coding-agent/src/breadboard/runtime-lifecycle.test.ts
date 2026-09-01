@@ -12,16 +12,16 @@ import {
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
+import { createLifecycleMonitor } from "./engine-port";
+import { lifecycleState } from "./lifecycle/lifecycle-state";
+import type { ProviderAuthPort } from "./provider-auth-port";
 import {
 	createRecoverableBreadboardRuntime,
 	type PreparedBreadboardRuntime,
 	prepareConnectedBreadboardRuntime,
 	resolveBreadboardCatalogModels,
 } from "./runtime";
-import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
-import { createLifecycleMonitor } from "./engine-port";
-import { lifecycleState } from "./lifecycle/lifecycle-state";
-import type { ProviderAuthPort } from "./provider-auth-port";
 import {
 	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
 	type BreadboardSessionBindingData,

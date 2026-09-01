@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { emergencyTerminalRestore } from "@oh-my-pi/pi-tui";
-import { lifecyclePresentationCategory, type LifecycleState } from "./lifecycle-state";
+import { type LifecycleState, lifecyclePresentationCategory } from "./lifecycle-state";
 import type { LifecycleDispatchResult } from "./lifecycle-supervisor";
 import type { BreadboardRunConfig } from "./run-config";
 

@@ -1,20 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import {
-	P30_SESSION_CONTRACT_ID,
-	P30_SESSION_SCHEMA_SHA256,
-	LifecycleE4ClientError,
 	createLifecycleE4Client,
 	type LifecycleE4Client,
+	LifecycleE4ClientError,
+	P30_SESSION_CONTRACT_ID,
+	P30_SESSION_SCHEMA_SHA256,
 } from "@breadboard/sdk/lifecycle";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import {
 	createDefaultLifecycleProcessAdapter,
 	type LifecycleClock,
-	type LifecycleSupervisorDependencies,
 	LifecycleSupervisor,
-	readKeychainReference,
+	type LifecycleSupervisorDependencies,
 	type ResolvedRemoteSecurity,
+	readKeychainReference,
 } from "./lifecycle-supervisor";
 import { LocalAuthorityStore } from "./local-authority-store";
 import type { BreadboardAuth, BreadboardRunConfig } from "./run-config";

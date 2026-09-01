@@ -122,11 +122,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./breadboard/lifecycle/lifecycle-supervisor": null,
-    "./*": {
-      "types": "./src/*.ts",
-      "import": "./src/*.ts"
-    },
     "./async": {
       "types": "./src/async/index.ts",
       "import": "./src/async/index.ts"

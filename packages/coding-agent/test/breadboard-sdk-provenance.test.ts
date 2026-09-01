@@ -67,8 +67,9 @@ describe("BreadBoard SDK provenance", () => {
 		expect(packageJson.scripts.build).toStartWith("bun run gate:distribution && ");
 		expect(packageJson.scripts.prepack).toStartWith("bun run gate:distribution && ");
 	});
-	test("keeps lifecycle construction behind the production owner", () => {
-		expect(packageJson.exports["./breadboard/lifecycle/lifecycle-supervisor"]).toBeNull();
+	test("keeps internal modules outside the package export map", () => {
+		expect(packageJson.exports["./*"]).toBeUndefined();
+		expect(packageJson.exports["./breadboard/lifecycle/lifecycle-supervisor"]).toBeUndefined();
 	});
 
 	test("fails closed when package.json drifts from the pinned artifact", () => {
