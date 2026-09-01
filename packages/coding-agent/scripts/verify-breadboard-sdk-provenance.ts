@@ -37,15 +37,21 @@ export interface BreadboardSdkProvenance {
 	readonly consumerCorrections?: readonly SdkProvenanceCorrection[];
 }
 
-export type BackendGitInspection = (
-	root: string,
-	assertRootIdentity: () => Promise<void>,
-) => Promise<{
+export interface BackendGitIdentity {
 	readonly root: string;
 	readonly commit: string;
 	readonly tree: string;
+	readonly sdkSubtree?: string;
 	readonly status: string;
-}>;
+}
+
+type BackendIdentityExpectation = Pick<BreadboardSdkProvenance, "backendCommit" | "backendTree"> &
+	Partial<Pick<BreadboardSdkProvenance, "sdkSubtree">>;
+
+export type BackendGitInspection = (
+	root: string,
+	assertRootIdentity: () => Promise<void>,
+) => Promise<BackendGitIdentity>;
 
 export interface VerifiedBackendSnapshot {
 	readonly root: string;
@@ -355,8 +361,9 @@ async function materializeExecutionSnapshot(
 async function inspectPinnedBackendGit(
 	root: string,
 	pinned: PinnedDirectory,
+	includeSdkSubtree = false,
 ): Promise<{
-	readonly identity: Awaited<ReturnType<BackendGitInspection>>;
+	readonly identity: BackendGitIdentity;
 	readonly verified: VerifiedHeadTree;
 	readonly executable: string;
 }> {
@@ -370,12 +377,24 @@ async function inspectPinnedBackendGit(
 		[0, 1],
 	);
 	invariant(promisorConfig.byteLength === 0, "backend repository is partial or promisor");
+	const identityArgs = [
+		"rev-parse",
+		"--show-toplevel",
+		"HEAD^{commit}",
+		"HEAD^{tree}",
+		...(includeSdkSubtree ? ["HEAD:sdk/ts"] : []),
+	];
 	const identityOutput = new TextDecoder("utf-8", { fatal: true }).decode(
-		await runGit(executable, root, ["rev-parse", "--show-toplevel", "HEAD^{commit}", "HEAD^{tree}"]),
+		await runGit(executable, root, identityArgs),
 	);
-	const [inspectedRoot, commit, tree, ...extra] = identityOutput.trim().split("\n");
+	const identityParts = identityOutput.trim().split("\n");
+	invariant(identityParts.length === (includeSdkSubtree ? 4 : 3), "backend Git identity is malformed");
+	const [inspectedRoot, commit, tree, sdkSubtree] = identityParts;
 	invariant(
-		extra.length === 0 && inspectedRoot !== undefined && commit !== undefined && tree !== undefined,
+		inspectedRoot !== undefined &&
+			commit !== undefined &&
+			tree !== undefined &&
+			(!includeSdkSubtree || sdkSubtree !== undefined),
 		"backend Git identity is malformed",
 	);
 	invariant((await realpath(inspectedRoot)) === (await realpath(root)), "backend Git root does not match");
@@ -465,26 +484,40 @@ async function inspectPinnedBackendGit(
 		await classificationSnapshot.close();
 	}
 	const finalIdentityOutput = new TextDecoder("utf-8", { fatal: true }).decode(
-		await runGit(executable, root, ["rev-parse", "--show-toplevel", "HEAD^{commit}", "HEAD^{tree}"]),
+		await runGit(executable, root, identityArgs),
 	);
-	const [finalRoot, finalCommit, finalTree, ...finalExtra] = finalIdentityOutput.trim().split("\n");
+	const finalIdentityParts = finalIdentityOutput.trim().split("\n");
+	invariant(finalIdentityParts.length === identityParts.length, "backend Git identity is malformed");
+	const [finalRoot, finalCommit, finalTree, finalSdkSubtree] = finalIdentityParts;
 	invariant(
-		finalExtra.length === 0 && finalRoot !== undefined && finalCommit !== undefined && finalTree !== undefined,
+		finalRoot !== undefined &&
+			finalCommit !== undefined &&
+			finalTree !== undefined &&
+			(!includeSdkSubtree || finalSdkSubtree !== undefined),
 		"backend Git identity is malformed",
 	);
 	invariant(
-		(await realpath(finalRoot)) === (await realpath(root)) && finalCommit === commit && finalTree === tree,
+		(await realpath(finalRoot)) === (await realpath(root)) &&
+			finalCommit === commit &&
+			finalTree === tree &&
+			finalSdkSubtree === sdkSubtree,
 		"backend Git identity changed",
 	);
 	return {
-		identity: { root: inspectedRoot, commit, tree, status: "" },
+		identity: {
+			root: inspectedRoot,
+			commit,
+			tree,
+			...(sdkSubtree === undefined ? {} : { sdkSubtree }),
+			status: "",
+		},
 		verified,
 		executable,
 	};
 }
 
 async function verifyCustomInspection(
-	manifest: Pick<BreadboardSdkProvenance, "backendCommit" | "backendTree">,
+	manifest: BackendIdentityExpectation,
 	root: string,
 	inspect: BackendGitInspection,
 ): Promise<void> {
@@ -509,6 +542,9 @@ async function verifyCustomInspection(
 	invariant(inspectedRoot === canonicalRoot, "backend Git root does not match");
 	invariant(identity.commit === manifest.backendCommit, "backend commit does not match");
 	invariant(identity.tree === manifest.backendTree, "backend tree does not match");
+	if (manifest.sdkSubtree !== undefined) {
+		invariant(identity.sdkSubtree === manifest.sdkSubtree, "backend SDK subtree does not match");
+	}
 	invariant(identity.status === "", "backend worktree is dirty");
 }
 
@@ -537,7 +573,7 @@ export async function openVerifiedBackendSnapshot(
 }
 
 export async function verifyBackendIdentity(
-	manifest: Pick<BreadboardSdkProvenance, "backendCommit" | "backendTree">,
+	manifest: BackendIdentityExpectation,
 	backendRoot: string | undefined,
 	inspect?: BackendGitInspection,
 ): Promise<void> {
@@ -549,9 +585,12 @@ export async function verifyBackendIdentity(
 	}
 	const pinned = await openPinnedDirectory(root);
 	try {
-		const { identity } = await inspectPinnedBackendGit(root, pinned);
+		const { identity } = await inspectPinnedBackendGit(root, pinned, manifest.sdkSubtree !== undefined);
 		invariant(identity.commit === manifest.backendCommit, "backend commit does not match");
 		invariant(identity.tree === manifest.backendTree, "backend tree does not match");
+		if (manifest.sdkSubtree !== undefined) {
+			invariant(identity.sdkSubtree === manifest.sdkSubtree, "backend SDK subtree does not match");
+		}
 	} finally {
 		await pinned.close();
 	}

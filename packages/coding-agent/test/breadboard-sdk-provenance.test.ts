@@ -39,6 +39,7 @@ describe("BreadBoard SDK provenance", () => {
 				root,
 				commit: manifest.backendCommit,
 				tree: manifest.backendTree,
+				sdkSubtree: manifest.sdkSubtree,
 				status: "",
 			};
 		};
@@ -133,11 +134,12 @@ describe("BreadBoard SDK provenance", () => {
 		);
 	});
 
-	test("requires a supplied clean backend at the exact approved commit and tree", async () => {
+	test("requires a supplied clean backend at the exact approved commit, tree, and SDK subtree", async () => {
 		const clean: BackendGitInspection = async root => ({
 			root,
 			commit: manifest.backendCommit,
 			tree: manifest.backendTree,
+			sdkSubtree: manifest.sdkSubtree,
 			status: "",
 		});
 		await expect(verifyBackendIdentity(manifest, packageRoot, clean)).resolves.toBeUndefined();
@@ -148,6 +150,7 @@ describe("BreadBoard SDK provenance", () => {
 				commit: "0".repeat(40),
 				tree: manifest.backendTree,
 				status: "",
+				sdkSubtree: manifest.sdkSubtree,
 			})),
 		).rejects.toThrow("backend commit does not match");
 		await expect(
@@ -156,14 +159,19 @@ describe("BreadBoard SDK provenance", () => {
 				commit: manifest.backendCommit,
 				tree: "0".repeat(40),
 				status: "",
+				sdkSubtree: manifest.sdkSubtree,
 			})),
 		).rejects.toThrow("backend tree does not match");
+		await expect(
+			verifyBackendIdentity({ ...manifest, sdkSubtree: "0".repeat(40) }, packageRoot, clean),
+		).rejects.toThrow("backend SDK subtree does not match");
 		await expect(
 			verifyBackendIdentity(manifest, packageRoot, async root => ({
 				root,
 				commit: manifest.backendCommit,
 				tree: manifest.backendTree,
 				status: " M registry.py",
+				sdkSubtree: manifest.sdkSubtree,
 			})),
 		).rejects.toThrow("backend worktree is dirty");
 	});
@@ -184,6 +192,7 @@ describe("BreadBoard SDK provenance", () => {
 				root: inspectedRoot,
 				commit: manifest.backendCommit,
 				tree: manifest.backendTree,
+				sdkSubtree: manifest.sdkSubtree,
 				status: "",
 			};
 		}) as unknown as BackendGitInspection;
