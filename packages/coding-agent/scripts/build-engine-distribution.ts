@@ -2,9 +2,23 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, unlink } from "node:fs/promises";
+import {
+	chmod,
+	copyFile,
+	link,
+	lstat,
+	mkdir,
+	mkdtemp,
+	open,
+	readdir,
+	readFile,
+	readlink,
+	realpath,
+	rm,
+	unlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { TOML } from "bun";
 import { installEngineDistributionAtomically } from "../src/breadboard/lifecycle/engine-distribution-installer";
 import {
@@ -301,6 +315,7 @@ async function readBackendIdentity(root: string): Promise<BackendIdentity> {
 }
 async function materializeBackendSource(backend: BackendIdentity, destination: string, cwd: string): Promise<string> {
 	await run(["git", "clone", "--shared", "--no-checkout", backend.root, destination], cwd);
+	await run(["git", "remote", "set-url", "origin", backend.repository], destination);
 	await run(["git", "checkout", "--detach", backend.commit], destination);
 	const commit = expectGitObject((await run(["git", "rev-parse", "HEAD"], destination)).stdout, "build source commit");
 	const tree = expectGitObject(
@@ -385,6 +400,44 @@ async function normalizeInstalledMetadata(sitePackages: string): Promise<void> {
 			});
 		}
 	}
+}
+
+function isContainedChild(root: string, candidate: string): boolean {
+	const path = relative(root, candidate);
+	return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+export async function materializeRuntimeSymlinks(root: string): Promise<void> {
+	const canonicalRoot = await realpath(root);
+	const rootMetadata = await lstat(canonicalRoot);
+	if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+		throw new Error("engine runtime root is not one real directory");
+	}
+	const visit = async (directory: string): Promise<void> => {
+		for (const entry of await readdir(directory, { withFileTypes: true })) {
+			const path = join(directory, entry.name);
+			if (entry.isDirectory()) {
+				await visit(path);
+				continue;
+			}
+			const metadata = await lstat(path);
+			if (!metadata.isSymbolicLink()) continue;
+			const linkTarget = await readlink(path);
+			if (isAbsolute(linkTarget)) throw new Error("engine runtime contains an absolute symlink");
+			const target = await realpath(path);
+			if (!isContainedChild(canonicalRoot, target)) {
+				throw new Error("engine runtime symlink escapes the runtime root");
+			}
+			const targetMetadata = await lstat(target);
+			if (!targetMetadata.isFile() || targetMetadata.isSymbolicLink() || targetMetadata.nlink !== 1) {
+				throw new Error("engine runtime symlink does not resolve to one regular file");
+			}
+			await unlink(path);
+			await copyFile(target, path, constants.COPYFILE_EXCL);
+			await chmod(path, targetMetadata.mode & 0o777);
+		}
+	};
+	await visit(canonicalRoot);
 }
 
 function recipeSha256(inputs: readonly RecipeInput[]): EngineDistributionSha256 {
@@ -603,7 +656,7 @@ async function main(options: BuildOptions): Promise<void> {
 					[
 						python,
 						"-c",
-						"import json; from breadboard.product.cli.harness import default_profile_identity; print(json.dumps(default_profile_identity(), sort_keys=True, separators=(',', ':')))",
+						"import json; from breadboard.product.harness.default_profile import default_profile_identity; print(json.dumps(default_profile_identity(), sort_keys=True, separators=(',', ':')))",
 					],
 					workRoot,
 				)
@@ -651,6 +704,7 @@ async function main(options: BuildOptions): Promise<void> {
 				await rm(join(rayThirdPartyRoot, name), { recursive: true, force: true });
 			}
 		}
+		await materializeRuntimeSymlinks(runtimeRoot);
 		const runtimeExecutable = join(runtimeRoot, "breadboard-engine");
 		await run(["codesign", "--verify", "--deep", "--strict", runtimeExecutable], workRoot);
 		const selfTest = await run([runtimeExecutable, ENGINE_SELF_TEST_ARGUMENT], workRoot);

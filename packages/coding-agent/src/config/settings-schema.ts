@@ -47,6 +47,7 @@ import {
 	TTS_LOCAL_VOICE_VALUES,
 } from "../tts/models";
 import { EDIT_MODES } from "../utils/edit-mode";
+import { DEFAULT_REDUCED_MOTION } from "../utils/reduced-motion";
 import {
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
 	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
@@ -1266,7 +1267,7 @@ export const SETTINGS_SCHEMA = {
 
 	"display.reduceMotion": {
 		type: "boolean",
-		default: false,
+		default: DEFAULT_REDUCED_MOTION,
 		ui: {
 			tab: "appearance",
 			group: "Display",

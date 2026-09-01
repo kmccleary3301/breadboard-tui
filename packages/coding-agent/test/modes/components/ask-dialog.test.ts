@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import type { ExtensionAskDialogQuestion } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { AskDialogComponent } from "@oh-my-pi/pi-coding-agent/modes/components/ask-dialog";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import { setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const DOWN = "\x1b[B";
@@ -16,20 +17,18 @@ const SPACE = " ";
 const TAB = "\t";
 const SHIFT_TAB = "\x1b[Z";
 
-let darkTheme = await getThemeByName("dark");
+const builtinThemes = getBuiltinThemes();
+if (!builtinThemes.dark || !builtinThemes.light) throw new Error("Failed to load built-in themes");
+const darkTheme = createTheme(builtinThemes.dark, { mode: "truecolor" });
+const lightTheme = createTheme(builtinThemes.light, { mode: "truecolor" });
 
 function render(component: AskDialogComponent): string {
 	return stripVTControlCharacters(component.render(80).join("\n"));
 }
 
 describe("AskDialogComponent", () => {
-	beforeAll(async () => {
-		darkTheme = await getThemeByName("dark");
-		if (!darkTheme) throw new Error("Failed to load dark theme");
-	});
-
 	beforeEach(() => {
-		setThemeInstance(darkTheme!);
+		setThemeInstance(darkTheme);
 		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g" }));
 	});
 
@@ -1116,7 +1115,7 @@ describe("AskDialogComponent", () => {
 		expect(out).toContain("PREVIEW-BRAVO");
 	});
 
-	it("refreshes cached preview styling after theme invalidation", async () => {
+	it("refreshes cached preview styling after theme invalidation", () => {
 		const createComponent = (): AskDialogComponent =>
 			new AskDialogComponent(
 				[{ id: "q1", question: "Pick one?", options: [{ label: "Alpha", preview: "CACHE-PREVIEW" }] }],
@@ -1125,9 +1124,6 @@ describe("AskDialogComponent", () => {
 		const previewLine = (component: AskDialogComponent): string =>
 			component.render(80).find(line => line.includes("CACHE-PREVIEW")) ?? "";
 		const originalTheme = darkTheme;
-		if (!originalTheme) throw new Error("Failed to load dark theme");
-		const lightTheme = await getThemeByName("light");
-		if (!lightTheme) throw new Error("Failed to load light theme");
 		const cachedComponent = createComponent();
 		const before = previewLine(cachedComponent);
 		expect(stripVTControlCharacters(before)).toContain("│ CACHE-PREVIEW");

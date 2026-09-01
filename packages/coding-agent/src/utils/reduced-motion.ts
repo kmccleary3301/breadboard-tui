@@ -1,8 +1,14 @@
-import { isSettingsInitialized, settings } from "../config/settings";
-import { getDefault } from "../config/settings-schema";
+/** Dependency-free default shared with the persisted settings schema. */
+export const DEFAULT_REDUCED_MOTION = false;
 
-/** Resolve the persisted motion preference without forcing settings initialization. */
+let readPersistedPreference: (() => boolean) | undefined;
+
+/** Bind the late-loaded settings singleton without pulling it into the prepaint graph. */
+export function configureReducedMotionReader(reader: (() => boolean) | undefined): void {
+	readPersistedPreference = reader;
+}
+
+/** Resolve an explicit override, then the live preference, then the dependency-free default. */
 export function isReducedMotionEnabled(override?: boolean): boolean {
-	if (override !== undefined) return override;
-	return isSettingsInitialized() ? settings.get("display.reduceMotion") : getDefault("display.reduceMotion");
+	return override ?? readPersistedPreference?.() ?? DEFAULT_REDUCED_MOTION;
 }

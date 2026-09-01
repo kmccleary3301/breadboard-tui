@@ -9,7 +9,7 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 beforeAll(async () => {
 	resetSettingsForTest();
 	await Settings.init({ inMemory: true });
-	await initTheme();
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 afterAll(() => {

@@ -17,7 +17,7 @@ const client = createLifecycleE4Client({
 	baseUrl: input.baseUrl,
 	expectedSessionContract: {
 		contractId: "p30-e4-session-v1",
-		schemaSha256: "sha256:385c19de8557a958b10d4a78afc64014a200558b8f089295882a1d9eb4b5d55a",
+		schemaSha256: "sha256:979bff06137b659c0110c0f9324703b955e22da85a7aac93bee7f639290475a9",
 	},
 });
 const bound = await client.handshake();

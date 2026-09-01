@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import type { HookSelectorSlider } from "@oh-my-pi/pi-coding-agent/modes/components/hook-selector";
 import { PlanReviewOverlay } from "@oh-my-pi/pi-coding-agent/modes/components/plan-review-overlay";
-import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import { setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";
@@ -15,7 +16,9 @@ const TAB = "\t";
 const SHIFT_DOWN = "\x1b[1;2B";
 const CANCEL = "\x07"; // ctrl+g, remapped to tui.select.cancel below
 
-let darkTheme = await getThemeByName("dark");
+const darkThemeJson = getBuiltinThemes().dark;
+if (!darkThemeJson) throw new Error("Failed to load dark theme");
+const darkTheme = createTheme(darkThemeJson, { mode: "truecolor" });
 
 function render(component: PlanReviewOverlay): string {
 	return stripVTControlCharacters(component.render(80).join("\n"));
@@ -29,13 +32,8 @@ const APPROVAL_OPTIONS = [
 ];
 
 describe("PlanReviewOverlay", () => {
-	beforeAll(async () => {
-		darkTheme = await getThemeByName("dark");
-		if (!darkTheme) throw new Error("Failed to load dark theme");
-	});
-
 	beforeEach(() => {
-		setThemeInstance(darkTheme!);
+		setThemeInstance(darkTheme);
 		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g" }));
 	});
 

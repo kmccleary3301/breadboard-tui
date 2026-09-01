@@ -2,9 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { RenderResultOptions } from "@oh-my-pi/pi-agent-core";
 import type { SettingPath, SettingValue } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import { setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { taskToolRenderer } from "@oh-my-pi/pi-coding-agent/task/renderer";
 import type { AgentProgress, SingleResult, TaskToolDetails } from "@oh-my-pi/pi-coding-agent/task/types";
+
+const darkThemeJson = getBuiltinThemes().dark;
+if (!darkThemeJson) throw new Error("Failed to load dark theme");
+const testTheme = createTheme(darkThemeJson, { mode: "truecolor" });
 
 function runningProgress(overrides: Partial<AgentProgress> = {}): AgentProgress {
 	return {
@@ -68,7 +73,7 @@ describe("task progress rendering", () => {
 		resetSettingsForTest();
 	});
 	it("renders running task rows static with the agent dot", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const progress = runningProgress({ id: "CountPackages", description: "List workspace packages" });
@@ -100,7 +105,7 @@ describe("task progress rendering", () => {
 	// preview — it stays on live progress rows and on finished result rows, and
 	// the generic `task` worker stays bare.
 	it("keeps the agent type badge on progress and result rows", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const badge = `${theme.format.bracketLeft}sonic${theme.format.bracketRight}`;
 
@@ -153,7 +158,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("shows the spawn count without a joined agent-type list in the header", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const details: TaskToolDetails = {
 			projectAgentsDir: null,
 			results: [],
@@ -178,7 +183,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("keeps the agent dot when shimmer is disabled", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const settings = Settings.instance;
 		const readSetting: Settings["get"] = settings.get.bind(settings);
 		vi.spyOn(settings, "get").mockImplementation(<P extends SettingPath>(path: P): SettingValue<P> => {
@@ -204,7 +209,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("renders pending task rows with the agent dot, not the pending glyph", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const progress = runningProgress({
 			id: "BestGpt",
@@ -234,7 +239,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("settles completed rows to the foreground color with the same dot", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const progress = runningProgress({
 			id: "DonePkg",
@@ -262,7 +267,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("shows the dispatch glyph in the header while agents run, not a spinner", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const header = findRow(
 			taskToolRenderer.renderResult(
@@ -280,7 +285,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("renders the task brief markdown inside the result frame", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		setThemeInstance(theme);
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const progress = runningProgress({ id: "BestGpt", status: "pending", description: "Combine winners" });
@@ -304,7 +309,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("pins unfinished tasks below finished ones, finished sorted by runtime asc", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const options: RenderResultOptions = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const details: TaskToolDetails = {
 			projectAgentsDir: null,
@@ -333,7 +338,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("orders finalized results by runtime asc, matching the live view", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const options: RenderResultOptions = { expanded: false, isPartial: false };
 		const details: TaskToolDetails = {
 			projectAgentsDir: null,
@@ -358,7 +363,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("folds collapsed progress lists to the live edge with a status summary", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const details: TaskToolDetails = {
 			projectAgentsDir: null,
 			results: [],
@@ -405,7 +410,7 @@ describe("task progress rendering", () => {
 	});
 
 	it("keeps problem rows visible when the collapsed result list folds", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		const details: TaskToolDetails = {
 			projectAgentsDir: null,
 			results: [
@@ -456,7 +461,7 @@ describe("task result detail-less state", () => {
 	});
 
 	it("renders a validation failure with the error glyph, not a success bullet", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		// The task-brief section renders markdown, which reads the active theme.
 		setThemeInstance(theme);
 		const options: RenderResultOptions = { expanded: false, isPartial: false };
@@ -480,7 +485,7 @@ describe("task result detail-less state", () => {
 	});
 
 	it("renders a detail-less success with the accent bullet, not an error glyph", async () => {
-		const theme = (await getThemeByName("dark"))!;
+		const theme = testTheme;
 		setThemeInstance(theme);
 		const options: RenderResultOptions = { expanded: false, isPartial: false };
 		const component = taskToolRenderer.renderResult({ content: [{ type: "text", text: "done" }] }, options, theme, {

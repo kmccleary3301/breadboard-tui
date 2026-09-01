@@ -2,9 +2,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import * as url from "node:url";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { grepToolRenderer } from "../../src/tools/grep";
+
+const darkThemeJson = getBuiltinThemes().dark;
+if (!darkThemeJson) throw new Error("Failed to load dark theme");
+const testTheme = createTheme(darkThemeJson, { mode: "truecolor" });
 
 function extractLinkUris(text: string): string[] {
 	return [...text.matchAll(/\x1b\]8;[^;]*;([^\x1b]+)\x1b\\/g)].map(match => match[1]!);
@@ -25,7 +29,7 @@ afterAll(() => {
 
 describe("grepToolRenderer", () => {
 	it("indents inline grep output and avoids accent-colored success headers", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 		const result = {
@@ -48,7 +52,7 @@ describe("grepToolRenderer", () => {
 	});
 
 	it("keeps truncation status in the header without a bottom notice", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 
@@ -83,7 +87,7 @@ describe("grepToolRenderer", () => {
 	});
 
 	it("shows actual matches when one grouped search section is larger than the collapsed budget", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 
@@ -122,7 +126,7 @@ describe("grepToolRenderer", () => {
 
 	it("links grouped file headers and code-frame lines to filesystem targets", async () => {
 		settings.override("tui.hyperlinks", "always");
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 
@@ -154,7 +158,7 @@ describe("grepToolRenderer", () => {
 
 	it("links single-file code-frame lines to the searched file", async () => {
 		settings.override("tui.hyperlinks", "always");
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 
@@ -181,7 +185,7 @@ describe("grepToolRenderer", () => {
 	});
 
 	it("bounds the expanded single-file view instead of dumping every match", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 
