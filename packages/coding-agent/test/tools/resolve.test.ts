@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import {
 	dispatchResolutionDevice,
@@ -18,6 +18,10 @@ import {
 	writeDeviceDispatch,
 } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
+
+const darkTheme = getBuiltinThemes().dark;
+if (!darkTheme) throw new Error("Expected dark theme");
+const uiTheme = createTheme(darkTheme, { mode: "truecolor" });
 
 function createSession(
 	options: {
@@ -194,9 +198,7 @@ describe("device tool-call predicates", () => {
 });
 
 it("renders a highlighted apply summary", async () => {
-	const theme = await getThemeByName("dark");
-	expect(theme).toBeDefined();
-	const uiTheme = theme!;
+	const resolvedTheme = uiTheme;
 
 	const component = resolveRenderer.renderResult(
 		{
@@ -209,7 +211,7 @@ it("renders a highlighted apply summary", async () => {
 			},
 		},
 		{ expanded: false, isPartial: false },
-		uiTheme,
+		resolvedTheme,
 	);
 
 	const rendered = sanitizeText(component.render(90).join("\n"));
@@ -218,13 +220,11 @@ it("renders a highlighted apply summary", async () => {
 	expect(rendered).toContain("All replacements are correct");
 	expect(rendered).not.toContain("Applied 2 replacements in 1 file.");
 	expect(rendered).not.toContain("Decision");
-	expect(rendered).not.toContain(uiTheme.boxRound.topLeft);
+	expect(rendered).not.toContain(resolvedTheme.boxRound.topLeft);
 });
 
 it("keeps the inverse block color across the full line (no mid-line fg reset)", async () => {
-	const theme = await getThemeByName("dark");
-	expect(theme).toBeDefined();
-	const uiTheme = theme!;
+	const resolvedTheme = uiTheme;
 
 	const component = resolveRenderer.renderResult(
 		{
@@ -237,7 +237,7 @@ it("keeps the inverse block color across the full line (no mid-line fg reset)", 
 			},
 		},
 		{ expanded: false, isPartial: false },
-		uiTheme,
+		resolvedTheme,
 	);
 
 	for (const line of component.render(90)) {

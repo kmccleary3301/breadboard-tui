@@ -7,6 +7,7 @@ import {
 	ReadToolGroupComponent,
 	readArgsCollapseIntoGroup,
 } from "@oh-my-pi/pi-coding-agent/modes/components/read-tool-group";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 function extractLinkUris(text: string): string[] {
@@ -23,7 +24,9 @@ describe("ReadToolGroupComponent", () => {
 	beforeAll(async () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true });
-		await themeModule.initTheme(false, undefined, undefined, "dark", "light");
+		const darkTheme = getBuiltinThemes().dark;
+		if (!darkTheme) throw new Error("Expected dark theme");
+		themeModule.setThemeInstance(createTheme(darkTheme, { mode: "truecolor" }));
 	});
 
 	afterEach(() => {

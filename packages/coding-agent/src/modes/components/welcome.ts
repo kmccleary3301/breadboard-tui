@@ -179,7 +179,7 @@ export class WelcomeComponent implements Component {
 		private lspServers: LspServerInfo[] = [],
 		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
 		private readonly appearance?: ProductAppearance,
-		private readonly reduceMotion?: boolean,
+		private reduceMotion?: boolean,
 	) {
 		this.#tips = getWelcomeTips(identity);
 	}
@@ -197,6 +197,12 @@ export class WelcomeComponent implements Component {
 	invalidate(): void {
 		this.#cachedWidth = -1;
 		this.#cachedLines = undefined;
+	}
+
+	/** Update the speculative startup preference; `undefined` delegates to the live settings reader. */
+	setReducedMotion(value: boolean | undefined): void {
+		this.reduceMotion = value;
+		if (isReducedMotionEnabled(value)) this.#stopAnimation();
 	}
 	/** The intro keeps the welcome block mutable; settling lets it retire to history. */
 	isTranscriptBlockFinalized(): boolean {

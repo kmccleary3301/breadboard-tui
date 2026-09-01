@@ -482,6 +482,19 @@ describe("Composer prepaint", () => {
 		}
 	});
 
+	it("honors the speculative reduced-motion preference before the first welcome paint", () => {
+		const terminal = new CountingTerminal(80, 32);
+		beginStartupComposer({
+			preferences: { ...config, reduceMotion: true },
+			terminal,
+			version: "9.9.9",
+			cache: false,
+		});
+		const lease = takeStartupComposerLease();
+		expect(lease?.composer.welcome?.isTranscriptBlockFinalized()).toBe(true);
+		lease?.composer.ui.stop();
+	});
+
 	it("preferences feed applies quiet mode", async () => {
 		const terminal = new CountingTerminal(80, 32);
 		beginStartupComposer({
@@ -511,6 +524,7 @@ describe("Composer prepaint", () => {
 			spellingTypoDetection: settings.get("spelling.typoDetection"),
 			spellingAutocomplete: settings.get("spelling.autocomplete"),
 			spellingAutocorrect: settings.get("spelling.autocorrect"),
+			reduceMotion: settings.get("display.reduceMotion"),
 			theme: {},
 		});
 		await terminal.waitForRender();
@@ -581,7 +595,11 @@ describe("Composer prepaint", () => {
 		expect(terminal.startOptions?.deferInput).toBeTrue();
 		expect(terminal.inputEnables).toBe(0);
 
-		applyStartupComposerPreferences({ ...config, theme: {} });
+		applyStartupComposerPreferences({
+			...config,
+			reduceMotion: settings.get("display.reduceMotion"),
+			theme: {},
+		});
 		expect(terminal.inputEnables).toBe(1);
 
 		// Adoption after preferences must not double-enable…

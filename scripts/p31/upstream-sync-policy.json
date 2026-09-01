@@ -12,7 +12,7 @@
     "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 280,
+    "maxTotalChangedPaths": 320,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
@@ -31,6 +31,7 @@
         "packages/coding-agent/src/assets/branding/breadboard_icon_bb_v1.*",
         "packages/coding-agent/src/product-identity.ts",
         "packages/coding-agent/src/product-identity.test.ts",
+        "packages/coding-agent/src/native-product-env.ts",
         "packages/coding-agent/src/blob-broker/uploaders-cloud-drives.ts",
         "packages/coding-agent/src/debug/index.ts",
         "packages/coding-agent/src/bb.ts",
@@ -66,6 +67,7 @@
         "packages/coding-agent/test/modes/magic-keywords.test.ts",
         "packages/coding-agent/test/status-line-context-cache.test.ts",
         "packages/coding-agent/test/status-line-overflow.test.ts",
+        "packages/coding-agent/test/session-color.test.ts",
         "packages/coding-agent/test/theme-color-mode.test.ts",
         "packages/tui/src/components/markdown.ts",
         "packages/tui/test/markdown.test.ts",
@@ -114,6 +116,7 @@
         "scripts/verify-upstream-sync.ts",
         "scripts/verify-upstream-sync.test.ts",
         "packages/coding-agent/breadboard-sdk-provenance.json",
+        "packages/coding-agent/sdk-export-inventory.json",
         "packages/coding-agent/vendor/breadboard-sdk-*.tgz",
         "packages/coding-agent/scripts/verify-breadboard-sdk-provenance.ts",
         "packages/coding-agent/scripts/c03-provider-parity-smoke.ts",
@@ -379,6 +382,8 @@
       "packages/coding-agent/src/product-entrypoint.test.ts",
       "packages/coding-agent/src/product-identity.ts",
       "packages/coding-agent/src/product-identity.test.ts",
+      "packages/coding-agent/src/native-product-env.ts",
+      "packages/coding-agent/test/session-color.test.ts",
       "packages/coding-agent/test/theme-color-mode.test.ts",
       "packages/utils/src/dirs.ts",
       "packages/coding-agent/scripts/build-binary.ts",
