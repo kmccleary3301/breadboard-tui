@@ -4,15 +4,21 @@
  * Every value crossing this seam is plain data. Credential summaries never
  * contain secret material; only the broker's execution path may receive it.
  */
+export const AUTH_SCHEME_IDS = ["api_key", "oauth2"] as const;
+export type AuthSchemeId = (typeof AUTH_SCHEME_IDS)[number];
 export type AuthProviderFlow = "browser" | "device";
-export type AuthCredentialKind = "oauth2" | "api_key" | (string & {});
+export type AuthProviderSupportTier = "core" | "unsupported";
+export type AuthProviderAuthOwner = "broker" | "provider";
+export type AuthProviderAvailabilityReason = "provider_managed" | "missing_auth" | "unsupported";
+export type AuthProviderModelDiscovery = "configured_only" | "unsupported";
+export type AuthCredentialKind = "oauth2" | "api_key";
 export type AuthCredentialStatus =
 	| "active"
 	| "disabled"
 	| "revoked"
 	| "reauthorization_required"
-	| "quarantined"
-	| (string & {});
+	| "quarantined";
+export type AuthCredentialRefreshStatus = "idle" | "refreshing" | "failed" | "blocked" | "unknown";
 export type AuthLoginStatus = "pending" | "awaiting_input" | "completed" | "cancelled" | "failed" | "unavailable";
 export type AuthActionOutcome = "cancelled" | "disabled" | "revoked" | "no_op";
 
@@ -20,14 +26,14 @@ export interface AuthProviderView {
 	readonly providerId: string;
 	readonly aliases: readonly string[];
 	readonly displayName: string;
-	readonly supportTier: string;
-	readonly authOwner: "broker" | "provider";
+	readonly supportTier: AuthProviderSupportTier;
+	readonly authOwner: AuthProviderAuthOwner;
 	readonly available: boolean;
-	readonly availabilityReason?: "provider_managed" | "missing_auth" | null;
-	readonly authSchemes: readonly string[];
+	readonly availabilityReason?: AuthProviderAvailabilityReason | null;
+	readonly authSchemes: readonly AuthSchemeId[];
 	readonly loginAvailable: boolean;
-	readonly oauthFlows: readonly string[];
-	readonly modelDiscovery: "configured_only";
+	readonly oauthFlows: readonly AuthProviderFlow[];
+	readonly modelDiscovery: AuthProviderModelDiscovery;
 	readonly storeCredentialsAs?: string;
 	readonly runtimeId?: string;
 	readonly compatibleProtocol?: string;
@@ -35,7 +41,7 @@ export interface AuthProviderView {
 }
 
 export interface AuthCredentialRefreshState {
-	readonly status: string;
+	readonly status: AuthCredentialRefreshStatus;
 	readonly expectedSecretVersion?: number | null;
 	readonly leaseAcquiredAtUtc?: string | null;
 	readonly leaseExpiresAtUtc?: string | null;
@@ -51,7 +57,7 @@ export interface AuthCredentialView {
 	readonly credentialRef: string;
 	readonly accountId: string;
 	readonly providerId: string;
-	readonly authSchemeId: string;
+	readonly authSchemeId: AuthSchemeId;
 	readonly credentialKind: AuthCredentialKind;
 	readonly accountLabel: string;
 	readonly alias?: string;
@@ -67,7 +73,7 @@ export interface AuthCredentialView {
 
 export interface BeginAuthLogin {
 	readonly providerId: string;
-	readonly authSchemeId?: string;
+	readonly authSchemeId?: AuthSchemeId;
 	readonly flow?: AuthProviderFlow;
 }
 
@@ -99,7 +105,7 @@ export interface PutApiKeyInput {
 	readonly providerId: string;
 	readonly accountLabel: string;
 	readonly apiKey: string;
-	readonly authSchemeId?: string;
+	readonly authSchemeId?: AuthSchemeId;
 	readonly alias?: string;
 	readonly bindings?: Readonly<Record<string, string>>;
 }
@@ -133,14 +139,14 @@ export class ProviderAuthError extends Error {
 	}
 }
 
-export interface ProviderAuthDataSource {
+export interface ProviderAuthReadPort {
 	listProviders(): Promise<ReadonlyArray<AuthProviderView>>;
 	listCredentials(providerId?: string): Promise<ReadonlyArray<AuthCredentialView>>;
 	listProvidersSync?(): ReadonlyArray<AuthProviderView>;
 	listCredentialsSync?(providerId?: string): ReadonlyArray<AuthCredentialView>;
 }
 
-export interface ProviderAuthPort extends ProviderAuthDataSource {
+export interface ProviderAuthMutationPort {
 	beginLogin(input: BeginAuthLogin): Promise<AuthLoginSession>;
 	getLogin(loginSessionId: string): Promise<AuthLoginSession>;
 	completeLogin(input: CompleteAuthLogin): Promise<AuthLoginSession>;
@@ -149,3 +155,5 @@ export interface ProviderAuthPort extends ProviderAuthDataSource {
 	logout(input: LogoutInput): Promise<AuthActionResult>;
 	revoke(input: RevokeInput): Promise<AuthActionResult>;
 }
+
+export interface ProviderAuthPort extends ProviderAuthReadPort, ProviderAuthMutationPort {}

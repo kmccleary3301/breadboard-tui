@@ -8,7 +8,7 @@ import {
 	type SessionId,
 	type SessionSnapshot,
 	type TurnId,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -17,7 +17,7 @@ import {
 	type PreparedBreadboardRuntime,
 	prepareConnectedBreadboardRuntime,
 	resolveBreadboardCatalogModels,
-} from "../main";
+} from "./runtime";
 import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
 import { createLifecycleMonitor } from "./engine-port";
 import { lifecycleState } from "./lifecycle/lifecycle-state";

@@ -19,8 +19,8 @@ const productSettingsUrl = new URL("../../src/breadboard/product-settings.ts", i
 async function probeTaskDefaults(breadboardProduct: boolean): Promise<TaskDefaultsProbe> {
 	const script = `
 if (${breadboardProduct}) {
-	const { installBreadboardSettingDefaults } = await import(${JSON.stringify(productSettingsUrl)});
-	installBreadboardSettingDefaults();
+	const { activateBreadboardProduct } = await import(${JSON.stringify(productSettingsUrl)});
+	await activateBreadboardProduct();
 }
 const { Settings } = await import(${JSON.stringify(settingsUrl)});
 
@@ -58,6 +58,38 @@ console.log(JSON.stringify({
 	}
 	return JSON.parse(stdout) as TaskDefaultsProbe;
 }
+async function probeProductSettingsImport(): Promise<{
+	product: string | null;
+	maxConcurrency: number;
+}> {
+	const script = `
+await import(${JSON.stringify(productSettingsUrl)});
+const { Settings } = await import(${JSON.stringify(settingsUrl)});
+console.log(JSON.stringify({
+	product: process.env.BREADBOARD_PRODUCT ?? null,
+	maxConcurrency: Settings.isolated().get("task.maxConcurrency"),
+}));
+`;
+	const env = { ...process.env };
+	delete env.BREADBOARD_PRODUCT;
+	const child = Bun.spawn([process.execPath, "--eval", script], {
+		env,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	if (exitCode !== 0) {
+		throw new Error(`product-settings import probe failed: exitCode=${exitCode}, stderr=${stderr}`);
+	}
+	return JSON.parse(stdout) as {
+		product: string | null;
+		maxConcurrency: number;
+	};
+}
 
 describe("product task safety defaults", () => {
 	it("bounds unset BreadBoard fan-out while preserving OMP defaults and explicit overrides", async () => {
@@ -80,4 +112,11 @@ describe("product task safety defaults", () => {
 		});
 		expect(omp.overrides).toEqual(breadboard.overrides);
 	}, 15_000);
+
+	it("does not mutate product identity or defaults when imported", async () => {
+		expect(await probeProductSettingsImport()).toEqual({
+			product: null,
+			maxConcurrency: 32,
+		});
+	});
 });

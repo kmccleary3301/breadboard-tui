@@ -14,8 +14,10 @@ import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	createBreadboardStartupForkPolicy,
-	createSessionManager,
 	resolveBreadboardSessionTarget,
+} from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
+import {
+	createSessionManager,
 	SessionResolutionError,
 	writeStartupNotice,
 } from "@oh-my-pi/pi-coding-agent/main";

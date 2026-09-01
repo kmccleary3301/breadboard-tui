@@ -660,7 +660,7 @@ async function verifyDistribution(repoRoot: string, policy: DeltaPolicy): Promis
 	assertEqual(provenance.schemaVersion, "p30.breadboard-sdk-provenance.v1", "SDK provenance schema");
 	assertEqual(provenance.packageName, distribution.packageName, "SDK provenance package name");
 	assertEqual(provenance.packageVersion, distribution.packageVersion, "SDK provenance package version");
-	assertEqual(provenance.artifactPath, "./vendor/breadboard-sdk-0.3.0.tgz", "SDK provenance artifact path");
+	assertEqual(provenance.artifactPath, "./vendor/breadboard-sdk-0.4.0.tgz", "SDK provenance artifact path");
 	assertEqual(provenance.artifactSha256, sha256(artifactBytes), "SDK artifact sha256");
 	assertEqual(provenance.artifactSha512Base64, sha512Base64(artifactBytes), "SDK artifact sha512");
 	assertEqual(provenance.artifactSizeBytes, artifactBytes.byteLength, "SDK artifact byte size");

@@ -2,7 +2,7 @@ import {
 	type CanonicalE4Client,
 	CanonicalE4ClientError,
 	type OpenedSession as CanonicalOpenedSession,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
 import type { BreadboardCreateSessionRequest, BreadboardSessionPort, OpenedSession, OpenSession } from "./session-port";
 
 interface CanonicalSessionClient {

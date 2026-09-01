@@ -1,4 +1,4 @@
-import type { SessionSnapshot } from "@breadboard/sdk/internal";
+import type { SessionSnapshot } from "@breadboard/sdk/session";
 import type { E4DurableCursor, E4OwnedSubmission } from "./e4-agent-stream";
 
 export const BREADBOARD_SESSION_BINDING_CUSTOM_TYPE = "breadboard.session-binding";

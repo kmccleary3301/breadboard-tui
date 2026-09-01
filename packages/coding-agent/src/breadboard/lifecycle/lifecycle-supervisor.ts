@@ -1,4 +1,4 @@
-import { createHash, randomBytes, X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, type FileHandle, mkdir, open, realpath, rm } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
@@ -9,15 +9,12 @@ import { checkServerIdentity } from "node:tls";
 import {
 	type BoundLifecycleE4Client,
 	type ClientRegistrationResponse,
-	createLifecycleE4Client,
 	type HardSignalOutcome,
 	type HardSignalPermitResponse,
 	type LifecycleE4Client,
 	LifecycleE4ClientError,
 	type LifecycleEngineBinding,
-	P30_SESSION_CONTRACT_ID,
-	P30_SESSION_SCHEMA_SHA256,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/lifecycle";
 import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
 	EngineRuntimeBundleError,
@@ -119,22 +116,22 @@ function createAuthenticatedRequestFetch(security: {
 export interface LifecycleSupervisorDependencies {
 	readonly store?: LocalAuthorityStore;
 	readonly process?: LifecycleProcessAdapter;
-	readonly createClient?: (config: {
+	readonly createClient: (config: {
 		readonly baseUrl: string;
 		readonly timeoutMs: number;
 		readonly bearerToken?: string;
 		readonly fetch?: typeof fetch;
 	}) => LifecycleE4Client;
-	readonly resolveRemoteSecurity?: (
+	readonly resolveRemoteSecurity: (
 		auth: Exclude<BreadboardAuth, { readonly kind: "process-secret" }>,
 	) => Promise<ResolvedRemoteSecurity>;
-	readonly randomCredential?: () => string;
-	readonly randomSecret?: () => Buffer;
-	readonly randomOwnerCredential?: () => Buffer;
-	readonly clock?: LifecycleClock;
-	readonly stateChanged?: (state: LifecycleState) => void;
+	readonly randomCredential: () => string;
+	readonly randomSecret: () => Buffer;
+	readonly randomOwnerCredential: () => Buffer;
+	readonly clock: LifecycleClock;
+	readonly stateChanged: (state: LifecycleState) => void;
 	readonly endpointAbsent?: (client: LifecycleE4Client) => Promise<boolean | "ambiguous">;
-	readonly restartOnUnexpectedChildExit?: boolean;
+	readonly restartOnUnexpectedChildExit: boolean;
 }
 
 export interface StopOptions {
@@ -166,25 +163,7 @@ const STARTUP_TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000, 4_000] as cons
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
 // Reserve the global process-cleanup deadline for governed hard-signal authorization and authority retirement.
 const LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS = 2_000;
-function randomOwnerCredential(): Buffer {
-	const source = randomBytes(32);
-	const encoded = Buffer.allocUnsafe(source.byteLength * 2);
-	const hex = "0123456789abcdef";
-	try {
-		for (let index = 0; index < source.byteLength; index += 1) {
-			const byte = source[index] as number;
-			encoded[index * 2] = hex.charCodeAt(byte >>> 4);
-			encoded[index * 2 + 1] = hex.charCodeAt(byte & 0x0f);
-		}
-		return encoded;
-	} finally {
-		source.fill(0);
-	}
-}
 
-function credentialText(credential: Uint8Array): string {
-	return Buffer.from(credential.buffer, credential.byteOffset, credential.byteLength).toString("utf8");
-}
 const BASE64URL_ALPHABET = Buffer.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "ascii");
 
 function encodeBootstrapCredential(secret: Uint8Array): Buffer {
@@ -211,6 +190,9 @@ function encodeBootstrapCredential(secret: Uint8Array): Buffer {
 	encoded[41] = BASE64URL_ALPHABET[((first & 0x03) << 4) | (second >>> 4)] as number;
 	encoded[42] = BASE64URL_ALPHABET[(second & 0x0f) << 2] as number;
 	return encoded;
+}
+function credentialText(credential: Uint8Array): string {
+	return Buffer.from(credential.buffer, credential.byteOffset, credential.byteLength).toString("utf8");
 }
 
 async function acquireInitialOwner(
@@ -257,9 +239,6 @@ const ALLOWED_TRANSITIONS: Readonly<Partial<Record<LifecycleStateName, ReadonlyS
 	"backing-off": new Set(["claiming", "starting", "restart-starting"]),
 };
 
-function randomCredential(): string {
-	return randomBytes(32).toString("base64url");
-}
 export function lifecycleChildEnvironment(
 	launchId: string,
 	engineStateRoot?: string,
@@ -926,28 +905,6 @@ export async function readKeychainReference(reference: string, options: Keychain
 		for (const chunk of chunks) chunk.fill(0);
 	}
 }
-async function defaultResolveRemoteSecurity(
-	auth: Exclude<BreadboardAuth, { readonly kind: "process-secret" }>,
-): Promise<ResolvedRemoteSecurity> {
-	const resolved = await readKeychainReference(auth.reference);
-	if (auth.kind === "keychain-reference") return { bearerToken: resolved };
-	try {
-		const parsed: unknown = JSON.parse(resolved);
-		if (
-			typeof parsed !== "object" ||
-			parsed === null ||
-			!("certificatePem" in parsed) ||
-			!("privateKeyPem" in parsed)
-		)
-			throw new Error("invalid identity");
-		const identity = parsed as { certificatePem?: unknown; privateKeyPem?: unknown };
-		if (typeof identity.certificatePem !== "string" || typeof identity.privateKeyPem !== "string")
-			throw new Error("invalid identity");
-		return { certificatePem: identity.certificatePem, privateKeyPem: identity.privateKeyPem };
-	} catch {
-		throw new LifecycleE4ClientError({ kind: "tls", code: "tls_transport_error" });
-	}
-}
 
 function pinnedCheckServerIdentity(
 	pin: string | undefined,
@@ -1076,26 +1033,14 @@ abstract class ModeStrategy {
 		readonly config: BreadboardRunConfig,
 		readonly dependencies: LifecycleSupervisorDependencies,
 	) {
-		this.clock = dependencies.clock ?? { now: Date.now, sleep: milliseconds => Bun.sleep(milliseconds) };
-		this.makeCredential = dependencies.randomCredential ?? randomCredential;
-		this.makeSecret = dependencies.randomSecret ?? (() => randomBytes(32));
-		this.makeOwnerCredential = dependencies.randomOwnerCredential ?? randomOwnerCredential;
+		this.clock = dependencies.clock;
+		this.makeCredential = dependencies.randomCredential;
+		this.makeSecret = dependencies.randomSecret;
+		this.makeOwnerCredential = dependencies.randomOwnerCredential;
 		this.clientInstanceId = this.makeCredential();
 		this.registrationCredential = this.makeCredential();
-		this.createClient =
-			dependencies.createClient ??
-			(options =>
-				createLifecycleE4Client({
-					baseUrl: options.baseUrl,
-					timeoutMs: options.timeoutMs,
-					expectedSessionContract: {
-						contractId: P30_SESSION_CONTRACT_ID,
-						schemaSha256: P30_SESSION_SCHEMA_SHA256,
-					},
-					...(options.bearerToken === undefined ? {} : { bearerToken: options.bearerToken }),
-					...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-				}));
-		this.stateChanged = dependencies.stateChanged ?? (() => undefined);
+		this.createClient = dependencies.createClient;
+		this.stateChanged = dependencies.stateChanged;
 	}
 
 	requestFetch: typeof fetch = globalThis.fetch;
@@ -1135,7 +1080,7 @@ abstract class ModeStrategy {
 		const auth = this.config.auth;
 		let security: ResolvedRemoteSecurity = {};
 		if (auth?.kind === "process-secret") security = { bearerToken: auth.value };
-		else if (auth) security = await (this.dependencies.resolveRemoteSecurity ?? defaultResolveRemoteSecurity)(auth);
+		else if (auth) security = await this.dependencies.resolveRemoteSecurity(auth);
 		if (this.config.mode !== "remote")
 			return security.bearerToken === undefined ? {} : { bearerToken: security.bearerToken };
 		const pin = this.config.tls?.kind === "system-trust" ? this.config.tls.spkiPin : undefined;
@@ -1394,20 +1339,9 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		super(config, dependencies);
 		if (!dependencies.store) throw new Error("local-owned requires a local authority store");
 		if (!config.endpoint) throw new Error("local-owned requires one endpoint");
+		if (!dependencies.process) throw new Error("local-owned requires a process adapter");
 		this.#store = dependencies.store;
-		const stateRootRelativePath = join("engine-state", LocalAuthorityStore.endpointKey(config.endpoint));
-		this.#process =
-			dependencies.process ??
-			createDefaultLifecycleProcessAdapter(
-				{
-					stateRootPath: join(this.#store.root, stateRootRelativePath),
-					ensure: relativePath =>
-						this.#store.ensurePrivateDirectory(
-							relativePath === undefined ? stateRootRelativePath : join(stateRootRelativePath, relativePath),
-						),
-				},
-				config.installedEngineIdentity !== undefined,
-			);
+		this.#process = dependencies.process;
 		this.#endpointAbsent =
 			dependencies.endpointAbsent ??
 			(async client => {
@@ -1422,7 +1356,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						: "ambiguous";
 				}
 			});
-		this.#restartOnUnexpectedChildExit = dependencies.restartOnUnexpectedChildExit ?? true;
+		this.#restartOnUnexpectedChildExit = dependencies.restartOnUnexpectedChildExit;
 	}
 	override abortRequiresQuiescence(): boolean {
 		return this.#hardSignalCommitActive;
@@ -3028,7 +2962,7 @@ export class LifecycleSupervisor {
 
 	constructor(
 		readonly config: BreadboardRunConfig,
-		dependencies: LifecycleSupervisorDependencies = {},
+		dependencies: LifecycleSupervisorDependencies,
 	) {
 		if (config.mode === "off") this.#strategy = new OffModeStrategy(config, dependencies);
 		else if (config.mode === "local-owned") this.#strategy = new LocalOwnedModeStrategy(config, dependencies);

@@ -1,7 +1,5 @@
-import { join } from "node:path";
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
-import { getAgentDir } from "@oh-my-pi/pi-utils/dirs";
 import {
 	formatInstalledEngineIdentity,
 	InstalledEngineDiscoveryError,
@@ -9,12 +7,11 @@ import {
 import { formatInstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-selection";
 import { restoreLifecycleTerminal, writeLifecyclePresentation } from "../breadboard/lifecycle/lifecycle-presenter";
 import { type LifecycleResult, lifecycleFailure, lifecycleState } from "../breadboard/lifecycle/lifecycle-state";
+import { createProductionLifecycleSupervisor } from "../breadboard/lifecycle/lifecycle-production";
 import {
 	dispatchLifecycleAction,
 	type LifecycleActionExecution,
-	LifecycleSupervisor,
 } from "../breadboard/lifecycle/lifecycle-supervisor";
-import { LocalAuthorityStore } from "../breadboard/lifecycle/local-authority-store";
 import { resolveProductBreadboardRunConfig } from "../breadboard/lifecycle/product-run-config";
 import {
 	BREADBOARD_ENGINE_MODES,
@@ -86,11 +83,7 @@ export default class Engine extends Command {
 						: lifecycleFailure("off", "failed", "mode_forbidden");
 				execution = { result };
 			} else {
-				const store =
-					config.mode === "local-owned"
-						? new LocalAuthorityStore(join(getAgentDir(), "breadboard", "lifecycle"))
-						: undefined;
-				const supervisor = new LifecycleSupervisor(config, { ...(store === undefined ? {} : { store }) });
+				const supervisor = createProductionLifecycleSupervisor(config, () => {});
 				terminalOwnedByDispatch = true;
 				execution = await dispatchLifecycleAction(supervisor, action, {
 					actionOptions: { consumerClosed: true, explicit: action === "stop" || action === "restart" },

@@ -157,7 +157,7 @@ describe("published coding-agent topology", () => {
 					JSON.stringify({
 						name: "@oh-my-pi/pi-coding-agent",
 						version: "18.0.1",
-						dependencies: { "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.3.0.tgz" },
+						dependencies: { "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz" },
 						bundledDependencies: ["@breadboard/sdk"],
 					}),
 				),
@@ -165,7 +165,7 @@ describe("published coding-agent topology", () => {
 					path.join(sdkRoot, "package.json"),
 					JSON.stringify({
 						name: "@breadboard/sdk",
-						version: "0.3.0",
+						version: "0.4.0",
 						dependencies: { "eventsource-parser": "^1.1.2" },
 					}),
 				),
@@ -180,7 +180,7 @@ describe("published coding-agent topology", () => {
 					name: "@oh-my-pi/pi-coding-agent",
 					version: "18.0.1",
 					dependencies: {
-						"@breadboard/sdk": "file:./vendor/breadboard-sdk-0.3.0.tgz",
+						"@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz",
 						"eventsource-parser": "^1.1.2",
 					},
 					bundledDependencies: ["@breadboard/sdk"],
@@ -195,7 +195,7 @@ describe("published coding-agent topology", () => {
 			expect(packedManifest.dependencies?.["eventsource-parser"]).toBe("^1.1.2");
 			expect(
 				(await $`tar -xOzf ${tarball} package/node_modules/@breadboard/sdk/package.json`.quiet()).text(),
-			).toContain('"version":"0.3.0"');
+			).toContain('"version":"0.4.0"');
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
 		}

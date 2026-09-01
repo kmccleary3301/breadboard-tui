@@ -88,7 +88,7 @@ describe("distribution notice bundle", () => {
 		const manifest = await Bun.file(path.join(packageRoot, "THIRD_PARTY_NOTICES.manifest.json")).json();
 		const bundle = await Bun.file(path.join(packageRoot, "THIRD_PARTY_NOTICES.txt")).text();
 		const sdkBytes = new Uint8Array(
-			await Bun.file(path.join(packageRoot, "vendor", "breadboard-sdk-0.3.0.tgz")).arrayBuffer(),
+			await Bun.file(path.join(packageRoot, "vendor", "breadboard-sdk-0.4.0.tgz")).arrayBuffer(),
 		);
 		expect(manifest.entries).toHaveLength(32);
 		expect(manifest.bundle.sha256).toBe(sha256(bundle));
@@ -100,7 +100,7 @@ describe("distribution notice bundle", () => {
 		});
 		expect(bundle).toContain("===== BEGIN LICENSE =====");
 		expect(bundle).toContain("===== BEGIN crates/pi-natives/src/fonts/Silver.LICENSE =====");
-		expect(bundle).toContain("Package: @breadboard/sdk@0.3.0");
+		expect(bundle).toContain("Package: @breadboard/sdk@0.4.0");
 		expect(await Bun.file(path.join(packageRoot, "LICENSE")).text()).toBe(
 			await Bun.file(path.join(repoRoot, "LICENSE")).text(),
 		);

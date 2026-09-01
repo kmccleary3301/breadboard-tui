@@ -28,8 +28,8 @@ export interface BreadboardSdkProvenance {
 	readonly backendCommit: string;
 	readonly backendTree: string;
 	readonly sdkSubtree: string;
-	readonly engineInterfaceVersion: "0.3.0";
-	readonly engineInterfaceRange: ">=0.1.0 <0.4.0";
+	readonly engineInterfaceVersion: "0.4.0";
+	readonly engineInterfaceRange: ">=0.4.0 <0.5.0";
 	readonly exportInventoryPath: string;
 	readonly exportInventorySha256: string;
 	readonly backendRootEnvironmentVariable: "BREADBOARD_P30_BACKEND_ROOT";
@@ -676,9 +676,9 @@ export async function verifyBreadboardSdkProvenance(
 	const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as BreadboardSdkProvenance;
 	invariant(manifest.schemaVersion === "p30.breadboard-sdk-provenance.v1", "unexpected manifest schema");
 	invariant(manifest.packageName === "@breadboard/sdk", "unexpected package name");
-	invariant(manifest.packageVersion === "0.3.0", "unexpected package version");
-	invariant(manifest.engineInterfaceVersion === "0.3.0", "unexpected engine interface version");
-	invariant(manifest.engineInterfaceRange === ">=0.1.0 <0.4.0", "unexpected engine interface range");
+	invariant(manifest.packageVersion === "0.4.0", "unexpected package version");
+	invariant(manifest.engineInterfaceVersion === "0.4.0", "unexpected engine interface version");
+	invariant(manifest.engineInterfaceRange === ">=0.4.0 <0.5.0", "unexpected engine interface range");
 	invariant(/^([0-9a-f]{64})$/.test(manifest.artifactSha256), "invalid artifact SHA-256");
 	invariant(/^([0-9a-f]{64})$/.test(manifest.exportInventorySha256), "invalid export inventory SHA-256");
 	invariant(

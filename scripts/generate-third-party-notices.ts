@@ -9,7 +9,7 @@ const packageRoot = path.join(repoRoot, "packages", "coding-agent");
 const bundlePath = path.join(packageRoot, "THIRD_PARTY_NOTICES.txt");
 const manifestPath = path.join(packageRoot, "THIRD_PARTY_NOTICES.manifest.json");
 const packageLicensePath = path.join(packageRoot, "LICENSE");
-const sdkArtifactPath = path.join(packageRoot, "vendor", "breadboard-sdk-0.3.0.tgz");
+const sdkArtifactPath = path.join(packageRoot, "vendor", "breadboard-sdk-0.4.0.tgz");
 const sdkProvenancePath = path.join(packageRoot, "breadboard-sdk-provenance.json");
 
 const GENERATED_PATHS = new Set([
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
 		sections.push("");
 	}
 	for (const member of sdkNoticeMembers) {
-		const qualifiedPath = `packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz!${member.path}`;
+		const qualifiedPath = `packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz!${member.path}`;
 		sections.push(`===== BEGIN ${qualifiedPath} =====`);
 		sections.push(`SHA-256: ${member.sha256}`);
 		sections.push("");
@@ -204,8 +204,8 @@ async function main(): Promise<void> {
 
 	const sdkProvenanceBytes = new Uint8Array(await Bun.file(sdkProvenancePath).arrayBuffer());
 	sections.push("===== BEGIN BUNDLED COMPONENT PROVENANCE =====");
-	sections.push("Package: @breadboard/sdk@0.3.0");
-	sections.push(`Artifact: packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz`);
+	sections.push("Package: @breadboard/sdk@0.4.0");
+	sections.push(`Artifact: packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz`);
 	sections.push(`Artifact SHA-256: ${sha256(sdkArtifactBytes)}`);
 	sections.push(`Provenance: packages/coding-agent/breadboard-sdk-provenance.json`);
 	sections.push(`Provenance SHA-256: ${sha256(sdkProvenanceBytes)}`);
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
 			sha256: entries.find(entry => entry.path === "LICENSE")?.sha256,
 		},
 		sdk: {
-			artifactPath: "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz",
+			artifactPath: "packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz",
 			artifactSha256: sha256(sdkArtifactBytes),
 			provenancePath: "packages/coding-agent/breadboard-sdk-provenance.json",
 			provenanceSha256: sha256(sdkProvenanceBytes),

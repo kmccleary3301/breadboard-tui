@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
+import { LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
 import { retryAmbiguousReplay } from "./helpers/retry-ambiguous-replay";
 
 const statusZero = (): LifecycleE4ClientError =>

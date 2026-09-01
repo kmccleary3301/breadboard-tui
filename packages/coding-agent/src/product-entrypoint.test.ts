@@ -59,7 +59,7 @@ describe("BreadBoard product entrypoint", () => {
 		const result = await runProcess(["src/bb.ts", "--version"], await temporaryHome());
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout.trim()).toBe("bb/0.1.0-rc.4 omp/18.0.1 sdk/0.3.0 engine-api >=0.1.0 <0.4.0");
+		expect(result.stdout.trim()).toBe("bb/0.1.0-rc.4 omp/18.0.1 sdk/0.4.0 engine-api >=0.4.0 <0.5.0");
 	});
 
 	test("uses the bb identity and never touches a native ~/.omp tree", async () => {
@@ -113,7 +113,7 @@ describe("BreadBoard product entrypoint", () => {
 		const productRoot = path.join(home, "product-config");
 		const dirsModule = path.join(packageDir, "..", "utils", "src", "dirs.ts");
 		const probe =
-			'await import("./src/omp.ts"); const dirs = await import(process.env.BB_DIRS_MODULE); process.stdout.write(JSON.stringify({ product: dirs.IS_BREADBOARD_PRODUCT, root: dirs.getConfigRootDir() }));';
+			'const { activateNativeProduct } = await import("./src/native-product-env.ts"); activateNativeProduct(); const dirs = await import(process.env.BB_DIRS_MODULE); process.stdout.write(JSON.stringify({ product: dirs.IS_BREADBOARD_PRODUCT, root: dirs.getConfigRootDir() }));';
 		const result = await runProcess(["-e", probe], home, {
 			BREADBOARD_PRODUCT: "1",
 			BREADBOARD_CONFIG_DIR: productRoot,
@@ -155,7 +155,7 @@ describe("BreadBoard product entrypoint", () => {
 		await mkdir(agentDir, { recursive: true });
 		await writeFile(path.join(agentDir, ".env"), "BREADBOARD_PRODUCT=1\n");
 		const probe =
-			'await import("./src/omp.ts"); await import("@oh-my-pi/pi-utils/env"); const dirs = await import("@oh-my-pi/pi-utils/dirs"); const loader = await import(process.env.BB_NATIVE_LOADER_MODULE); process.stdout.write(JSON.stringify({ marker: process.env.BREADBOARD_PRODUCT, root: dirs.getConfigRootDir(), natives: loader.resolveNativesDir({ homeDir: process.env.HOME, pathExists: () => false }) }));';
+			'const { activateNativeProduct } = await import("./src/native-product-env.ts"); activateNativeProduct(); await import("@oh-my-pi/pi-utils/env"); const dirs = await import("@oh-my-pi/pi-utils/dirs"); const loader = await import(process.env.BB_NATIVE_LOADER_MODULE); process.stdout.write(JSON.stringify({ marker: process.env.BREADBOARD_PRODUCT, root: dirs.getConfigRootDir(), natives: loader.resolveNativesDir({ homeDir: process.env.HOME, pathExists: () => false }) }));';
 
 		const result = await runProcess(["-e", probe], home, {
 			BREADBOARD_PRODUCT: "1",

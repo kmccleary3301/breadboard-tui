@@ -2,7 +2,7 @@
  * Immutable presentation identity for coding-agent surfaces.
  *
  * Executable names, paths, versions, and protocol identifiers remain owned by
- * `@oh-my-pi/pi-utils/dirs`; this module owns only user-visible art and copy.
+ * `@oh-my-pi/pi-utils`; this module owns only user-visible art and copy.
  */
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 import breadboardSourceArt from "./assets/branding/breadboard_icon_bb_v1.provenance.json" with { type: "json" };

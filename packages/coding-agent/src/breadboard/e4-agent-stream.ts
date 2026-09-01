@@ -2,11 +2,11 @@ import {
 	CanonicalE4ClientError,
 	type CanonicalJsonObject,
 	deterministicSerialize,
-	LifecycleE4ClientError,
 	type StructuredSubmit,
 	type SubmitReceipt,
 	sha256Bytes,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
+import { LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
 import type { AgentEvent, AgentToolResult, StreamFn } from "@oh-my-pi/pi-agent-core";
 import type {
 	AssistantMessage,

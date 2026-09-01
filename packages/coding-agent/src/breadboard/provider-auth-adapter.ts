@@ -1,11 +1,20 @@
-import { ApiError, type InternalBreadboardClient } from "@breadboard/sdk/internal";
+import { ApiError, type BreadboardClient } from "@breadboard/sdk/engine";
 import { parseCallbackInput } from "@oh-my-pi/pi-ai/oauth/callback-server";
 import {
+	type AuthCredentialKind,
 	type AuthCredentialRefreshState,
+	type AuthCredentialRefreshStatus,
+	type AuthCredentialStatus,
 	type AuthCredentialView,
 	type AuthLoginSession,
 	type AuthLoginStatus,
+	type AuthProviderAvailabilityReason,
+	type AuthProviderAuthOwner,
+	type AuthProviderFlow,
+	type AuthProviderModelDiscovery,
+	type AuthProviderSupportTier,
 	type AuthProviderView,
+	type AuthSchemeId,
 	type BeginAuthLogin,
 	type CompleteAuthLogin,
 	type LogoutInput,
@@ -16,7 +25,7 @@ import {
 } from "./provider-auth-port";
 
 type BreadboardProviderAuthClient = Pick<
-	InternalBreadboardClient,
+	BreadboardClient,
 	| "listProviders"
 	| "listCredentials"
 	| "beginLogin"
@@ -41,6 +50,72 @@ function optionalUtc(milliseconds: number | null | undefined): string | null | u
 	return milliseconds === undefined ? undefined : utc(milliseconds);
 }
 
+function authScheme(value: string | null | undefined): AuthSchemeId {
+	return value === "oauth2" ? "oauth2" : "api_key";
+}
+
+function credentialKind(value: string | null | undefined): AuthCredentialKind {
+	return value === "oauth2" ? "oauth2" : "api_key";
+}
+
+function credentialStatus(value: string): AuthCredentialStatus {
+	switch (value) {
+		case "active":
+		case "disabled":
+		case "revoked":
+		case "reauthorization_required":
+		case "quarantined":
+			return value;
+		default:
+			return "quarantined";
+	}
+}
+
+function refreshStatus(value: string): AuthCredentialRefreshStatus {
+	switch (value) {
+		case "idle":
+		case "refreshing":
+		case "failed":
+		case "blocked":
+			return value;
+		default:
+			return "unknown";
+	}
+}
+
+function providerSupportTier(value: string): AuthProviderSupportTier {
+	return value === "core" ? "core" : "unsupported";
+}
+
+function providerAuthOwner(value: string): AuthProviderAuthOwner {
+	return value === "broker" ? "broker" : "provider";
+}
+
+function providerAvailabilityReason(
+	value: string | null | undefined,
+): AuthProviderAvailabilityReason | null | undefined {
+	if (value === undefined || value === null) return value;
+	switch (value) {
+		case "provider_managed":
+		case "missing_auth":
+			return value;
+		default:
+			return "unsupported";
+	}
+}
+
+function providerAuthSchemes(values: readonly string[]): AuthSchemeId[] {
+	return values.flatMap(value => (value === "oauth2" || value === "api_key" ? [value] : []));
+}
+
+function providerOAuthFlows(values: readonly string[] | undefined): AuthProviderFlow[] {
+	return (values ?? []).flatMap(value => (value === "browser" || value === "device" ? [value] : []));
+}
+
+function providerModelDiscovery(value: string): AuthProviderModelDiscovery {
+	return value === "configured_only" ? "configured_only" : "unsupported";
+}
+
 function refreshState(row: SdkAuthCredentialRefreshState): AuthCredentialRefreshState {
 	const leaseAcquiredAtUtc = optionalUtc(row.lease_acquired_at_ms);
 	const leaseExpiresAtUtc = optionalUtc(row.lease_expires_at_ms);
@@ -48,7 +123,7 @@ function refreshState(row: SdkAuthCredentialRefreshState): AuthCredentialRefresh
 	const retryNotBeforeUtc = optionalUtc(row.retry_not_before_ms);
 	const updatedAtUtc = optionalUtc(row.updated_at_ms);
 	return {
-		status: row.status,
+		status: refreshStatus(row.status),
 		...(row.expected_secret_version !== undefined ? { expectedSecretVersion: row.expected_secret_version } : {}),
 		...(leaseAcquiredAtUtc !== undefined ? { leaseAcquiredAtUtc } : {}),
 		...(leaseExpiresAtUtc !== undefined ? { leaseExpiresAtUtc } : {}),
@@ -66,11 +141,11 @@ function credentialView(row: SdkAuthCredentialView): AuthCredentialView {
 		accountId: row.account_id,
 		credentialRef: row.credential_id,
 		providerId: row.provider_id,
-		authSchemeId: row.auth_scheme_id,
-		credentialKind: row.credential_kind || "api_key",
+		authSchemeId: authScheme(row.auth_scheme_id),
+		credentialKind: credentialKind(row.credential_kind),
 		...(row.alias ? { alias: row.alias } : {}),
 		accountLabel: row.label,
-		status: row.status,
+		status: credentialStatus(row.status),
 		secretVersion: row.secret_version,
 		...(row.source ? { source: row.source } : {}),
 		updatedAtUtc: new Date(row.updated_at_ms).toISOString(),
@@ -82,18 +157,19 @@ function credentialView(row: SdkAuthCredentialView): AuthCredentialView {
 }
 
 function providerView(item: SdkAuthProviderView): AuthProviderView {
+	const availabilityReason = providerAvailabilityReason(item.availability_reason);
 	return {
 		providerId: item.provider_id,
 		aliases: item.aliases,
 		displayName: item.display_name,
-		supportTier: item.support_tier,
-		authOwner: item.auth_owner,
+		supportTier: providerSupportTier(item.support_tier),
+		authOwner: providerAuthOwner(item.auth_owner),
 		available: item.available,
-		...(item.availability_reason !== undefined ? { availabilityReason: item.availability_reason } : {}),
-		authSchemes: item.auth_schemes,
+		...(availabilityReason !== undefined ? { availabilityReason } : {}),
+		authSchemes: providerAuthSchemes(item.auth_schemes),
 		loginAvailable: item.login_available === true,
-		oauthFlows: item.oauth_flows ?? [],
-		modelDiscovery: item.model_discovery,
+		oauthFlows: providerOAuthFlows(item.oauth_flows),
+		modelDiscovery: providerModelDiscovery(item.model_discovery),
 		...(item.runtime_id ? { runtimeId: item.runtime_id } : {}),
 		...(item.compatible_protocol ? { compatibleProtocol: item.compatible_protocol } : {}),
 		...(item.base_url ? { baseUrl: item.base_url } : {}),
@@ -202,7 +278,7 @@ async function brokerCall<T>(nextAction: string, call: () => Promise<T>): Promis
 	}
 }
 
-/** Maps the generated @breadboard/sdk 0.3.0 auth client to the product UI port. */
+/** Maps the generated BreadBoard SDK auth client to the product UI port. */
 export function createBreadboardProviderAuthPort(client: BreadboardProviderAuthClient): ProviderAuthPort {
 	return {
 		async listProviders() {

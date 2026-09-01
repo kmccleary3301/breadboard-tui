@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyCliApiKeyOverride, BreadboardProductApiKeyError } from "../src/main";
+import { applyCliApiKeyOverride, BreadboardProductApiKeyError } from "../src/breadboard/runtime";
 
 describe("BreadBoard CLI API-key isolation", () => {
 	test("rejects --api-key before native AuthStorage can observe it", () => {

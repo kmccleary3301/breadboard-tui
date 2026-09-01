@@ -4,11 +4,10 @@ import {
 	type AuthLoginSession,
 	type AuthProviderFlow,
 	type AuthProviderView,
+	type AuthSchemeId,
 	ProviderAuthError,
 	type ProviderAuthPort,
 } from "./provider-auth-port";
-
-const SUPPORTED_AUTH_SCHEMES: Record<string, true> = { api_key: true, oauth2: true };
 
 export interface ProviderAuthPrompt {
 	readonly message: string;
@@ -18,14 +17,14 @@ export interface ProviderAuthPrompt {
 
 export interface ProviderAuthLoginPresenter {
 	readonly signal: AbortSignal;
-	selectAuthScheme(provider: AuthProviderView, schemes: readonly string[]): Promise<string>;
+	selectAuthScheme(provider: AuthProviderView, schemes: readonly AuthSchemeId[]): Promise<string>;
 	selectOAuthFlow?(provider: AuthProviderView): Promise<AuthProviderFlow | undefined>;
 	showAuthorization(session: AuthLoginSession): void;
 	prompt(input: ProviderAuthPrompt): Promise<string>;
 	showProgress(message: string): void;
 }
 export interface AuthenticateProviderOptions {
-	readonly authSchemeId?: string;
+	readonly authSchemeId?: AuthSchemeId;
 	readonly pollIntervalMs?: number;
 	readonly timeoutMs?: number;
 }
@@ -61,17 +60,15 @@ function assertOpen(signal: AbortSignal): void {
 	if (signal.aborted) throw cancellation();
 }
 
-function usableSchemes(provider: AuthProviderView): string[] {
-	return provider.authSchemes.filter(
-		scheme => SUPPORTED_AUTH_SCHEMES[scheme] === true && (scheme !== "oauth2" || provider.loginAvailable),
-	);
+function usableSchemes(provider: AuthProviderView): AuthSchemeId[] {
+	return provider.authSchemes.filter(scheme => scheme !== "oauth2" || provider.loginAvailable);
 }
 
 async function selectScheme(
 	provider: AuthProviderView,
 	presenter: ProviderAuthLoginPresenter,
-	requestedScheme: string | undefined,
-): Promise<string> {
+	requestedScheme: AuthSchemeId | undefined,
+): Promise<AuthSchemeId> {
 	const schemes = usableSchemes(provider);
 	if (requestedScheme) {
 		if (!schemes.includes(requestedScheme)) {
@@ -89,7 +86,7 @@ async function selectScheme(
 	}
 	if (schemes.length > 1) {
 		const selected = await presenter.selectAuthScheme(provider, schemes);
-		if (schemes.includes(selected)) return selected;
+		if ((selected === "api_key" || selected === "oauth2") && schemes.includes(selected)) return selected;
 	}
 	throw new ProviderAuthError({
 		code: "provider_auth_unavailable",

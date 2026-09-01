@@ -17,7 +17,7 @@ import {
 	type SubmitReceipt,
 	serializeLoggedSessionEvent,
 	validateSessionReplayFacts,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
 import { CanonicalE4SessionPort } from "../../src/breadboard/canonical-e4-session-port";
 import { breadboardProjectionEventId, E4AgentStreamBridge } from "../../src/breadboard/e4-agent-stream";
 import {
@@ -564,10 +564,10 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 
 describe("BBOMP-CORE-52 — package identity, SDK provenance, version, and compatibility (6)", () => {
 	test("package identity names the pinned BreadBoard SDK artifact", () => {
-		expect(provenance).toMatchObject({ packageName: "@breadboard/sdk", packageVersion: "0.3.0" });
+		expect(provenance).toMatchObject({ packageName: "@breadboard/sdk", packageVersion: "0.4.0" });
 	});
 	test("SDK provenance records a content-addressed artifact", () => {
-		expect(provenance.artifactPath).toContain("breadboard-sdk-0.3.0.tgz");
+		expect(provenance.artifactPath).toContain("breadboard-sdk-0.4.0.tgz");
 		expect(provenance.artifactSha256).toMatch(/^[0-9a-f]{64}$/);
 	});
 	test("SDK provenance records the source commit used for the artifact", () => {

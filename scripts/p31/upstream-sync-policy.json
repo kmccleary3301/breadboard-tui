@@ -436,13 +436,13 @@
   "distribution": {
     "packageRoot": "packages/coding-agent",
     "packageName": "@breadboard/sdk",
-    "packageVersion": "0.3.0",
-    "artifactPath": "packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz",
+    "packageVersion": "0.4.0",
+    "artifactPath": "packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz",
     "provenancePath": "packages/coding-agent/breadboard-sdk-provenance.json",
     "packageLicensePath": "packages/coding-agent/LICENSE",
     "noticeBundlePath": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
     "noticeManifestPath": "packages/coding-agent/THIRD_PARTY_NOTICES.manifest.json",
-    "expectedSdkDependency": "file:./vendor/breadboard-sdk-0.3.0.tgz",
+    "expectedSdkDependency": "file:./vendor/breadboard-sdk-0.4.0.tgz",
     "expectedSdkLicenseAssertion": "none"
   },
   "receiptPaths": {

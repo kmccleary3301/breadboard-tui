@@ -18,7 +18,6 @@ import { parentPort } from "node:worker_threads";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
-	formatBreadboardVersion,
 	getActiveProfile,
 	IS_BREADBOARD_PRODUCT,
 	MIN_BUN_VERSION,
@@ -26,6 +25,7 @@ import {
 	setProfile,
 	VERSION,
 } from "@oh-my-pi/pi-utils/dirs";
+import { formatBreadboardVersion } from "@oh-my-pi/pi-utils/product-distribution";
 import { interceptUnhandledRejections } from "@oh-my-pi/pi-utils/postmortem";
 import { setProcessName } from "@oh-my-pi/pi-utils/process-name";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
@@ -99,7 +99,7 @@ async function runSmokeTest(): Promise<void> {
 	const noticeBundle = await Bun.file(new URL(noticeBundlePath, import.meta.url)).text();
 	if (
 		!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n") ||
-		!noticeBundle.includes("Package: @breadboard/sdk@0.3.0")
+		!noticeBundle.includes("Package: @breadboard/sdk@0.4.0")
 	) {
 		throw new Error("distribution notice bundle is missing or malformed");
 	}

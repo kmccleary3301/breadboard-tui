@@ -371,7 +371,7 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(selected).toEqual([]);
 	});
 
-	test("SDK adapter preserves real 0.3.0 DTOs without secret-bearing summaries", async () => {
+	test("SDK adapter preserves real 0.4.0 DTOs without secret-bearing summaries", async () => {
 		const requests: unknown[] = [];
 		const credentialRow = {
 			account_id: "bbacct_work",
@@ -495,7 +495,7 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(JSON.stringify(rows)).not.toContain("rotated-secret");
 	});
 
-	test("SDK adapter preserves unknown credential classifications without promoting them active", async () => {
+	test("SDK adapter maps unknown credential classifications to a safe inactive summary", async () => {
 		const futureCredential = {
 			account_id: "bbacct_future",
 			credential_id: "bbcred_future",
@@ -542,7 +542,7 @@ describe("BreadBoard provider auth port integration", () => {
 
 		const [row] = await port.listCredentials();
 
-		expect(row).toMatchObject({ credentialKind: "service_account", status: "expired" });
+		expect(row).toMatchObject({ credentialKind: "api_key", status: "quarantined", authSchemeId: "api_key" });
 		expect(row?.status).not.toBe("active");
 	});
 

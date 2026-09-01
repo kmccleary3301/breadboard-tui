@@ -1,6 +1,6 @@
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthProviderInfo } from "@oh-my-pi/pi-ai/oauth/types";
-import type { AuthCredentialView, AuthProviderView, ProviderAuthDataSource } from "../../breadboard/provider-auth-port";
+import type { AuthCredentialView, AuthProviderView, ProviderAuthReadPort } from "../../breadboard/provider-auth-port";
 import type { AuthStorage, StoredAuthCredential } from "../../session/auth-storage";
 
 function providerView(provider: OAuthProviderInfo): AuthProviderView {
@@ -41,7 +41,7 @@ function credentialView(row: StoredAuthCredential): AuthCredentialView {
 }
 
 /** Adapts native OMP storage to the same read-only provider data source as BreadBoard. */
-export function createNativeProviderAuthDataSource(authStorage: AuthStorage): ProviderAuthDataSource {
+export function createNativeProviderAuthDataSource(authStorage: AuthStorage): ProviderAuthReadPort {
 	return {
 		listProvidersSync() {
 			return getOAuthProviders().map(providerView);

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { emergencyTerminalRestore } from "@oh-my-pi/pi-tui";
-import type { LifecycleState } from "./lifecycle-state";
+import { lifecyclePresentationCategory, type LifecycleState } from "./lifecycle-state";
 import type { LifecycleDispatchResult } from "./lifecycle-supervisor";
 import type { BreadboardRunConfig } from "./run-config";
 
@@ -46,27 +46,39 @@ export function displayEndpointIdentity(endpoint: string | undefined): string | 
 }
 
 export function presentLifecycle(result: LifecycleDispatchResult): LifecyclePresentation {
-	if (result.kind === "off")
-		return { summary: "BreadBoard engine: off", remediation: REMEDIATION_BY_REASON.engine_mode_off, exitCode: 0 };
-	if (result.kind === "ready") {
-		return {
-			summary: `BreadBoard engine: ready (${result.state.mode}; instance ${result.handle.binding.engineInstanceId})`,
-			exitCode: 0,
-		};
+	switch (lifecyclePresentationCategory(result.state.name)) {
+		case "off":
+			if (result.kind !== "off") break;
+			return { summary: "BreadBoard engine: off", remediation: REMEDIATION_BY_REASON.engine_mode_off, exitCode: 0 };
+		case "ready":
+			if (result.kind !== "ready") break;
+			return {
+				summary: `BreadBoard engine: ready (${result.state.mode}; instance ${result.handle.binding.engineInstanceId})`,
+				exitCode: 0,
+			};
+		case "observed":
+			if (result.kind !== "observed") break;
+			return {
+				summary: `BreadBoard engine: compatible, observed only (${result.state.mode}; instance ${result.handle.binding.engineInstanceId})`,
+				exitCode: 0,
+			};
+		case "detached":
+			if (result.kind !== "detached") break;
+			return { summary: "BreadBoard engine: detached", exitCode: 0 };
+		case "stopped":
+			if (result.kind !== "stopped") break;
+			return { summary: "BreadBoard engine: stopped", exitCode: 0 };
+		case "failure":
+			if (result.kind !== "failure") break;
+			return {
+				summary: `BreadBoard engine: ${result.state.name} (${result.state.reason})`,
+				remediation: REMEDIATION_BY_REASON[result.state.reason],
+				exitCode: result.state.reason === "mode_forbidden" ? 2 : 1,
+			};
+		case "progress":
+			break;
 	}
-	if (result.kind === "observed") {
-		return {
-			summary: `BreadBoard engine: compatible, observed only (${result.state.mode}; instance ${result.handle.binding.engineInstanceId})`,
-			exitCode: 0,
-		};
-	}
-	if (result.kind === "detached") return { summary: "BreadBoard engine: detached", exitCode: 0 };
-	if (result.kind === "stopped") return { summary: "BreadBoard engine: stopped", exitCode: 0 };
-	return {
-		summary: `BreadBoard engine: ${result.state.name} (${result.state.reason})`,
-		remediation: REMEDIATION_BY_REASON[result.state.reason],
-		exitCode: result.state.reason === "mode_forbidden" ? 2 : 1,
-	};
+	throw new Error(`lifecycle result state ${result.state.name} has no presentation`);
 }
 
 export function secretSafeLifecycleStatus(

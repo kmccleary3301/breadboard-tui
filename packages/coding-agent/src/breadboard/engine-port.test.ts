@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decodeLoggedSessionEvent } from "@breadboard/sdk/internal";
+import { decodeLoggedSessionEvent } from "@breadboard/sdk/session";
 import {
 	buildBreadboardSessionCreatePayload,
 	connectCanonicalBreadboardEnginePort,

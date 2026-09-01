@@ -1092,11 +1092,11 @@ SOFTWARE.
 ===== END python/robomp/LICENSE =====
 
 ===== BEGIN BUNDLED COMPONENT PROVENANCE =====
-Package: @breadboard/sdk@0.3.0
-Artifact: packages/coding-agent/vendor/breadboard-sdk-0.3.0.tgz
-Artifact SHA-256: e0df0a4774ba4b5d7de96deaaab48a926c51675a8fa6818b00f777b62bd9d303
+Package: @breadboard/sdk@0.4.0
+Artifact: packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz
+Artifact SHA-256: 74336070ee87e20bcd67deb50760c078ce305d561f01249e09b12279df7aa329
 Provenance: packages/coding-agent/breadboard-sdk-provenance.json
-Provenance SHA-256: 03f8ce5d8ff75744f0d923095afdbaed50f03582cdc8c07abd177fe76f736c6a
+Provenance SHA-256: 31179f63c164af3866c7a4c7fcb84a8b8240a61be60b92fa802b0ddc43031f6b
 License assertion: none; archive inspection found no LICENSE/NOTICE member.
 ===== END BUNDLED COMPONENT PROVENANCE =====
 
