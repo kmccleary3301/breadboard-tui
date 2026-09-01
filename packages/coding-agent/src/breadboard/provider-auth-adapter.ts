@@ -58,6 +58,13 @@ function credentialKind(value: string | null | undefined): AuthCredentialKind {
 	return value === "oauth2" ? "oauth2" : "api_key";
 }
 
+function hasSupportedCredentialClassification(row: SdkAuthCredentialView): boolean {
+	return (
+		(row.auth_scheme_id === "oauth2" || row.auth_scheme_id === "api_key") &&
+		(row.credential_kind === "oauth2" || row.credential_kind === "api_key")
+	);
+}
+
 function credentialStatus(value: string): AuthCredentialStatus {
 	switch (value) {
 		case "active":
@@ -145,7 +152,7 @@ function credentialView(row: SdkAuthCredentialView): AuthCredentialView {
 		credentialKind: credentialKind(row.credential_kind),
 		...(row.alias ? { alias: row.alias } : {}),
 		accountLabel: row.label,
-		status: credentialStatus(row.status),
+		status: hasSupportedCredentialClassification(row) ? credentialStatus(row.status) : "quarantined",
 		secretVersion: row.secret_version,
 		...(row.source ? { source: row.source } : {}),
 		updatedAtUtc: new Date(row.updated_at_ms).toISOString(),

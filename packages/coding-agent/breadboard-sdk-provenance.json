@@ -7,8 +7,8 @@
   "artifactSha512Base64": "4vYDasLkl4YeGmAdjC1gLokSdEdqBiyBsDHdoajOlesdxivPVnbGEl1kEICS6qQHQ4vowhB89q71McQjF3hBlA==",
   "artifactSizeBytes": 66595,
   "backendRepository": "https://github.com/kmccleary3301/breadboard.git",
-  "backendCommit": "983b37a954a4a5c45d3c8a03c7fbf204cb446e54",
-  "backendTree": "5d65e4bbfc3f920aa91557f550d7764195db474f",
+  "backendCommit": "c97f564d7404e13f1ca760e76bca234eaee0de78",
+  "backendTree": "2322d5138338f4bd9acbd39e6c2feea18bdeadad",
   "sdkSubtree": "f1384282b67e189d1a4f2708526a4bdc4164d79c",
   "engineInterfaceVersion": "0.4.0",
   "engineInterfaceRange": ">=0.4.0 <0.5.0",
@@ -70,5 +70,5 @@
     "internalCompatibility": "removed; supported engine, session, and lifecycle subpaths are explicit"
   },
   "backendRootEnvironmentVariable": "BREADBOARD_P30_BACKEND_ROOT",
-  "exportInventorySha256": "fd1a8b9db863983773e4a6eaba16d1ca41415ceb2419bd844a139ed98a68df91"
+  "exportInventorySha256": "f13859cb214edd301881c573a13930fa5aa23c7fb4a1d20abeafa1ec8d684907"
 }

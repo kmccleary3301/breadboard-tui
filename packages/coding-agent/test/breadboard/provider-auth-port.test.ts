@@ -503,7 +503,7 @@ describe("BreadBoard provider auth port integration", () => {
 			auth_scheme_id: "future-auth",
 			label: "future credential",
 			credential_kind: "service_account",
-			status: "expired",
+			status: "active",
 			source: "broker",
 			secret_version: 1,
 			created_at_ms: 1,

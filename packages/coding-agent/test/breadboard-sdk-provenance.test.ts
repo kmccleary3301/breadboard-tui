@@ -22,6 +22,7 @@ const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json
 	bin: Record<string, string>;
 	bundledDependencies: string[];
 	dependencies: Record<string, string>;
+	exports: Record<string, unknown>;
 	scripts: Record<string, string>;
 };
 const workspaceRoot = resolve(packageRoot, "../..");
@@ -65,6 +66,9 @@ describe("BreadBoard SDK provenance", () => {
 		expect(packageJson.scripts["gate:distribution"]).toBe("bun run gate:breadboard-sdk && bun run gate:notices");
 		expect(packageJson.scripts.build).toStartWith("bun run gate:distribution && ");
 		expect(packageJson.scripts.prepack).toStartWith("bun run gate:distribution && ");
+	});
+	test("keeps lifecycle construction behind the production owner", () => {
+		expect(packageJson.exports["./breadboard/lifecycle/lifecycle-supervisor"]).toBeNull();
 	});
 
 	test("fails closed when package.json drifts from the pinned artifact", () => {
