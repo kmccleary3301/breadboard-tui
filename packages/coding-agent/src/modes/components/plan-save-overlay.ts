@@ -66,6 +66,6 @@ export class PlanSaveOverlay implements Component, Focusable {
 		if (available <= 0) return prompt;
 		const marker = this.#focused ? CURSOR_MARKER : "";
 		const suggested = truncateToWidth(this.#suggestedPath, Math.max(0, available - 1));
-		return `${prompt}${marker}\x1b[7m \x1b[27m${theme.fg("dim", suggested)}`;
+		return `${prompt}${marker}${theme.inverse(" ")}${theme.fg("dim", suggested)}`;
 	}
 }

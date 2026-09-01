@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { ToolChoiceQueue } from "@oh-my-pi/pi-coding-agent/session/tool-choice-queue";
 import { createTools, type Tool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
@@ -407,9 +408,9 @@ describe("read and write route xd:// device URLs", () => {
 	});
 
 	it("keeps the generic custom-tool card when a mounted device has no renderer", async () => {
-		await themeModule.initTheme();
-		const uiTheme = (await themeModule.getThemeByName("dark")) ?? (await themeModule.getThemeByName("light"));
-		if (!uiTheme) throw new Error("expected an initialized theme");
+		const darkTheme = getBuiltinThemes().dark;
+		if (!darkTheme) throw new Error("expected an initialized theme");
+		const uiTheme = createTheme(darkTheme, { mode: "truecolor" });
 
 		const weatherDevice: AgentTool = {
 			name: "weather",

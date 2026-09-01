@@ -131,7 +131,7 @@ describe("Agent hub row ordering", () => {
 	let geometry: GeometryStub | undefined;
 
 	beforeAll(async () => {
-		await initTheme();
+		await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 	});
 
 	afterEach(() => {

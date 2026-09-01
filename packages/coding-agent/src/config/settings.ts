@@ -43,6 +43,7 @@ import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../sessi
 import { AUTO_IMAGE_PROVIDER_ORDER, isImageProviderId } from "../tools/image-providers";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
 import { INSPECT_IMAGE_MODES } from "../utils/inspect-image-mode";
+import { configureReducedMotionReader } from "../utils/reduced-motion";
 import { isSearchProviderId, SEARCH_PROVIDER_ORDER } from "../web/search/types";
 import {
 	type BashInterceptorRule,
@@ -433,12 +434,14 @@ export class Settings {
 		return promise.then(
 			instance => {
 				globalInstance = instance;
+				configureReducedMotionReader(() => instance.get("display.reduceMotion"));
 				clearBoundSettingsMethods();
 				globalInstancePromise = Promise.resolve(instance);
 				return instance;
 			},
 			error => {
 				globalInstance = null;
+				configureReducedMotionReader(undefined);
 				globalInstancePromise = null;
 				clearBoundSettingsMethods();
 				throw error;
@@ -2675,6 +2678,7 @@ export function resetSettingsForTest(): void {
 	}
 	liveSettingsInstances.clear();
 	globalInstance = null;
+	configureReducedMotionReader(undefined);
 	globalInstancePromise = null;
 	clearBoundSettingsMethods();
 	configureProviderMaxInFlightRequests(undefined);

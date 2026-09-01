@@ -22,6 +22,7 @@ import { TtsrNotificationComponent } from "../../modes/components/ttsr-notificat
 import { createUsageRowBlock } from "../../modes/components/usage-row";
 import { getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext, TodoPhase } from "../../modes/types";
+import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
 import idleRecapPrompt from "../../prompts/system/recap-user.md" with { type: "text" };
 import type { AgentSessionEvent } from "../../session/agent-session";
 import { isSilentAbort, isUserInvokedSkillPrompt, readQueueChipText, resolveAbortLabel } from "../../session/messages";
@@ -2274,7 +2275,8 @@ export class EventController {
 
 		const sessionName = this.ctx.sessionManager.getSessionName();
 		TERMINAL.sendNotification({
-			title: sessionName || "Oh My Pi",
+			applicationName: ACTIVE_PRODUCT_IDENTITY.displayName,
+			title: sessionName || ACTIVE_PRODUCT_IDENTITY.displayName,
 			body: "Stopped with error",
 			type: "error",
 			actions: "focus",
@@ -2299,7 +2301,8 @@ export class EventController {
 
 		const sessionName = this.ctx.sessionManager.getSessionName();
 		TERMINAL.sendNotification({
-			title: sessionName || "Oh My Pi",
+			applicationName: ACTIVE_PRODUCT_IDENTITY.displayName,
+			title: sessionName || ACTIVE_PRODUCT_IDENTITY.displayName,
 			body: "Complete",
 			type: "completion",
 			actions: "focus",

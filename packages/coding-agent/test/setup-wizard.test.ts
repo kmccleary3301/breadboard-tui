@@ -18,6 +18,7 @@ import { WebSearchTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scene
 import { SetupWizardComponent } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/wizard-overlay";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { OMP_PRODUCT_IDENTITY } from "@oh-my-pi/pi-coding-agent/product-identity";
 import { SEARCH_PROVIDER_OPTIONS, SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
 
 function fakeContextWithConfiguredModel(): InteractiveModeContext {
@@ -144,6 +145,7 @@ describe("setup wizard model selection", () => {
 			},
 		);
 		const host = {
+			identity: OMP_PRODUCT_IDENTITY,
 			ctx: {
 				settings,
 				session: {
@@ -246,6 +248,51 @@ describe("setup wizard persistence", () => {
 		expect(setFocus).toHaveBeenCalled();
 	});
 });
+
+describe("setup wizard reduced motion", () => {
+	it("shows the first scene immediately and skips decorative timers and outro", async () => {
+		const interval = vi.spyOn(globalThis, "setInterval");
+		let host: SetupSceneHost | undefined;
+		const scene: SetupScene = {
+			id: "static",
+			title: "Static setup",
+			minVersion: 1,
+			mount: nextHost => {
+				host = nextHost;
+				return {
+					title: "Static setup",
+					render: () => ["STATIC-SCENE"],
+					invalidate: () => {},
+				};
+			},
+		};
+		const ctx = {
+			settings: Settings.isolated(),
+			ui: {
+				terminal: { rows: 24 },
+				setFocus: () => {},
+				requestRender: () => {},
+			},
+		} as unknown as InteractiveModeContext;
+		const component = new SetupWizardComponent(ctx, [scene], {
+			identity: OMP_PRODUCT_IDENTITY,
+			reduceMotion: true,
+		});
+
+		try {
+			const completed = component.run();
+			expect(component.render(80).join("\n")).toContain("STATIC-SCENE");
+			expect(interval).not.toHaveBeenCalled();
+			host?.finish("done");
+			await completed;
+			expect(component.render(80).every(line => line.trim().length === 0)).toBe(true);
+			expect(interval).not.toHaveBeenCalled();
+		} finally {
+			component.dispose();
+		}
+	});
+});
+
 describe("setup wizard mouse routing", () => {
 	it("synthesizes arrow keys from wheel notches for scenes without routeMouse", () => {
 		const received: string[] = [];
@@ -268,7 +315,7 @@ describe("setup wizard mouse routing", () => {
 				requestRender: () => {},
 			},
 		} as unknown as InteractiveModeContext;
-		const component = new SetupWizardComponent(ctx, [scene]);
+		const component = new SetupWizardComponent(ctx, [scene], { identity: OMP_PRODUCT_IDENTITY });
 		try {
 			void component.run();
 			// Left click during the splash advances into the scene, like Enter.
@@ -317,7 +364,7 @@ describe("setup wizard mouse routing", () => {
 				requestRender: () => {},
 			},
 		} as unknown as InteractiveModeContext;
-		const component = new SetupWizardComponent(ctx, [scene]);
+		const component = new SetupWizardComponent(ctx, [scene], { identity: OMP_PRODUCT_IDENTITY });
 		try {
 			void component.run();
 			component.handleInput("\r"); // splash → scene
@@ -378,7 +425,9 @@ describe("setup wizard short terminals", () => {
 
 	it("keeps the selected provider row visible while navigating on a 24-row terminal", async () => {
 		await initTheme(false, "unicode", false, "titanium", "light");
-		const component = new SetupWizardComponent(shortTerminalCtx(24), [providersSetupScene]);
+		const component = new SetupWizardComponent(shortTerminalCtx(24), [providersSetupScene], {
+			identity: OMP_PRODUCT_IDENTITY,
+		});
 		void component.run();
 		component.handleInput("\r"); // splash → scene
 		const nowSpy = skipDissolve();
@@ -400,7 +449,9 @@ describe("setup wizard short terminals", () => {
 
 	it("keeps the curated theme list and its selection visible on a 24-row terminal", async () => {
 		await initTheme(false, "unicode", false, "titanium", "light");
-		const component = new SetupWizardComponent(shortTerminalCtx(24), [themeSetupScene]);
+		const component = new SetupWizardComponent(shortTerminalCtx(24), [themeSetupScene], {
+			identity: OMP_PRODUCT_IDENTITY,
+		});
 		void component.run();
 		component.handleInput("\r"); // splash → scene
 		const nowSpy = skipDissolve();

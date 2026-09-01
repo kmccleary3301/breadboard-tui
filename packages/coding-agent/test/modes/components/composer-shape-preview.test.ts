@@ -10,7 +10,15 @@ import {
 	installExtensionComposerShape,
 } from "@oh-my-pi/pi-coding-agent/modes/components/composer-shape-registry";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/settings-selector";
-import { initTheme, setTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
+import { composerSetupScene } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/composer";
+import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
+import { initTheme, setTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import {
+	BREADBOARD_PRODUCT_IDENTITY,
+	OMP_PRODUCT_IDENTITY,
+	type ProductIdentity,
+} from "@oh-my-pi/pi-coding-agent/product-identity";
 import type { ComposerStyle } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
@@ -28,6 +36,57 @@ describe("composer shape preview", () => {
 	});
 
 	const shapes: ComposerShape[] = [...COMPOSER_SHAPE_VALUES];
+
+	function createPreviewSession() {
+		return {
+			state: { messages: [] },
+			messages: [],
+			model: { contextWindow: 128_000 },
+			contextUsageRevision: 0,
+			systemPrompt: [],
+			agent: { state: { tools: [] } },
+			skills: [],
+			isStreaming: false,
+			isAutoThinking: false,
+			autoResolvedThinkingLevel: () => undefined,
+			isAdvisorActive: () => false,
+			getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
+			isFastModeActive: () => false,
+			getAsyncJobSnapshot: () => ({ running: [] }),
+			getCurrentModel: () => undefined,
+			isFastModeEnabled: () => false,
+			getContextUsage: () => ({ tokens: 0, contextWindow: 128_000 }),
+			getGoalModeState: () => null,
+			modelRegistry: { isUsingOAuth: () => false },
+			sessionManager: {
+				getSessionName: () => "",
+				getUsageStatistics: () => ({
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					orchestrationInput: 0,
+					orchestrationOutput: 0,
+					orchestrationCacheRead: 0,
+					premiumRequests: 0,
+					cost: 0,
+				}),
+			},
+		} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
+	}
+
+	function createPreviewStatus(identity: ProductIdentity): StatusLineComponent {
+		const status = new StatusLineComponent(createPreviewSession(), identity);
+		status.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "powerline-thin",
+			sessionAccent: false,
+		});
+		return status;
+	}
 
 	it.each(shapes)("renders %s shape preview without throwing in dark theme", async (shape: ComposerShape) => {
 		await setTheme("dark");
@@ -111,6 +170,62 @@ describe("composer shape preview", () => {
 			expect(rendered.join("\n")).toContain("omp");
 			expect(rendered.join("\n")).toContain("BOTTOM-FULL");
 			expect(rendered[rendered.length - 2]).toBe(""); // spacer row before the bar
+		}
+	});
+
+	it("uses the real status source for native and product marks across every symbol preset", async () => {
+		for (const preset of ["unicode", "nerd", "ascii"] as const) {
+			await initTheme(false, preset, false, "titanium", "light");
+			for (const identity of [OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY]) {
+				const status = createPreviewStatus(identity);
+				const rendered = Bun.stripANSI(renderComposerShapePreview("pi", 80, status, identity.cliName).join("\n"));
+				const expectedMark = identity.id === OMP_PRODUCT_IDENTITY.id ? theme.icon.pi : identity.compactLogo[preset];
+				expect(rendered).toContain(expectedMark);
+				expect(rendered).toContain(identity.cliName);
+				if (identity.id === BREADBOARD_PRODUCT_IDENTITY.id) {
+					expect(rendered).not.toMatch(/\bomp\b/i);
+					expect(rendered).not.toContain("π");
+				}
+			}
+		}
+	});
+
+	it("keeps the stable pi id while adapting its user-facing label", () => {
+		expect(getComposerShapeOptions(OMP_PRODUCT_IDENTITY).find(option => option.value === "pi")?.label).toBe("Pi");
+		expect(getComposerShapeOptions(BREADBOARD_PRODUCT_IDENTITY).find(option => option.value === "pi")?.label).toBe(
+			"Framed Rules",
+		);
+	});
+
+	it("renders the setup composer scene through the injected identity and real status source", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		for (const identity of [OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY]) {
+			const isolated = Settings.isolated();
+			isolated.set("composer.shape", "pi");
+			const host = {
+				identity,
+				ctx: {
+					settings: isolated,
+					statusLine: createPreviewStatus(identity),
+				},
+				requestRender: () => {},
+				finish: () => {},
+				setFocus: () => {},
+				restoreFocus: () => {},
+			} as unknown as SetupSceneHost;
+			const rendered = Bun.stripANSI(composerSetupScene.mount(host).render(80, 40).join("\n"));
+			if (identity.id === BREADBOARD_PRODUCT_IDENTITY.id) {
+				expect(rendered).toContain("Framed Rules");
+				expect(rendered).toContain("bb");
+				expect(rendered).not.toMatch(/\bomp\b/i);
+				expect(rendered).not.toMatch(/\bPi\b/);
+				expect(rendered).not.toContain("π");
+			} else {
+				expect(rendered).toMatch(/\bPi\b/);
+				expect(rendered).toContain("omp");
+				expect(rendered).toContain(theme.icon.pi);
+				expect(rendered).not.toContain("Framed Rules");
+			}
 		}
 	});
 

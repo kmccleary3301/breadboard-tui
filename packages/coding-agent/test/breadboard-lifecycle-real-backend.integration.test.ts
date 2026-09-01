@@ -22,7 +22,7 @@ const backendPython =
 	(backendRoot === undefined ? undefined : resolve(backendRoot, ".venv/bin/python"));
 const expectedSessionContract = {
 	contractId: "p30-e4-session-v1" as const,
-	schemaSha256: "sha256:4c796e33684136cd7304c989318ec7ea2735c3702b15de9067a687dcc5310813" as const,
+	schemaSha256: "sha256:979bff06137b659c0110c0f9324703b955e22da85a7aac93bee7f639290475a9" as const,
 };
 const authorityId = (): string => randomBytes(32).toString("base64url");
 const clientId = (label: string): string => `p30-real-${label}-${authorityId()}`;

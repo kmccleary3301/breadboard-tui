@@ -1,11 +1,13 @@
 import type { Component, SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import type { ProviderAuthPort } from "../../../breadboard/provider-auth-port";
+import type { ProductIdentity } from "../../../product-identity";
 import type { InteractiveModeContext } from "../../types";
 
 export type SetupSceneResult = "done" | "skipped";
 
 export interface SetupSceneHost {
 	ctx: InteractiveModeContext;
+	identity: ProductIdentity;
 	providerAuthPort?: ProviderAuthPort;
 	requestRender(): void;
 	finish(result: SetupSceneResult): void;

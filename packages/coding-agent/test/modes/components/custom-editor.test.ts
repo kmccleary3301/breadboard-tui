@@ -81,6 +81,33 @@ describe("CustomEditor placeholder decoration", () => {
 	});
 });
 
+describe("CustomEditor reduced motion", () => {
+	beforeAll(async () => {
+		await initTheme();
+	});
+
+	it("renders magic keywords statically without scheduling repaint frames", async () => {
+		const editor = new CustomEditor(getEditorTheme());
+		editor.setText("please ultrathink this");
+		editor.focused = true;
+		editor.magicKeywordsEnabledOverride = true;
+		editor.reduceMotionEnabled = () => true;
+		let repaints = 0;
+		editor.setShimmerRepaintHandler(() => {
+			repaints += 1;
+		});
+
+		const context = { line: 0, startCol: 0, endCol: 22 };
+		const first = editor.decorateText("please ultrathink this", context);
+		await Bun.sleep(CustomEditor.SHIMMER_FRAME_MS + 20);
+		const second = editor.decorateText("please ultrathink this", context);
+
+		expect(first).toBe(second);
+		expect(repaints).toBe(0);
+		editor.setShimmerRepaintHandler(undefined);
+	});
+});
+
 describe("CustomEditor restored image drafts", () => {
 	beforeAll(async () => {
 		await initTheme();

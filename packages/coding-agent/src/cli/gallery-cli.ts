@@ -227,16 +227,15 @@ async function renderGallerySections(
  */
 export async function runGalleryCommand(args: GalleryCommandArgs): Promise<void> {
 	const settingsInstance = await Settings.init();
-	// Screenshots must carry exact theme RGB regardless of how the invoking
-	// terminal advertises its color support, so force truecolor before the theme
-	// (and therefore every SGR escape it emits) is built.
-	if (args.screenshot) process.env.COLORTERM = "truecolor";
+	// Screenshots carry exact theme RGB regardless of invoking terminal capability.
+	// Pass the mode explicitly; never mutate process-wide terminal facts.
 	await initTheme(
 		false,
 		settingsInstance.get("symbolPreset"),
 		settingsInstance.get("colorBlindMode"),
 		settingsInstance.get("theme.dark"),
 		settingsInstance.get("theme.light"),
+		args.screenshot ? "truecolor" : undefined,
 	);
 
 	const width = resolveWidth(args.width);

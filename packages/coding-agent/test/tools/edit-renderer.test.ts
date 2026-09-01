@@ -9,6 +9,7 @@ import { editToolRenderer } from "@oh-my-pi/pi-coding-agent/edit/renderer";
 import { SLOPPY_MARKERS } from "@oh-my-pi/pi-coding-agent/edit/sloppy";
 import { renderDiff } from "@oh-my-pi/pi-coding-agent/modes/components/diff";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { Text, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
@@ -22,12 +23,13 @@ beforeAll(async () => {
 let uiThemePromise: Promise<themeModule.Theme> | undefined;
 
 function getUiTheme(): Promise<themeModule.Theme> {
-	uiThemePromise ??= (async () => {
-		await themeModule.initTheme(false, undefined, undefined, "dark", "light");
-		const theme = await themeModule.getThemeByName("dark");
-		expect(theme).toBeDefined();
-		return theme!;
-	})();
+	uiThemePromise ??= Promise.resolve().then(() => {
+		const darkTheme = getBuiltinThemes().dark;
+		if (!darkTheme) throw new Error("Expected dark theme");
+		const resolved = createTheme(darkTheme, { mode: "truecolor" });
+		themeModule.setThemeInstance(resolved);
+		return resolved;
+	});
 	return uiThemePromise;
 }
 

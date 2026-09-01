@@ -8,9 +8,9 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { containsUltrathink, highlightUltrathink } from "@oh-my-pi/pi-coding-agent/modes/ultrathink";
 import { clearBundledCommandsCache, loadBundledCommands } from "@oh-my-pi/pi-coding-agent/task/commands";
 
-beforeAll(() => {
-	// highlightOrchestrate/highlightUltrathink read the global theme's color mode.
-	initTheme();
+beforeAll(async () => {
+	// Highlight helpers read the global theme's color mode.
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 describe("orchestrate keyword detection", () => {

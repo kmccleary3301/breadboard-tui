@@ -29,6 +29,7 @@ export interface PrepaintComposerOptions {
 
 /** Final settings pushed into the live composer after Settings and the theme resolve. */
 export interface PrepaintComposerPreferences extends ComposerPreferences {
+	readonly reduceMotion: boolean;
 	readonly theme: ComposerThemePreferences;
 }
 
@@ -98,6 +99,7 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 		exit: options.exit,
 		now: options.now,
 		preferences,
+		welcomeReducedMotion: preferences.reduceMotion,
 		welcome,
 	});
 	try {
@@ -141,16 +143,20 @@ export function applyStartupComposerPreferences(update: PrepaintComposerPreferen
 		spellingTypoDetection: update.spellingTypoDetection,
 		spellingAutocomplete: update.spellingAutocomplete,
 		spellingAutocorrect: update.spellingAutocorrect,
+		reduceMotion: undefined,
 	};
 	pending.composer.setPreferences(preferences);
+	pending.composer.setWelcomeReducedMotion(undefined);
 	// Settings resolved means the module graph is loaded and the event loop is
 	// responsive again: take raw-input ownership now. The kernel echoed (and
 	// buffered) everything typed during the load; the editor replays it here.
 	pending.composer.enableInput();
 	if (pending.cache) {
-		void writeComposerUiCache(pending.cwd, preferences, update.theme).catch(error => {
-			logger.debug("composer UI cache write failed", { error });
-		});
+		void writeComposerUiCache(pending.cwd, { ...preferences, reduceMotion: update.reduceMotion }, update.theme).catch(
+			error => {
+				logger.debug("composer UI cache write failed", { error });
+			},
+		);
 	}
 }
 

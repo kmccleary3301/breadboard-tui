@@ -69,4 +69,33 @@ describe("startup splash", () => {
 		expect(focused).toBe(preSplashEditor);
 		expect(overlayComponent?.render(32)).toHaveLength(8);
 	});
+
+	it("renders the resting frame without scheduling animation when motion is reduced", async () => {
+		let hidden = false;
+		let renderRequests = 0;
+		let overlayComponent: Component | undefined;
+		const ctx = {
+			ui: {
+				terminal: { rows: 20 },
+				showOverlay: (component: Component) => {
+					overlayComponent = component;
+					return {
+						hide: () => {
+							hidden = true;
+						},
+					};
+				},
+				setFocus: () => {},
+				requestRender: () => {
+					renderRequests += 1;
+				},
+			},
+		} as unknown as InteractiveModeContext;
+
+		await runStartupSplash(ctx, { durationMs: 5_000, tickMs: 100, now: () => 0, reduceMotion: true });
+
+		expect(hidden).toBe(true);
+		expect(renderRequests).toBe(1);
+		expect(overlayComponent?.render(64).join("\n")).toContain("press enter to skip");
+	});
 });

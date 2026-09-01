@@ -137,6 +137,24 @@ describe("buildDesktopNotifyCommand", () => {
 		]);
 	});
 
+	it("uses a caller-supplied product identity for the app name and blank-title fallback", () => {
+		expect(
+			buildDesktopNotifyCommand(notifySend, {
+				applicationName: "BreadBoard",
+				title: " ",
+				body: "Complete",
+			}),
+		).toEqual([
+			"/usr/bin/notify-send",
+			"--app-name",
+			"BreadBoard",
+			"--urgency=normal",
+			"--expire-time=5000",
+			"BreadBoard",
+			"Complete",
+		]);
+	});
+
 	it("falls back to the app name when the structured title is blank", () => {
 		expect(buildDesktopNotifyCommand(notifySend, { title: "   ", body: "Waiting for input" })).toEqual([
 			"/usr/bin/notify-send",

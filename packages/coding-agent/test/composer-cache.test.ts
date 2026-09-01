@@ -19,7 +19,12 @@ describe("composer startup cache", () => {
 		const key = Bun.hash.wyhash(path.resolve(cwd)).toString(16).padStart(16, "0");
 		const cacheDir = path.join(getAgentDir(), "cache", "composer", key);
 		try {
-			const preferences = { ...COMPOSER_DEFAULTS, composerShape: "rail", autocompleteMaxVisible: 7 };
+			const preferences = {
+				...COMPOSER_DEFAULTS,
+				composerShape: "rail",
+				autocompleteMaxVisible: 7,
+				reduceMotion: true,
+			};
 			const recentSessions = [{ name: "cached work", timeAgo: "3m ago" }];
 			const lspServers = [{ name: "rust-analyzer", status: "connecting" as const, fileTypes: [".rs"] }];
 			await Promise.all([

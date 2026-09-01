@@ -1,4 +1,7 @@
 import { type Component, matchesKey, type OverlayFocusOwner } from "@oh-my-pi/pi-tui";
+import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
+import { isReducedMotionEnabled } from "../../utils/reduced-motion";
+import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 
@@ -6,9 +9,18 @@ export interface RunStartupSplashOptions {
 	readonly durationMs?: number;
 	readonly tickMs?: number;
 	readonly now?: () => number;
+	readonly identity?: ProductIdentity;
+	readonly reduceMotion?: boolean;
 }
 
-class StartupSplashComponent implements Component, OverlayFocusOwner {
+interface StartupSplashComponentOptions {
+	readonly identity: ProductIdentity;
+	readonly durationMs?: number;
+	readonly tickMs?: number;
+	readonly now?: () => number;
+	readonly reduceMotion?: boolean;
+}
+export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	#phaseStartedAt = 0;
 	#timer: NodeJS.Timeout | undefined;
 	#done = Promise.withResolvers<void>();
@@ -19,7 +31,7 @@ class StartupSplashComponent implements Component, OverlayFocusOwner {
 
 	constructor(
 		readonly ctx: InteractiveModeContext,
-		options: RunStartupSplashOptions = {},
+		private readonly options: StartupSplashComponentOptions,
 	) {
 		this.#durationMs = options.durationMs ?? SETUP_SPLASH_MS;
 		this.#tickMs = options.tickMs ?? SETUP_TICK_MS;
@@ -27,9 +39,14 @@ class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 
 	run(): Promise<void> {
-		this.#phaseStartedAt = this.#now();
-		this.#startTimer();
+		const reduceMotion = isReducedMotionEnabled(this.options.reduceMotion);
+		this.#phaseStartedAt = this.#now() - (reduceMotion ? this.#durationMs : 0);
 		this.ctx.ui.requestRender();
+		if (reduceMotion) {
+			this.#done.resolve();
+		} else {
+			this.#startTimer();
+		}
 		return this.#done.promise;
 	}
 
@@ -54,8 +71,17 @@ class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 
 	render(width: number): readonly string[] {
-		const elapsedMs = Math.min(this.#durationMs, Math.max(0, this.#now() - this.#phaseStartedAt));
-		return renderSetupSplash(Math.max(1, width), Math.max(1, this.ctx.ui.terminal.rows), elapsedMs);
+		const elapsedMs = isReducedMotionEnabled(this.options.reduceMotion)
+			? this.#durationMs
+			: Math.min(this.#durationMs, Math.max(0, this.#now() - this.#phaseStartedAt));
+		return renderSetupSplash(
+			Math.max(1, width),
+			Math.max(1, this.ctx.ui.terminal.rows),
+			elapsedMs,
+			this.options.identity,
+			theme.isLight ? "light" : "dark",
+			theme.getColorMode(),
+		);
 	}
 
 	#startTimer(): void {
@@ -88,7 +114,13 @@ export async function runStartupSplash(
 	ctx: InteractiveModeContext,
 	options: RunStartupSplashOptions = {},
 ): Promise<void> {
-	const component = new StartupSplashComponent(ctx, options);
+	const component = new StartupSplashComponent(ctx, {
+		identity: options.identity ?? ACTIVE_PRODUCT_IDENTITY,
+		...(options.durationMs !== undefined ? { durationMs: options.durationMs } : {}),
+		...(options.tickMs !== undefined ? { tickMs: options.tickMs } : {}),
+		...(options.now ? { now: options.now } : {}),
+		...(options.reduceMotion !== undefined ? { reduceMotion: options.reduceMotion } : {}),
+	});
 	const overlay = ctx.ui.showOverlay(component, {
 		width: "100%",
 		maxHeight: "100%",

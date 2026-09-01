@@ -260,4 +260,4 @@ export type ThemeBg =
 	| "toolErrorBg"
 	| "statusLineBg";
 
-export type ColorMode = "truecolor" | "256color";
+export type ColorMode = "none" | "16color" | "256color" | "truecolor";

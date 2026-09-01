@@ -15,11 +15,6 @@ type Harness = {
 
 let harness: Harness | undefined;
 
-function defined<T>(value: T | undefined): T {
-	if (value === undefined) throw new Error("Expected value to be defined");
-	return value;
-}
-
 async function createHarness(sessionName: string): Promise<Harness> {
 	if (harness) {
 		harness.mode.loadingAnimation?.stop();
@@ -31,7 +26,7 @@ async function createHarness(sessionName: string): Promise<Harness> {
 
 	const tempDir = TempDir.createSync("@pi-working-accent-");
 	await Settings.init({ inMemory: true, cwd: tempDir.path() });
-	await initTheme(false);
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 	const sessionManager = SessionManager.inMemory(tempDir.path());
 	await sessionManager.setSessionName(sessionName, "user");
 	const session = {
@@ -89,7 +84,7 @@ describe("InteractiveMode working-message session accent cache", () => {
 	it("reuses one computed accent across loader spinner and message colorizers", async () => {
 		const { mode } = await createHarness("Cached session");
 		const getHex = vi.spyOn(sessionColor, "getSessionAccentHex");
-		const getAnsi = vi.spyOn(sessionColor, "getSessionAccentAnsi");
+		const getAnsi = vi.spyOn(theme, "getCustomColorAnsi");
 
 		// Colorizers run lazily at render time (loader layout cache); the accent
 		// computation is observable only after a render.
@@ -108,23 +103,11 @@ describe("InteractiveMode working-message session accent cache", () => {
 		const initialName = "Alpha session";
 		const renamedName = "Beta session";
 		const { mode, sessionManager } = await createHarness(initialName);
-		const initialAnsi = defined(
-			sessionColor.getSessionAccentAnsi(
-				sessionColor.getSessionAccentHex(
-					initialName,
-					theme.getMajorThemeColorHexes(),
-					theme.accentSurfaceLuminance,
-				),
-			),
+		const initialAnsi = theme.getCustomColorAnsi(
+			sessionColor.getSessionAccentHex(initialName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),
 		);
-		const renamedAnsi = defined(
-			sessionColor.getSessionAccentAnsi(
-				sessionColor.getSessionAccentHex(
-					renamedName,
-					theme.getMajorThemeColorHexes(),
-					theme.accentSurfaceLuminance,
-				),
-			),
+		const renamedAnsi = theme.getCustomColorAnsi(
+			sessionColor.getSessionAccentHex(renamedName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),
 		);
 		const getHex = vi.spyOn(sessionColor, "getSessionAccentHex");
 
@@ -168,14 +151,8 @@ describe("InteractiveMode working-message session accent cache", () => {
 	it("caches disabled session accents and recomputes when the setting is enabled again", async () => {
 		const sessionName = "Toggle session";
 		const { mode } = await createHarness(sessionName);
-		const accentAnsi = defined(
-			sessionColor.getSessionAccentAnsi(
-				sessionColor.getSessionAccentHex(
-					sessionName,
-					theme.getMajorThemeColorHexes(),
-					theme.accentSurfaceLuminance,
-				),
-			),
+		const accentAnsi = theme.getCustomColorAnsi(
+			sessionColor.getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),
 		);
 		const getHex = vi.spyOn(sessionColor, "getSessionAccentHex");
 

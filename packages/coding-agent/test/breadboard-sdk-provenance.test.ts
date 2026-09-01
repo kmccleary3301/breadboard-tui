@@ -11,6 +11,7 @@ import {
 	verifyBackendIdentity,
 	verifyBreadboardSdkProvenance,
 	verifyPinnedReferences,
+	verifySdkExportInventory,
 } from "../scripts/verify-breadboard-sdk-provenance";
 
 const packageRoot = resolve(import.meta.dir, "..");
@@ -25,9 +26,10 @@ const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json
 };
 const workspaceRoot = resolve(packageRoot, "../..");
 const lockText = await readFile(resolve(workspaceRoot, "bun.lock"), "utf8");
+const exportInventoryBytes = await readFile(resolve(packageRoot, manifest.exportInventoryPath));
 
 describe("BreadBoard SDK provenance", () => {
-	test("verifies immutable artifact, lock, installed bytes, and type entry with no backend environment", async () => {
+	test("verifies immutable artifact, export inventory, lock, installed bytes, and type entry", async () => {
 		const environmentName = manifest.backendRootEnvironmentVariable;
 		const previous = process.env[environmentName];
 		delete process.env[environmentName];
@@ -37,6 +39,7 @@ describe("BreadBoard SDK provenance", () => {
 				root,
 				commit: manifest.backendCommit,
 				tree: manifest.backendTree,
+				sdkSubtree: manifest.sdkSubtree,
 				status: "",
 			};
 		};
@@ -44,12 +47,18 @@ describe("BreadBoard SDK provenance", () => {
 			await expect(verifyBreadboardSdkProvenance(packageRoot, packageRoot, clean)).resolves.toMatchObject({
 				packageName: "@breadboard/sdk",
 				packageVersion: "0.3.0",
-				artifactSha256: "181309cc011c7a43dda2308aaf25fc7674965010b4275720f06d2e78fa7be80f",
+				artifactSha256: "e0df0a4774ba4b5d7de96deaaab48a926c51675a8fa6818b00f777b62bd9d303",
 			});
 		} finally {
 			if (previous === undefined) delete process.env[environmentName];
 			else process.env[environmentName] = previous;
 		}
+	});
+	test("rejects export inventory tampering", () => {
+		expect(() => verifySdkExportInventory(manifest, exportInventoryBytes)).not.toThrow();
+		const tampered = new Uint8Array(exportInventoryBytes);
+		tampered[tampered.byteLength - 2] ^= 1;
+		expect(() => verifySdkExportInventory(manifest, tampered)).toThrow("export inventory SHA-256 changed");
 	});
 
 	test("runs SDK provenance and notice gates before build or publication", () => {
@@ -125,11 +134,12 @@ describe("BreadBoard SDK provenance", () => {
 		);
 	});
 
-	test("requires a supplied clean backend at the exact approved commit and tree", async () => {
+	test("requires a supplied clean backend at the exact approved commit, tree, and SDK subtree", async () => {
 		const clean: BackendGitInspection = async root => ({
 			root,
 			commit: manifest.backendCommit,
 			tree: manifest.backendTree,
+			sdkSubtree: manifest.sdkSubtree,
 			status: "",
 		});
 		await expect(verifyBackendIdentity(manifest, packageRoot, clean)).resolves.toBeUndefined();
@@ -140,6 +150,7 @@ describe("BreadBoard SDK provenance", () => {
 				commit: "0".repeat(40),
 				tree: manifest.backendTree,
 				status: "",
+				sdkSubtree: manifest.sdkSubtree,
 			})),
 		).rejects.toThrow("backend commit does not match");
 		await expect(
@@ -148,14 +159,19 @@ describe("BreadBoard SDK provenance", () => {
 				commit: manifest.backendCommit,
 				tree: "0".repeat(40),
 				status: "",
+				sdkSubtree: manifest.sdkSubtree,
 			})),
 		).rejects.toThrow("backend tree does not match");
+		await expect(
+			verifyBackendIdentity({ ...manifest, sdkSubtree: "0".repeat(40) }, packageRoot, clean),
+		).rejects.toThrow("backend SDK subtree does not match");
 		await expect(
 			verifyBackendIdentity(manifest, packageRoot, async root => ({
 				root,
 				commit: manifest.backendCommit,
 				tree: manifest.backendTree,
 				status: " M registry.py",
+				sdkSubtree: manifest.sdkSubtree,
 			})),
 		).rejects.toThrow("backend worktree is dirty");
 	});
@@ -176,6 +192,7 @@ describe("BreadBoard SDK provenance", () => {
 				root: inspectedRoot,
 				commit: manifest.backendCommit,
 				tree: manifest.backendTree,
+				sdkSubtree: manifest.sdkSubtree,
 				status: "",
 			};
 		}) as unknown as BackendGitInspection;

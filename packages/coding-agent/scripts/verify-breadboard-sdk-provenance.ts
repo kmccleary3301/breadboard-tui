@@ -9,6 +9,13 @@ import {
 	type PinnedDirectory,
 } from "../src/breadboard/lifecycle/pinned-directory";
 
+export interface SdkProvenanceCorrection {
+	readonly field: string;
+	readonly sourceValue: string;
+	readonly correctedValue: string;
+	readonly evidence: string;
+}
+
 export interface BreadboardSdkProvenance {
 	readonly schemaVersion: "p30.breadboard-sdk-provenance.v1";
 	readonly packageName: "@breadboard/sdk";
@@ -17,21 +24,34 @@ export interface BreadboardSdkProvenance {
 	readonly artifactSha256: string;
 	readonly artifactSha512Base64: string;
 	readonly artifactSizeBytes: number;
+	readonly backendRepository: string;
 	readonly backendCommit: string;
 	readonly backendTree: string;
+	readonly sdkSubtree: string;
+	readonly engineInterfaceVersion: "0.3.0";
+	readonly engineInterfaceRange: ">=0.1.0 <0.4.0";
+	readonly exportInventoryPath: string;
+	readonly exportInventorySha256: string;
 	readonly backendRootEnvironmentVariable: "BREADBOARD_P30_BACKEND_ROOT";
 	readonly installedFilesSha256: Readonly<Record<string, string>>;
+	readonly consumerCorrections?: readonly SdkProvenanceCorrection[];
 }
+
+export interface BackendGitIdentity {
+	readonly root: string;
+	readonly commit: string;
+	readonly tree: string;
+	readonly sdkSubtree?: string;
+	readonly status: string;
+}
+
+type BackendIdentityExpectation = Pick<BreadboardSdkProvenance, "backendCommit" | "backendTree"> &
+	Partial<Pick<BreadboardSdkProvenance, "sdkSubtree">>;
 
 export type BackendGitInspection = (
 	root: string,
 	assertRootIdentity: () => Promise<void>,
-) => Promise<{
-	readonly root: string;
-	readonly commit: string;
-	readonly tree: string;
-	readonly status: string;
-}>;
+) => Promise<BackendGitIdentity>;
 
 export interface VerifiedBackendSnapshot {
 	readonly root: string;
@@ -50,6 +70,39 @@ function sha256(bytes: Uint8Array): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function verifyExportNames(value: unknown, label: string): void {
+	invariant(
+		Array.isArray(value) && value.every(name => typeof name === "string" && name.length > 0),
+		`${label} is malformed`,
+	);
+	const names = value.filter((name): name is string => typeof name === "string");
+	invariant(new Set(names).size === names.length, `${label} contains duplicate names`);
+	invariant(JSON.stringify(names) === JSON.stringify([...names].sort()), `${label} is not sorted`);
+}
+
+export function verifySdkExportInventory(
+	manifest: Pick<
+		BreadboardSdkProvenance,
+		"backendCommit" | "backendTree" | "exportInventorySha256" | "packageName" | "packageVersion"
+	>,
+	bytes: Uint8Array,
+): void {
+	invariant(sha256(bytes) === manifest.exportInventorySha256, "export inventory SHA-256 changed");
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+	} catch {
+		invariant(false, "export inventory is not valid UTF-8 JSON");
+	}
+	invariant(isRecord(parsed), "export inventory root is malformed");
+	invariant(parsed.schema_version === "bb.sdk_export_inventory.v1", "unexpected export inventory schema");
+	invariant(parsed.package === manifest.packageName, "export inventory package does not match");
+	invariant(parsed.version === manifest.packageVersion, "export inventory version does not match");
+	invariant(parsed.source_commit === manifest.backendCommit, "export inventory commit does not match");
+	invariant(parsed.source_tree === manifest.backendTree, "export inventory tree does not match");
+	verifyExportNames(parsed.public_exports, "public export inventory");
+	verifyExportNames(parsed.internal_exports, "internal export inventory");
 }
 
 async function trustedGitExecutable(): Promise<string> {
@@ -308,8 +361,9 @@ async function materializeExecutionSnapshot(
 async function inspectPinnedBackendGit(
 	root: string,
 	pinned: PinnedDirectory,
+	includeSdkSubtree = false,
 ): Promise<{
-	readonly identity: Awaited<ReturnType<BackendGitInspection>>;
+	readonly identity: BackendGitIdentity;
 	readonly verified: VerifiedHeadTree;
 	readonly executable: string;
 }> {
@@ -323,12 +377,24 @@ async function inspectPinnedBackendGit(
 		[0, 1],
 	);
 	invariant(promisorConfig.byteLength === 0, "backend repository is partial or promisor");
+	const identityArgs = [
+		"rev-parse",
+		"--show-toplevel",
+		"HEAD^{commit}",
+		"HEAD^{tree}",
+		...(includeSdkSubtree ? ["HEAD:sdk/ts"] : []),
+	];
 	const identityOutput = new TextDecoder("utf-8", { fatal: true }).decode(
-		await runGit(executable, root, ["rev-parse", "--show-toplevel", "HEAD^{commit}", "HEAD^{tree}"]),
+		await runGit(executable, root, identityArgs),
 	);
-	const [inspectedRoot, commit, tree, ...extra] = identityOutput.trim().split("\n");
+	const identityParts = identityOutput.trim().split("\n");
+	invariant(identityParts.length === (includeSdkSubtree ? 4 : 3), "backend Git identity is malformed");
+	const [inspectedRoot, commit, tree, sdkSubtree] = identityParts;
 	invariant(
-		extra.length === 0 && inspectedRoot !== undefined && commit !== undefined && tree !== undefined,
+		inspectedRoot !== undefined &&
+			commit !== undefined &&
+			tree !== undefined &&
+			(!includeSdkSubtree || sdkSubtree !== undefined),
 		"backend Git identity is malformed",
 	);
 	invariant((await realpath(inspectedRoot)) === (await realpath(root)), "backend Git root does not match");
@@ -418,26 +484,40 @@ async function inspectPinnedBackendGit(
 		await classificationSnapshot.close();
 	}
 	const finalIdentityOutput = new TextDecoder("utf-8", { fatal: true }).decode(
-		await runGit(executable, root, ["rev-parse", "--show-toplevel", "HEAD^{commit}", "HEAD^{tree}"]),
+		await runGit(executable, root, identityArgs),
 	);
-	const [finalRoot, finalCommit, finalTree, ...finalExtra] = finalIdentityOutput.trim().split("\n");
+	const finalIdentityParts = finalIdentityOutput.trim().split("\n");
+	invariant(finalIdentityParts.length === identityParts.length, "backend Git identity is malformed");
+	const [finalRoot, finalCommit, finalTree, finalSdkSubtree] = finalIdentityParts;
 	invariant(
-		finalExtra.length === 0 && finalRoot !== undefined && finalCommit !== undefined && finalTree !== undefined,
+		finalRoot !== undefined &&
+			finalCommit !== undefined &&
+			finalTree !== undefined &&
+			(!includeSdkSubtree || finalSdkSubtree !== undefined),
 		"backend Git identity is malformed",
 	);
 	invariant(
-		(await realpath(finalRoot)) === (await realpath(root)) && finalCommit === commit && finalTree === tree,
+		(await realpath(finalRoot)) === (await realpath(root)) &&
+			finalCommit === commit &&
+			finalTree === tree &&
+			finalSdkSubtree === sdkSubtree,
 		"backend Git identity changed",
 	);
 	return {
-		identity: { root: inspectedRoot, commit, tree, status: "" },
+		identity: {
+			root: inspectedRoot,
+			commit,
+			tree,
+			...(sdkSubtree === undefined ? {} : { sdkSubtree }),
+			status: "",
+		},
 		verified,
 		executable,
 	};
 }
 
 async function verifyCustomInspection(
-	manifest: Pick<BreadboardSdkProvenance, "backendCommit" | "backendTree">,
+	manifest: BackendIdentityExpectation,
 	root: string,
 	inspect: BackendGitInspection,
 ): Promise<void> {
@@ -462,6 +542,9 @@ async function verifyCustomInspection(
 	invariant(inspectedRoot === canonicalRoot, "backend Git root does not match");
 	invariant(identity.commit === manifest.backendCommit, "backend commit does not match");
 	invariant(identity.tree === manifest.backendTree, "backend tree does not match");
+	if (manifest.sdkSubtree !== undefined) {
+		invariant(identity.sdkSubtree === manifest.sdkSubtree, "backend SDK subtree does not match");
+	}
 	invariant(identity.status === "", "backend worktree is dirty");
 }
 
@@ -490,7 +573,7 @@ export async function openVerifiedBackendSnapshot(
 }
 
 export async function verifyBackendIdentity(
-	manifest: Pick<BreadboardSdkProvenance, "backendCommit" | "backendTree">,
+	manifest: BackendIdentityExpectation,
 	backendRoot: string | undefined,
 	inspect?: BackendGitInspection,
 ): Promise<void> {
@@ -502,9 +585,12 @@ export async function verifyBackendIdentity(
 	}
 	const pinned = await openPinnedDirectory(root);
 	try {
-		const { identity } = await inspectPinnedBackendGit(root, pinned);
+		const { identity } = await inspectPinnedBackendGit(root, pinned, manifest.sdkSubtree !== undefined);
 		invariant(identity.commit === manifest.backendCommit, "backend commit does not match");
 		invariant(identity.tree === manifest.backendTree, "backend tree does not match");
+		if (manifest.sdkSubtree !== undefined) {
+			invariant(identity.sdkSubtree === manifest.sdkSubtree, "backend SDK subtree does not match");
+		}
 	} finally {
 		await pinned.close();
 	}
@@ -591,7 +677,10 @@ export async function verifyBreadboardSdkProvenance(
 	invariant(manifest.schemaVersion === "p30.breadboard-sdk-provenance.v1", "unexpected manifest schema");
 	invariant(manifest.packageName === "@breadboard/sdk", "unexpected package name");
 	invariant(manifest.packageVersion === "0.3.0", "unexpected package version");
+	invariant(manifest.engineInterfaceVersion === "0.3.0", "unexpected engine interface version");
+	invariant(manifest.engineInterfaceRange === ">=0.1.0 <0.4.0", "unexpected engine interface range");
 	invariant(/^([0-9a-f]{64})$/.test(manifest.artifactSha256), "invalid artifact SHA-256");
+	invariant(/^([0-9a-f]{64})$/.test(manifest.exportInventorySha256), "invalid export inventory SHA-256");
 	invariant(
 		manifest.backendRootEnvironmentVariable === "BREADBOARD_P30_BACKEND_ROOT",
 		"unexpected backend root environment variable",
@@ -615,6 +704,24 @@ export async function verifyBreadboardSdkProvenance(
 		createHash("sha512").update(artifact).digest("base64") === manifest.artifactSha512Base64,
 		"artifact SHA-512 changed",
 	);
+	invariant(
+		manifest.exportInventoryPath.startsWith("./") && !isAbsolute(manifest.exportInventoryPath),
+		"export inventory path must be repository-relative",
+	);
+	const exportInventoryPath = resolve(packageRoot, manifest.exportInventoryPath);
+	const exportInventoryRelative = relative(packageRoot, exportInventoryPath);
+	invariant(
+		exportInventoryRelative !== "" &&
+			!exportInventoryRelative.startsWith("..") &&
+			!isAbsolute(exportInventoryRelative),
+		"export inventory escapes the package root",
+	);
+	const exportInventoryStat = await lstat(exportInventoryPath);
+	invariant(
+		exportInventoryStat.isFile() && exportInventoryStat.nlink === 1 && !exportInventoryStat.isSymbolicLink(),
+		"export inventory is not a single-link regular file",
+	);
+	verifySdkExportInventory(manifest, await readFile(exportInventoryPath));
 
 	const workspaceRoot = resolve(packageRoot, "../..");
 	const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as {
@@ -632,8 +739,13 @@ export async function verifyBreadboardSdkProvenance(
 		"installed file inventory differs from the artifact manifest",
 	);
 	for (const relative of expectedFiles) {
+		const expectedHash = manifest.installedFilesSha256[relative];
+		invariant(
+			expectedHash !== undefined && /^[0-9a-f]{64}$/.test(expectedHash),
+			`invalid installed hash for ${relative}`,
+		);
 		const bytes = await readFile(join(installedRoot, relative));
-		invariant(sha256(bytes) === manifest.installedFilesSha256[relative], `installed bytes changed for ${relative}`);
+		invariant(sha256(bytes) === expectedHash, `installed bytes changed for ${relative}`);
 	}
 	const installedPackage = JSON.parse(await readFile(join(installedRoot, "package.json"), "utf8")) as {
 		name?: string;
@@ -654,6 +766,9 @@ if (import.meta.main) {
 			artifactSha256: manifest.artifactSha256,
 			backendCommit: manifest.backendCommit,
 			backendTree: manifest.backendTree,
+			sdkSubtree: manifest.sdkSubtree,
+			engineInterfaceRange: manifest.engineInterfaceRange,
+			exportInventorySha256: manifest.exportInventorySha256,
 			installedFiles: Object.keys(manifest.installedFilesSha256).length,
 		})}\n`,
 	);

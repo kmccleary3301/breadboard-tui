@@ -1,11 +1,4 @@
-import {
-	ApiError,
-	type BreadboardClient,
-	type AuthCredentialRefreshState as SdkAuthCredentialRefreshState,
-	type AuthCredentialView as SdkAuthCredentialView,
-	type AuthLoginSession as SdkAuthLoginSession,
-	type AuthProviderView as SdkAuthProviderView,
-} from "@breadboard/sdk";
+import { ApiError, type InternalBreadboardClient } from "@breadboard/sdk/internal";
 import { parseCallbackInput } from "@oh-my-pi/pi-ai/oauth/callback-server";
 import {
 	type AuthCredentialRefreshState,
@@ -23,7 +16,7 @@ import {
 } from "./provider-auth-port";
 
 type BreadboardProviderAuthClient = Pick<
-	BreadboardClient,
+	InternalBreadboardClient,
 	| "listProviders"
 	| "listCredentials"
 	| "beginLogin"
@@ -34,6 +27,11 @@ type BreadboardProviderAuthClient = Pick<
 	| "logout"
 	| "revoke"
 >;
+type AsyncResult<Operation> = Operation extends (...args: never[]) => Promise<infer Result> ? Result : never;
+type SdkAuthProviderView = AsyncResult<BreadboardProviderAuthClient["listProviders"]>[number];
+type SdkAuthCredentialView = AsyncResult<BreadboardProviderAuthClient["listCredentials"]>[number];
+type SdkAuthCredentialRefreshState = NonNullable<SdkAuthCredentialView["refresh_state"]>;
+type SdkAuthLoginSession = AsyncResult<BreadboardProviderAuthClient["beginLogin"]>;
 
 function utc(milliseconds: number | null | undefined): string | null {
 	return milliseconds == null ? null : new Date(milliseconds).toISOString();

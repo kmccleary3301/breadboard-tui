@@ -1,11 +1,15 @@
 import { describe, expect, it } from "bun:test";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { globToolRenderer } from "../../src/tools/glob";
 
+const darkThemeJson = getBuiltinThemes().dark;
+if (!darkThemeJson) throw new Error("Failed to load dark theme");
+const testTheme = createTheme(darkThemeJson, { mode: "truecolor" });
+
 describe("globToolRenderer", () => {
 	it("indents inline glob output and avoids accent-colored success headers", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 		const result = {
@@ -27,7 +31,7 @@ describe("globToolRenderer", () => {
 	});
 
 	it("renders a timed-out empty scan as incomplete instead of a definitive no-files claim", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 		// `truncated` with zero files only happens on the timeout path — the
@@ -52,7 +56,7 @@ describe("globToolRenderer", () => {
 	});
 
 	it("renders a genuinely empty result as no files found", async () => {
-		const theme = await getThemeByName("dark");
+		const theme = testTheme;
 		expect(theme).toBeDefined();
 		const uiTheme = theme!;
 		const result = {

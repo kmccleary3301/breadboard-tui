@@ -19,13 +19,12 @@ import type { ContextUsage } from "@oh-my-pi/pi-coding-agent/extensibility/exten
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { initTheme, setSymbolPreset, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { getSessionAccentAnsi } from "@oh-my-pi/pi-coding-agent/utils/session-color";
 import { adjustHsv } from "@oh-my-pi/pi-utils";
 
 beforeAll(async () => {
 	resetSettingsForTest();
 	await Settings.init({ inMemory: true });
-	await initTheme();
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 afterAll(() => {
@@ -453,7 +452,9 @@ describe("StatusLineComponent context breakdown", () => {
 			expect(speculationIndex).toBeLessThan(compactionIndex);
 			expect(nerd).not.toContain("╎");
 			expect(nerd).not.toContain("┃");
-			const expectedDimmed = getSessionAccentAnsi(adjustHsv(theme.getColorHex("borderAccent"), { s: 0.7, v: 0.75 }));
+			const expectedDimmed = theme.getCustomColorAnsi(
+				adjustHsv(theme.getColorHex("borderAccent"), { s: 0.7, v: 0.75 }),
+			);
 			expect(border).toContain(`${expectedDimmed}󰁨`);
 			expect(border).not.toContain(`${theme.getFgAnsi("warning")}󰁨`);
 			await setSymbolPreset("unicode");
@@ -463,7 +464,7 @@ describe("StatusLineComponent context breakdown", () => {
 			expect(unicode).not.toContain("󰕝");
 			expect(unicode).not.toContain("󰁨");
 		} finally {
-			await initTheme();
+			await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 		}
 	});
 

@@ -268,7 +268,6 @@ export function lifecycleChildEnvironment(
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
-		BREADBOARD_LEGACY_ROUTES: "1",
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 		RAY_BACKEND_LOG_LEVEL: "error",
 		RAY_LOG_TO_DRIVER: "0",

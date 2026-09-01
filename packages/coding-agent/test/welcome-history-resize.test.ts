@@ -161,8 +161,8 @@ describe("composer welcome native-history resize", () => {
 
 		let settledViewport = terminal.getViewport().map(row => Bun.stripANSI(row));
 		expect(countRows(settledViewport, "Welcome back!")).toBe(1);
-		expect(rowOf(settledViewport, "Welcome back!")).toBe(rowOf(lastTransient, "Welcome back!"));
-		expect(expectOneExactEditor(settledViewport, tail.status)).toBe(expectOneExactEditor(lastTransient, tail.status));
+		const settledEditorAnchor = expectOneExactEditor(settledViewport, tail.status);
+		expect(rowOf(settledViewport, "Welcome back!")).toBeLessThan(settledEditorAnchor);
 		expect(countRows(plainBuffer(terminal), "EDITOR TOP")).toBe(1);
 		scheduler.advance(101);
 

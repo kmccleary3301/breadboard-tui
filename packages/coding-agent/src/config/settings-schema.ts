@@ -47,6 +47,7 @@ import {
 	TTS_LOCAL_VOICE_VALUES,
 } from "../tts/models";
 import { EDIT_MODES } from "../utils/edit-mode";
+import { DEFAULT_REDUCED_MOTION } from "../utils/reduced-motion";
 import {
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
 	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
@@ -1261,6 +1262,17 @@ export const SETTINGS_SCHEMA = {
 				{ value: "kitt", label: "KITT Scanner", description: "Knight Rider 1982 red light bouncing left-right" },
 				{ value: "disabled", label: "Disabled", description: "No animation; static muted text" },
 			],
+		},
+	},
+
+	"display.reduceMotion": {
+		type: "boolean",
+		default: DEFAULT_REDUCED_MOTION,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Reduce Motion",
+			description: "Disable decorative welcome, setup, shimmer, and keyword animations",
 		},
 	},
 

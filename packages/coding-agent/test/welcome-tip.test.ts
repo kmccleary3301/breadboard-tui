@@ -5,7 +5,7 @@ import { visibleWidth } from "@oh-my-pi/pi-tui";
 
 describe("renderWelcomeTip", () => {
 	beforeAll(async () => {
-		await initTheme(false);
+		await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 	});
 
 	it("wraps long tips under the label instead of truncating", () => {

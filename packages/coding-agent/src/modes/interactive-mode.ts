@@ -51,7 +51,6 @@ import {
 	sanitizeText,
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
-import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
 import { reset as resetCapabilities } from "../capability";
 import type { CollabGuestLink } from "../collab/guest";
@@ -142,7 +141,7 @@ import { copyToClipboard } from "../utils/clipboard";
 import type { EventBus } from "../utils/event-bus";
 import { getEditorCommand, openInEditor } from "../utils/external-editor";
 import { resumeCommand } from "../utils/resume-command";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../utils/session-color";
+import { getSessionAccentHex } from "../utils/session-color";
 import { messageHasDisplayableThinking } from "../utils/thinking-display";
 import {
 	disposeTerminalTitleState,
@@ -337,7 +336,7 @@ function formatHudNoteMarker(count: number): string {
 		.split("")
 		.map(d => HUD_NOTE_SUP_DIGITS[d] ?? d)
 		.join("");
-	return theme.fg("dim", chalk.italic(` \u207a${sub}`));
+	return theme.fg("dim", theme.italic(` \u207a${sub}`));
 }
 
 type GoalSubcommand = "set" | "show" | "pause" | "resume" | "drop" | "budget";
@@ -874,6 +873,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui = this.composer.ui;
 		this.editor = this.composer.editor;
 		this.editor.magicKeywordsEnabled = () => this.settings.get("magicKeywords.enabled");
+		this.editor.reduceMotionEnabled = () => this.settings.get("display.reduceMotion");
 		this.editor.imageReferenceHyperlink = imageReferenceHyperlink;
 		this.#ownsStartedUi = wasStarted;
 		this.#startupSubmitGated = true;
@@ -2073,7 +2073,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			const hex = sessionName
 				? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
 				: undefined;
-			const ansi = getSessionAccentAnsi(hex);
+			const ansi = hex ? theme.getCustomColorAnsi(hex) : "";
 			if (ansi) {
 				this.editor.borderColor = (str: string) => `${ansi}${str}\x1b[39m`;
 			} else {
@@ -2081,9 +2081,9 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.editor.borderColor = theme.getThinkingBorderColor(level);
 			}
 		}
-		if (this.focusedAgentId) {
+		if (this.focusedAgentId && theme.getColorMode() !== "none") {
 			// Focused subagent view: faint the outline so the borrowed session is
-			// visually distinct from the main one.
+			// visible but clearly subordinate to the parent workspace.
 			const base = this.editor.borderColor;
 			this.editor.borderColor = (str: string) => `\x1b[2m${base(str)}\x1b[22m`;
 		}
@@ -2251,11 +2251,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		const marker = formatHudNoteMarker(todo.notes?.length ?? 0);
 		switch (todo.status) {
 			case "completed":
-				return theme.fg("success", `${prefix}${checkbox.checked} ${chalk.strikethrough(todo.content)}`) + marker;
+				return theme.fg("success", `${prefix}${checkbox.checked} ${theme.strikethrough(todo.content)}`) + marker;
 			case "in_progress":
 				return theme.fg("accent", `${prefix}${checkbox.unchecked} ${todo.content}`) + marker;
 			case "abandoned":
-				return theme.fg("error", `${prefix}${checkbox.unchecked} ${chalk.strikethrough(todo.content)}`) + marker;
+				return theme.fg("error", `${prefix}${checkbox.unchecked} ${theme.strikethrough(todo.content)}`) + marker;
 			case "blocked":
 				return theme.fg("warning", `${prefix}${checkbox.unchecked} ${todo.content} (blocked)`) + marker;
 			default:
@@ -4659,7 +4659,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const sessionId = this.sessionManager.getSessionId();
 		const sessionFile = this.sessionManager.getSessionFile();
 		if (sessionId && sessionFile && this.sessionManager.isSessionOnDisk()) {
-			process.stderr.write(`\n${chalk.dim(`Resume this session with ${resumeCommand(sessionId)}`)}\n`);
+			process.stderr.write(`\n${theme.fg("dim", `Resume this session with ${resumeCommand(sessionId)}`)}\n`);
 		}
 
 		await postmortem.quit(0);
@@ -4697,6 +4697,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 		nextEditor.viewportRowsProvider = () => this.ui.terminal.rows;
 		nextEditor.magicKeywordsEnabled = () => this.settings.get("magicKeywords.enabled");
+		nextEditor.reduceMotionEnabled = () => this.settings.get("display.reduceMotion");
 		nextEditor.imageReferenceHyperlink = imageReferenceHyperlink;
 		nextEditor.onAutocompleteCancel = () => {
 			this.ui.requestRender(true);
@@ -4946,8 +4947,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			return this.#cacheWorkingMessageAccent(key, undefined);
 		}
 		const hex = getSessionAccentHex(key.sessionName, theme.getMajorThemeColorHexes(), key.accentSurfaceLuminance);
-		const main = getSessionAccentAnsi(hex);
-		const dim = getSessionAccentAnsi(adjustHsv(hex, { s: 0.55, v: 0.65 }));
+		const main = theme.getCustomColorAnsi(hex);
+		const dim = theme.getCustomColorAnsi(adjustHsv(hex, { s: 0.55, v: 0.65 }));
 		return this.#cacheWorkingMessageAccent(key, main && dim ? { main, dim } : undefined);
 	}
 
@@ -5259,7 +5260,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	#setMicCursor(color: { r: number; g: number; b: number }): void {
-		this.editor.cursorOverride = `\x1b[38;2;${color.r};${color.g};${color.b}m${theme.icon.mic}\x1b[0m`;
+		this.editor.cursorOverride = theme.customColor(`rgb(${color.r}, ${color.g}, ${color.b})`, theme.icon.mic);
 		// Theme symbols can be wide (for example, 🎤), so measure the rendered override.
 		this.editor.cursorOverrideWidth = visibleWidth(this.editor.cursorOverride);
 	}

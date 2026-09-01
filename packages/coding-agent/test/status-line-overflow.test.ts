@@ -7,8 +7,9 @@ import type { StatusLineSegmentId } from "@oh-my-pi/pi-coding-agent/config/setti
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import type { SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
 import { renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-coding-agent/utils/session-color";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import { initTheme, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getSessionAccentHex } from "@oh-my-pi/pi-coding-agent/utils/session-color";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
 
@@ -17,7 +18,7 @@ const originalProjectDir = getProjectDir();
 beforeAll(async () => {
 	resetSettingsForTest();
 	await Settings.init({ inMemory: true });
-	await initTheme();
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 afterAll(() => {
@@ -149,7 +150,7 @@ describe("status line session accent", () => {
 
 	// Computed lazily: `theme` is assigned by initTheme() in beforeAll, after module evaluation.
 	const accentAnsi = (): string => {
-		const ansi = getSessionAccentAnsi(
+		const ansi = theme.getCustomColorAnsi(
 			getSessionAccentHex("Named session", theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),
 		);
 		if (!ansi) throw new Error("expected a session accent ANSI sequence for the test theme");
@@ -191,6 +192,23 @@ describe("status line session accent", () => {
 		const enabled = renderSegment("session_name", createCtx({ sessionName: "Named session", sessionAccent: true }));
 		expect(enabled.visible).toBe(true);
 		expect(enabled.content).toContain(ansi);
+	});
+
+	it("emits no application SGR in plain color mode", () => {
+		const dark = getBuiltinThemes().dark;
+		if (!dark) throw new Error("dark theme unavailable");
+		try {
+			setThemeInstance(createTheme(dark, { mode: "none" }));
+			const border = buildComponent(true).getTopBorder(80).content;
+			const segment = renderSegment(
+				"session_name",
+				createCtx({ sessionName: "Named session", sessionAccent: true }),
+			);
+			expect(`${border}${segment.content}`).not.toMatch(/\x1b\[[0-9;]*m/u);
+			expect(border).toContain("Named session");
+		} finally {
+			setThemeInstance(createTheme(dark, { mode: "truecolor" }));
+		}
 	});
 });
 

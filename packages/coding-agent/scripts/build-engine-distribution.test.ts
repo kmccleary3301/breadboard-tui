@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmod, link, lstat, mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writePinnedFile } from "./build-engine-distribution";
+import { materializeRuntimeSymlinks, writePinnedFile } from "./build-engine-distribution";
 
 const temporaryRoots: string[] = [];
 
@@ -51,5 +51,40 @@ describe("pinned engine trust publication", () => {
 		await chmod(target, 0o400);
 		await symlink(target, symlinkPath);
 		await expect(writePinnedFile(symlinkPath, content)).rejects.toThrow("identity is invalid");
+	});
+});
+
+describe("frozen runtime normalization", () => {
+	test("materializes contained file symlinks without changing bytes or mode", async () => {
+		const root = await temporaryRoot();
+		const runtime = join(root, "runtime");
+		const libraryRoot = join(runtime, "pyarrow");
+		const target = join(libraryRoot, "libarrow.dylib");
+		const alias = join(runtime, "libarrow.dylib");
+		await mkdir(libraryRoot, { recursive: true });
+		await Bun.write(target, "signed library bytes");
+		await chmod(target, 0o500);
+		await symlink("pyarrow/libarrow.dylib", alias);
+
+		await materializeRuntimeSymlinks(runtime);
+
+		const metadata = await lstat(alias);
+		expect(metadata.isFile()).toBe(true);
+		expect(metadata.isSymbolicLink()).toBe(false);
+		expect(metadata.nlink).toBe(1);
+		expect(metadata.mode & 0o777).toBe(0o500);
+		expect(await readFile(alias, "utf8")).toBe("signed library bytes");
+	});
+
+	test("rejects runtime symlinks that escape their private root", async () => {
+		const root = await temporaryRoot();
+		const runtime = join(root, "runtime");
+		await mkdir(runtime);
+		await Bun.write(join(root, "outside.dylib"), "outside");
+		await symlink("../outside.dylib", join(runtime, "escaped.dylib"));
+
+		await expect(materializeRuntimeSymlinks(runtime)).rejects.toThrow(
+			"engine runtime symlink escapes the runtime root",
+		);
 	});
 });

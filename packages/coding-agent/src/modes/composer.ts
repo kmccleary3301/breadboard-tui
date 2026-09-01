@@ -30,6 +30,8 @@ export interface ComposerPreferences {
 	readonly spellingTypoDetection: boolean;
 	readonly spellingAutocomplete: boolean;
 	readonly spellingAutocorrect: boolean;
+	/** Cached only for the speculative welcome paint; live animation reads Settings. */
+	readonly reduceMotion?: boolean;
 }
 
 /** Settings-schema-compatible defaults used when constructing a dependency-free composer. */
@@ -61,6 +63,8 @@ export interface ComposerOptions {
 	/** Extra TUI construction options (render scheduler injection for tests and `omp render`). */
 	readonly tuiOptions?: TUIOptions;
 	readonly preferences?: Partial<ComposerPreferences>;
+	/** Speculative persisted preference used only until the settings graph is live. */
+	readonly welcomeReducedMotion?: boolean;
 	readonly welcome?: ComposerWelcomeUpdate;
 	readonly exit?: (code: number) => void;
 	readonly now?: () => number;
@@ -106,6 +110,7 @@ export class Composer implements TerminalFrameProvider {
 	readonly #exit: (code: number) => void;
 	readonly #now: () => number;
 	#preferences: ComposerPreferences;
+	#welcomeReducedMotion: boolean | undefined;
 	#welcome: WelcomeComponent | undefined;
 	#version = "";
 	#modelName = "";
@@ -140,6 +145,7 @@ export class Composer implements TerminalFrameProvider {
 		this.#exit = options.exit ?? (code => process.exit(code));
 		this.#now = options.now ?? Date.now;
 		this.#preferences = { ...COMPOSER_DEFAULTS, ...options.preferences };
+		this.#welcomeReducedMotion = options.welcomeReducedMotion;
 		this.#applyWelcomeUpdate(options.welcome ?? {});
 
 		this.ui = new TUI(
@@ -405,6 +411,12 @@ export class Composer implements TerminalFrameProvider {
 		this.#welcome?.playIntro(() => this.ui.requestComponentRender(this.#header));
 	}
 
+	/** Replace or clear the speculative reduced-motion value used by the welcome scene. */
+	setWelcomeReducedMotion(value: boolean | undefined): void {
+		this.#welcomeReducedMotion = value;
+		this.#welcome?.setReducedMotion(value);
+	}
+
 	/** Transfer terminal ownership to InteractiveMode without stopping the composer. */
 	transfer(): void {
 		if (!this.#started || this.#stopped || this.#transferred) {
@@ -436,6 +448,9 @@ export class Composer implements TerminalFrameProvider {
 			this.#providerName,
 			this.#recentSessions,
 			this.#lspServers,
+			undefined,
+			undefined,
+			this.#welcomeReducedMotion,
 		);
 	}
 

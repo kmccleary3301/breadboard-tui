@@ -2,8 +2,9 @@ import { Args, type CommandMetadata, Flags } from "@oh-my-pi/pi-utils/cli";
 import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
 import { CLI_THINKING_LEVELS } from "../cli/thinking-levels";
 import { SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
+import { ACTIVE_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 
-const PRODUCT_NAME = APP_NAME === "bb" ? "BreadBoard" : "OMP";
+const PRODUCT_NAME = ACTIVE_PRODUCT_IDENTITY.shortDisplayName;
 
 export const launchHelp = {
 	description: "AI coding assistant",
@@ -17,10 +18,12 @@ export const launchHelp = {
 	},
 	flags: {
 		"engine-mode": Flags.string({
-			description: "BreadBoard engine mode",
+			description: `${BREADBOARD_PRODUCT_IDENTITY.displayName} engine mode`,
 			options: ["local-owned", "local-external", "remote", "off"],
 		}),
-		"engine-url": Flags.string({ description: "Exact BreadBoard engine endpoint URL" }),
+		"engine-url": Flags.string({
+			description: `Exact ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine endpoint URL`,
+		}),
 		model: Flags.string({
 			description: 'Model to use (fuzzy match: "opus", "gpt-5.2", or "openai/gpt-5.2")',
 		}),

@@ -2,7 +2,8 @@ import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { RenderResultOptions } from "@oh-my-pi/pi-agent-core";
-import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import { setThemeInstance, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { bashToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/bash";
 import { previewWindowRows } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 import { ImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
@@ -19,9 +20,10 @@ describe("bashToolRenderer", () => {
 	let uiTheme: Theme;
 
 	beforeAll(async () => {
-		const loadedTheme = await getThemeByName("dark");
-		if (!loadedTheme) throw new Error("Expected dark theme");
-		uiTheme = loadedTheme;
+		const darkTheme = getBuiltinThemes().dark;
+		if (!darkTheme) throw new Error("Expected dark theme");
+		uiTheme = createTheme(darkTheme, { mode: "truecolor" });
+		setThemeInstance(uiTheme);
 	});
 
 	afterEach(() => {

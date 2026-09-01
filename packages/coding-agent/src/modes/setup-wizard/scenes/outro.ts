@@ -1,5 +1,7 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { gradientLogo, PI_LOGO } from "../../components/welcome";
+import type { ProductAppearance, ProductIdentity } from "../../../product-identity";
+import { gradientLogo } from "../../components/welcome";
+import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
 import { renderStarfield, SETUP_TICK_MS } from "./splash";
 
@@ -17,11 +19,24 @@ function clampLine(line: string, width: number): string {
 	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
 }
 
-export function renderSetupOutro(width: number, height: number, elapsedMs: number): string[] {
+export function renderSetupOutro(
+	width: number,
+	height: number,
+	elapsedMs: number,
+	identity: ProductIdentity,
+	appearance: ProductAppearance,
+	mode: ColorMode,
+): string[] {
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
 	const lines = renderStarfield(width, height, frame + 1000);
 	const progress = Math.max(0, Math.min(1, elapsedMs / SETUP_OUTRO_MS));
-	const logo = gradientLogo(PI_LOGO, progress * 1.2, { pos: (progress * 2) % 1, strength: 1 - progress });
+	const logo = gradientLogo(
+		identity.logoArt,
+		progress * 1.2,
+		{ pos: (progress * 2) % 1, strength: 1 - progress },
+		identity.gradientPalettes[appearance],
+		mode,
+	);
 	const title = theme.bold(theme.fg("success", `${theme.status.success} Setup saved`));
 	const subtitle = theme.fg("muted", "Handing off to the normal CLI…");
 	const sweepWidth = Math.max(1, Math.min(width - 8, Math.floor((width - 8) * progress)));

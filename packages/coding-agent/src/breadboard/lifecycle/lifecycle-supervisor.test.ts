@@ -95,7 +95,7 @@ function bindingFor(
 		launchId,
 		protocolVersion: "1.0",
 		sessionContractId: "p30-e4-session-v1",
-		sessionSchemaSha256: "sha256:4c796e33684136cd7304c989318ec7ea2735c3702b15de9067a687dcc5310813",
+		sessionSchemaSha256: "sha256:979bff06137b659c0110c0f9324703b955e22da85a7aac93bee7f639290475a9",
 		sessionReplayContractDigest: {} as LifecycleEngineBinding["sessionReplayContractDigest"],
 		liveness: { status: "live" },
 		process: {
@@ -115,7 +115,7 @@ function bindingFor(
 		protocol: { protocolVersion: "1.0" },
 		sessionContract: {
 			contractId: "p30-e4-session-v1",
-			schemaSha256: "sha256:4c796e33684136cd7304c989318ec7ea2735c3702b15de9067a687dcc5310813",
+			schemaSha256: "sha256:979bff06137b659c0110c0f9324703b955e22da85a7aac93bee7f639290475a9",
 			compatibility: "compatible",
 			sessionReplayContractDigest: {} as LifecycleEngineBinding["sessionReplayContractDigest"],
 		},
@@ -701,7 +701,6 @@ describe("LifecycleSupervisor mode authority", () => {
 		try {
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).toEqual({
 				PATH: "/usr/bin:/bin",
-				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 				RAY_BACKEND_LOG_LEVEL: "error",
@@ -719,7 +718,6 @@ describe("LifecycleSupervisor mode authority", () => {
 				),
 			).toEqual({
 				PATH: "/usr/bin:/bin",
-				BREADBOARD_LEGACY_ROUTES: "1",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
 				RAY_BACKEND_LOG_LEVEL: "error",

@@ -9,7 +9,7 @@ const originalProjectDir = getProjectDir();
 beforeAll(async () => {
 	resetSettingsForTest();
 	await Settings.init({ inMemory: true });
-	await initTheme();
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 });
 
 afterAll(() => {

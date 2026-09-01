@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, type Mock, test, vi } from "bun:test";
+import { describe, expect, type Mock, test, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -6,7 +6,8 @@ import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-regis
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ModelPickerComponent, type ModelPickerOptions } from "@oh-my-pi/pi-coding-agent/modes/components/model-picker";
 import { resolveSegmentPalette } from "@oh-my-pi/pi-coding-agent/modes/components/segment-track";
-import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import { setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { ResolvedRoleModel } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { TUI } from "@oh-my-pi/pi-tui";
 
@@ -29,12 +30,11 @@ function makeModel(provider: string, id: string, contextWindow = 128_000): Model
 	});
 }
 
-let testTheme = await getThemeByName("dark");
+const darkThemeJson = getBuiltinThemes().dark;
+if (!darkThemeJson) throw new Error("Failed to load dark theme for ModelPicker tests");
+const testTheme = createTheme(darkThemeJson, { mode: "truecolor" });
 
 function installTestTheme(): void {
-	if (!testTheme) {
-		throw new Error("Failed to load dark theme for ModelPicker tests");
-	}
 	setThemeInstance(testTheme);
 }
 
@@ -84,13 +84,6 @@ const DOWN = "\x1b[B";
 const ESC = "\x1b";
 
 describe("ModelPicker", () => {
-	beforeAll(async () => {
-		testTheme = await getThemeByName("dark");
-		if (!testTheme) {
-			throw new Error("Failed to load dark theme for ModelPicker tests");
-		}
-	});
-
 	test("flags over-context models but keeps them selectable, reporting overContext on pick", () => {
 		const small = makeModel("test", "a-small", 4096);
 		const large = makeModel("test", "b-large", 128_000);
