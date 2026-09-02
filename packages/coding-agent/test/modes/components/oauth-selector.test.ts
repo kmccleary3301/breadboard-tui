@@ -1,9 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import type {
-	AuthCredentialView,
-	ProviderAuthDataSource,
-} from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
+import type { AuthCredentialView, ProviderAuthReadPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { OAuthSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/oauth-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -12,7 +9,7 @@ beforeAll(async () => {
 	await initTheme();
 });
 
-function providerDataSource(storedProviders: readonly string[] = []): ProviderAuthDataSource {
+function providerDataSource(storedProviders: readonly string[] = []): ProviderAuthReadPort {
 	return {
 		async listProviders() {
 			return getOAuthProviders().map(provider => ({

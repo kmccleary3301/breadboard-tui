@@ -18,7 +18,6 @@ import { parentPort } from "node:worker_threads";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
-	formatBreadboardVersion,
 	getActiveProfile,
 	IS_BREADBOARD_PRODUCT,
 	MIN_BUN_VERSION,
@@ -28,6 +27,7 @@ import {
 } from "@oh-my-pi/pi-utils/dirs";
 import { interceptUnhandledRejections } from "@oh-my-pi/pi-utils/postmortem";
 import { setProcessName } from "@oh-my-pi/pi-utils/process-name";
+import { formatBreadboardVersion } from "@oh-my-pi/pi-utils/product-distribution";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
 import noticeBundlePath from "../THIRD_PARTY_NOTICES.txt" with { type: "file" };
 import { BLOB_BROKER_WORKER_ARG } from "./blob-broker/protocol";
@@ -99,7 +99,7 @@ async function runSmokeTest(): Promise<void> {
 	const noticeBundle = await Bun.file(new URL(noticeBundlePath, import.meta.url)).text();
 	if (
 		!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n") ||
-		!noticeBundle.includes("Package: @breadboard/sdk@0.3.0")
+		!noticeBundle.includes("Package: @breadboard/sdk@0.4.0")
 	) {
 		throw new Error("distribution notice bundle is missing or malformed");
 	}
@@ -156,25 +156,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		return true;
 	}
 	if (arg === STATS_SYNC_WORKER_ARG) {
-		// The sync worker handles messages via `self.onmessage`, assigned during
-		// this *async* dynamic import. Bun flushes the worker's initial message
-		// buffer when the entry module's top-level evaluation finishes — before
-		// this dispatch completes — so anything the parent posted right after
-		// spawning (the smoke ping, the first parse request) would be dropped.
-		// Park early events and replay them once the module's handler is live.
-		// Worker-thread entries using `parentPort` need the same sync-prefix
-		// buffering; the computer/tab/eval cases install that inbox below.
-		const scope = globalThis as unknown as { onmessage: ((event: MessageEvent) => void) | null };
-		const pending: MessageEvent[] = [];
-		const buffer = (event: MessageEvent): void => {
-			pending.push(event);
-		};
-		scope.onmessage = buffer;
+		// The selected worker module is loaded dynamically, after Bun flushes
+		// messages posted at spawn. Install the shared sync-prefix inbox first
+		// so the stats worker can replay its initial ping or parse request.
+		if (parentPort) installWorkerInbox(parentPort);
 		await import("@oh-my-pi/omp-stats/sync-worker");
-		const handler = scope.onmessage;
-		if (handler && handler !== buffer) {
-			for (const event of pending) handler.call(scope, event);
-		}
 		return true;
 	}
 	// Bun flushes messages the parent posted before spawn once this entry's

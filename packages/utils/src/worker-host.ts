@@ -68,6 +68,7 @@ let pendingInbox: WorkerInbox | null = null;
  * imported — so the listener exists when Bun flushes pre-spawn messages.
  */
 export function installWorkerInbox(port: MessageListenerPort): WorkerInbox {
+	if (pendingInbox) return pendingInbox;
 	const queue: unknown[] = [];
 	let handler: ((message: unknown) => void) | null = null;
 	port.on("message", (data: unknown) => {

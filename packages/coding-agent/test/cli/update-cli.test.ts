@@ -74,7 +74,7 @@ describe("BreadBoard product releases", () => {
 	});
 
 	it("parses the exact active product token including prerelease suffixes", () => {
-		expect(parseReportedVersion("bb/0.1.0-rc.3 omp/18.0.1 sdk/0.3.0", "bb")).toBe("0.1.0-rc.3");
+		expect(parseReportedVersion("bb/0.1.0-rc.3 omp/18.0.1 sdk/0.4.0", "bb")).toBe("0.1.0-rc.3");
 		expect(parseReportedVersion("omp/18.0.1", "omp")).toBe("18.0.1");
 		expect(parseReportedVersion("omp/18.0.1", "bb")).toBeUndefined();
 	});

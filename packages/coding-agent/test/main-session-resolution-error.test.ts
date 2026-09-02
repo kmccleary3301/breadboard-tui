@@ -9,16 +9,14 @@ import { describe, expect, it, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+	createBreadboardStartupForkPolicy,
+	resolveBreadboardSessionTarget,
+} from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { BreadboardSessionTransitionError } from "@oh-my-pi/pi-coding-agent/breadboard/session-binding";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import {
-	createBreadboardStartupForkPolicy,
-	createSessionManager,
-	resolveBreadboardSessionTarget,
-	SessionResolutionError,
-	writeStartupNotice,
-} from "@oh-my-pi/pi-coding-agent/main";
+import { createSessionManager, SessionResolutionError, writeStartupNotice } from "@oh-my-pi/pi-coding-agent/main";
 import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 

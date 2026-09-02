@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
 import type {
 	CancellationReceipt,
 	ClientMessageId,
@@ -9,8 +10,8 @@ import type {
 	StructuredSubmit,
 	SubmitInput,
 	SubmitReceipt,
-} from "@breadboard/sdk/internal";
-import { CanonicalE4ClientError, decodeLoggedSessionEvent, LifecycleE4ClientError } from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
+import { CanonicalE4ClientError, decodeLoggedSessionEvent } from "@breadboard/sdk/session";
 import { Agent, type AgentEvent, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Context } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

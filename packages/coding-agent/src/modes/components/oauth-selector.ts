@@ -8,7 +8,7 @@ import {
 	Spacer,
 	TruncatedText,
 } from "@oh-my-pi/pi-tui";
-import type { AuthCredentialView, AuthProviderView, ProviderAuthDataSource } from "../../breadboard/provider-auth-port";
+import type { AuthCredentialView, AuthProviderView, ProviderAuthReadPort } from "../../breadboard/provider-auth-port";
 import { settings } from "../../config/settings";
 import { theme } from "../../modes/theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
@@ -67,7 +67,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	/** Visible list window, shrunk by {@link setMaxHeight} on short screens. */
 	#maxVisible = OAUTH_SELECTOR_MAX_VISIBLE;
 	#mode: "login" | "logout" | "revoke";
-	#dataSource: ProviderAuthDataSource;
+	#dataSource: ProviderAuthReadPort;
 	#credentials: AuthCredentialView[] = [];
 	#onSelectCallback: (providerId: string) => void;
 	#onCancelCallback: () => void;
@@ -81,7 +81,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	readonly ready: Promise<void>;
 	constructor(
 		mode: "login" | "logout" | "revoke",
-		dataSource: ProviderAuthDataSource,
+		dataSource: ProviderAuthReadPort,
 		onSelect: (providerId: string) => void,
 		onCancel: () => void,
 		options?: {

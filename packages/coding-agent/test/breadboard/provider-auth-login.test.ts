@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError } from "@breadboard/sdk";
+import { ApiError } from "@breadboard/sdk/engine";
 import { createBreadboardProviderAuthPort } from "../../src/breadboard/provider-auth-adapter";
 import { authenticateProvider, type ProviderAuthLoginPresenter } from "../../src/breadboard/provider-auth-login";
 import {

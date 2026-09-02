@@ -22,6 +22,7 @@ const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json
 	bin: Record<string, string>;
 	bundledDependencies: string[];
 	dependencies: Record<string, string>;
+	exports: Record<string, unknown>;
 	scripts: Record<string, string>;
 };
 const workspaceRoot = resolve(packageRoot, "../..");
@@ -46,8 +47,8 @@ describe("BreadBoard SDK provenance", () => {
 		try {
 			await expect(verifyBreadboardSdkProvenance(packageRoot, packageRoot, clean)).resolves.toMatchObject({
 				packageName: "@breadboard/sdk",
-				packageVersion: "0.3.0",
-				artifactSha256: "e0df0a4774ba4b5d7de96deaaab48a926c51675a8fa6818b00f777b62bd9d303",
+				packageVersion: "0.4.0",
+				artifactSha256: "620ccbb6b34a3bf95affe96be713222b6c39a763fbe83c276434c3cc11e87513",
 			});
 		} finally {
 			if (previous === undefined) delete process.env[environmentName];
@@ -65,6 +66,10 @@ describe("BreadBoard SDK provenance", () => {
 		expect(packageJson.scripts["gate:distribution"]).toBe("bun run gate:breadboard-sdk && bun run gate:notices");
 		expect(packageJson.scripts.build).toStartWith("bun run gate:distribution && ");
 		expect(packageJson.scripts.prepack).toStartWith("bun run gate:distribution && ");
+	});
+	test("keeps internal modules outside the package export map", () => {
+		expect(packageJson.exports["./*"]).toBeUndefined();
+		expect(packageJson.exports["./breadboard/lifecycle/lifecycle-supervisor"]).toBeUndefined();
 	});
 
 	test("fails closed when package.json drifts from the pinned artifact", () => {

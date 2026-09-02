@@ -11,8 +11,8 @@ import type {
 	LifecycleE4Client,
 	LifecycleEngineBinding,
 	PrepareHardSignalInput,
-} from "@breadboard/sdk/internal";
-import { LifecycleE4ClientError } from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/lifecycle";
+import { LifecycleE4ClientError } from "@breadboard/sdk/lifecycle";
 import { createEngineRuntimeBundle } from "./engine-runtime-bundle";
 import { presentLifecycle, writeLifecyclePresentation } from "./lifecycle-presenter";
 import { type LifecycleState, lifecycleFailure } from "./lifecycle-state";
@@ -26,6 +26,7 @@ import {
 	type LifecycleSignal,
 	type LifecycleSignalTarget,
 	LifecycleSupervisor,
+	type LifecycleSupervisorDependencies,
 	lifecycleChildEnvironment,
 	type ProcessObservation,
 	readKeychainReference,
@@ -58,6 +59,28 @@ const common = {
 	canonicalizeWorkspace: () => "/canonical/workspace",
 	environment: {} as Record<string, string | undefined>,
 };
+let testCredentialCounter = 0;
+const TEST_LIFECYCLE_DEFAULTS = {
+	clock: { now: () => Date.now(), sleep: async () => {} },
+	randomCredential: () => Buffer.from(`${++testCredentialCounter}`.padStart(32, "0"), "ascii").toString("base64url"),
+	randomSecret: () => Buffer.alloc(32, 1),
+	randomOwnerCredential: () => Buffer.from("02".repeat(32), "ascii"),
+	createClient: () => {
+		throw new Error("test lifecycle client factory not configured");
+	},
+	resolveRemoteSecurity: async () => ({}),
+	stateChanged: () => {},
+	restartOnUnexpectedChildExit: true,
+	process: {
+		spawnVerified: async () => {
+			throw new Error("test lifecycle process adapter not configured");
+		},
+		observe: async () => ({ kind: "ambiguous" as const }),
+		controlFor: async () => null,
+		cleanupExited: async () => {},
+		cleanupPreparedStart: async () => {},
+	},
+} satisfies LifecycleSupervisorDependencies;
 
 function resolved(
 	mode: "off" | "local-external" | "remote" | "local-owned",
@@ -448,6 +471,7 @@ describe("LifecycleSupervisor mode authority", () => {
 	test("off performs zero client, store, process, or secret I/O", async () => {
 		let touched = 0;
 		const supervisor = new LifecycleSupervisor(resolved("off"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			createClient: () => {
 				touched++;
 				throw new Error("forbidden");
@@ -469,6 +493,7 @@ describe("LifecycleSupervisor mode authority", () => {
 		for (const mode of ["local-external", "remote"] as const) {
 			let touched = 0;
 			const supervisor = new LifecycleSupervisor(resolved(mode), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				createClient: () => {
 					touched++;
 					throw new Error("must not connect");
@@ -492,6 +517,7 @@ describe("LifecycleSupervisor mode authority", () => {
 			});
 			const bound = boundClient(binding, calls);
 			const supervisor = new LifecycleSupervisor(resolved(mode), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				createClient: () => ({ handshake: async () => bound }),
 			});
 			const observed = await supervisor.status();
@@ -514,6 +540,7 @@ describe("LifecycleSupervisor mode authority", () => {
 			});
 			const bound = boundClient(binding, calls);
 			const supervisor = new LifecycleSupervisor(resolved(mode), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				createClient: () => ({
 					handshake: async () => {
 						handshakes++;
@@ -548,6 +575,7 @@ describe("LifecycleSupervisor mode authority", () => {
 		});
 		const bound = boundClient(binding, calls);
 		const supervisor = new LifecycleSupervisor(resolved(mode), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			createClient: () => ({
 				handshake: async () => {
 					handshakes++;
@@ -589,6 +617,7 @@ describe("LifecycleSupervisor mode authority", () => {
 				const base = boundClient(binding, []);
 				const renewalFailure = Promise.withResolvers<LifecycleState>();
 				const supervisor = new LifecycleSupervisor(resolved(mode), {
+					...TEST_LIFECYCLE_DEFAULTS,
 					createClient: () => ({
 						handshake: async () => ({
 							...base,
@@ -640,6 +669,7 @@ describe("LifecycleSupervisor mode authority", () => {
 				launch: { launchId: "external_launch_abcdefghijklmnopqrstuvwxyz", source: "external_unmanaged" },
 			});
 			const supervisor = new LifecycleSupervisor(config, {
+				...TEST_LIFECYCLE_DEFAULTS,
 				resolveRemoteSecurity: async value =>
 					value.kind === "keychain-reference"
 						? { bearerToken: "resolved-token" }
@@ -679,6 +709,7 @@ describe("LifecycleSupervisor mode authority", () => {
 				launch: { launchId: "external_launch_abcdefghijklmnopqrstuvwxyz", source: "external_unmanaged" },
 			});
 			const supervisor = new LifecycleSupervisor(config, {
+				...TEST_LIFECYCLE_DEFAULTS,
 				resolveRemoteSecurity: async () => ({ bearerToken: "resolved-token" }),
 				createClient: () => ({ handshake: async () => boundClient(binding, []) }),
 			});
@@ -815,6 +846,7 @@ describe("LifecycleSupervisor mode authority", () => {
 				},
 			);
 			const supervisor = new LifecycleSupervisor(resolved("remote"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store: forbiddenLocalDependency as never,
 				process: forbiddenLocalDependency as never,
 				createClient: () => {
@@ -987,6 +1019,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1010,6 +1043,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let now = 0;
 		let handshakeAttempts = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1061,7 +1095,11 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			installedEngineIdentity: {} as NonNullable<BreadboardRunConfig["installedEngineIdentity"]>,
 		});
 		const store = await temporaryStore();
-		const supervisor = new LifecycleSupervisor(config, { store });
+		const supervisor = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: createDefaultLifecycleProcessAdapter(undefined, true),
+		});
 
 		await expect(supervisor.connect()).rejects.toMatchObject({
 			name: "InstalledEngineDiscoveryError",
@@ -1077,6 +1115,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const calls: string[] = [];
 		let registrationAttempts = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1120,6 +1159,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const calls: string[] = [];
 		const endpoint = "http://127.0.0.1:7777";
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1150,6 +1190,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let handshakes = 0;
 		const baseFactory = clientFactory(process, calls);
 		const supervisor = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1208,6 +1249,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		};
 		const supervisor = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: inspectingProcess,
 			createClient: clientFactory(process, []),
@@ -1239,6 +1281,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const process = processHarness();
 			process.failSpawnAfterBinding(scenario.error);
 			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: clientFactory(process, []),
@@ -1265,6 +1308,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const store = await temporaryStore();
 		const process = processHarness();
 		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, [], { registerError: new Error("register failed") }),
@@ -1272,6 +1316,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect((await first.connect()).kind).toBe("failure");
 		expect(await store.readCurrent("http://127.0.0.1:7777")).not.toBeNull();
 		const second = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, []),
@@ -1283,6 +1328,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const store = await temporaryStore();
 		const process = processHarness();
 		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, [], { registerError: new Error("register failed") }),
@@ -1291,6 +1337,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const calls: string[] = [];
 		const unavailableControl: LifecycleProcessAdapter = { ...process.adapter, controlFor: async () => null };
 		const adopter = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: unavailableControl,
 			createClient: clientFactory(process, calls),
@@ -1311,6 +1358,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			body: "[redacted]",
 		});
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1342,6 +1390,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		let clientTouches = 0;
 		const status = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => {
@@ -1379,12 +1428,14 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		};
 		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
 			clock,
 		});
 		const second = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -1435,6 +1486,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		pendingBootstrap.fill(0);
 		const calls: string[] = [];
 		const recovered = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1476,6 +1528,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let absenceChecks = 0;
 		const calls: string[] = [];
 		const recovered = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1552,6 +1605,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let probes = 0;
 		const calls: string[] = [];
 		const recovered = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1605,6 +1659,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		bootstrap.fill(0);
 		owner.fill(0);
 		const recovered = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1625,6 +1680,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const calls: string[] = [];
 		const first = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1638,6 +1694,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			selectedConfig: { engineArtifact: { ...artifact, argv: ["--different"] } },
 		});
 		const adopter = new LifecycleSupervisor(changed, {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1651,6 +1708,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const calls: string[] = [];
 		const first = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1658,6 +1716,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect((await first.connect()).kind).toBe("ready");
 		expect((await first.close({ consumerClosed: true })).kind).toBe("detached");
 		const adopter = new LifecycleSupervisor(resolved("local-owned", "attached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -1688,6 +1747,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			let responseLosses = 2;
 			const timeout = new LifecycleE4ClientError({ kind: "timeout" });
 			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: () => ({
@@ -1743,6 +1803,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let responseLosses = 3;
 		const requestIds: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -1826,6 +1887,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				},
 			});
 			const starter = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
@@ -1861,6 +1923,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const originalRegistration = registrations[0];
 			if (!originalRegistration) throw new Error("original requester registration missing");
 			const successor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
@@ -1947,6 +2010,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		});
 		const starter = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -1964,6 +2028,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const oldAttempt = await store.readControlAttempt(endpoint, record);
 		if (!oldAttempt) throw new Error("durable old control attempt missing");
 		const successor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -1998,6 +2063,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let acceptedTransitions = 0;
 		const acceptedRequests: number[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2037,6 +2103,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const prepareRequests: number[] = [];
 		const commitRequests: Array<Record<string, unknown>> = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2123,7 +2190,12 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				};
 			},
 		});
-		const first = new LifecycleSupervisor(resolved("local-owned"), { store, process: process.adapter, createClient });
+		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient,
+		});
 		expect((await first.connect()).kind).toBe("ready");
 		expect((await first.stop({ consumerClosed: true })).kind).toBe("failure");
 		expect(process.events).not.toContain("hard-control");
@@ -2136,6 +2208,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		first.abort();
 		commitLosses = 0;
 		const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -2155,6 +2228,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const outcomeRequests: Array<Record<string, unknown>> = [];
 		const rollbackRequests: Array<Record<string, unknown>> = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2217,6 +2291,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			body: "[redacted]",
 		});
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2268,6 +2343,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const process = processHarness();
 			const endpoint = "http://127.0.0.1:7777";
 			const first = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: clientFactory(process, []),
@@ -2324,6 +2400,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				body: "[redacted]",
 			});
 			const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: () => ({
@@ -2416,6 +2493,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const calls: string[] = [];
 			let requestId = "";
 			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: () => ({
@@ -2453,6 +2531,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			body: "[redacted]",
 		});
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls, { drainError: drainConflict }),
@@ -2470,6 +2549,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.exitOnNextWait();
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -2495,6 +2575,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		process.exitOnNextWait();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: {
 				...process.adapter,
@@ -2517,6 +2598,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const calls: string[] = [];
 		let observedAdmissionEpoch: number | undefined;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2545,6 +2627,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.waitResults.push(false);
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -2562,6 +2645,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.waitResults.push(false, false);
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -2581,6 +2665,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const bootstrap = Buffer.alloc(32, 17);
 		const owner = Buffer.from("durable_failure_owner_abcdefghijklmnopqrstuvwxyz", "ascii");
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, []),
@@ -2610,6 +2695,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const bootstrap = Buffer.alloc(32, 11);
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, []),
@@ -2634,6 +2720,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const entered = Promise.withResolvers<void>();
 		const handshake = Promise.withResolvers<BoundLifecycleE4Client>();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2672,6 +2759,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const entered = Promise.withResolvers<void>();
 		const handshake = Promise.withResolvers<BoundLifecycleE4Client>();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2705,6 +2793,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const calls: string[] = [];
 		supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -2729,6 +2818,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const registration = Promise.withResolvers<never>();
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2768,6 +2858,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.waitResults.push(false);
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2819,6 +2910,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.waitResults.push(false);
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2858,6 +2950,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.waitResults.push(false);
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
@@ -2899,6 +2992,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls, { gracefulError: new Error("record failed") }),
@@ -2931,6 +3025,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		};
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: blockedProcess,
 			createClient: () => ({
@@ -2987,6 +3082,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const states: string[] = [];
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -3016,6 +3112,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const restarted = Promise.withResolvers<void>();
 		let readyCount = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			clock: {
@@ -3041,6 +3138,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const failed = Promise.withResolvers<LifecycleState>();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			endpointAbsent: async () => true,
@@ -3059,6 +3157,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		});
 		expect(process.spawnCount()).toBe(1);
 		const successor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			endpointAbsent: async () => true,
@@ -3081,6 +3180,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const sleepStarted = Promise.withResolvers<void>();
 		const releaseSleep = Promise.withResolvers<void>();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			clock: {
@@ -3112,6 +3212,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const sleepStarted = Promise.withResolvers<void>();
 		const releaseSleep = Promise.withResolvers<void>();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			clock: {
@@ -3147,6 +3248,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const releaseSecondSleep = Promise.withResolvers<void>();
 		let readyCount = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			clock: {
@@ -3191,6 +3293,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const failed = Promise.withResolvers<LifecycleState>();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			endpointAbsent: async () => true,
@@ -3219,6 +3322,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const endpoint = "http://127.0.0.1:7777";
 		const abandonedStarter = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, [], { registerError: new Error("starter registration failed") }),
@@ -3229,6 +3333,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const restarted = Promise.withResolvers<void>();
 		let readyCount = 0;
 		const adopter = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			clock: {
@@ -3256,6 +3361,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		process.unboundNext();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, []),
@@ -3277,6 +3383,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		let first: { readonly pid: number; readonly launchId: string } | undefined;
 		let handshakes = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			endpointAbsent: async () => true,
@@ -3313,6 +3420,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		});
 		const process = processHarness();
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, []),
@@ -3334,6 +3442,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		let clients = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => {
@@ -3358,6 +3467,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const endpoint = "http://127.0.0.1:7777";
 		const starter = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, []),
@@ -3367,6 +3477,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		process.crash(exited.pid);
 		const calls: string[] = [];
 		const stopper = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -3387,6 +3498,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const process = processHarness();
 		const calls: string[] = [];
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
@@ -3440,6 +3552,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			bootstrap.fill(0);
 			owner.fill(0);
 			const supervisor = new LifecycleSupervisor(config, {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				endpointAbsent: async () => absent,
@@ -3500,9 +3613,15 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				};
 			},
 		});
-		const first = new LifecycleSupervisor(resolved("local-owned"), { store, process: process.adapter, createClient });
+		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient,
+		});
 		expect((await first.connect()).state.reason).toBe("endpoint_unreachable");
 		const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -3564,12 +3683,14 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				},
 			});
 			const first = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
 			});
 			expect((await first.connect()).state.reason).toBe(firstReason);
 			const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
@@ -3636,11 +3757,17 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				};
 			},
 		});
-		const first = new LifecycleSupervisor(resolved("local-owned"), { store, process: process.adapter, createClient });
+		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient,
+		});
 		expect((await first.connect()).state.reason).toBe("endpoint_unreachable");
 		const afterFirst = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
 		expect(afterFirst).toMatchObject({ kind: "recoverable", claim: { ownerAttemptGeneration: 1 } });
 		const second = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -3649,6 +3776,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const afterSecond = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
 		expect(afterSecond).toMatchObject({ kind: "recoverable", claim: { ownerAttemptGeneration: 2 } });
 		const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -3724,12 +3852,14 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				},
 			});
 			const first = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
 			});
 			expect((await first.connect()).state.reason).toBe("endpoint_unreachable");
 			const second = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
@@ -3738,6 +3868,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const pending = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
 			expect(pending).toMatchObject({ kind: "recoverable", claim: { ownerAttemptGeneration: 2 } });
 			const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient,
@@ -3802,9 +3933,15 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				};
 			},
 		});
-		const first = new LifecycleSupervisor(resolved("local-owned"), { store, process: process.adapter, createClient });
+		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient,
+		});
 		expect((await first.connect()).state.reason).toBe("endpoint_unreachable");
 		const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -3850,9 +3987,15 @@ describe("LifecycleSupervisor local-owned authority", () => {
 				};
 			},
 		});
-		const first = new LifecycleSupervisor(resolved("local-owned"), { store, process: process.adapter, createClient });
+		const first = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient,
+		});
 		expect((await first.connect()).kind).toBe("failure");
 		const recovered = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -3885,6 +4028,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const store = await temporaryStore();
 			const renewalFailure = Promise.withResolvers<LifecycleState>();
 			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: () => ({
@@ -3938,6 +4082,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			const store = await temporaryStore();
 			const process = processHarness();
 			const supervisor = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+				...TEST_LIFECYCLE_DEFAULTS,
 				store,
 				process: process.adapter,
 				createClient: () => ({
@@ -3992,6 +4137,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		});
 		const supervisor = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -4037,6 +4183,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		});
 		const supervisor = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,
@@ -4079,6 +4226,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			},
 		});
 		const supervisor = new LifecycleSupervisor(resolved("local-owned", "detached"), {
+			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient,

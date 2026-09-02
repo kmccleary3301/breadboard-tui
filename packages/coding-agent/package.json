@@ -55,7 +55,7 @@
   },
   "dependencies": {
     "@babel/parser": "catalog:",
-    "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.3.0.tgz",
+    "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz",
     "@mozilla/readability": "catalog:",
     "@oh-my-pi/hashline": "catalog:",
     "@oh-my-pi/omp-stats": "catalog:",
@@ -112,7 +112,7 @@
     "THIRD_PARTY_NOTICES.txt",
     "THIRD_PARTY_NOTICES.manifest.json",
     "breadboard-sdk-provenance.json",
-    "vendor/breadboard-sdk-0.3.0.tgz",
+    "vendor/breadboard-sdk-0.4.0.tgz",
     "examples",
     "README.md",
     "CHANGELOG.md"
@@ -121,10 +121,6 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
-    },
-    "./*": {
-      "types": "./src/*.ts",
-      "import": "./src/*.ts"
     },
     "./async": {
       "types": "./src/async/index.ts",
@@ -511,6 +507,10 @@
       "import": "./src/plan-mode/*.ts"
     },
     "./prompts/*": "./src/prompts/*.md",
+    "./sdk": {
+      "types": "./src/sdk.ts",
+      "import": "./src/sdk.ts"
+    },
     "./secrets": {
       "types": "./src/secrets/index.ts",
       "import": "./src/secrets/index.ts"

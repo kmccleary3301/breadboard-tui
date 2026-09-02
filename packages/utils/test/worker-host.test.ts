@@ -53,6 +53,15 @@ describe("worker-host inbox", () => {
 		expect(received).toEqual([{ type: "init" }, { type: "run", runId: "r1" }, { type: "run", runId: "r2" }]);
 	});
 
+	it("reuses the entrypoint inbox when CLI dispatch installs it again", () => {
+		const port = new EventEmitter();
+		const first = installWorkerInbox(port);
+		const second = installWorkerInbox(port);
+
+		expect(second).toBe(first);
+		expect(port.listenerCount("message")).toBe(1);
+	});
+
 	it("delivers nothing twice and re-buffers after unbind", () => {
 		const port = new EventEmitter();
 		const inbox = installWorkerInbox(port);

@@ -1,28 +1,20 @@
-import { join } from "node:path";
-import {
-	createCanonicalE4Client,
-	createInternalBreadboardClient,
-	type InternalBreadboardClient,
-	type LifecycleEngineBinding,
-} from "@breadboard/sdk/internal";
-import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
+import { type BreadboardClient, createBreadboardClient } from "@breadboard/sdk/engine";
+import type { LifecycleEngineBinding } from "@breadboard/sdk/lifecycle";
+import { createCanonicalE4Client } from "@breadboard/sdk/session";
+import { logger } from "@oh-my-pi/pi-utils";
 import { CanonicalE4SessionPort } from "./canonical-e4-session-port";
+import { createProductionLifecycleSupervisor } from "./lifecycle/lifecycle-production";
 import {
-	LIFECYCLE_FAILURE_STATES,
+	isLifecycleAuthorityDiscontinuityState,
+	isLifecycleFailureState as isLifecycleFailureStateName,
 	type LifecycleReadyHandle,
 	type LifecycleResult,
 	type LifecycleState,
 	lifecycleFailure,
 } from "./lifecycle/lifecycle-state";
-import {
-	LifecycleSupervisor,
-	type LifecycleSupervisorDependencies,
-	type StopOptions,
-} from "./lifecycle/lifecycle-supervisor";
-import { LocalAuthorityStore } from "./lifecycle/local-authority-store";
+import type { LifecycleSupervisor, StopOptions } from "./lifecycle/lifecycle-supervisor";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
-import type { ModelRolePort } from "./model-role-port";
-import { createBreadboardModelRolePort } from "./model-role-port";
+import { createBreadboardModelRolePort, type ModelRolePort } from "./model-role-port";
 import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
 import type { ProviderAuthPort } from "./provider-auth-port";
 import type { BreadboardCreateSessionRequest, OpenedSession, OpenSession } from "./session-port";
@@ -31,13 +23,13 @@ type AsyncResult<Operation> = Operation extends (...args: never[]) => Promise<in
 type FirstParameter<Operation> = Operation extends (input: infer Input, ...args: never[]) => Promise<unknown>
 	? Input
 	: never;
-type EngineStatusResponse = AsyncResult<InternalBreadboardClient["engineStatus"]>;
-type ModelCatalogResponse = AsyncResult<InternalBreadboardClient["getModelCatalog"]>;
-type ProviderAuthAttachRequest = FirstParameter<InternalBreadboardClient["providerAuthAttach"]>;
-type ProviderAuthAttachResponse = AsyncResult<InternalBreadboardClient["providerAuthAttach"]>;
-type ProviderAuthDetachRequest = FirstParameter<InternalBreadboardClient["providerAuthDetach"]>;
-type ProviderAuthDetachResponse = AsyncResult<InternalBreadboardClient["providerAuthDetach"]>;
-type ProviderAuthStatusResponse = AsyncResult<InternalBreadboardClient["providerAuthStatus"]>;
+type EngineStatusResponse = AsyncResult<BreadboardClient["engineStatus"]>;
+type ModelCatalogResponse = AsyncResult<BreadboardClient["getModelCatalog"]>;
+type ProviderAuthAttachRequest = FirstParameter<BreadboardClient["providerAuthAttach"]>;
+type ProviderAuthAttachResponse = AsyncResult<BreadboardClient["providerAuthAttach"]>;
+type ProviderAuthDetachRequest = FirstParameter<BreadboardClient["providerAuthDetach"]>;
+type ProviderAuthDetachResponse = AsyncResult<BreadboardClient["providerAuthDetach"]>;
+type ProviderAuthStatusResponse = AsyncResult<BreadboardClient["providerAuthStatus"]>;
 
 type BreadboardEngineReadyHandle = Pick<
 	LifecycleReadyHandle,
@@ -101,7 +93,6 @@ export interface BreadboardEnginePort {
 export interface BreadboardEngineConnectionOptions {
 	readonly onLateSessionCloseError: (error: unknown) => void;
 	readonly onLifecycleFailure?: (result: BreadboardLifecycleFailureResult) => void;
-	readonly dependencies?: LifecycleSupervisorDependencies;
 }
 
 export type BreadboardEngineConnectionResult =
@@ -114,15 +105,9 @@ export interface LifecycleMonitor {
 	activateAuthority(authority: BreadboardEngineAuthorityIdentity): void;
 }
 
-function isLifecycleFailureState(state: LifecycleState): state is BreadboardLifecycleFailureResult["state"] {
-	return (LIFECYCLE_FAILURE_STATES as readonly LifecycleState["name"][]).includes(state.name);
+function isLifecycleFailureResultState(state: LifecycleState): state is BreadboardLifecycleFailureResult["state"] {
+	return isLifecycleFailureStateName(state.name) && state.reason !== undefined;
 }
-
-const AUTHORITY_DISCONTINUITY_STATES: ReadonlySet<LifecycleState["name"]> = new Set([
-	"backing-off",
-	"restart-stopping",
-	"restart-starting",
-]);
 
 export function createLifecycleMonitor(
 	onLifecycleFailure?: BreadboardEngineConnectionOptions["onLifecycleFailure"],
@@ -144,13 +129,13 @@ export function createLifecycleMonitor(
 		if (
 			failure === undefined &&
 			activeAuthority !== undefined &&
-			(state.name === "ready" || AUTHORITY_DISCONTINUITY_STATES.has(state.name))
+			isLifecycleAuthorityDiscontinuityState(state.name)
 		) {
 			discontinuity = Object.freeze({ previous: activeAuthority, trigger: state });
 			const result = lifecycleFailure(activeAuthority.mode, "identity-changed", "identity_changed", state.attempt);
 			if (result.kind !== "failure") throw new Error("BreadBoard authority discontinuity was not terminal");
 			latchFailure(result);
-		} else if (failure === undefined && isLifecycleFailureState(state)) {
+		} else if (failure === undefined && isLifecycleFailureResultState(state)) {
 			latchFailure({ kind: "failure", state });
 		}
 		for (const listener of listeners) {
@@ -261,7 +246,7 @@ function createConnectedPort(
 		fetch: strictEventFetch,
 	};
 	const canonicalClient = createCanonicalE4Client(clientConfig);
-	const controlClient = createInternalBreadboardClient(clientConfig);
+	const controlClient = createBreadboardClient(clientConfig);
 	const sessionClient = {
 		...canonicalClient,
 		async create(request: BreadboardCreateSessionRequest) {
@@ -429,17 +414,7 @@ export async function connectCanonicalBreadboardEnginePort(
 	options: BreadboardEngineConnectionOptions,
 ): Promise<BreadboardEngineConnectionResult> {
 	const monitor = createLifecycleMonitor(options.onLifecycleFailure);
-	const suppliedDependencies = options.dependencies ?? {};
-	const store =
-		config.mode === "local-owned"
-			? (suppliedDependencies.store ?? new LocalAuthorityStore(join(getAgentDir(), "breadboard", "lifecycle")))
-			: undefined;
-	const supervisor = new LifecycleSupervisor(config, {
-		...suppliedDependencies,
-		...(store === undefined ? { store: undefined } : { store }),
-		stateChanged: monitor.stateChanged,
-		restartOnUnexpectedChildExit: false,
-	});
+	const supervisor = createProductionLifecycleSupervisor(config, monitor.stateChanged);
 	const connected = await supervisor.connect();
 	if (connected.kind !== "ready") {
 		await supervisor.close({ consumerClosed: true });

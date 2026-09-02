@@ -12,9 +12,9 @@ import {
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { authenticateProvider } from "../../../breadboard/provider-auth-login";
 import {
-	type ProviderAuthDataSource,
 	ProviderAuthError,
 	type ProviderAuthPort,
+	type ProviderAuthReadPort,
 } from "../../../breadboard/provider-auth-port";
 import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "../../../product-identity";
 import { copyToClipboard } from "../../../utils/clipboard";
@@ -23,7 +23,7 @@ import { OAuthSelectorComponent } from "../../components/oauth-selector";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
 
-const UNAVAILABLE_PRODUCT_PROVIDER_SOURCE: ProviderAuthDataSource = Object.freeze({
+const UNAVAILABLE_PRODUCT_PROVIDER_SOURCE: ProviderAuthReadPort = Object.freeze({
 	listProvidersSync: () => [],
 	listCredentialsSync: () => [],
 	async listProviders() {

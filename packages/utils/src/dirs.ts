@@ -14,13 +14,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { engines, version } from "../package.json" with { type: "json" };
+import { engines } from "../package.json" with { type: "json" };
+import { BREADBOARD_DISTRIBUTION_POLICY } from "./product-distribution";
 
 /** Whether this process was bootstrapped through the BreadBoard product entrypoint. */
 export const IS_BREADBOARD_PRODUCT = process.env.BREADBOARD_PRODUCT === "1";
 
 /** App name used in user-facing paths, process titles, and CLI output. */
-export const APP_NAME: string = IS_BREADBOARD_PRODUCT ? "bb" : "omp";
+export const APP_NAME: string = IS_BREADBOARD_PRODUCT ? BREADBOARD_DISTRIBUTION_POLICY.productName : "omp";
 
 /** Default config directory name (e.g. ".breadboard" or ".omp"). */
 export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
@@ -28,33 +29,10 @@ export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
 /** Ordered main settings filenames: canonical write target first, legacy-compatible YAML fallback second. */
 export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
 
-/** BreadBoard product version. */
-export const BREADBOARD_VERSION = "0.1.0-rc.4";
-
-/** Canonical SDK dependency version used by the BreadBoard product. */
-export const BREADBOARD_SDK_VERSION = "0.3.0";
-
-/** Supported BreadBoard engine API range. */
-export const BREADBOARD_ENGINE_API_RANGE = ">=0.1.0 <0.4.0";
-
-/** Upstream OMP version embedded by this fork. */
-export const OMP_VERSION: string = version;
-
-/** Structured BreadBoard product/version lineage. */
-export const BREADBOARD_VERSION_INFO = Object.freeze({
-	product: `bb/${BREADBOARD_VERSION}`,
-	omp: `omp/${OMP_VERSION}`,
-	sdk: `sdk/${BREADBOARD_SDK_VERSION}`,
-	engineApi: `engine-api ${BREADBOARD_ENGINE_API_RANGE}`,
-});
-
-/** Render the stable human-readable BreadBoard product/version lineage. */
-export function formatBreadboardVersion(): string {
-	return Object.values(BREADBOARD_VERSION_INFO).join(" ");
-}
-
 /** Version used by the active CLI identity. */
-export const VERSION: string = IS_BREADBOARD_PRODUCT ? BREADBOARD_VERSION : version;
+export const VERSION: string = IS_BREADBOARD_PRODUCT
+	? BREADBOARD_DISTRIBUTION_POLICY.productVersion
+	: BREADBOARD_DISTRIBUTION_POLICY.ompVersion;
 
 /** Default User-Agent header string (e.g. "omp/17.2.12" or "bb/0.1.0-rc.3"). */
 export const USER_AGENT = `${APP_NAME}/${VERSION}`;

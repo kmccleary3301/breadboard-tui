@@ -1,5 +1,4 @@
-import "./product-env";
-import { type SettingDefaultOverrides, setDistributionSettingDefaults } from "../config/settings-schema";
+import type { SettingDefaultOverrides } from "../config/settings-schema";
 
 export const BREADBOARD_SETTING_DEFAULTS = {
 	"task.maxConcurrency": 4,
@@ -7,9 +6,9 @@ export const BREADBOARD_SETTING_DEFAULTS = {
 	"task.maxRuntimeMs": 30 * 60_000,
 } satisfies SettingDefaultOverrides;
 
-/** Install BreadBoard defaults before the shared CLI creates Settings. */
-export function installBreadboardSettingDefaults(): void {
+/** Establish BreadBoard identity and defaults before loading the shared CLI. */
+export async function activateBreadboardProduct(): Promise<void> {
+	process.env.BREADBOARD_PRODUCT = "1";
+	const { setDistributionSettingDefaults } = await import("../config/settings-schema");
 	setDistributionSettingDefaults(BREADBOARD_SETTING_DEFAULTS);
 }
-
-installBreadboardSettingDefaults();

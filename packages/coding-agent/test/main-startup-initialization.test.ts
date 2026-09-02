@@ -2,12 +2,9 @@ import { describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { resolveBreadboardBackendModel } from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
-import {
-	resolveBreadboardBackendModel,
-	resolveStartupNetworkPolicy,
-	runRootCommand,
-} from "@oh-my-pi/pi-coding-agent/main";
+import { resolveStartupNetworkPolicy, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import { getConfigRootDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 
 const SESSION_FIXTURE = path.join(import.meta.dir, "fixtures", "large-session.jsonl");

@@ -8,20 +8,21 @@ import {
 	type SessionId,
 	type SessionSnapshot,
 	type TurnId,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
+import { createLifecycleMonitor } from "./engine-port";
+import { lifecycleState } from "./lifecycle/lifecycle-state";
+import type { ProviderAuthPort } from "./provider-auth-port";
 import {
 	createRecoverableBreadboardRuntime,
 	type PreparedBreadboardRuntime,
 	prepareConnectedBreadboardRuntime,
 	resolveBreadboardCatalogModels,
-} from "../main";
-import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
-import { createLifecycleMonitor } from "./engine-port";
-import { lifecycleState } from "./lifecycle/lifecycle-state";
-import type { ProviderAuthPort } from "./provider-auth-port";
+	resolveBreadboardSessionTarget,
+} from "./runtime";
 import {
 	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
 	type BreadboardSessionBindingData,
@@ -242,6 +243,37 @@ test("projects configured evidence routes into the public session model scope", 
 		"cli_mock/reference",
 	]);
 	expect(models.every(candidate => candidate.baseUrl === "http://127.0.0.1:9/v1")).toBeTrue();
+});
+
+test("pins explicit startup model and approval policy into the engine session request", () => {
+	expect(
+		resolveBreadboardSessionTarget(
+			{ continue: false, resume: undefined },
+			undefined,
+			undefined,
+			"/workspace",
+			true,
+			{
+				provider: "cli_mock",
+				id: "reference",
+			},
+			"yolo",
+		),
+	).toEqual({
+		kind: "create",
+		request: {
+			workspace: "/workspace",
+			permissionMode: "configured",
+			overrides: {
+				"providers.default_model": "cli_mock/reference",
+				"permissions.options.default_response": "allow",
+				"permissions.edit.default": "allow",
+				"permissions.shell.default": "allow",
+				"permissions.webfetch.default": "allow",
+				"permissions.read.default": "allow",
+			},
+		},
+	});
 });
 describe("connected BreadBoard runtime lifecycle", () => {
 	test("invalidates one old runtime on authority replacement and requires an explicit fresh attach", async () => {

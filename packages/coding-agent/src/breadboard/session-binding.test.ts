@@ -6,7 +6,7 @@ import {
 	type ReplayContractDigest,
 	type SessionId,
 	type SessionSnapshot,
-} from "@breadboard/sdk/internal";
+} from "@breadboard/sdk/session";
 import {
 	addOwnedSubmission,
 	advanceProjectionBinding,
