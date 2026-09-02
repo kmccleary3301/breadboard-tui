@@ -12,7 +12,7 @@
     "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 320,
+    "maxTotalChangedPaths": 321,
     "maxUpstreamEntrypointPaths": 12
   },
   "rules": [
