@@ -175,6 +175,7 @@ describe("WelcomeComponent native identity", () => {
 			}),
 			defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
 		});
+		vi.spyOn(theme, "getColorMode").mockReturnValue("truecolor");
 		const dark = new WelcomeComponent("1.2.3", "model", "provider", [], [], alternate, "dark").render(90);
 		const light = new WelcomeComponent("1.2.3", "model", "provider", [], [], alternate, "light").render(90);
 
