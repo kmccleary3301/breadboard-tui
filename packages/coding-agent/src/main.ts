@@ -1990,7 +1990,11 @@ export async function runRootCommand(
 							}
 							await agentSession.agent.emitExternalEventAndWait(event, idempotencyKey);
 						},
-						{ modelRegistry, requestPermission: breadboardPermissionHandler },
+						{
+							modelRegistry,
+							requestPermission: breadboardPermissionHandler,
+							selectedModel: parsedArgs.model ? sessionOptions.model : undefined,
+						},
 						settingsInstance,
 						sessionManager,
 						idempotencyKey => {

@@ -17,6 +17,7 @@ import type { ExtensionUIContext } from "../extensibility/extensions/types";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 import type { SessionTransitionPlan } from "../session/agent-session";
 import type { AuthStorage } from "../session/auth-storage";
+import type { ApprovalMode } from "../tools/approval";
 import {
 	breadboardProjectionEventId,
 	E4AgentStreamBridge,
@@ -195,12 +196,25 @@ export function rejectBreadboardSessionTransition(plan: SessionTransitionPlan): 
 	);
 }
 
+function exactModelRoute(selector: string | undefined): Pick<Model, "provider" | "id"> | undefined {
+	const normalized = selector?.trim();
+	if (!normalized) return undefined;
+	const separator = normalized.indexOf("/");
+	if (separator <= 0 || separator === normalized.length - 1) return undefined;
+	return {
+		provider: normalized.slice(0, separator),
+		id: normalized.slice(separator + 1),
+	};
+}
+
 export function resolveBreadboardSessionTarget(
 	parsed: Pick<Args, "continue" | "resume">,
 	sessionManager: BreadboardSessionBindingManager | undefined,
 	sessionConfigPath: string | undefined,
 	workspacePath: string = getProjectDir(),
 	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
+	selectedModel?: Pick<Model, "provider" | "id">,
+	approvalMode?: ApprovalMode,
 ): OpenSession {
 	if (parsed.continue || parsed.resume === true || typeof parsed.resume === "string") {
 		const binding = sessionManager && readBreadboardSessionBinding(sessionManager);
@@ -218,12 +232,31 @@ export function resolveBreadboardSessionTarget(
 			"a selected sessionConfigPath is required to create a session",
 		);
 	}
+	const hasOverrides = selectedModel !== undefined || approvalMode === "yolo";
 	return {
 		kind: "create",
 		request: {
 			workspace: workspacePath,
 			permissionMode: "configured",
 			...(sessionConfigPath === undefined ? {} : { configPath: sessionConfigPath }),
+			...(hasOverrides
+				? {
+						overrides: {
+							...(selectedModel === undefined
+								? {}
+								: { "providers.default_model": `${selectedModel.provider}/${selectedModel.id}` }),
+							...(approvalMode === "yolo"
+								? {
+										"permissions.options.default_response": "allow",
+										"permissions.edit.default": "allow",
+										"permissions.shell.default": "allow",
+										"permissions.webfetch.default": "allow",
+										"permissions.read.default": "allow",
+									}
+								: {}),
+						},
+					}
+				: {}),
 		},
 	};
 }
@@ -250,6 +283,7 @@ type BreadboardModelRegistry = Pick<ModelRegistry, "getAll">;
 export interface BreadboardRuntimeAuthority {
 	readonly modelRegistry: BreadboardModelRegistry;
 	readonly requestPermission: E4PermissionHandler;
+	readonly selectedModel?: Pick<Model, "provider" | "id">;
 }
 
 type ConnectedBreadboardEnginePort = Pick<
@@ -880,6 +914,8 @@ export async function prepareBreadboardRuntime(
 		config.sessionConfigPath,
 		workspacePath,
 		IS_BREADBOARD_PRODUCT,
+		authority.selectedModel ?? exactModelRoute(parsed.model),
+		activeSettings.get("tools.approvalMode"),
 	);
 
 	const connectGeneration = async (

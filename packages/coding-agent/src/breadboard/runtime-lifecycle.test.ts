@@ -21,6 +21,7 @@ import {
 	type PreparedBreadboardRuntime,
 	prepareConnectedBreadboardRuntime,
 	resolveBreadboardCatalogModels,
+	resolveBreadboardSessionTarget,
 } from "./runtime";
 import {
 	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
@@ -242,6 +243,37 @@ test("projects configured evidence routes into the public session model scope", 
 		"cli_mock/reference",
 	]);
 	expect(models.every(candidate => candidate.baseUrl === "http://127.0.0.1:9/v1")).toBeTrue();
+});
+
+test("pins explicit startup model and approval policy into the engine session request", () => {
+	expect(
+		resolveBreadboardSessionTarget(
+			{ continue: false, resume: undefined },
+			undefined,
+			undefined,
+			"/workspace",
+			true,
+			{
+				provider: "cli_mock",
+				id: "reference",
+			},
+			"yolo",
+		),
+	).toEqual({
+		kind: "create",
+		request: {
+			workspace: "/workspace",
+			permissionMode: "configured",
+			overrides: {
+				"providers.default_model": "cli_mock/reference",
+				"permissions.options.default_response": "allow",
+				"permissions.edit.default": "allow",
+				"permissions.shell.default": "allow",
+				"permissions.webfetch.default": "allow",
+				"permissions.read.default": "allow",
+			},
+		},
+	});
 });
 describe("connected BreadBoard runtime lifecycle", () => {
 	test("invalidates one old runtime on authority replacement and requires an explicit fresh attach", async () => {
