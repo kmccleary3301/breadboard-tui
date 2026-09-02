@@ -34,8 +34,8 @@ describe("issue #3031 — mnemopi embeddings live in an isolated subprocess", ()
 		// Bun-test worker: the test runner owns its own IPC channel and can
 		// starve nested Bun subprocess IPC on some Bun builds.
 		const repoRoot = path.resolve(import.meta.dir, "../../..");
-		const script =
-			'const { smokeTestMnemopiEmbedWorker } = await import("@oh-my-pi/pi-coding-agent/mnemopi/embed-client"); await smokeTestMnemopiEmbedWorker({ timeoutMs: 15000 });';
+		const embedClientUrl = new URL("../src/mnemopi/embed-client.ts", import.meta.url).href;
+		const script = `const { smokeTestMnemopiEmbedWorker } = await import(${JSON.stringify(embedClientUrl)}); await smokeTestMnemopiEmbedWorker({ timeoutMs: 15000 });`;
 		const proc = Bun.spawn([process.execPath, "-e", script], {
 			cwd: repoRoot,
 			stdout: "pipe",
