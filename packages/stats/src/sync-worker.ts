@@ -11,6 +11,8 @@
  * for issue #1011 / PR #1027, where the worker silently failed to load).
  */
 
+import { parentPort } from "node:worker_threads";
+import { consumeWorkerInbox } from "@oh-my-pi/pi-utils/worker-host";
 import { type ParseSessionResult, parseSessionFile } from "./parser";
 
 export type SyncWorkerRequest = { kind?: "parse"; sessionFile: string; fromOffset: number } | { kind: "ping" };
@@ -20,21 +22,27 @@ export type SyncWorkerResponse =
 	| { ok: true; kind: "pong" }
 	| { ok: false; error: string };
 
-declare const self: Worker & {
-	onmessage: ((event: MessageEvent<SyncWorkerRequest>) => void) | null;
-};
+if (!parentPort) throw new Error("stats sync worker: missing parentPort");
 
-self.onmessage = async event => {
-	const request = event.data;
+const port = parentPort;
+const handleMessage = async (message: unknown): Promise<void> => {
+	const request = message as SyncWorkerRequest;
 	try {
 		if (request.kind === "ping") {
-			self.postMessage({ ok: true, kind: "pong" } satisfies SyncWorkerResponse);
+			port.postMessage({ ok: true, kind: "pong" } satisfies SyncWorkerResponse);
 			return;
 		}
 		const result = await parseSessionFile(request.sessionFile, request.fromOffset);
-		self.postMessage({ ok: true, result } satisfies SyncWorkerResponse);
+		port.postMessage({ ok: true, result } satisfies SyncWorkerResponse);
 	} catch (err) {
 		const error = err instanceof Error ? (err.stack ?? err.message) : String(err);
-		self.postMessage({ ok: false, error } satisfies SyncWorkerResponse);
+		port.postMessage({ ok: false, error } satisfies SyncWorkerResponse);
 	}
 };
+
+const inbox = consumeWorkerInbox();
+if (inbox) {
+	inbox.bind(message => void handleMessage(message));
+} else {
+	port.on("message", message => void handleMessage(message));
+}
