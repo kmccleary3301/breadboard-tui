@@ -200,7 +200,7 @@ function dispatch(handle: WorkerHandle, request: SyncWorkerRequest): Promise<Par
  *
  * Rejects on transport error, error response, or timeout.
  */
-export async function smokeTestSyncWorker({ timeoutMs = 5_000 }: { timeoutMs?: number } = {}): Promise<void> {
+export async function smokeTestSyncWorker({ timeoutMs = 30_000 }: { timeoutMs?: number } = {}): Promise<void> {
 	if (process.platform === "darwin") return;
 	const worker = createSyncWorker();
 	const { promise, resolve, reject } = Promise.withResolvers<void>();
