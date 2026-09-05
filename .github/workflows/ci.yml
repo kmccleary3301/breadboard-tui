@@ -199,11 +199,11 @@ jobs:
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
 
    # Provides the native addons every downstream TS job installs. PRs never
-   # build: they fetch the latest release's Linux x64 pair from the
-   # @oh-my-pi/pi-natives-linux-x64 npm leaf instead. The workspace loader
-   # skips its version sentinel for workspace loads, so release addons load
-   # fine under a newer checkout; a PR whose TS tests depend on changed
-   # native behavior fails visibly and the native side lands via main.
+   # build: they fetch the Linux x64 pair matching packages/natives/package.json
+   # from the @oh-my-pi/pi-natives-linux-x64 npm leaf. Workspace loads bypass
+   # the version sentinel, so selection must not follow a mutable latest tag.
+   # Unreleased native changes still land through main's source-built
+   # validation.
    # Main builds the Linux x64 pair consumed by tests; a release build expands
    # to every Linux-hosted/cross target before publishing.
    native_addons:
@@ -214,13 +214,14 @@ jobs:
       steps:
          - uses: actions/checkout@v4
 
-         # ---- PR path: latest release addons from npm ----
+         # ---- PR path: version-matched release addons from npm ----
          - name: Fetch release native addons (npm)
            if: github.event_name == 'pull_request'
            shell: bash
            run: |
               set -euo pipefail
-              tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@latest dist.tarball)"
+              native_version="$(jq -r '.version' packages/natives/package.json)"
+              tarball="$(npm view "@oh-my-pi/pi-natives-linux-x64@$native_version" dist.tarball)"
               echo "Fetching $tarball"
               curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
               mkdir -p bazel-bin/natives-linux-x64-baseline bazel-bin/natives-linux-x64-modern
@@ -261,7 +262,7 @@ jobs:
            run: |
               if gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null \
                  | grep -qE '^(crates/|bazel/|Cargo\.(toml|lock)|MODULE\.bazel(\.lock)?|BUILD\.bazel|\.bazelrc|\.bazelignore|\.bazelversion|rust-toolchain\.toml|rustfmt\.toml)'; then
-                echo "::notice title=Native sources changed::PR CI tests against the latest release addons by design; native changes are validated post-merge on main and at release."
+                echo "::notice title=Native sources changed::PR CI tests against the declared native package version's release addons; native changes are validated post-merge on main and at release."
               fi
 
          # ---- main path: bazel build of required native targets ----
