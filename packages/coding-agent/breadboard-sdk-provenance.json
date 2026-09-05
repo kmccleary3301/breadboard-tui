@@ -7,9 +7,9 @@
   "artifactSha512Base64": "DiOLViARDm+gY9bMdNiqdbA/wZlKgaL8pBrJxjtxxwQB8YsSwybClBKbKdurpIBrsrpOuz7/uoFi9diqlFkPiQ==",
   "artifactSizeBytes": 67742,
   "backendRepository": "https://github.com/kmccleary3301/breadboard.git",
-  "backendCommit": "05bc6ba5e7699354a3b8597a91e7cbf6e8c7ac8d",
-  "backendTree": "a884ace66441168ef504a383fa4eda31d6a429d2",
-  "sdkSubtree": "b28ad6200d98e480cba29b721cecd1f6ae75d4e1",
+  "backendCommit": "7a91238cfcb399262d22d631610ba9124637f64a",
+  "backendTree": "a7ba5dce2f54cb0938436e86cf1ecc28cdc1c377",
+  "sdkSubtree": "6e51a95214a3c5ed9f38baa3ba17382be73bff59",
   "engineInterfaceVersion": "0.4.0",
   "engineInterfaceRange": ">=0.4.0 <0.5.0",
   "installedFilesSha256": {
@@ -49,26 +49,6 @@
     "package.json": "518f4619eaec0530702630505ad22c0ebd562a49db929561c37ceeb5532ea066"
   },
   "exportInventoryPath": "./sdk-export-inventory.json",
-  "validation": {
-    "sdkTests": "SKIPPED per W9 concurrent-batch constraint",
-    "canonicalRepeatability": "SKIPPED per W9 concurrent-batch constraint",
-    "cleanConsumerTypecheck": "SKIPPED per W9 concurrent-batch constraint",
-    "cleanConsumerRuntime": "SKIPPED per W9 concurrent-batch constraint"
-  },
-  "d7ContractDifferences": {
-    "baselineArtifactSha256": "06eba5c858ba23399f984aade20527b82fe26d14a3cd7817e1bcf3b0748cb1d4",
-    "baselineInstalledFileCount": 24,
-    "currentInstalledFileCount": 34,
-    "generatedDtoSurface": "dist/generated/dtos replaced by dist/generated/public-bindings",
-    "addedModules": [
-      "dist/public-client.d.ts",
-      "dist/public-client.js",
-      "dist/transport-security.d.ts",
-      "dist/transport-security.js"
-    ],
-    "publicRoot": "narrowed to explicit product-safe exports; ROUTES remains internal as INTERNAL_ROUTES",
-    "internalCompatibility": "removed; supported engine, session, and lifecycle subpaths are explicit"
-  },
   "backendRootEnvironmentVariable": "BREADBOARD_P30_BACKEND_ROOT",
-  "exportInventorySha256": "b67ffa98522613c530ed615d2994142570376b5b2a1f16eab1931822c635c3f9"
+  "exportInventorySha256": "be3841a0dea6b83fccb7dadae6c3d66cb106c1006307a53c8cfa9bab1b573b40"
 }
