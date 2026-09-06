@@ -341,6 +341,7 @@ async def inspect_state():
         raise RuntimeError("Session replay does not match its persisted owner snapshot")
     work = WorkItem.restore(factory.repository, run_id + ":work")
     source_message_bytes = {}
+    recorded_contexts = {}
     for name in ("E", "E_PRIME"):
         recording = json.loads((workspace / (name + ".json")).read_text())
         recording_workspace = workspace / recording["workspace"]
@@ -349,6 +350,14 @@ async def inspect_state():
             workspace_artifact_ref(recording_workspace, recording["request_ref"]),
         )
         source_message_bytes[name] = base64.b64encode(exchange).decode("ascii")
+        recorded, _ = load_session(recording_workspace, recording["session_id"])
+        persisted = json.loads(session_metadata_path(recording_workspace, recording["session_id"]).read_bytes())
+        if rebuild(recorded.events).as_dict() != persisted:
+            raise RuntimeError("recorded Session replay differs from its persisted owner snapshot")
+        recorded_contexts[name] = {
+            "effective_context": None if recorded.effective_context is None else recorded.effective_context.decode(),
+            "raw_fact_ids": list(recorded.raw_fact_ids),
+        }
     result = {
         "registry_root": str(registry_root),
         "registry_record_count": len(records),
@@ -374,6 +383,7 @@ async def inspect_state():
         "raw_fact_ids": list(parent.raw_fact_ids),
         "terminal_outcome": parent_value["terminal_outcome"],
         "source_message_bytes": source_message_bytes,
+        "recorded_contexts": recorded_contexts,
     }
     joined = [event for event in work.events if event.kind == "child.joined"]
     result["execution_evidence"] = None
@@ -939,6 +949,17 @@ def assert_report_and_owners(
         or oracle.get("raw_fact_ids") != EXPECTED_FACTS
     ):
         raise JourneyFailure("pre-operation context oracle changed")
+    expected_context = {
+        "effective_context": EXPECTED_CONTEXT,
+        "raw_fact_ids": EXPECTED_FACTS,
+    }
+    if state.get("recorded_contexts") != {
+        "E": expected_context,
+        "E_PRIME": expected_context,
+    }:
+        raise JourneyFailure(
+            "post-operation recorded owner lost compacted context or raw facts"
+        )
     if state.get("generation_sequence") != oracle.get("generation_sequence"):
         raise JourneyFailure("generation sequence changed across operation")
     annotations = state.get("annotation_events")

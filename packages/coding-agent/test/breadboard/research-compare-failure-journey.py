@@ -268,6 +268,32 @@ def main() -> int:
             "installed environment unexpectedly contains provider credentials"
         )
 
+    usage = subprocess.run(
+        [str(bb), "research", "compare"],
+        cwd=workspace,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=options.startup_timeout,
+        check=False,
+    )
+    (output / "usage.stdout.txt").write_text(usage.stdout)
+    (output / "usage.stderr.txt").write_text(usage.stderr)
+    if usage.returncode != 1 or any(
+        flag not in usage.stderr
+        for flag in (
+            "--definition",
+            "--world",
+            "--generation",
+            "--projection",
+            "--compare",
+            "--help",
+        )
+    ):
+        raise JourneyFailure(
+            "invalid comparison invocation lost the shared command usage/help"
+        )
+
     _journey.run_source_program(
         _journey.FIXTURE_PROGRAM,
         [str(workspace)],

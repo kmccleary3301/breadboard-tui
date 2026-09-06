@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { emergencyTerminalRestore } from "@oh-my-pi/pi-tui";
+import { InstalledEngineDiscoveryError } from "./installed-engine-manifest";
+import { formatInstalledEngineDiscoveryError } from "./installed-engine-selection";
 import { type LifecycleState, lifecyclePresentationCategory } from "./lifecycle-state";
 import type { LifecycleDispatchResult } from "./lifecycle-supervisor";
-import type { BreadboardRunConfig } from "./run-config";
+import { type BreadboardRunConfig, BreadboardRunConfigError } from "./run-config";
 
 export interface LifecyclePresentation {
 	readonly summary: string;
@@ -35,6 +37,14 @@ const REMEDIATION_BY_REASON: Readonly<Record<string, string>> = {
 	process_control_failed: "Do not retry a signal until full process and engine identity is verified.",
 	session_slice_not_landed: "The lifecycle is ready, but the governed Breadboard session slice is not installed.",
 };
+
+export function formatBreadboardConnectionError(error: unknown): string | undefined {
+	if (error instanceof BreadboardRunConfigError) {
+		return `BreadBoard configuration error [${error.code}/${error.field}]: ${error.message}`;
+	}
+	if (error instanceof InstalledEngineDiscoveryError) return formatInstalledEngineDiscoveryError(error);
+	return undefined;
+}
 
 export function displayEndpointIdentity(endpoint: string | undefined): string | undefined {
 	if (!endpoint) return undefined;

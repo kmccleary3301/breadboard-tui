@@ -34,9 +34,7 @@ import {
 	connectCanonicalBreadboardEnginePort,
 	type BreadboardLifecycleFailureResult as EngineLifecycleFailureResult,
 } from "./engine-port";
-import { InstalledEngineDiscoveryError } from "./lifecycle/installed-engine-manifest";
-import { formatInstalledEngineDiscoveryError } from "./lifecycle/installed-engine-selection";
-import { writeLifecyclePresentation } from "./lifecycle/lifecycle-presenter";
+import { formatBreadboardConnectionError, writeLifecyclePresentation } from "./lifecycle/lifecycle-presenter";
 import { resolveProductBreadboardRunConfig } from "./lifecycle/product-run-config";
 import {
 	BreadboardRunConfigError,
@@ -320,12 +318,8 @@ export class BreadboardModelAuthorityError extends Error {
 }
 
 export function formatBreadboardStartupError(error: unknown): string | undefined {
-	if (error instanceof BreadboardRunConfigError) {
-		return `BreadBoard configuration error [${error.code}/${error.field}]: ${error.message}`;
-	}
-	if (error instanceof InstalledEngineDiscoveryError) {
-		return formatInstalledEngineDiscoveryError(error);
-	}
+	const connectionError = formatBreadboardConnectionError(error);
+	if (connectionError !== undefined) return connectionError;
 	if (error instanceof BreadboardSessionTransitionError) {
 		return `BreadBoard session transition error [${error.code}]: ${error.message}`;
 	}
