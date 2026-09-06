@@ -1,20 +1,16 @@
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { formatInstalledEngineIdentity } from "../breadboard/lifecycle/installed-engine-manifest";
 import {
-	formatInstalledEngineIdentity,
-	InstalledEngineDiscoveryError,
-} from "../breadboard/lifecycle/installed-engine-manifest";
-import { formatInstalledEngineDiscoveryError } from "../breadboard/lifecycle/installed-engine-selection";
-import { restoreLifecycleTerminal, writeLifecyclePresentation } from "../breadboard/lifecycle/lifecycle-presenter";
+	formatBreadboardConnectionError,
+	restoreLifecycleTerminal,
+	writeLifecyclePresentation,
+} from "../breadboard/lifecycle/lifecycle-presenter";
 import { createProductionLifecycleSupervisor } from "../breadboard/lifecycle/lifecycle-production";
 import { type LifecycleResult, lifecycleFailure, lifecycleState } from "../breadboard/lifecycle/lifecycle-state";
 import { dispatchLifecycleAction, type LifecycleActionExecution } from "../breadboard/lifecycle/lifecycle-supervisor";
 import { resolveProductBreadboardRunConfig } from "../breadboard/lifecycle/product-run-config";
-import {
-	BREADBOARD_ENGINE_MODES,
-	BreadboardRunConfigError,
-	parseSelectedBreadboardConfig,
-} from "../breadboard/lifecycle/run-config";
+import { BREADBOARD_ENGINE_MODES, parseSelectedBreadboardConfig } from "../breadboard/lifecycle/run-config";
 import { engineHelp as commandHelp } from "../cli/command-help";
 import { Settings } from "../config/settings";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
@@ -97,13 +93,7 @@ export default class Engine extends Command {
 			process.exitCode = exitCode;
 		} catch (error) {
 			const message =
-				error instanceof BreadboardRunConfigError
-					? `${BREADBOARD_PRODUCT_IDENTITY.displayName} configuration error [${error.code}/${error.field}]: ${error.message}`
-					: error instanceof InstalledEngineDiscoveryError
-						? formatInstalledEngineDiscoveryError(error)
-						: error instanceof Error
-							? error.message
-							: String(error);
+				formatBreadboardConnectionError(error) ?? (error instanceof Error ? error.message : String(error));
 			process.stderr.write(`${message}\n`);
 			process.exitCode = 1;
 		} finally {

@@ -109,6 +109,15 @@ def _configure_ray_runtime() -> tuple[Path, bool]:
 
 
 def _main() -> None:
+    engine_root = Path(sys.executable).resolve().parent
+    os.environ["BREADBOARD_RESEARCH_WORLD_MODE"] = "frozen"
+    os.environ["BREADBOARD_VERIFIED_ENGINE_ROOT"] = str(engine_root)
+    os.environ["BREADBOARD_RESEARCH_WORLD_WORKER"] = str(engine_root / "breadboard-research-world")
+    os.environ["BREADBOARD_RESEARCH_WORLD_HELPER"] = str(Path(sys.executable).resolve())
+    if sys.argv[1:2] == ["--process-child"]:
+        from breadboard.product.runtime.process_child import main as process_child_main
+
+        raise SystemExit(process_child_main(sys.argv[2:]))
     ray_runtime_root, owns_ray_runtime_root = _configure_ray_runtime()
     try:
         if sys.argv[1:] == ["${ENGINE_SELF_TEST_ARGUMENT}"]:
@@ -141,6 +150,10 @@ def _main() -> None:
                 if ray.is_initialized():
                     ray.shutdown()
             return
+        if sys.argv[1:2] == ["--research-world-helper"]:
+            from breadboard.product.runtime.research_world import main as research_world_main
+
+            raise SystemExit(research_world_main(sys.argv[1:]))
         if _run_frozen_ray_child():
             return
         from breadboard_engine.api.cli_bridge.server import main
@@ -698,6 +711,23 @@ async function main(options: BuildOptions): Promise<void> {
 			workRoot,
 		);
 		const runtimeRoot = join(distPath, "breadboard-engine");
+		await run(
+			["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+			join(sourceRoot, "sdk", "ts-kernel-contracts"),
+		);
+		await run(
+			[
+				"bun",
+				"build",
+				"sdk/ts-kernel-core/src/research-world-worker.ts",
+				"--compile",
+				"--tsconfig-override",
+				"sdk/ts-kernel-core/tsconfig.json",
+				"--outfile",
+				join(runtimeRoot, "breadboard-research-world"),
+			],
+			sourceRoot,
+		);
 		const rayThirdPartyRoot = join(runtimeRoot, "_internal", "ray", "thirdparty_files");
 		for (const name of await readdir(rayThirdPartyRoot)) {
 			if (name === "psutil" || (name.startsWith("psutil-") && name.endsWith(".dist-info"))) {

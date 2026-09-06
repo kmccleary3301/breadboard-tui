@@ -22,6 +22,7 @@ import { launchHelp } from "./commands/launch-help";
 export const commands: CommandEntry[] = [
 	{ name: "launch", load: () => import("./commands/launch").then(m => m.default), help: launchHelp },
 	{ name: "engine", load: () => import("./commands/engine").then(m => m.default), help: commandHelp.engineHelp },
+	{ name: "research", load: () => import("./commands/research").then(m => m.default), help: commandHelp.researchHelp },
 	{
 		name: "acp",
 		load: () => import("./commands/acp").then(m => m.default),

@@ -12,8 +12,8 @@
     "tree": "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61"
   },
   "budgets": {
-    "maxTotalChangedPaths": 321,
-    "maxUpstreamEntrypointPaths": 12
+    "maxTotalChangedPaths": 325,
+    "maxUpstreamEntrypointPaths": 13
   },
   "rules": [
     {
@@ -73,6 +73,7 @@
         "packages/tui/test/markdown.test.ts",
         "packages/coding-agent/test/theme-auto-detection.test.ts",
         "packages/coding-agent/src/commands/engine.ts",
+        "packages/coding-agent/src/commands/research.ts",
         "packages/coding-agent/src/cli/command-help.ts",
         "packages/coding-agent/src/cli/help-extra.ts",
         "packages/coding-agent/src/commands/launch-help.ts",
@@ -378,6 +379,7 @@
       "packages/coding-agent/test/cli/update-cli.test.ts",
       "packages/coding-agent/test/cli-argv-routing.test.ts",
       "packages/coding-agent/src/commands/engine.ts",
+      "packages/coding-agent/src/commands/research.ts",
       "packages/coding-agent/src/commands/launch-help.ts",
       "packages/coding-agent/src/commands/launch.ts",
       "packages/coding-agent/src/config/settings.ts",

@@ -1,4 +1,4 @@
-import { type BreadboardClient, createBreadboardClient } from "@breadboard/sdk/engine";
+import { ApiError, type BreadboardClient, createBreadboardClient } from "@breadboard/sdk/engine";
 import type { LifecycleEngineBinding } from "@breadboard/sdk/lifecycle";
 import { createCanonicalE4Client } from "@breadboard/sdk/session";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -81,6 +81,9 @@ export interface BreadboardEnginePort {
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
 	getFeatures(): Promise<EngineStatusResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
+	compareResearch(
+		request: FirstParameter<BreadboardClient["compareResearch"]>,
+	): Promise<{ readonly resultJson: string; readonly exitCode: number }>;
 	setSessionModel(sessionId: string, model: string): Promise<void>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
 	readonly modelRoles: ModelRolePort;
@@ -103,6 +106,24 @@ export interface LifecycleMonitor {
 	readonly signal: BreadboardLifecycleFailureSignal;
 	readonly stateChanged: (state: LifecycleState) => void;
 	activateAuthority(authority: BreadboardEngineAuthorityIdentity): void;
+}
+
+function semanticExitCode(body: unknown): number | undefined {
+	if (
+		body === null ||
+		typeof body !== "object" ||
+		Array.isArray(body) ||
+		!("schema_version" in body) ||
+		body.schema_version !== "bb.cli.result.v1" ||
+		!("ok" in body) ||
+		body.ok !== false ||
+		!("exit_code" in body)
+	)
+		return undefined;
+	const exitCode = body.exit_code;
+	return typeof exitCode === "number" && Number.isInteger(exitCode) && exitCode > 0 && exitCode < 256
+		? exitCode
+		: undefined;
 }
 
 function isLifecycleFailureResultState(state: LifecycleState): state is BreadboardLifecycleFailureResult["state"] {
@@ -374,6 +395,19 @@ function createConnectedPort(
 		getModelCatalog: async configPath => {
 			assertOperational();
 			return controlClient.getModelCatalog(configPath);
+		},
+		compareResearch: async request => {
+			assertOperational();
+			try {
+				const result = await controlClient.compareResearch(request);
+				return { resultJson: JSON.stringify(result), exitCode: result.exit_code };
+			} catch (error) {
+				if (error instanceof ApiError) {
+					const exitCode = semanticExitCode(error.body);
+					if (exitCode !== undefined) return { resultJson: JSON.stringify(error.body), exitCode };
+				}
+				throw error;
+			}
 		},
 		setSessionModel: async (sessionId, model) => {
 			assertOperational();

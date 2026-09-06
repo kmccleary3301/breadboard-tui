@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
+
 ### Changed
 
 - The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.

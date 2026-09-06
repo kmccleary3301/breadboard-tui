@@ -18,8 +18,8 @@ Current product identity:
 
 - BreadBoard: `0.1.0-rc.4`
 - OMP: `18.0.1`
-- `@breadboard/sdk`: `0.3.0`
-- engine interface: `>=0.1.0 <0.4.0`
+- `@breadboard/sdk`: `0.4.0`
+- SDK engine API range: `>=0.4.0 <0.5.0`
 
 ## Build
 
@@ -27,13 +27,34 @@ Prerequisites: Bun `>=1.3.14` (the repository package manager and primary CI lan
 
 ```sh
 bun install --frozen-lockfile
+bun packages/coding-agent/scripts/build-engine-distribution.ts \
+  --backend-root /path/to/pinned/breadboard \
+  --output-root /path/to/private/engine-distribution \
+  --product-version 18.0.1
 BREADBOARD_P30_BACKEND_ROOT=/path/to/pinned/breadboard \
+  BREADBOARD_ENGINE_DISTRIBUTION_ROOT=/path/to/private/engine-distribution \
   bun run --cwd packages/coding-agent build:bb
 ./packages/coding-agent/dist/bb --version
 ./packages/coding-agent/dist/bb --smoke-test
 ```
 
 The SDK provenance gate fails closed when the backend checkout, generated contract, or vendored artifact differs from the recorded identity.
+
+The engine distribution builder requires its pinned Bun `1.3.14`, Python and uv toolchain. It builds the engine from the clean backend commit rather than importing that checkout at runtime.
+
+## Recorded-run comparison
+
+The downstream `bb` product compares recorded Sessions through the installed engine:
+
+```sh
+bb research compare --definition EXPERIMENT.json --world WORLD.json --generation GENERATION.json --projection PROJECTION.json --compare E.json,E_PRIME.json
+```
+
+Run from the workspace containing those inputs. The result envelope returns `data.run_id` and `data.report_id`. Repeating identical inputs resumes the admitted snapshot and returns the same completed identities, even if referenced source recordings later advance. Engine-declared failures preserve their semantic exit and error codes.
+
+Worlds are `local`, `container`, `ray`, and `slurm`. Declare `field_mask` as exactly `["/occurred_at", "/timestamp"]` before running. Container workspace paths must be visible to the container daemon; a remote Docker VM does not necessarily share the host's temporary directory.
+
+The [installed acceptance journey](./packages/coding-agent/test/breadboard/research-compare-journey.py) exercises controller replacement, replay, request bytes, compaction, annotations, and child settlement. The [failure journey](./packages/coding-agent/test/breadboard/research-compare-failure-journey.py) exercises forged reports and lost child results. Both provide `--help` and require a freshly built `bb`; source checkout access is limited to fixture creation and owner inspection.
 
 ## Verification
 
