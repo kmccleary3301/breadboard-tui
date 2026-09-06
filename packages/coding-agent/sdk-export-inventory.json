@@ -2,8 +2,8 @@
   "schema_version": "bb.sdk_export_inventory.v1",
   "package": "@breadboard/sdk",
   "version": "0.4.0",
-  "source_commit": "d9385c53560dfafa828b264e67e993d7f129ae4d",
-  "source_tree": "301bea7b30f4e44f1f4207ef1c44099aa810335a",
+  "source_commit": "5d82a6d354e0a26c752407aa7494c3a0924f010a",
+  "source_tree": "f72f407b516466fb482b814a17089caafa1cb3f8",
   "public_exports": [
     "ApiError",
     "BreadboardClient",

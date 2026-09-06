@@ -60,7 +60,7 @@ from breadboard.product.operations.harness import LockHarnessRequest, lock_harne
 from breadboard.product.operations.model import OperationContext
 from breadboard.product.runtime.artifacts import put_workspace_artifact
 from breadboard.product.runtime.events import AnnotationRecord, CompactionSnapshot, Session, rebuild, replay_differential
-from breadboard.product.runtime.session_store import create_session
+from breadboard.product.runtime.session_store import create_session, mutate_session
 from breadboard_engine.provider.contract_exchange import ProviderExchangeV2
 from breadboard_engine.provider.contract_runtime import ProviderRuntimeContext
 from breadboard_engine.provider.contract_wire import canonical_json
@@ -88,7 +88,7 @@ class CapturingAdapter:
         self.path = path
     def __call__(self, request):
         self.path.with_name("held-out-wire.json").write_bytes(request.content)
-        self.path.write_bytes(canonical_json(json.loads(request.content)).encode())
+        self.path.write_bytes(json.dumps(json.loads(request.content), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode())
         return httpx.Response(200, json={
             "id": "held-out", "created": 1, "model": "gpt-4o-mini",
             "object": "chat.completion", "choices": [{
@@ -154,7 +154,7 @@ def prepare(root):
             "provider_id": descriptor.provider_id, "runtime_id": descriptor.runtime_id,
             "route_id": definition["providers"]["default_model"], "model": model,
         },
-        "request": {"stream": False, "messages": messages, "tools": []},
+        "request": {"stream": True, "messages": [{"message_id": "forbidden-request", "role": "user", "content": [{"type": "text", "text": "Do not reconstruct this derivative request."}]}], "tools": []},
         "events": [
             {"sequence": 0, "kind": "response_start"},
             {"sequence": 1, "kind": "text_start", "content_index": 0, "message_id": "recorded-answer"},
@@ -177,8 +177,9 @@ def prepare(root):
         workspace = root / name
         workspace.mkdir()
         ref = put_workspace_artifact(workspace, exchange_bytes, media_type="application/json")
+        input_ref = put_workspace_artifact(workspace, b"Recorded question.", media_type="text/plain")
         session = Session.start(compiled.lock, "recorded comparison", session_id="recorded-session", clock=Clock(timestamp))
-        session.input("Recorded question.", (ref,))
+        session.input("Recorded question.", (ref, input_ref))
         segment = session.read_model.trajectory_segment_id
         session.assistant_message("Recorded answer.", message_id="recorded-answer", trajectory_id=segment)
         session.annotate(AnnotationRecord(
@@ -201,8 +202,9 @@ def prepare(root):
         (root / (name + ".json")).write_text(json.dumps({
             "definition": "EXPERIMENT.json", "workspace": name,
             "session_id": "recorded-session", "request_ref": ref.digest,
+            "adapter_config": {"stream": False},
         }), encoding="utf-8")
-    projection = {"projector_version": "bb.session.projector.v2", "as_of": len(session.events)}
+    projection = {"projector_version": "bb.session.projector.v2"}
     (root / "PROJECTION.json").write_text(json.dumps(projection), encoding="utf-8")
     pre = {
         "definition_lock": compiled.lock.as_dict(),
@@ -230,20 +232,33 @@ def prepare(root):
     (root / "pre-operation-oracle.json").write_text(json.dumps(pre, sort_keys=True), encoding="utf-8")
     print(json.dumps({"workspace": str(root), "event_count": len(session.events), "compaction_count": 3}))
 
+def advance(root):
+    for name in ("E", "E_PRIME"):
+        def append(session):
+            target = next(event.payload for event in session.events if event.kind == "assistant_message")
+            session.annotate(AnnotationRecord(
+                "after-admission", target["message_id"], target["trajectory_id"],
+                "new source fact", "source-owner", session.pinned_generation_id,
+            ))
+        mutate_session(root / name, "recorded-session", append)
+    print("recorded source advanced after comparison admission")
+
 if __name__ == "__main__":
-    prepare(Path(sys.argv[1]).resolve())
+    (advance if len(sys.argv) == 3 and sys.argv[2] == "advance" else prepare)(Path(sys.argv[1]).resolve())
 """
 
 
 INSPECT_PROGRAM = r"""
 from __future__ import annotations
 import asyncio
+import base64
 import json
 import sys
 from pathlib import Path
 from breadboard.product.coordination.work_items import WorkItem, WorkItemRepository
 from breadboard.product.runtime.artifacts import ArtifactRef
-from breadboard.product.runtime.session_store import load_session
+from breadboard.product.runtime.events import rebuild
+from breadboard.product.runtime.session_store import load_session, session_metadata_path
 from breadboard.product.runtime.children import ChildSpec, ChildState, DurableChildFactory, ProcessExecutionAdapter, RESEARCH_WORLD_WORKER_COMMAND
 from breadboard.product.harness.lock import load_lock
 from breadboard.product.runtime.artifacts import read_workspace_artifact, workspace_artifact_ref
@@ -253,6 +268,7 @@ from breadboard_engine.api.cli_bridge.registry.registry_impl import SessionRegis
 workspace = Path(sys.argv[1]).resolve()
 agent_root = Path(sys.argv[2]).resolve()
 run_id = sys.argv[3]
+cancel_owned = sys.argv[4:] == ["cancel"]
 
 def registry_candidates():
     paths = set()
@@ -269,6 +285,9 @@ async def inspect_state():
         durable = [record for record in records if isinstance(record.metadata, dict) and "durable_child" in record.metadata]
         if durable:
             found.append((root, registry, records, durable))
+    if not found and cancel_owned:
+        print(json.dumps({"local_child_cleanup": "no admitted children"}))
+        return
     if len(found) != 1:
         raise RuntimeError(f"expected one isolated retained registry with a durable child, found {len(found)}")
     registry_root, registry, records, durable = found[0]
@@ -284,6 +303,17 @@ async def inspect_state():
         repository=WorkItemRepository(workspace / ".breadboard" / "work_items.jsonl"),
         adapters=(ProcessExecutionAdapter(command=RESEARCH_WORLD_WORKER_COMMAND),),
     )
+    if cancel_owned:
+        states = await asyncio.to_thread(
+            factory.cancel_tree,
+            parent_session_id=child.parent_session_id,
+            parent_work_item_id=child.parent_work_item_id,
+            reason="failed acceptance journey cleanup",
+        )
+        if any(state.terminal_count != 1 for state in states):
+            raise RuntimeError("owned child cancellation has not reached terminal settlement")
+        print(json.dumps({"local_child_cleanup": "terminal", "children": len(states)}))
+        return
     ref = child.child_spec["task_artifact_ref"]
     task_bytes = factory.artifacts.read(ArtifactRef(ref["digest"], ref["size_bytes"], ref["media_type"]))
     task = task_bytes.decode()
@@ -299,38 +329,69 @@ async def inspect_state():
         parent_work_item_id=child.parent_work_item_id,
         definition=WorkflowDefinition((WorkflowStep("compare", spec),)),
     )
-    decision = (await asyncio.to_thread(controller.decision)).as_dict()
     parent, _ = load_session(workspace, run_id)
+    if parent.read_model.status == "failed":
+        decision = None
+    else:
+        decision = (await asyncio.to_thread(controller.decision)).as_dict()
     parent_value = parent.read_model.as_dict()
+    parent_replay = rebuild(parent.events)
+    durable_parent = json.loads(session_metadata_path(workspace, run_id).read_bytes())
+    if parent_replay.as_dict() != durable_parent:
+        raise RuntimeError("Session replay does not match its persisted owner snapshot")
     work = WorkItem.restore(factory.repository, run_id + ":work")
+    source_message_bytes = {}
+    for name in ("E", "E_PRIME"):
+        recording = json.loads((workspace / (name + ".json")).read_text())
+        recording_workspace = workspace / recording["workspace"]
+        exchange = read_workspace_artifact(
+            recording_workspace,
+            workspace_artifact_ref(recording_workspace, recording["request_ref"]),
+        )
+        source_message_bytes[name] = base64.b64encode(exchange).decode("ascii")
     result = {
         "registry_root": str(registry_root),
         "registry_record_count": len(records),
         "child_state": child.retained(),
+        "child_process_observation": ProcessExecutionAdapter().observe(child.execution_target),
         "decision": decision,
         "parent_events": [event.as_dict() for event in parent.events],
         "parent_read_model": parent_value,
+        "owner_replay_equal": True,
         "work_events": [event.as_dict() for event in work.events],
+        "work_status": work.read_model.status,
+        "work_terminal_reason": work.read_model.terminal_reason,
         "joined_count": sum(event.kind == "child.joined" for event in work.events),
         "attempt_count": sum(event.kind == "attempt.started" for event in work.events),
+        "child_terminal_count": child.terminal_count,
+        "child_joined": child.joined,
+        "child_settlement": None if child.settlement is None else dict(child.settlement),
+        "child_terminal_outcome": child.terminal_outcome,
         "annotation_events": [event.as_dict() for event in parent.events if event.kind == "annotation"],
         "generation_sequence": list(parent.generation_sequence),
         "trajectory_segments": [dict(item) for item in parent.trajectory_segments],
         "effective_context": None if parent.effective_context is None else parent.effective_context.decode(),
         "raw_fact_ids": list(parent.raw_fact_ids),
         "terminal_outcome": parent_value["terminal_outcome"],
+        "source_message_bytes": source_message_bytes,
     }
     joined = [event for event in work.events if event.kind == "child.joined"]
+    result["execution_evidence"] = None
     if len(joined) == 1:
         child_session, _ = load_session(workspace, joined[0].payload["child_session_id"])
+        durable_child = json.loads(session_metadata_path(workspace, child_session.read_model.session_id).read_bytes())
+        if rebuild(child_session.events).as_dict() != durable_child:
+            raise RuntimeError("child Session replay does not match its persisted owner snapshot")
         result["child_session_events"] = [event.as_dict() for event in child_session.events]
         result["child_session_read_model"] = child_session.read_model.as_dict()
+        result["child_session_status"] = child_session.read_model.status
         result["child_completed_count"] = sum(event.kind == "session.completed" for event in child_session.events)
         result["child_parent_session_id"] = child_session.read_model.lineage.parent_session_id if child_session.read_model.lineage else None
-        world_result = json.loads(
-            read_workspace_artifact(workspace, workspace_artifact_ref(workspace, child.result_refs[0]))
-        )
-        result["execution_evidence"] = world_result["execution_evidence"]
+        if child.result_refs:
+            world_result = json.loads(
+                read_workspace_artifact(workspace, workspace_artifact_ref(workspace, child.result_refs[0]))
+            )
+            result["execution_evidence"] = world_result["execution_evidence"]
     report_id = None
     if parent.read_model.terminal_outcome is not None:
         report_id = parent.read_model.terminal_outcome.get("summary")
@@ -469,9 +530,10 @@ def run_source_program(
             Path(pwd.getpwuid(os.getuid()).pw_dir) / ".breadboard" / "session-authority"
         ),
     }
-    with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open(
-        "w", encoding="utf-8"
-    ) as stderr:
+    with (
+        stdout_path.open("w", encoding="utf-8") as stdout,
+        stderr_path.open("w", encoding="utf-8") as stderr,
+    ):
         completed = subprocess.run(
             [sys.executable, "-c", program, *args],
             cwd=cwd,
@@ -679,48 +741,96 @@ def copy_world_input(
 
 
 def finish_slurm_world(
-    world: dict[str, Any], marker: Path, evidence: list[dict[str, Any]]
+    world: dict[str, Any],
+    marker: Path,
+    evidence: list[dict[str, Any]],
+    *,
+    expect_success: bool,
+    local_quiescent: bool,
 ) -> dict[str, Any]:
-    job_id = evidence[-1]["executionId"].split("@", 1)[0]
-    if not job_id.isascii() or not job_id.isdigit():
-        raise JourneyFailure("Slurm execution has no numeric scheduler identity")
-    observed_id = slurm_gate_command(
-        world, f"cat {shlex.quote(str(marker))}"
-    ).stdout.strip()
-    if observed_id != job_id:
-        raise JourneyFailure(
-            "Slurm gate and execution evidence identify different jobs"
-        )
-    accounting = slurm_gate_command(
+    owned_workspace = world["remote_evidence_directory"]
+    if str(marker.parent) != owned_workspace:
+        raise JourneyFailure("Slurm marker is outside this run's owned workspace")
+    marker_id = slurm_gate_command(
         world,
-        f"sacct -n -P -X -j {job_id} "
-        "--format=JobIDRaw,State,ExitCode,AllocCPUS,ReqMem,Timelimit,WorkDir%500",
-    ).stdout
-    rows = [line.split("|") for line in accounting.splitlines() if line.strip()]
-    if len(rows) != 1 or len(rows[0]) != 7:
-        raise JourneyFailure(
-            f"Slurm accounting did not return one complete job record: {accounting}"
-        )
-    actual_id, state, exit_code, cpus, memory, time_limit, workdir = rows[0]
-    if (actual_id, state, exit_code, workdir) != (
-        job_id,
+        f"if test -f {shlex.quote(str(marker))}; then cat {shlex.quote(str(marker))}; fi",
+    ).stdout.strip()
+    known_ids = {marker_id} if marker_id else set()
+    for receipt in evidence:
+        execution_id = receipt.get("executionId")
+        if isinstance(execution_id, str):
+            known_ids.add(execution_id.split("@", 1)[0])
+    active = slurm_gate_command(world, 'squeue -h -u "$(id -un)" -o "%i|%T|%Z"').stdout
+    active_rows = [
+        fields
+        for line in active.splitlines()
+        if len(fields := line.split("|", 2)) == 3 and fields[2] == owned_workspace
+    ]
+    known_ids.update(row[0] for row in active_rows)
+    if not known_ids and local_quiescent and not expect_success:
+        slurm_gate_command(world, f"rm -rf -- {shlex.quote(owned_workspace)}")
+        return {
+            "job_id": None,
+            "state": "not-submitted",
+            "owned_workspace_removed": owned_workspace,
+        }
+    if len(known_ids) != 1:
+        raise JourneyFailure("Slurm cleanup has no unique owned scheduler identity")
+    job_id = known_ids.pop()
+    if not job_id.isascii() or not job_id.isdigit():
+        raise JourneyFailure("Slurm owned scheduler identity is not numeric")
+    if len(active_rows) > 1:
+        raise JourneyFailure("Slurm cleanup found multiple jobs in the owned workspace")
+    if active_rows and not expect_success:
+        slurm_gate_command(world, f"scancel {shlex.quote(job_id)}")
+    terminal_states = {
         "COMPLETED",
-        "0:0",
-        world["remote_evidence_directory"],
-    ):
-        raise JourneyFailure(
-            f"Slurm job has not completed in its owned workspace: {accounting}"
-        )
-    slurm_gate_command(world, f"rm -rf -- {shlex.quote(workdir)}")
-    return {
+        "CANCELLED",
+        "FAILED",
+        "TIMEOUT",
+        "NODE_FAIL",
+        "OUT_OF_MEMORY",
+        "PREEMPTED",
+        "BOOT_FAIL",
+        "DEADLINE",
+        "REVOKED",
+    }
+    deadline = time.monotonic() + max(world["command_timeout_ms"] / 1000, 5.0)
+    while True:
+        accounting = slurm_gate_command(
+            world,
+            f"sacct -n -P -X -j {shlex.quote(job_id)} "
+            "--format=JobIDRaw,State,ExitCode,AllocCPUS,ReqMem,Timelimit,WorkDir%500",
+        ).stdout
+        rows = [line.split("|") for line in accounting.splitlines() if line.strip()]
+        if len(rows) == 1 and len(rows[0]) == 7:
+            actual_id, state, exit_code, cpus, memory, time_limit, workdir = rows[0]
+            if actual_id != job_id or workdir != owned_workspace:
+                raise JourneyFailure(
+                    f"Slurm accounting does not identify the owned workspace: {accounting}"
+                )
+            if state.split()[0].split("+", 1)[0] in terminal_states:
+                break
+        if time.monotonic() >= deadline:
+            raise JourneyFailure(
+                f"Slurm owned job has not reached terminal accounting: {accounting}"
+            )
+        time.sleep(0.2)
+    slurm_gate_command(world, f"rm -rf -- {shlex.quote(owned_workspace)}")
+    cleanup = {
         "job_id": job_id,
         "state": state,
         "exit_code": exit_code,
         "allocated_cpus": int(cpus),
         "requested_memory": memory,
         "time_limit": time_limit,
-        "owned_workspace_removed": workdir,
+        "owned_workspace_removed": owned_workspace,
     }
+    if expect_success and (state != "COMPLETED" or exit_code != "0:0"):
+        raise JourneyFailure(
+            f"comparison job did not complete successfully; cleanup={cleanup}"
+        )
+    return cleanup
 
 
 def authenticate_controller(
@@ -769,15 +879,56 @@ def authenticate_controller(
     }
 
 
+def cleanup_failed_run(
+    helpers: Any, workspace: Path, agent: Path, engine_root: Path, output: Path
+) -> None:
+    authority = helpers.active_authority(agent)
+    if authority is not None:
+        _, record = authority
+        pid, token = int(record["pid"]), str(record["osProcessStartToken"])
+        if process_alive(pid):
+            if str(process_start_token(pid)) != token:
+                raise JourneyFailure(
+                    "cleanup refuses an unverified controller identity"
+                )
+            os.kill(pid, signal.SIGTERM)
+            deadline = time.monotonic() + 5.0
+            while process_alive(pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if process_alive(pid):
+                if str(process_start_token(pid)) != token:
+                    raise JourneyFailure("controller identity changed during cleanup")
+                os.kill(pid, signal.SIGKILL)
+                wait_until(
+                    lambda: not process_alive(pid), 5.0, "owned controller cleanup"
+                )
+    run_source_program(
+        INSPECT_PROGRAM,
+        [str(workspace), str(agent), "", "cancel"],
+        engine_root=engine_root,
+        cwd=workspace,
+        stdout_path=output / "cleanup-children.stdout.txt",
+        stderr_path=output / "cleanup-children.stderr.txt",
+        timeout=30,
+    )
+
+
 def assert_report_and_owners(
     state: dict[str, Any],
     oracle: dict[str, Any],
     held_request: bytes,
     held_wire: bytes,
+    source_message_bytes: dict[str, str],
     *,
     run_id: str,
     report_id: str,
 ) -> None:
+    if state.get("owner_replay_equal") is not True:
+        raise JourneyFailure(
+            "post-operation replay differs from a durable owner snapshot"
+        )
+    if state.get("source_message_bytes") != source_message_bytes:
+        raise JourneyFailure("recorded source message bytes changed across operation")
     if (
         oracle.get("event_kinds") != EXPECTED_EVENT_KINDS
         or oracle.get("compaction_count") != 3
@@ -794,16 +945,42 @@ def assert_report_and_owners(
     if not isinstance(annotations, list) or len(annotations) != 1:
         raise JourneyFailure("expected exactly one immutable annotation")
     annotation = annotations[0].get("payload", {})
-    if annotation.get("author") != "research.compare" or annotation.get(
-        "generation"
-    ) != state.get("parent_read_model", {}).get("effective_lock_hash"):
+    report_messages = [
+        event["payload"]
+        for event in state["parent_events"]
+        if event["kind"] == "assistant_message"
+    ]
+    if len(report_messages) != 1:
+        raise JourneyFailure("comparison parent has no unique report message")
+    report_message = report_messages[0]
+    if (
+        annotation.get("message_id") != run_id + ":report"
+        or annotation.get("message_id") != report_message["message_id"]
+        or annotation.get("trajectory_id") != report_message["trajectory_id"]
+        or annotation.get("author") != "research.compare"
+        or annotation.get("generation")
+        != state.get("parent_read_model", {}).get("effective_lock_hash")
+    ):
         raise JourneyFailure(
-            "comparison annotation is not bound to the accepted generation"
+            "comparison annotation target or generation is not bound to the source message"
         )
-    if state.get("joined_count") != 1 or state.get("child_completed_count") != 1:
-        raise JourneyFailure("expected exactly one child join and one child settlement")
+    if (
+        state.get("joined_count") != 1
+        or state.get("child_terminal_count") != 1
+        or state.get("child_joined") is not True
+        or state.get("child_terminal_outcome") != "completed"
+        or state.get("child_settlement") is not None
+        or state.get("child_session_status") != "completed"
+        or state.get("child_completed_count") != 1
+    ):
+        raise JourneyFailure(
+            "expected one completed child Session and one joined ChildState settlement"
+        )
     if state.get("child_parent_session_id") != run_id:
         raise JourneyFailure("child lineage does not point at the research run")
+    parent_model = state.get("parent_read_model")
+    if not isinstance(parent_model, dict) or parent_model.get("status") != "completed":
+        raise JourneyFailure("research parent Session did not complete")
     report = state.get("report")
     if (
         not isinstance(report, dict)
@@ -814,20 +991,17 @@ def assert_report_and_owners(
     records = report.get("records")
     if not isinstance(records, list) or len(records) != 2:
         raise JourneyFailure("research report does not contain exactly two records")
-    canonical_held_request = held_request
     try:
         held_out_value = json.loads(held_wire)
     except json.JSONDecodeError as error:
         raise JourneyFailure(
             f"held-out OpenAI SDK request was not JSON: {error}"
         ) from error
-    canonical_wire = json.dumps(
+    canonical_held_request = json.dumps(
         held_out_value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
-    if canonical_wire != canonical_held_request:
+    if canonical_held_request != held_request:
         raise JourneyFailure("held-out OpenAI SDK request was not captured canonically")
-    if not held_wire:
-        raise JourneyFailure("held-out OpenAI SDK request bytes are empty")
     for record in records:
         if record.get("request_body", "").encode() != canonical_held_request:
             raise JourneyFailure(
@@ -904,6 +1078,7 @@ def main() -> int:
     )
     parser.add_argument("--startup-timeout", type=float, default=30.0)
     parser.add_argument("--turn-timeout", type=float, default=120.0)
+    parser.add_argument("--fail-after-world-start", action="store_true")
     options = parser.parse_args()
     if sys.version_info < (3, 11):
         raise JourneyFailure("research compare journey requires Python 3.11+")
@@ -993,6 +1168,9 @@ def main() -> int:
     third: subprocess.Popen[bytes] | None = None
     third_streams: tuple[Any, Any] | None = None
     slurm_cleaned = False
+    first_failure: BaseException | None = None
+    summary: dict[str, Any] | None = None
+    execution_evidence: list[dict[str, Any]] = []
     try:
         first, first_stdout, first_stderr = process_command(
             command, workspace, environment, output, "first"
@@ -1008,6 +1186,8 @@ def main() -> int:
             return world_gate_started(world, gate_started)
 
         wait_until(gate_ready, options.startup_timeout, "world gate start")
+        if options.fail_after_world_start:
+            raise JourneyFailure("injected failure after world start")
         discovered = wait_until(
             lambda: next(
                 (
@@ -1048,6 +1228,28 @@ def main() -> int:
             raise JourneyFailure(
                 f"workflow was not waiting at kill gate: {before['decision']}"
             )
+        target = before["child_state"]["execution_target"]
+        child_pid, child_group = target["pid"], target["process_group_id"]
+        if (
+            before["child_process_observation"] != "running"
+            or os.getpgid(child_pid) != child_group
+        ):
+            raise JourneyFailure("retained child process identity is not live")
+        worker_processes = subprocess.run(
+            ["ps", "-g", str(child_group), "-o", "pid=,ppid=,args="],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+        if "breadboard-research-world" not in worker_processes:
+            raise JourneyFailure("owned process group has no installed research worker")
+        if (
+            str(engine_root) in worker_processes
+            or str(Path(__file__).parents[4]) in worker_processes
+        ):
+            raise JourneyFailure("installed child process group uses a source checkout")
+        (output / "worker-processes.txt").write_text(worker_processes)
         controller = authenticate_controller(helpers, first, agent, engine_root)
         controller_pid = int(controller["pid"])
         if str(process_start_token(controller_pid)) != str(controller["start_token"]):
@@ -1156,11 +1358,21 @@ def main() -> int:
             oracle,
             held_request,
             held_wire,
+            before["source_message_bytes"],
             run_id=run_id,
             report_id=report_id,
         )
         baseline_parent_events = completed_state["parent_events"]
         baseline_work_events = completed_state["work_events"]
+        run_source_program(
+            FIXTURE_PROGRAM,
+            [str(workspace), "advance"],
+            engine_root=engine_root,
+            cwd=workspace,
+            stdout_path=output / "advance-source.stdout.txt",
+            stderr_path=output / "advance-source.stderr.txt",
+            timeout=options.startup_timeout,
+        )
         third, third_stdout, third_stderr = process_command(
             command, workspace, environment, output, "resume"
         )
@@ -1175,7 +1387,6 @@ def main() -> int:
         third_result = command_result(
             output / "resume.stdout.txt", output / "resume.stderr.txt", "resume"
         )
-        print("RESULT resume", json.dumps(third_result, sort_keys=True))
         if third_result.get("data") != data:
             raise JourneyFailure(
                 "identical inputs did not return the same run/report IDs"
@@ -1189,6 +1400,7 @@ def main() -> int:
             label="resumed",
             timeout=options.startup_timeout,
         )
+        execution_evidence = resumed_state["execution_evidence"]
         if (
             resumed_state["parent_events"] != baseline_parent_events
             or resumed_state["work_events"] != baseline_work_events
@@ -1201,6 +1413,7 @@ def main() -> int:
             oracle,
             held_request,
             held_wire,
+            before["source_message_bytes"],
             run_id=run_id,
             report_id=report_id,
         )
@@ -1231,33 +1444,68 @@ def main() -> int:
             "acceptance": {
                 "definition_generation_trajectory": True,
                 "three_compactions": True,
-                "context_oracle": True,
                 "held_out_openai_request_bytes": True,
                 "projection_replay": True,
+                "owner_snapshot_replay": True,
                 "annotation": True,
+                "annotation_target": True,
+                "source_message_bytes_unchanged": True,
                 "single_child_join_settlement": True,
+                "child_state_terminal_join_settlement": True,
+                "child_session_completion": True,
                 "identical_resume_same_ids": True,
                 "owner_events_unchanged": True,
                 "isolated_agent_registry": resumed_state["registry_root"],
             },
             "evidence_directory": str(output),
         }
-        if world["kind"] == "slurm":
-            summary["scheduler_cleanup"] = finish_slurm_world(
-                world, gate_started, resumed_state["execution_evidence"]
-            )
-            slurm_cleaned = True
-        write_json(output / "journey-summary.json", summary)
-        print(json.dumps(summary, sort_keys=True))
-        return 0
+        execution_evidence = resumed_state["execution_evidence"]
+    except BaseException as error:
+        first_failure = error
     finally:
+        local_quiescent = first_failure is None
+        if first_failure is not None:
+            try:
+                cleanup_failed_run(helpers, workspace, agent, engine_root, output)
+                local_quiescent = True
+            except BaseException as cleanup_error:
+                print(f"owned process cleanup failed: {cleanup_error}", file=sys.stderr)
         try:
-            if not slurm_cleaned:
+            if world["kind"] == "slurm" and not slurm_cleaned:
+                scheduler_cleanup = finish_slurm_world(
+                    world,
+                    gate_started,
+                    execution_evidence,
+                    expect_success=first_failure is None,
+                    local_quiescent=local_quiescent,
+                )
+                print(
+                    "SCHEDULER_CLEANUP", json.dumps(scheduler_cleanup, sort_keys=True)
+                )
+                if summary is not None:
+                    summary["scheduler_cleanup"] = scheduler_cleanup
+                slurm_cleaned = True
+            elif not slurm_cleaned:
                 release_world_gate(world, gate_release)
+        except BaseException as cleanup_error:
+            if first_failure is None:
+                first_failure = cleanup_error
+            else:
+                print(
+                    f"research compare cleanup failed after primary failure: {cleanup_error}",
+                    file=sys.stderr,
+                )
         finally:
             cleanup_process(third, third_streams, 5.0)
             cleanup_process(second, second_streams, 5.0)
             cleanup_process(first, first_streams, 5.0)
+    if first_failure is not None:
+        raise first_failure
+    if summary is None:
+        raise JourneyFailure("research compare produced no success summary")
+    write_json(output / "journey-summary.json", summary)
+    print(json.dumps(summary, sort_keys=True))
+    return 0
 
 
 def _inspector_wait_ready(

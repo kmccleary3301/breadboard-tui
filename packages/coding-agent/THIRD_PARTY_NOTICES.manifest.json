@@ -3,7 +3,7 @@
   "generator": "scripts/generate-third-party-notices.ts",
   "bundle": {
     "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "sha256": "9da17c8c47236621c2ae2b07d5c084acc8da9af2998b21f98835ae47300ebfd6",
+    "sha256": "be909d09badb93b9a1aab347fcf2f33f55932749d2fd71c7124b2d8a91c05b28",
     "bytes": 53932
   },
   "packageLicense": {
@@ -12,9 +12,9 @@
   },
   "sdk": {
     "artifactPath": "packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz",
-    "artifactSha256": "7f3f4fcec503ba149dc52f6d228a36be4945d8c416c90b3dd7cc5c0cb20ead12",
+    "artifactSha256": "9109259210ea7b4cc8a14553a503fabeee0db3a706d8732213f0a3d3850267da",
     "provenancePath": "packages/coding-agent/breadboard-sdk-provenance.json",
-    "provenanceSha256": "a0657b65fbef340f8647fa235b522d4aef7fb046dcaefb3a78ddef12dba3e8dc",
+    "provenanceSha256": "d06499740756ece8bd1db19c5bd57607b554a4075b55c11d58346da79d0358fd",
     "licenseNoticeMemberPresent": false,
     "licenseAssertion": "none",
     "licenseNoticeMembers": []
