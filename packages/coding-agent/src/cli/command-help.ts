@@ -50,6 +50,10 @@ export const engineHelp = {
 	description: `Manage the governed ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine lifecycle`,
 } satisfies CommandMetadata;
 
+export const researchHelp = {
+	description: "Compare recorded Sessions through a pinned execution world",
+} satisfies CommandMetadata;
+
 export const galleryHelp = {
 	description: "Preview tool renderers across streaming, in-progress, success, and failure states",
 } satisfies CommandMetadata;

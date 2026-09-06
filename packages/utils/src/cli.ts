@@ -103,17 +103,25 @@ export const Args = {
 // Parse result types — mirrors oclif's typed output from this.parse()
 // ---------------------------------------------------------------------------
 
-type FlagValue<D extends FlagDescriptor> = D["kind"] extends "boolean"
-	? D extends { default: boolean }
+type FlagValue<D extends FlagDescriptor> = D extends { required: true }
+	? D["kind"] extends "boolean"
 		? boolean
-		: boolean | undefined
-	: D["kind"] extends "integer"
-		? D extends { default: number }
+		: D["kind"] extends "integer"
 			? number
-			: number | undefined
-		: D extends { multiple: true }
-			? string[] | undefined
-			: string | undefined;
+			: D extends { multiple: true }
+				? string[]
+				: string
+	: D["kind"] extends "boolean"
+		? D extends { default: boolean }
+			? boolean
+			: boolean | undefined
+		: D["kind"] extends "integer"
+			? D extends { default: number }
+				? number
+				: number | undefined
+			: D extends { multiple: true }
+				? string[] | undefined
+				: string | undefined;
 
 type ArgValue<D extends ArgDescriptor> = D extends { multiple: true } ? string[] | undefined : string | undefined;
 

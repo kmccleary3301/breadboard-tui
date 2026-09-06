@@ -81,6 +81,7 @@ export interface BreadboardEnginePort {
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
 	getFeatures(): Promise<EngineStatusResponse>;
 	getModelCatalog(configPath: string): Promise<ModelCatalogResponse>;
+	compareResearch: BreadboardClient["compareResearch"];
 	setSessionModel(sessionId: string, model: string): Promise<void>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
 	readonly modelRoles: ModelRolePort;
@@ -374,6 +375,10 @@ function createConnectedPort(
 		getModelCatalog: async configPath => {
 			assertOperational();
 			return controlClient.getModelCatalog(configPath);
+		},
+		compareResearch: async request => {
+			assertOperational();
+			return controlClient.compareResearch(request);
 		},
 		setSessionModel: async (sessionId, model) => {
 			assertOperational();
