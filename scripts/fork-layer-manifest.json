@@ -429,6 +429,11 @@
       "rule": "breadboard-owned-adapters-and-controls"
     },
     {
+      "path": "packages/coding-agent/src/commands/research.ts",
+      "class": "breadboard-owned",
+      "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
       "path": "packages/coding-agent/src/config/settings.ts",
       "class": "upstream-owned",
       "rule": "upstream-ordinary-omp"
@@ -931,6 +936,13 @@
       "path": "packages/tui/test/notifications.test.ts",
       "class": "breadboard-owned",
       "rule": "breadboard-owned-adapters-and-controls"
+    },
+    {
+      "path": "packages/utils/src/cli.ts",
+      "class": "manual-review",
+      "rule": "manual-review-boundaries",
+      "owner": "omp-entrypoint",
+      "layer": 2
     },
     {
       "path": "packages/utils/src/dirs.ts",
