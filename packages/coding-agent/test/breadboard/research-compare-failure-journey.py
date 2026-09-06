@@ -283,11 +283,7 @@ def main() -> int:
         flag not in usage.stderr
         for flag in (
             "--definition",
-            "--world",
-            "--generation",
-            "--projection",
-            "--compare",
-            "--help",
+            "bb research --help",
         )
     ):
         raise JourneyFailure(
