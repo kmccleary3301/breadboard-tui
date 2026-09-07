@@ -63,7 +63,7 @@ EVENT_ID_RE = re.compile(
 GIT_OBJECT_RE = re.compile(r"[0-9a-f]{40}")
 EXPECTED_ARTIFACT_SHA256 = {
     "sdkArtifact": "9109259210ea7b4cc8a14553a503fabeee0db3a706d8732213f0a3d3850267da",
-    "sdkProvenance": "7244ef1b60a288af9fdfe51ac504a6eb0a03c2f350740658fc6fae558d0f52b9",
+    "sdkProvenance": "ac62f1ecd9ebca3f0b5d628fa0f3c9d16a18f33bad26e15deba8ed183c8d8fe0",
 }
 SYNTHETIC_TOOLS = ("todo.write_board", "write", "run_shell")
 ANSI_RE = re.compile(

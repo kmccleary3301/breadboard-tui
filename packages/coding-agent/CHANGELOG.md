@@ -24,7 +24,7 @@
 - SDK provenance checks now verify the dependency actually resolved by the consumer, including workspace-local installations.
 - Cyclic session-successor bindings now fail closed instead of reopening an earlier session.
 - Product archives now recheck the engine bytes being sealed and retain the verified trust root.
-- Configured prompt-mode sessions now wait for tool approval instead of rejecting requests before the dialog can respond.
+- Configured prompt-mode sessions now wait for tool approval; explicit noninteractive modes do not open an approval wait.
 
 ## [18.0.1] - 2026-08-23
 
