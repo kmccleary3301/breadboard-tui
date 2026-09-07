@@ -36,14 +36,20 @@ from urllib.parse import urlsplit
 ROWS = 36
 COLUMNS = 120
 ASSISTANT_SENTINEL = "Proceed to build and test."
-SYNTHETIC_ASSISTANT_SENTINEL = "Bubble sort validation complete."
 FIRST_PROMPT = "Create the deterministic protofilesystem fixture now."
 SECOND_PROMPT = "Report the next action after the fixture is ready."
 SYNTHETIC_PROMPT = "Create and validate the deterministic bubble sort fixture."
+CANCEL_PROMPT = (
+    "Repeat the deterministic bubble sort validation, then wait for permission."
+)
+CRASH_PROMPT = "Start another deterministic bubble sort validation for crash recovery."
 RECONNECT_PROMPT = (
     "Prove the recovered engine can execute the deterministic validation."
 )
-BINDING_SCHEMA = "breadboard.session-binding.v3"
+POST_RESUME_PROMPT = (
+    "Prove the resumed session can execute one final deterministic validation."
+)
+BINDING_SCHEMA = "breadboard.session-binding.v4"
 BINDING_TYPE = "breadboard.session-binding"
 EXPECTED_FILES = (
     "Makefile",
@@ -54,6 +60,11 @@ EXPECTED_FILES = (
 EVENT_ID_RE = re.compile(
     r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|sha256:[0-9a-f]{64})"
 )
+GIT_OBJECT_RE = re.compile(r"[0-9a-f]{40}")
+EXPECTED_ARTIFACT_SHA256 = {
+    "sdkArtifact": "620ccbb6b34a3bf95affe96be713222b6c39a763fbe83c276434c3cc11e87513",
+    "sdkProvenance": "77615170da7014b9110837f7de77dd1649e2ff26bfa18cb33f460a308432e8d6",
+}
 SYNTHETIC_TOOLS = ("todo.write_board", "write", "run_shell")
 ANSI_RE = re.compile(
     rb"(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~]|\x1B[@-_])"
@@ -312,11 +323,29 @@ class PtyChild:
     def send_line(self, text: str) -> None:
         self.send(text.encode("utf-8") + b"\r")
 
+    def send_typed_line(self, text: str) -> None:
+        for character in text:
+            self.send(character.encode("utf-8"))
+            time.sleep(0.03)
+        self.send_enter()
+
+
     def send_escape(self) -> None:
         self.send(b"\x1b")
 
     def send_enter(self) -> None:
         self.send(b"\r")
+
+    def permission_dialog_tool(self) -> str | None:
+        screen = self.screen.text()
+        if "up/down navigate  enter select  esc cancel" not in screen:
+            return None
+        match = re.search(r"BreadBoard permission request · ([^·\n]+)", screen)
+        return match.group(1).strip() if match is not None else None
+
+    def permission_dialog_ready(self) -> bool:
+        return self.permission_dialog_tool() == "run_shell"
+
 
     def wait_for_exit(self, timeout: float) -> int:
         deadline = time.monotonic() + timeout
@@ -381,24 +410,7 @@ def parse_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def active_terminal_session_files(agent_root: Path) -> set[Path]:
-    latest: tuple[int, Path] | None = None
-    terminal_root = agent_root / "terminal-sessions"
-    for path in sorted(terminal_root.iterdir()) if terminal_root.exists() else ():
-        try:
-            modified = path.stat().st_mtime_ns
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
-        if len(lines) < 2 or not lines[1]:
-            continue
-        candidate = (modified, Path(lines[1]).resolve())
-        if latest is None or candidate[0] > latest[0]:
-            latest = candidate
-    return {latest[1]} if latest is not None else set()
-
-
-def binding_snapshot(agent_root: Path) -> BindingSnapshot | None:
+def binding_snapshots(agent_root: Path) -> list[BindingSnapshot]:
     candidates: list[BindingSnapshot] = []
     for path in sorted(agent_root.rglob("*.jsonl")) if agent_root.exists() else ():
         rows = parse_jsonl(path)
@@ -412,22 +424,33 @@ def binding_snapshot(agent_root: Path) -> BindingSnapshot | None:
         ]
         if bindings:
             candidates.append(BindingSnapshot(path.resolve(), bindings[-1], rows))
+    return candidates
+
+
+def binding_snapshot(agent_root: Path) -> BindingSnapshot | None:
+    candidates = binding_snapshots(agent_root)
     if not candidates:
         return None
-    active_files = active_terminal_session_files(agent_root)
-    active_candidates = [
-        candidate for candidate in candidates if candidate.session_file in active_files
-    ]
-    if len(active_candidates) == 1:
-        return active_candidates[0]
-    if not active_candidates and active_files:
-        return None
-    if len(candidates) == 1:
-        return candidates[0]
-    raise JourneyFailure(
-        "expected one active OMP session binding file, "
-        f"found {len(active_candidates)} among {len(candidates)} retained files"
+    return max(candidates, key=lambda candidate: candidate.session_file.stat().st_mtime_ns)
+
+
+def binding_snapshot_for_session(
+    agent_root: Path, session_id: str
+) -> BindingSnapshot | None:
+    return next(
+        (
+            snapshot
+            for snapshot in binding_snapshots(agent_root)
+            if snapshot.data.get("sessionId") == session_id
+        ),
+        None,
     )
+
+def session_model(snapshot: BindingSnapshot) -> str | None:
+    for row in reversed(snapshot.rows):
+        if row.get("type") == "model_change" and isinstance(row.get("model"), str):
+            return row["model"]
+    return None
 
 
 def content_text(content: Any) -> str:
@@ -576,6 +599,32 @@ def process_snapshot(pid: int) -> dict[str, Any]:
             "stderr": completed.stderr,
         }
     return result
+
+
+def listener_snapshot(endpoint: str) -> dict[str, Any]:
+    parsed = urlsplit(endpoint)
+    if parsed.hostname is None or parsed.port is None:
+        raise JourneyFailure(f"invalid authority endpoint: {endpoint}")
+    command = [
+        "/usr/sbin/lsof",
+        "-nP",
+        f"-iTCP:{parsed.port}",
+        "-sTCP:LISTEN",
+    ]
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return {
+        "argv": command,
+        "exitCode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "socketConnectable": endpoint_open(endpoint),
+    }
 
 
 def process_environment_contains(pid: int, value: str) -> bool | None:
@@ -851,34 +900,16 @@ def load_retained_state(agent_root: Path) -> tuple[Path, dict[str, Any], bytes]:
         sorted(agent_root.rglob("session-state/*.json")) if agent_root.exists() else []
     )
     if not candidates:
-        raise JourneyFailure("expected one retained session-state file, found 0")
-    active_binding = binding_snapshot(agent_root)
-    active_session_id = (
-        active_binding.data.get("sessionId") if active_binding is not None else None
-    )
-    matches: list[tuple[Path, dict[str, Any], bytes]] = []
-    for candidate in candidates:
-        raw = candidate.read_bytes()
-        try:
-            value = json.loads(raw)
-        except json.JSONDecodeError as error:
-            raise JourneyFailure("retained session state is not JSON") from error
-        if not isinstance(value, dict):
-            raise JourneyFailure("retained session state is not an object")
-        session = value.get("session")
-        if (
-            len(candidates) == 1
-            or isinstance(session, dict)
-            and session.get("session_id") == active_session_id
-        ):
-            matches.append((candidate.resolve(), value, raw))
-    if len(matches) != 1:
-        raise JourneyFailure(
-            "expected one retained state for the active session, "
-            f"found {len(matches)} among {len(candidates)} retained files"
-        )
-    return matches[0]
-
+        raise JourneyFailure("expected one retained session-state file, found none")
+    state_path = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+    raw = state_path.read_bytes()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise JourneyFailure("retained session state is not JSON") from error
+    if not isinstance(value, dict):
+        raise JourneyFailure("retained session state is not an object")
+    return state_path.resolve(), value, raw
 
 def retained_state_snapshot(
     agent_root: Path,
@@ -930,6 +961,38 @@ def wait_for_terminal_state(
     assert isinstance(result, tuple)
     return result
 
+def wait_for_terminal_state_with_permissions(
+    child: PtyChild,
+    agent_root: Path,
+    count: int,
+    timeout: float,
+    label: str,
+    outcome: str,
+) -> tuple[tuple[Path, dict[str, Any], bytes], list[str]]:
+    deadline = time.monotonic() + timeout
+    active_prompt: str | None = None
+    approvals: list[str] = []
+    while True:
+        snapshot = retained_state_snapshot(agent_root)
+        if snapshot is not None:
+            turns = terminal_turns(snapshot[1])
+            if len(turns) >= count and turns[count - 1].get("terminal_outcome") == outcome:
+                return snapshot, approvals
+        tool = child.permission_dialog_tool()
+        if tool is None:
+            active_prompt = None
+        elif tool != active_prompt:
+            approvals.append(tool)
+            active_prompt = tool
+            child.send_enter()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise JourneyFailure(
+                f"{label}: timed out while handling permissions {approvals}\n"
+                f"{child.screen.text()}"
+            )
+        child.pump(min(0.2, remaining))
+
 
 def binding_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
@@ -946,15 +1009,44 @@ def validate_binding_history(rows: list[dict[str, Any]]) -> dict[str, Any]:
     history = binding_history(rows)
     if not history:
         raise JourneyFailure("transcript contains no BreadBoard binding history")
-    session_ids = {entry.get("sessionId") for entry in history}
-    replay_digests = {entry.get("replayConfigurationDigest") for entry in history}
-    if len(session_ids) != 1 or len(replay_digests) != 1:
-        raise JourneyFailure(
-            "binding history changed session or replay configuration identity"
-        )
+    active_session_id: str | None = None
+    previous_session_id: str | None = None
+    active_replay_digest: str | None = None
+    session_ids: list[str] = []
     prior_sequence = -1
     event_ids: dict[int, str | None] = {}
+    unique_cursor_count = 0
     for entry in history:
+        session_id = entry.get("sessionId")
+        predecessor = entry.get("previousSessionId")
+        replay_digest = entry.get("replayConfigurationDigest")
+        if not isinstance(session_id, str) or not session_id:
+            raise JourneyFailure("binding history contains an invalid session identity")
+        if active_session_id is None:
+            if predecessor is not None:
+                raise JourneyFailure("initial binding unexpectedly names a predecessor session")
+            active_session_id = session_id
+            active_replay_digest = replay_digest
+            session_ids.append(session_id)
+        elif session_id != active_session_id:
+            if (
+                predecessor != active_session_id
+                or session_id in session_ids
+                or replay_digest != active_replay_digest
+            ):
+                raise JourneyFailure("binding history contains an invalid session successor")
+            previous_session_id = active_session_id
+            active_session_id = session_id
+            session_ids.append(session_id)
+            prior_sequence = -1
+            event_ids = {}
+        elif (
+            predecessor != previous_session_id
+            or replay_digest != active_replay_digest
+        ):
+            raise JourneyFailure(
+                "binding history changed predecessor or replay configuration within one session"
+            )
         cursor = entry.get("cursor")
         if not isinstance(cursor, dict) or type(cursor.get("sequence")) is not int:
             raise JourneyFailure("binding history contains an invalid cursor")
@@ -968,6 +1060,8 @@ def validate_binding_history(rows: list[dict[str, Any]]) -> dict[str, Any]:
             raise JourneyFailure("binding history rolled back its cursor")
         if sequence in event_ids and event_ids[sequence] != event_id:
             raise JourneyFailure("binding history conflicts at one cursor sequence")
+        if sequence not in event_ids:
+            unique_cursor_count += 1
         event_ids[sequence] = event_id
         prior_sequence = sequence
         submissions = owned_submissions(entry)
@@ -981,44 +1075,56 @@ def validate_binding_history(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 )
     return {
         "entryCount": len(history),
-        "sessionId": next(iter(session_ids)),
-        "replayConfigurationDigest": next(iter(replay_digests)),
+        "sessionId": active_session_id,
+        "sessionIds": session_ids,
+        "sessionCount": len(session_ids),
+        "replayConfigurationDigest": active_replay_digest,
         "firstCursor": history[0]["cursor"],
         "finalCursor": history[-1]["cursor"],
-        "uniqueCursorCount": len(event_ids),
+        "uniqueCursorCount": unique_cursor_count,
         "cursorRollback": False,
         "cursorConflict": False,
     }
 
 
-def session_event_journal(agent_root: Path) -> tuple[Path, list[dict[str, Any]]]:
-    candidates = sorted(agent_root.rglob("session-events/*/session_events.jsonl"))
-    if len(candidates) > 1:
-        active_binding = binding_snapshot(agent_root)
-        active_session_id = (
-            active_binding.data.get("sessionId") if active_binding is not None else None
-        )
-        candidates = [
-            path for path in candidates if path.parent.name == active_session_id
-        ]
-    if len(candidates) != 1:
+def session_event_journals(
+    agent_root: Path, session_ids: set[str]
+) -> tuple[list[Path], list[dict[str, Any]]]:
+    candidates = sorted(
+        path.resolve()
+        for path in agent_root.rglob("session-events/*/session_events.jsonl")
+        if path.parent.name in session_ids
+    )
+    found_ids = {path.parent.name for path in candidates}
+    if found_ids != session_ids or len(candidates) != len(session_ids):
         raise JourneyFailure(
-            "expected one retained event journal for the active session, "
-            f"found {len(candidates)}"
+            f"expected one retained event journal per bound session {sorted(session_ids)}, "
+            f"found {sorted(str(path) for path in candidates)}"
         )
-    rows = parse_jsonl(candidates[0])
-    if not rows:
-        raise JourneyFailure("retained session event journal is empty")
-    expected_sequences = list(range(1, len(rows) + 1))
-    sequences = [row.get("sequence") for row in rows]
-    if sequences != expected_sequences:
-        raise JourneyFailure(
-            f"retained session event journal is not contiguous: {sequences}"
-        )
-    session_ids = {row.get("session_id") for row in rows}
-    if len(session_ids) != 1 or not isinstance(next(iter(session_ids)), str):
-        raise JourneyFailure("retained session event journal changed session identity")
-    return candidates[0].resolve(), rows
+    rows: list[dict[str, Any]] = []
+    for path in candidates:
+        journal_rows: list[dict[str, Any]] = []
+        expected_session_id = path.parent.name
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise JourneyFailure(f"retained session event is not an object: {path}")
+            journal_rows.append(value)
+        if not journal_rows:
+            raise JourneyFailure(f"retained session event journal is empty: {path}")
+        for expected_sequence, value in enumerate(journal_rows, start=1):
+            if (
+                value.get("schema_version") != "bb.session_event.v1"
+                or value.get("session_id") != expected_session_id
+                or value.get("sequence") != expected_sequence
+            ):
+                raise JourneyFailure(
+                    f"retained session event journal identity or sequence is invalid: {path}"
+                )
+        rows.extend(journal_rows)
+    return candidates, rows
 
 
 def validate_tool_receipts(facts: dict[str, Any]) -> dict[str, Any]:
@@ -1486,6 +1592,11 @@ def run_tamper_failure(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bb", type=Path, required=True)
+    parser.add_argument("--pi-natives", type=Path, required=True)
+    parser.add_argument("--sdk-artifact", type=Path, required=True)
+    parser.add_argument("--sdk-provenance", type=Path, required=True)
+    parser.add_argument("--tui-source-commit", required=True)
+    parser.add_argument("--tui-source-tree", required=True)
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--config-root", type=Path, required=True)
     parser.add_argument("--agent-root", type=Path, required=True)
@@ -1498,6 +1609,97 @@ def main() -> int:
     options = parser.parse_args()
 
     bb = options.bb.resolve(strict=True)
+    pi_natives = options.pi_natives.resolve(strict=True)
+    sdk_artifact = options.sdk_artifact.resolve(strict=True)
+    sdk_provenance = options.sdk_provenance.resolve(strict=True)
+    for label, path in (
+        ("pi native addon", pi_natives),
+        ("SDK artifact", sdk_artifact),
+        ("SDK provenance", sdk_provenance),
+    ):
+        if not path.is_file():
+            raise JourneyFailure(f"{label} is not a file: {path}")
+    product_root = bb.parent
+    expected_native = product_root / "native" / "pi_natives.darwin-arm64.node"
+    if pi_natives != expected_native:
+        raise JourneyFailure("bb and pi native addon are not from one installed product root")
+    install_manifest = json.loads(
+        (product_root / "install-manifest.v1.json").read_text(encoding="utf-8")
+    )
+    binary_identity = install_manifest.get("binary")
+    native_identity = install_manifest.get("nativeAddon")
+    if (
+        install_manifest.get("schemaVersion") != "bb.product_install_manifest.v1"
+        or not isinstance(binary_identity, dict)
+        or binary_identity.get("path") != "bb"
+        or not isinstance(native_identity, dict)
+        or native_identity.get("path")
+        != "native/pi_natives.darwin-arm64.node"
+    ):
+        raise JourneyFailure("installed product manifest does not bind executable paths")
+    expected_artifact_sha256 = dict(EXPECTED_ARTIFACT_SHA256)
+    for label, identity in (
+        ("bb", binary_identity),
+        ("piNatives", native_identity),
+    ):
+        digest = identity.get("sha256")
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        ):
+            raise JourneyFailure(f"installed {label} manifest digest is invalid")
+        expected_artifact_sha256[label] = digest.removeprefix("sha256:")
+    artifact_paths = {
+        "bb": bb,
+        "piNatives": pi_natives,
+        "sdkArtifact": sdk_artifact,
+        "sdkProvenance": sdk_provenance,
+    }
+    artifact_sha256 = {
+        label: sha256_file(path) for label, path in artifact_paths.items()
+    }
+    mismatched_artifacts = {
+        label: {
+            "expected": expected_artifact_sha256[label],
+            "actual": artifact_sha256[label],
+        }
+        for label in artifact_paths
+        if artifact_sha256[label] != expected_artifact_sha256[label]
+    }
+    if mismatched_artifacts:
+        raise JourneyFailure(
+            f"installed artifact identity mismatch: {mismatched_artifacts}"
+        )
+    sdk_provenance_payload = json.loads(sdk_provenance.read_text(encoding="utf-8"))
+    if (
+        sdk_provenance_payload.get("schemaVersion")
+        != "p30.breadboard-sdk-provenance.v1"
+        or sdk_provenance_payload.get("packageName") != "@breadboard/sdk"
+        or sdk_provenance_payload.get("packageVersion") != "0.4.0"
+        or sdk_provenance_payload.get("artifactSha256")
+        != EXPECTED_ARTIFACT_SHA256["sdkArtifact"]
+        or sdk_provenance_payload.get("artifactSizeBytes") != sdk_artifact.stat().st_size
+        or sdk_provenance_payload.get("engineInterfaceVersion") != "0.4.0"
+        or sdk_provenance_payload.get("engineInterfaceRange") != ">=0.4.0 <0.5.0"
+    ):
+        raise JourneyFailure("SDK provenance does not match the canonical artifact")
+    if GIT_OBJECT_RE.fullmatch(options.tui_source_commit) is None:
+        raise JourneyFailure("--tui-source-commit must be a lowercase 40-hex object id")
+    if GIT_OBJECT_RE.fullmatch(options.tui_source_tree) is None:
+        raise JourneyFailure("--tui-source-tree must be a lowercase 40-hex object id")
+    product_provenance = json.loads(
+        (product_root / "provenance.v1.json").read_text(encoding="utf-8")
+    )
+    product_source = product_provenance.get("productSource")
+    if (
+        product_provenance.get("schemaVersion") != "bb.product_provenance.v1"
+        or not isinstance(product_source, dict)
+        or product_source.get("commit") != options.tui_source_commit
+        or product_source.get("tree") != options.tui_source_tree
+    ):
+        raise JourneyFailure(
+            "installed product provenance does not match the requested TUI source identity"
+        )
     roots = {
         "home": options.home.resolve(strict=True),
         "config": options.config_root.resolve(strict=True),
@@ -1512,6 +1714,10 @@ def main() -> int:
         raise JourneyFailure(f"bb is not executable: {bb}")
     for label, root in roots.items():
         ensure_empty_directory(root, label)
+    (roots["agent"] / "config.yml").write_text(
+        "tools:\n  approvalMode: always-ask\n",
+        encoding="utf-8",
+    )
     if any(root == output or output.is_relative_to(root) for root in roots.values()):
         raise JourneyFailure("output must be outside isolated journey roots")
     assert_no_forbidden_paths(str(bb), forbidden_roots, "installed bb path")
@@ -1606,6 +1812,7 @@ def main() -> int:
             "preflight status created runtime authority or process state"
         )
     initial = PtyChild([str(bb)], roots["workspace"], environment)
+    provider_free_tui_pid = initial.pid
     try:
         initial.wait_until(
             lambda: (
@@ -1698,6 +1905,9 @@ def main() -> int:
         )
         assert isinstance(second, BindingSnapshot)
         write_capture(output, "initial-turn-2", initial)
+        initial_session_id = str(second.data.get("sessionId") or "")
+        if not initial_session_id:
+            raise JourneyFailure("initial provider-free session is missing its session id")
         during_initial_extractions = extraction_roots(roots["temp"])
         if len(during_initial_extractions) != 1:
             raise JourneyFailure(
@@ -1725,166 +1935,88 @@ def main() -> int:
         if process_environment_contains(int(first_authority["pid"]), secret_canary):
             raise JourneyFailure("managed engine inherited the secret canary")
         initial_engine_canary_absent = True
-
-        record_action("open-model-selector", command="/switch")
-        initial.send_line("/switch")
+        record_action("open-model-selector", command="/model")
+        initial.send_line("/model")
         initial.wait_until(
-            lambda: "Session-only switch" in initial.screen.text(),
+            lambda: "All models" in initial.screen.text(),
             options.startup_timeout,
-            "public model selector",
+            "public model role selector",
         )
+        initial.send(b"\x1b[C")
         initial.send(b"cli_mock/reference")
         initial.wait_until(
             lambda: "cli_mock/reference" in initial.screen.text(),
             options.startup_timeout,
-            "synthetic model selector result",
+            "synthetic default-role selector result",
         )
+        write_capture(output, "synthetic-model-selector", initial)
         initial.send_enter()
+        initial.send_enter()
+        initial.send_escape()
+        initial.send_escape()
+        initial.send_escape()
         initial.wait_until(
-            lambda: (
-                "Session-only switch" not in initial.screen.text()
-                and "cli_mock/reference" in initial.screen.text()
-            ),
+            lambda: "Default model: cli_mock/reference" in initial.screen.text(),
             options.startup_timeout,
-            "deferred locked model selection",
+            "active model role selection status",
         )
-        record_action("select-locked-model", model="cli_mock/reference")
-        initial.send_line(SYNTHETIC_PROMPT)
-        record_action("submit-locked-model-turn", prompt=SYNTHETIC_PROMPT)
-        initial.wait_until(
-            lambda: (
-                "lock_immutable" in initial.screen.text()
-                and "model overrides are rejected after session.start"
-                in initial.screen.text()
-            ),
-            options.startup_timeout,
-            "immutable model-role lock rejection",
-        )
-        write_capture(output, "immutable-model-switch-rejected", initial)
-        locked_provider_free = binding_snapshot(roots["agent"])
-        if (
-            locked_provider_free is None
-            or locked_provider_free.session_file != second.session_file
-        ):
-            raise JourneyFailure("locked model rejection changed session lineage")
-        record_action(
-            "reject-locked-model-switch",
-            model="cli_mock/reference",
-            reason="lock_immutable",
-        )
+        record_action("select-synthetic-model", model="cli_mock/reference", scope="active-and-next-session")
 
-        provider_free_pid = initial.pid
-        provider_free_authority = first_authority
-        provider_free_processes = first_processes
         record_action("exit-provider-free-tui", command="/exit")
         initial.send_line("/exit")
-        provider_free_exit = initial.wait_for_exit(60)
+        initial_exit = initial.wait_for_exit(60)
         write_capture(output, "provider-free-exit", initial)
+        old_initial = binding_snapshot(roots["agent"])
+        if old_initial is None or old_initial.data.get("sessionId") != initial_session_id:
+            raise JourneyFailure("provider-free session was not retained before relaunch")
+        initial_model = session_model(old_initial)
+        if initial_model != "cli_mock/reference":
+            raise JourneyFailure(
+                f"provider-free session did not record the selected model: {initial_model!r}"
+            )
+        old_initial_facts = transcript_facts(old_initial.rows)
+        if old_initial_facts["userTexts"] != [FIRST_PROMPT, SECOND_PROMPT]:
+            raise JourneyFailure(
+                f"provider-free session lost submitted prompts: {old_initial_facts['userTexts']}"
+            )
+        if old_initial_facts["assistantTexts"].count(ASSISTANT_SENTINEL) != 2:
+            raise JourneyFailure(
+                "provider-free session does not retain exactly two assistant sentinels"
+            )
+        if old_initial_facts["toolCalls"] != ["list_dir", "apply_unified_patch"] * 2:
+            raise JourneyFailure("provider-free session lost its native tool calls")
         initial.close()
-        if provider_free_exit != 0:
-            raise JourneyFailure(f"provider-free bb exit was {provider_free_exit}")
-        if process_alive(int(provider_free_authority["pid"])):
-            raise JourneyFailure("provider-free engine remained alive after TUI close")
-        if active_authority(roots["agent"]) is not None:
-            raise JourneyFailure(
-                "provider-free engine authority remained after TUI close"
-            )
-        if extraction_roots(roots["temp"]):
-            raise JourneyFailure(
-                "provider-free engine extraction remained after TUI close"
-            )
-        if ray_runtime_roots(roots["temp"]) - baseline_ray_runtime_roots:
-            raise JourneyFailure("provider-free Ray runtime remained after TUI close")
-        permission_rule_path = (
-            roots["workspace"] / ".breadboard" / "permission_rules.json"
-        )
-        write_json(
-            permission_rule_path,
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "category": "shell",
-                        "pattern": "*",
-                        "decision": "allow",
-                        "scope": "project",
-                    }
-                ],
-            },
-        )
 
-        initial = PtyChild(
-            [
-                str(bb),
-                "--model",
-                "cli_mock/reference",
-                "--approval-mode",
-                "yolo",
-            ],
-            roots["workspace"],
-            environment,
-        )
+        record_action("launch-synthetic-tui", model="cli_mock/reference")
+        initial = PtyChild([str(bb)], roots["workspace"], environment)
+        synthetic_tui_pid = initial.pid
         initial.wait_until(
-            lambda: "cli_mock/reference" in initial.screen.text(),
+            lambda: "reference" in initial.screen.text() and "No LSP servers" in initial.screen.text(),
             options.startup_timeout,
             "fresh synthetic TUI readiness",
         )
-        if binding_snapshot(roots["agent"]) is not None:
-            raise JourneyFailure(
-                "fresh synthetic TUI created a binding before its first turn"
-            )
-        _synthetic_authority_path, first_authority = initial.wait_until(
+        _fresh_authority_path, fresh_authority = initial.wait_until(
             lambda: active_authority(roots["agent"]),
             options.startup_timeout,
             "fresh synthetic engine authority",
         )
-        if not endpoint_open(str(first_authority["normalizedEndpoint"])):
-            raise JourneyFailure("fresh synthetic engine listener is not open")
-        if first_authority.get("launchId") == provider_free_authority.get("launchId"):
-            raise JourneyFailure("fresh synthetic launch reused engine authority")
-        during_initial_extractions = extraction_roots(roots["temp"])
-        if len(during_initial_extractions) != 1:
-            raise JourneyFailure(
-                "fresh synthetic launch did not use one extraction identity"
-            )
-        during_initial_ray_roots = (
-            ray_runtime_roots(roots["temp"]) - baseline_ray_runtime_roots
-        )
-        if len(during_initial_ray_roots) != 1:
-            raise JourneyFailure(
-                "fresh synthetic launch did not use one ephemeral Ray root"
-            )
-        initial_ray_runtime = ray_runtime_snapshot(next(iter(during_initial_ray_roots)))
-        first_processes = {
-            "bb": process_snapshot(initial.pid),
-            "engine": process_snapshot(int(first_authority["pid"])),
-        }
-        assert_no_forbidden_paths(
-            json.dumps(first_processes, sort_keys=True),
-            [*forbidden_roots, host_agent_root],
-            "fresh synthetic process snapshot",
-        )
-        assert_loopback_network(first_processes, "fresh synthetic process snapshot")
-        if process_environment_contains(int(first_authority["pid"]), secret_canary):
-            raise JourneyFailure("fresh synthetic engine inherited the secret canary")
-        write_capture(output, "synthetic-model-selected", initial)
-        record_action(
-            "launch-synthetic-session",
-            model="cli_mock/reference",
-        )
+        if not endpoint_open(str(fresh_authority["normalizedEndpoint"])):
+            raise JourneyFailure("fresh managed engine listener is not open")
 
-        initial.send_line(SYNTHETIC_PROMPT)
+        record_action("fresh-synthetic-runtime", model="cli_mock/reference")
+        # The PTY driver must model separate human keystrokes here. Sending an
+        # entire prompt and Enter in one write can become one terminal input
+        # callback, which is not an interactive user path.
+        initial.send_typed_line(SYNTHETIC_PROMPT)
         record_action("submit-synthetic-turn", prompt=SYNTHETIC_PROMPT)
         initial.wait_until(
-            lambda: (
-                snapshot
-                if (snapshot := binding_snapshot(roots["agent"])) is not None
-                and snapshot.session_file != locked_provider_free.session_file
-                else None
-            ),
+            initial.permission_dialog_ready,
             options.turn_timeout,
-            "fresh synthetic session binding",
+            "synthetic run_shell permission",
         )
+        write_capture(output, "synthetic-permission-allow", initial)
+        initial.send_enter()
+        record_action("allow-synthetic-run-shell")
         _, _synthetic_state, _ = wait_for_terminal_state(
             initial,
             roots["agent"],
@@ -1895,7 +2027,14 @@ def main() -> int:
         )
 
         def synthetic_turn_ready() -> BindingSnapshot | None:
-            snapshot = binding_snapshot(roots["agent"])
+            snapshot = next(
+                (
+                    candidate
+                    for candidate in binding_snapshots(roots["agent"])
+                    if candidate.data.get("sessionId") != initial_session_id
+                ),
+                None,
+            )
             if snapshot is None or len(owned_submissions(snapshot.data)) != 1:
                 return None
             facts = transcript_facts(snapshot.rows)
@@ -1911,6 +2050,14 @@ def main() -> int:
             "synthetic projected terminal turn",
         )
         assert isinstance(synthetic, BindingSnapshot)
+        synthetic_session_id = str(synthetic.data.get("sessionId") or "")
+        if not synthetic_session_id or synthetic_session_id == initial_session_id:
+            raise JourneyFailure("fresh synthetic session is missing a distinct session id")
+        synthetic_model = session_model(synthetic)
+        if synthetic_model != "cli_mock/reference":
+            raise JourneyFailure(
+                f"fresh session did not start with cli_mock/reference: {synthetic_model!r}"
+            )
         synthetic_facts = transcript_facts(synthetic.rows)
         synthetic_cursor = cursor_sequence(synthetic.data)
         if synthetic_facts["completionSentinelCount"] != 0:
@@ -1926,10 +2073,125 @@ def main() -> int:
             )
         write_capture(output, "synthetic-completed", initial)
 
+        successful_shell_results_before_cancel = sum(
+            row["name"] == "run_shell" and row["isError"] is False
+            for row in synthetic_facts["toolResultRows"]
+        )
+        bubble_sort_digest_before_cancel = sha256_file(bubble_sort)
+        initial.send_line(CANCEL_PROMPT)
+        record_action("submit-cancel-turn", prompt=CANCEL_PROMPT)
+        initial.wait_until(
+            initial.permission_dialog_ready,
+            options.turn_timeout,
+            "cancellation permission checkpoint",
+        )
+        write_capture(output, "synthetic-permission-cancel", initial)
+        initial.send_escape()
+        record_action("cancel-synthetic-permission", key="Escape")
+        _, cancellation_state, _ = wait_for_terminal_state(
+            initial,
+            roots["agent"],
+            2,
+            options.turn_timeout,
+            "cancelled synthetic turn",
+            "cancelled",
+        )
+        cancellation_envelopes = terminal_envelopes(cancellation_state)
+        cancelled_turn_id = cancellation_state["turns"][1].get("turn_id")
+        if not any(
+            envelope.get("type") == "turn_cancelled"
+            and envelope.get("turn_id") == cancelled_turn_id
+            for envelope in cancellation_envelopes
+        ):
+            raise JourneyFailure(
+                "cancelled turn has no correlated durable turn_cancelled terminal envelope"
+            )
+
+        def cancelled_turn_ready() -> BindingSnapshot | None:
+            snapshot = binding_snapshot(roots["agent"])
+            if snapshot is None or len(owned_submissions(snapshot.data)) != 2:
+                return None
+            if cursor_sequence(snapshot.data) <= synthetic_cursor:
+                return None
+            facts = transcript_facts(snapshot.rows)
+            if (
+                len(facts["assistantErrors"])
+                != len(synthetic_facts["assistantErrors"]) + 1
+            ):
+                return None
+            return snapshot
+
+        cancelled = initial.wait_until(
+            cancelled_turn_ready,
+            options.turn_timeout,
+            "cancelled projected terminal turn",
+        )
+        assert isinstance(cancelled, BindingSnapshot)
+        cancelled_facts = transcript_facts(cancelled.rows)
+        successful_shell_results_after_cancel = sum(
+            row["name"] == "run_shell" and row["isError"] is False
+            for row in cancelled_facts["toolResultRows"]
+        )
+        if (
+            successful_shell_results_after_cancel
+            != successful_shell_results_before_cancel
+        ):
+            raise JourneyFailure("cancelled permission executed run_shell")
+        if sha256_file(bubble_sort) != bubble_sort_digest_before_cancel:
+            raise JourneyFailure(
+                "cancelled permission changed the deterministic fixture"
+            )
+        cancelled_cursor = cursor_sequence(cancelled.data)
+        initial.wait_until(
+            lambda: (
+                "BreadBoard permission request · run_shell" not in initial.screen.text()
+                and "cli_mock/reference" in initial.screen.text()
+            ),
+            options.turn_timeout,
+            "usable composer after cancellation",
+        )
+        write_capture(output, "synthetic-cancelled", initial)
+
+        initial.send_line(CRASH_PROMPT)
+        record_action("submit-crash-turn", prompt=CRASH_PROMPT)
+        initial.wait_until(
+            initial.permission_dialog_ready,
+            options.turn_timeout,
+            "engine crash permission checkpoint",
+        )
+        _, _crash_pending_state, _ = initial.wait_until(
+            lambda: (
+                snapshot
+                if (snapshot := retained_state_snapshot(roots["agent"])) is not None
+                and isinstance(snapshot[1].get("turns"), list)
+                and len(snapshot[1]["turns"]) == 3
+                and snapshot[1]["turns"][-1].get("terminal_resolution_committed")
+                is not True
+                else None
+            ),
+            options.turn_timeout,
+            "pending crash turn authority",
+        )
+        crash_turn_id = str(_crash_pending_state["turns"][-1].get("turn_id") or "")
+        if not crash_turn_id:
+            raise JourneyFailure("pending crash turn is missing durable identity")
+        initial.wait_until(
+            lambda: (
+                snapshot
+                if (snapshot := binding_snapshot(roots["agent"])) is not None
+                and any(
+                    str(submission.get("turnId")) == crash_turn_id
+                    for submission in owned_submissions(snapshot.data)
+                )
+                else None
+            ),
+            options.turn_timeout,
+            "durable crash turn ownership",
+        )
         crash_authority_path, crash_authority = initial.wait_until(
             lambda: active_authority(roots["agent"]),
             options.startup_timeout,
-            "idle crash engine authority",
+            "crash engine authority",
         )
         crash_pid = int(crash_authority["pid"])
         if crash_pid == initial.pid or not process_alive(crash_pid):
@@ -1956,7 +2218,7 @@ def main() -> int:
         write_capture(output, "engine-crash-checkpoint", initial)
         os.kill(crash_pid, signal.SIGKILL)
         record_action(
-            "kill-authenticated-idle-engine",
+            "kill-authenticated-engine",
             pid=crash_pid,
             osProcessStartToken=crash_authority["osProcessStartToken"],
             engineInstanceId=crash_authority["engineInstanceId"],
@@ -1966,8 +2228,6 @@ def main() -> int:
             options.startup_timeout,
             "old engine process death",
         )
-        initial.send_line(RECONNECT_PROMPT)
-        record_action("submit-reconnect-turn", prompt=RECONNECT_PROMPT)
 
         def replacement_authority_ready() -> tuple[Path, dict[str, Any]] | None:
             authority = active_authority(roots["agent"])
@@ -2005,9 +2265,69 @@ def main() -> int:
             raise JourneyFailure(
                 "replacement engine changed the public authority record path"
             )
-        crash_cursor = synthetic_cursor
+        _, crash_state, _ = wait_for_terminal_state(
+            initial,
+            roots["agent"],
+            3,
+            options.turn_timeout,
+            "crashed terminal turn",
+            "failed",
+        )
+        crash_envelopes = terminal_envelopes(crash_state)
+        if len(crash_envelopes) < 3 or crash_envelopes[2].get("type") != "turn_failed":
+            raise JourneyFailure(
+                "crashed turn has no durable turn_failed terminal envelope"
+            )
+
+        def crashed_turn_ready() -> BindingSnapshot | None:
+            snapshot = binding_snapshot(roots["agent"])
+            if snapshot is None:
+                return None
+            if not any(
+                str(submission.get("turnId")) == crash_turn_id
+                for submission in owned_submissions(snapshot.data)
+            ):
+                return None
+            if cursor_sequence(snapshot.data) <= cancelled_cursor:
+                return None
+            facts = transcript_facts(snapshot.rows)
+            if (
+                len(facts["assistantErrors"])
+                != len(cancelled_facts["assistantErrors"]) + 1
+            ):
+                return None
+            return snapshot
+
+        crashed = initial.wait_until(
+            crashed_turn_ready,
+            options.turn_timeout,
+            "crashed projected terminal turn",
+        )
+        assert isinstance(crashed, BindingSnapshot)
+        crashed_facts = transcript_facts(crashed.rows)
+        crash_errors = crashed_facts["assistantErrors"][
+            len(cancelled_facts["assistantErrors"]) :
+        ]
+        if len(crash_errors) != 1:
+            raise JourneyFailure(
+                "crashed turn did not project one sanitized terminal failure"
+            )
+        crash_text = crash_errors[0]
+        if crash_text != "BreadBoard session closed":
+            raise JourneyFailure(
+                f"crash projection used an unexpected sanitized error: {crash_text!r}"
+            )
+        assert_no_forbidden_paths(
+            crash_text, [*forbidden_roots, bb.parent], "crash projection"
+        )
+        if "Traceback (most recent call last)" in crash_text:
+            raise JourneyFailure("crash projection exposed a raw backend traceback")
+        crash_cursor = cursor_sequence(crashed.data)
         initial.wait_until(
-            lambda: "cli_mock/reference" in initial.screen.text(),
+            lambda: (
+                "BreadBoard permission request · run_shell" not in initial.screen.text()
+                and "cli_mock/reference" in initial.screen.text()
+            ),
             options.turn_timeout,
             "reconnected TUI readiness",
         )
@@ -2045,22 +2365,26 @@ def main() -> int:
             raise JourneyFailure("replacement engine inherited the secret canary")
         replacement_engine_canary_absent = True
         write_capture(output, "engine-reconnected", initial)
-        initial.wait_until(
-            lambda: "HTTP request failed" in initial.screen.text(),
-            options.turn_timeout,
-            "failed submission after engine replacement",
-        )
-        initial.send_line(RECONNECT_PROMPT)
-        record_action("retry-reconnect-turn", prompt=RECONNECT_PROMPT)
 
-        _, reconnect_state, _ = wait_for_terminal_state(
+        initial.send_line(RECONNECT_PROMPT)
+        record_action("submit-reconnect-turn", prompt=RECONNECT_PROMPT)
+        (
+            (_, reconnect_state, _),
+            reconnect_approvals,
+        ) = wait_for_terminal_state_with_permissions(
             initial,
             roots["agent"],
-            2,
+            4,
             options.turn_timeout,
             "post-reconnect terminal turn",
             "completed",
         )
+        if "run_shell" not in reconnect_approvals:
+            raise JourneyFailure(
+                f"post-reconnect turn did not request run_shell approval: {reconnect_approvals}"
+            )
+        for tool in reconnect_approvals:
+            record_action("allow-reconnect-permission", tool=tool)
         reconnect_turn_id = str(reconnect_state["turns"][-1].get("turn_id") or "")
         if not reconnect_turn_id:
             raise JourneyFailure("post-reconnect turn is missing durable identity")
@@ -2106,10 +2430,12 @@ def main() -> int:
     final_initial = binding_snapshot(roots["agent"])
     if final_initial is None:
         raise JourneyFailure("binding disappeared after initial exit")
+    if final_initial.data.get("sessionId") != synthetic_session_id:
+        raise JourneyFailure("fresh synthetic session binding was not retained after exit")
     final_initial_cursor = cursor_sequence(final_initial.data)
     initial_owned = owned_submissions(final_initial.data)
     final_initial_facts = transcript_facts(final_initial.rows)
-    if len(initial_owned) != 2 or final_initial_cursor < cursor_sequence(
+    if len(initial_owned) != 4 or final_initial_cursor < cursor_sequence(
         reconnected.data
     ):
         raise JourneyFailure(
@@ -2117,9 +2443,9 @@ def main() -> int:
         )
     for field in ("clientMessageId", "inputId", "turnId"):
         values = [item.get(field) for item in initial_owned]
-        if len(values) != 2 or len(set(values)) != 2:
+        if len(values) != 4 or len(set(values)) != 4:
             raise JourneyFailure(
-                f"owned submissions do not have two unique {field} values"
+                f"owned submissions do not have four unique {field} values"
             )
     for authority in (first_authority, crash_authority, replacement_authority):
         if process_alive(int(authority["pid"])):
@@ -2136,21 +2462,26 @@ def main() -> int:
     state_path, retained_state, retained_bytes_before_restart = load_retained_state(
         roots["agent"]
     )
+    state_paths_before_restart = {
+        path.resolve() for path in roots["agent"].rglob("session-state/*.json")
+    }
     if retained_state.get("schema_version") != "bb.cli_bridge.session_state.v1":
         raise JourneyFailure("retained state has the wrong schema")
     turns = retained_state.get("turns")
     envelopes = retained_state.get("terminal_event_envelopes")
-    if not isinstance(turns, list) or len(turns) != 2:
-        raise JourneyFailure("retained state does not have exactly two turns")
-    if not isinstance(envelopes, list) or len(envelopes) != 2:
+    if not isinstance(turns, list) or len(turns) != 4:
+        raise JourneyFailure("retained state does not have exactly four turns")
+    if not isinstance(envelopes, list) or len(envelopes) != 4:
         raise JourneyFailure(
-            "retained state does not have exactly two terminal envelopes"
+            "retained state does not have exactly four terminal envelopes"
         )
     if any(turn.get("terminal_resolution_committed") is not True for turn in turns):
         raise JourneyFailure("retained turns are not terminally committed")
     terminal_outcomes = [turn.get("terminal_outcome") for turn in turns]
     if terminal_outcomes != [
         "completed",
+        "cancelled",
+        "failed",
         "completed",
     ]:
         raise JourneyFailure(
@@ -2194,6 +2525,8 @@ def main() -> int:
         FIRST_PROMPT,
         SECOND_PROMPT,
         SYNTHETIC_PROMPT,
+        CANCEL_PROMPT,
+        CRASH_PROMPT,
         RECONNECT_PROMPT,
     ):
         if prompt in retained_text:
@@ -2244,6 +2577,7 @@ def main() -> int:
         roots["workspace"],
         environment,
     )
+    resume_tui_pid = resume.pid
     try:
 
         def resume_ready() -> tuple[Path, dict[str, Any]] | None:
@@ -2252,19 +2586,21 @@ def main() -> int:
                 "launchId"
             ) == replacement_authority.get("launchId"):
                 return None
-            if SYNTHETIC_ASSISTANT_SENTINEL not in normalized_transcript(
-                bytes(resume.raw)
-            ):
+            restored_assistant = final_initial_facts["assistantTexts"][-1]
+            if restored_assistant not in normalized_transcript(bytes(resume.raw)):
                 return None
             snapshot = binding_snapshot(roots["agent"])
             if (
                 snapshot is None
                 or snapshot.session_file != final_initial.session_file
-                or snapshot.data.get("sessionId") != final_initial.data.get("sessionId")
+                or snapshot.data.get("sessionId")
+                == final_initial.data.get("sessionId")
+                or snapshot.data.get("previousSessionId")
+                != final_initial.data.get("sessionId")
                 or snapshot.data.get("replayConfigurationDigest")
                 != final_initial.data.get("replayConfigurationDigest")
-                or owned_submissions(snapshot.data) != initial_owned
-                or cursor_sequence(snapshot.data) < final_initial_cursor
+                or owned_submissions(snapshot.data)
+                or cursor_sequence(snapshot.data) <= 0
                 or transcript_facts(snapshot.rows) != final_initial_facts
             ):
                 return None
@@ -2317,6 +2653,52 @@ def main() -> int:
             raise JourneyFailure("resumed engine inherited the secret canary")
         resume_engine_canary_absent = True
         write_capture(output, "resume-readback", resume)
+        resume.send_line(POST_RESUME_PROMPT)
+        record_action("submit-post-resume-turn", prompt=POST_RESUME_PROMPT)
+        (
+            (_, post_resume_state, _),
+            post_resume_approvals,
+        ) = wait_for_terminal_state_with_permissions(
+            resume,
+            roots["agent"],
+            1,
+            options.turn_timeout,
+            "post-resume terminal turn",
+            "completed",
+        )
+        if "run_shell" not in post_resume_approvals:
+            raise JourneyFailure(
+                f"post-resume turn did not request run_shell approval: {post_resume_approvals}"
+            )
+        for tool in post_resume_approvals:
+            record_action("allow-post-resume-permission", tool=tool)
+        post_resume_turn_id = str(post_resume_state["turns"][-1].get("turn_id") or "")
+        if not post_resume_turn_id:
+            raise JourneyFailure("post-resume turn is missing durable identity")
+
+        def post_resume_turn_ready() -> BindingSnapshot | None:
+            snapshot = binding_snapshot(roots["agent"])
+            if snapshot is None or not any(
+                str(submission.get("turnId")) == post_resume_turn_id
+                for submission in owned_submissions(snapshot.data)
+            ):
+                return None
+            facts = transcript_facts(snapshot.rows)
+            if cursor_sequence(snapshot.data) <= 0:
+                return None
+            if tuple(facts["toolCalls"][-3:]) != SYNTHETIC_TOOLS:
+                return None
+            if tuple(facts["toolResults"][-3:]) != SYNTHETIC_TOOLS:
+                return None
+            return snapshot
+
+        post_resume = resume.wait_until(
+            post_resume_turn_ready,
+            options.turn_timeout,
+            "post-resume projected terminal turn",
+        )
+        assert isinstance(post_resume, BindingSnapshot)
+        write_capture(output, "post-resume-completed", resume)
         record_action("exit-resumed-tui", command="/exit")
         resume.send_line("/exit")
         resume_exit = resume.wait_for_exit(60)
@@ -2328,28 +2710,86 @@ def main() -> int:
 
     final_resume = binding_snapshot(roots["agent"])
     if final_resume is None:
-        raise JourneyFailure("durable binding disappeared after resume read-back")
+        raise JourneyFailure("durable binding disappeared after post-resume turn")
     if (
-        final_resume.data.get("sessionId") != final_initial.data.get("sessionId")
+        final_resume.data.get("sessionId") == final_initial.data.get("sessionId")
+        or final_resume.data.get("previousSessionId")
+        != final_initial.data.get("sessionId")
         or final_resume.data.get("replayConfigurationDigest")
         != final_initial.data.get("replayConfigurationDigest")
-        or len(owned_submissions(final_resume.data)) != 2
-        or cursor_sequence(final_resume.data) < final_initial_cursor
+        or len(owned_submissions(final_resume.data)) != 1
+        or cursor_sequence(final_resume.data) <= 0
     ):
-        raise JourneyFailure("resume read-back changed lineage or regressed durability")
-    _, retained_state_after, _retained_bytes_after_restart = load_retained_state(
-        roots["agent"]
-    )
-    turns_after = retained_state_after.get("turns")
-    envelopes_after = retained_state_after.get("terminal_event_envelopes")
-    if not isinstance(turns_after, list) or len(turns_after) != 2:
-        raise JourneyFailure("resumed state does not have exactly two turns")
-    if not isinstance(envelopes_after, list) or len(envelopes_after) != 2:
         raise JourneyFailure(
-            "resumed state does not have exactly two terminal envelopes"
+            "post-resume turn did not advance through an explicit fresh-session successor"
         )
-    if turns_after != turns or envelopes_after != envelopes:
-        raise JourneyFailure("process resume changed pre-existing durable turn state")
+    successor_state_path, retained_state_after, retained_bytes_after_restart = (
+        load_retained_state(roots["agent"])
+    )
+    state_paths_after_restart = {
+        path.resolve() for path in roots["agent"].rglob("session-state/*.json")
+    }
+    if (
+        state_paths_after_restart - state_paths_before_restart
+        != {successor_state_path}
+        or successor_state_path == state_path
+        or state_path.read_bytes() != retained_bytes_before_restart
+    ):
+        raise JourneyFailure(
+            "terminal successor did not preserve one immutable predecessor state"
+        )
+    successor_turns = retained_state_after.get("turns")
+    successor_envelopes = retained_state_after.get("terminal_event_envelopes")
+    if not isinstance(successor_turns, list) or len(successor_turns) != 1:
+        raise JourneyFailure("post-resume successor state does not have exactly one turn")
+    if not isinstance(successor_envelopes, list) or len(successor_envelopes) != 1:
+        raise JourneyFailure(
+            "post-resume successor state does not have exactly one terminal envelope"
+        )
+    successor_session = retained_state_after.get("session")
+    successor_submission = retained_state_after.get("submissions")
+    final_submission = owned_submissions(final_resume.data)[0]
+    expected_session_id = str(final_resume.data["sessionId"])
+    expected_turn_id = str(final_submission["turnId"])
+    expected_input_id = str(final_submission["inputId"])
+    successor_turn = successor_turns[0]
+    if not isinstance(successor_turn, dict):
+        raise JourneyFailure("post-resume successor turn is not an object")
+    successor_envelope = successor_envelopes[0]
+    if not isinstance(successor_envelope, dict):
+        raise JourneyFailure("post-resume successor terminal envelope is not an object")
+    successor_payload = successor_envelope.get("payload")
+    if (
+        not isinstance(successor_session, dict)
+        or successor_session.get("session_id") != expected_session_id
+        or successor_session.get("event_seq") != cursor_sequence(final_resume.data)
+        or successor_session.get("replay_head_sequence")
+        != cursor_sequence(final_resume.data)
+        or not isinstance(successor_submission, list)
+        or len(successor_submission) != 1
+        or successor_submission[0].get("turn_id") != expected_turn_id
+        or successor_submission[0].get("input_id") != expected_input_id
+        or successor_turn.get("turn_id") != expected_turn_id
+        or successor_turn.get("input_id") != expected_input_id
+        or successor_envelope.get("session_id") != expected_session_id
+        or successor_envelope.get("turn_id") != expected_turn_id
+        or successor_envelope.get("input_id") != expected_input_id
+        or successor_envelope.get("type") != "turn_completed"
+        or successor_envelope.get("protocol_version") != "1.0"
+        or successor_envelope.get("stable_cursor") is not True
+        or not isinstance(successor_payload, dict)
+        or successor_payload.get("finish_reason") != "stop"
+        or successor_payload.get("output_emitted") is not True
+    ):
+        raise JourneyFailure(
+            "post-resume retained state does not match the successor binding lineage"
+        )
+    if successor_turns[0].get("terminal_outcome") != "completed":
+        raise JourneyFailure("post-resume successor turn is not durably completed")
+    if retained_bytes_after_restart == retained_bytes_before_restart:
+        raise JourneyFailure("post-resume successor reused predecessor state bytes")
+    turns_after = [*turns, *successor_turns]
+    envelopes_after = [*envelopes, *successor_envelopes]
     if process_alive(int(second_authority["pid"])):
         raise JourneyFailure("resumed engine PID remains alive after TUI close")
     if endpoint_open(str(second_authority["normalizedEndpoint"])):
@@ -2368,12 +2808,12 @@ def main() -> int:
         network_audit_raw,
         output / "network-observation.csv",
         {
-            provider_free_pid,
-            int(provider_free_authority["pid"]),
-            initial.pid,
+            int(crash_authority["pid"]),
+            provider_free_tui_pid,
+            synthetic_tui_pid,
             int(first_authority["pid"]),
             int(replacement_authority["pid"]),
-            resume.pid,
+            resume_tui_pid,
             int(second_authority["pid"]),
         },
         network_audit_stderr,
@@ -2441,32 +2881,13 @@ def main() -> int:
             "cases": tamper_results,
         },
     )
-    provider_free_facts = transcript_facts(locked_provider_free.rows)
-    if provider_free_facts["userTexts"] != [
-        FIRST_PROMPT,
-        SECOND_PROMPT,
-        SYNTHETIC_PROMPT,
-    ]:
-        raise JourneyFailure(
-            "provider-free session has unexpected submitted prompts: "
-            f"{provider_free_facts['userTexts']}"
-        )
-    if provider_free_facts["assistantTexts"].count(ASSISTANT_SENTINEL) != 2:
-        raise JourneyFailure(
-            "provider-free session does not retain exactly two assistant texts"
-        )
-    expected_mock_tools = ["list_dir", "apply_unified_patch"] * 2
-    if (
-        provider_free_facts["toolCalls"] != expected_mock_tools
-        or provider_free_facts["toolResults"] != expected_mock_tools
-    ):
-        raise JourneyFailure("provider-free session has unexpected tool activity")
-
     facts = transcript_facts(final_resume.rows)
     expected_prompts = [
         SYNTHETIC_PROMPT,
+        CANCEL_PROMPT,
+        CRASH_PROMPT,
         RECONNECT_PROMPT,
-        RECONNECT_PROMPT,
+        POST_RESUME_PROMPT,
     ]
     if facts["userTexts"] != expected_prompts:
         raise JourneyFailure(
@@ -2474,14 +2895,20 @@ def main() -> int:
         )
     if facts["assistantTexts"].count(ASSISTANT_SENTINEL) != 0:
         raise JourneyFailure(
-            "provider-free assistant text crossed the fresh-session boundary"
+            "synthetic transcript unexpectedly retained provider-free assistant text"
         )
     if facts["completionSentinelCount"] != 0:
         raise JourneyFailure(
             "control-only completion sentinel reached the durable TUI transcript"
         )
-    expected_tool_calls = list(SYNTHETIC_TOOLS) * 2
-    expected_tool_results = list(SYNTHETIC_TOOLS) * 2
+    expected_tool_calls = list(SYNTHETIC_TOOLS) * 5
+    expected_tool_results = (
+        list(SYNTHETIC_TOOLS)
+        + list(SYNTHETIC_TOOLS[:2])
+        + list(SYNTHETIC_TOOLS[:2])
+        + list(SYNTHETIC_TOOLS)
+        + list(SYNTHETIC_TOOLS)
+    )
     if facts["toolCalls"] != expected_tool_calls:
         raise JourneyFailure(
             f"OMP transcript has unexpected tool calls: {facts['toolCalls']}"
@@ -2493,31 +2920,23 @@ def main() -> int:
     shell_results = [
         row for row in facts["toolResultRows"] if row["name"] == "run_shell"
     ]
-    if len(shell_results) != 2 or any(
+    if len(shell_results) != 3 or any(
         row["isError"] or "[1, 2, 3, 4, 5]" not in row["content"]
         for row in shell_results
     ):
         raise JourneyFailure(
-            f"installed shell validations did not succeed exactly twice: {shell_results}"
+            f"installed shell validations did not succeed exactly three times: {shell_results}"
         )
     tool_receipt_evidence = validate_tool_receipts(facts)
     session_text = final_resume.session_file.read_text(encoding="utf-8")
     if secret_canary in session_text:
         raise JourneyFailure("OMP JSONL contains the secret canary")
-    provider_free_session_text = locked_provider_free.session_file.read_text(
-        encoding="utf-8"
-    )
-    if secret_canary in provider_free_session_text:
-        raise JourneyFailure("provider-free OMP JSONL contains the secret canary")
-    assert_no_forbidden_paths(
-        provider_free_session_text,
-        [*forbidden_roots, bb.parent],
-        "provider-free OMP JSONL",
-    )
     assert_no_forbidden_paths(session_text, [*forbidden_roots, bb.parent], "OMP JSONL")
 
     final_binding_history = validate_binding_history(final_resume.rows)
-    event_journal_path, event_journal_rows = session_event_journal(roots["agent"])
+    event_journal_paths, event_journal_rows = session_event_journals(
+        roots["agent"], set(final_binding_history["sessionIds"])
+    )
     event_kinds: dict[str, int] = {}
     for event in event_journal_rows:
         kind = event.get("kind")
@@ -2600,14 +3019,13 @@ def main() -> int:
     event_extract = {
         "schemaVersion": "bb.g6_session_event_extract.v1",
         "status": "pass",
-        "path": str(event_journal_path),
+        "paths": [str(path) for path in event_journal_paths],
         "events": event_journal_rows,
         "eventKinds": event_kinds,
     }
     process_timeline = {
         "schemaVersion": "bb.g6_process_authority_timeline.v1",
         "status": "pass",
-        "providerFreeAuthority": provider_free_authority,
         "initialAuthority": first_authority,
         "crashAuthority": crash_authority,
         "replacementAuthority": replacement_authority,
@@ -2619,7 +3037,6 @@ def main() -> int:
         },
         "replacementIdentity": replacement_identity,
         "processes": {
-            "providerFree": provider_free_processes,
             "initial": first_processes,
             "replacement": replacement_processes,
             "resume": second_processes,
@@ -2646,7 +3063,6 @@ def main() -> int:
     write_json(output / "ui-action-trace.json", action_trace)
 
     cleanup = {
-        "providerFreePidDead": True,
         "initialPidDead": True,
         "crashedPidDead": True,
         "replacementPidDead": True,
@@ -2663,7 +3079,6 @@ def main() -> int:
         "knownManagedPidsDead": all(
             not process_alive(int(authority["pid"]))
             for authority in (
-                provider_free_authority,
                 first_authority,
                 crash_authority,
                 replacement_authority,
@@ -2673,14 +3088,57 @@ def main() -> int:
     }
     if not cleanup["knownManagedPidsDead"]:
         raise JourneyFailure("one known managed process remains alive after final exit")
+    managed_pids = sorted(
+        {
+            provider_free_tui_pid,
+            synthetic_tui_pid,
+            resume_tui_pid,
+            int(first_authority["pid"]),
+            int(crash_authority["pid"]),
+            int(replacement_authority["pid"]),
+            int(second_authority["pid"]),
+        }
+    )
+    final_process_snapshots = {
+        str(pid): process_snapshot(pid) for pid in managed_pids
+    }
+    final_listener_snapshot = listener_snapshot(
+        str(second_authority["normalizedEndpoint"])
+    )
     summary = {
         "schemaVersion": "bb.installed_g6_journey.v1",
         "status": "pass",
         "bb": str(bb),
+        "artifactIdentity": {
+            "schemaVersion": "bb.installed_g6_artifact_identity.v1",
+            "tuiSourceCommit": options.tui_source_commit,
+            "tuiSourceTree": options.tui_source_tree,
+            "bb": {
+                "path": str(bb),
+                "sizeBytes": bb.stat().st_size,
+                "sha256": f"sha256:{sha256_file(bb)}",
+            },
+            "piNatives": {
+                "path": str(pi_natives),
+                "sizeBytes": pi_natives.stat().st_size,
+                "sha256": f"sha256:{sha256_file(pi_natives)}",
+            },
+            "sdkArtifact": {
+                "path": str(sdk_artifact),
+                "sizeBytes": sdk_artifact.stat().st_size,
+                "sha256": f"sha256:{sha256_file(sdk_artifact)}",
+            },
+            "sdkProvenance": {
+                "path": str(sdk_provenance),
+                "sizeBytes": sdk_provenance.stat().st_size,
+                "sha256": f"sha256:{sha256_file(sdk_provenance)}",
+            },
+        },
         "environmentKeys": sorted(environment),
         "manualEngineOrSessionConfiguration": False,
-        "persistentPermissionRule": str(permission_rule_path.resolve()),
         "sessionFile": str(final_resume.session_file),
+        "providerFreeSessionId": initial_session_id,
+        "syntheticSessionId": synthetic_session_id,
         "sessionId": final_resume.data["sessionId"],
         "preTurnBindingPresent": False,
         "preflightStatusIdentity": preflight_status_identity,
@@ -2689,7 +3147,8 @@ def main() -> int:
             "first": first_cursor,
             "second": cursor_sequence(second.data),
             "synthetic": synthetic_cursor,
-            "afterIdleCrash": crash_cursor,
+            "cancelled": cancelled_cursor,
+            "crashed": crash_cursor,
             "beforeResume": final_initial_cursor,
             "final": cursor_sequence(final_resume.data),
         },
@@ -2700,9 +3159,10 @@ def main() -> int:
         "createdFiles": [
             *[str((roots["workspace"] / name).resolve()) for name in EXPECTED_FILES],
             str(bubble_sort.resolve()),
-            str(permission_rule_path.resolve()),
         ],
         "statePath": str(state_path),
+        "successorStatePath": str(successor_state_path),
+        "retainedStatePaths": sorted(str(path) for path in state_paths_after_restart),
         "retainedTurnCount": len(turns_after),
         "retainedTerminalEnvelopeCount": len(envelopes_after),
         "terminalOutcomes": [turn.get("terminal_outcome") for turn in turns_after],
@@ -2719,6 +3179,18 @@ def main() -> int:
         "initialRayRuntime": initial_ray_runtime,
         "resumeRayRuntime": resume_ray_runtime,
         "cleanup": cleanup,
+        "finalCleanupEvidence": {
+            "managedPids": managed_pids,
+            "processSnapshots": final_process_snapshots,
+            "listener": final_listener_snapshot,
+            "activeAuthority": active_authority(roots["agent"]),
+            "extractionRoots": extraction_roots(roots["temp"]),
+            "rayRuntimeRoots": sorted(
+                str(path)
+                for path in ray_runtime_roots(roots["temp"])
+                - baseline_ray_runtime_roots
+            ),
+        },
         "providerIsolation": {
             "providerCalls": network_observation["nonLoopbackConnectionCount"] != 0,
             "loopbackOnlyNetwork": network_observation["loopbackOnly"],
@@ -2734,7 +3206,6 @@ def main() -> int:
         "hostAgentPathsAbsent": True,
         "tamperFailures": tamper_results,
     }
-    write_json(output / "journey-summary.json", summary)
     canary_bytes = secret_canary.encode("utf-8")
     scan_roots = (output, roots["agent"], roots["config"], roots["workspace"])
     for scan_root in scan_roots:
@@ -2747,6 +3218,7 @@ def main() -> int:
                         raise JourneyFailure(
                             f"secret canary leaked into {evidence_file}"
                         )
+    write_json(output / "journey-summary.json", summary)
     print(
         json.dumps(
             {

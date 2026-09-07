@@ -23,8 +23,9 @@ import {
 const replayDigest = "sha256:replay" as ReplayContractDigest;
 
 const binding = (overrides: Partial<BreadboardSessionBindingData> = {}): BreadboardSessionBindingData => ({
-	schemaVersion: "breadboard.session-binding.v3",
+	schemaVersion: "breadboard.session-binding.v4",
 	sessionId: "session-1",
+	previousSessionId: null,
 	replayConfigurationDigest: replayDigest,
 	cursor: { eventId: "event-5", sequence: 5 },
 	ownedSubmissions: [],
@@ -69,7 +70,7 @@ const customEntry = (data: unknown) => ({
 });
 
 describe("BreadBoard session binding", () => {
-	test("rejects malformed v3 data and duplicate correlation identities", () => {
+	test("rejects malformed v4 data and duplicate correlation identities", () => {
 		expect(() => parseBreadboardSessionBindingData({ ...binding(), extra: true })).toThrow(
 			BreadboardSessionTransitionError,
 		);
@@ -107,6 +108,40 @@ describe("BreadBoard session binding", () => {
 			}),
 		).toThrow("conflicts with the active transcript");
 	});
+	test("accepts an explicit fresh-session successor and rejects ambiguous replacement", () => {
+		const first = binding({ ownedSubmissions: [owned("1")] });
+		const successor = binding({
+			sessionId: "session-2",
+			previousSessionId: first.sessionId,
+			cursor: { eventId: "event-1", sequence: 1 },
+		});
+		expect(readBreadboardSessionBinding({ getBranch: () => [customEntry(first), customEntry(successor)] })).toEqual(
+			successor,
+		);
+		expect(validateBreadboardActivation(first, successor, true)).toBe("append");
+		expect(() =>
+			readBreadboardSessionBinding({
+				getBranch: () => [customEntry(first), customEntry({ ...successor, previousSessionId: "other-session" })],
+			}),
+		).toThrow("conflicts with the active transcript");
+		expect(() =>
+			readBreadboardSessionBinding({
+				getBranch: () => [customEntry(first), customEntry({ ...successor, ownedSubmissions: [owned("2")] })],
+			}),
+		).toThrow("conflicts with the active transcript");
+		const changedReplay = {
+			...successor,
+			replayConfigurationDigest: `sha256:${"c".repeat(64)}`,
+		};
+		expect(() =>
+			readBreadboardSessionBinding({
+				getBranch: () => [customEntry(first), customEntry(changedReplay)],
+			}),
+		).toThrow("conflicts with the active transcript");
+		expect(() => validateBreadboardActivation(first, changedReplay, true)).toThrow(
+			"does not match the durable OMP binding",
+		);
+	});
 
 	test("validates fresh history and the exact retained resume boundary", () => {
 		const fresh = validateBreadboardSnapshot(
@@ -123,6 +158,9 @@ describe("BreadBoard session binding", () => {
 		expect(() =>
 			validateBreadboardSnapshot("session-1", snapshot({ retainedHistory: "partial" }), undefined),
 		).toThrow("partial retained history");
+		expect(() => validateBreadboardSnapshot("session-1", snapshot(), undefined, "session-1")).toThrow(
+			"impossible or malformed",
+		);
 
 		const retained = binding({ cursor: { eventId: "event-5", sequence: 5 } });
 		expect(
@@ -160,7 +198,7 @@ describe("BreadBoard session binding", () => {
 
 		const sameCursor = advanceProjectionBinding(withSecond, { eventId: "event-5", sequence: 5 }, [owned("2")]);
 		expect(sameCursor.cursor).toEqual({ eventId: "event-5", sequence: 5 });
-		expect(sameCursor.ownedSubmissions).toEqual([owned("2")]);
+		expect(sameCursor.ownedSubmissions).toEqual([owned("1"), owned("2")]);
 		expect(() => advanceProjectionBinding(withSecond, { eventId: "other-event", sequence: 5 }, [])).toThrow(
 			"conflicts with or rolls back",
 		);

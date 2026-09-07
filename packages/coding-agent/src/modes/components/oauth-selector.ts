@@ -72,6 +72,8 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#onSelectCallback: (providerId: string) => void;
 	#onCancelCallback: () => void;
 	#statusMessage: string | undefined;
+	#loading = true;
+	#closed = false;
 	#validateAuthCallback?: (providerId: string) => Promise<boolean>;
 	#requestRenderCallback?: () => void;
 	#authState: Map<string, "checking" | "valid" | "invalid"> = new Map();
@@ -111,6 +113,8 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			this.ready = Promise.resolve();
 		} else {
 			this.ready = this.#loadProviders().catch(error => {
+				if (this.#closed) return;
+				this.#loading = false;
 				this.#statusMessage = error instanceof Error ? error.message : "Unable to load provider status.";
 				this.#updateList();
 				this.#requestRenderCallback?.();
@@ -120,6 +124,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	}
 
 	stopValidation(): void {
+		this.#closed = true;
 		this.#validationGeneration += 1;
 		this.#stopSpinner();
 	}
@@ -172,6 +177,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	}
 
 	#applyProviders(providers: ReadonlyArray<AuthProviderView>, credentials: ReadonlyArray<AuthCredentialView>): void {
+		this.#loading = false;
 		this.#credentials = credentials.map(credential => ({ ...credential }));
 		const rows = providers.map(provider => ({
 			...provider,
@@ -199,6 +205,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			this.#dataSource.listProviders(),
 			this.#dataSource.listCredentials(),
 		]);
+		if (this.#closed) return;
 		this.#applyProviders(providers, credentials);
 	}
 
@@ -401,13 +408,16 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			this.#listContainer.addChild(new TruncatedText(this.#renderStatusLine(total), 0, 0));
 		}
 
-		if (total === 0) {
-			const message =
-				this.#allProviders.length === 0
-					? this.#mode === "login"
-						? "No OAuth providers available"
-						: "No stored provider credentials to log out"
-					: "No matching providers";
+		if (total === 0 && !this.#statusMessage) {
+			const message = this.#loading
+				? "Loading providers…"
+				: this.#allProviders.length > 0
+					? "No matching providers"
+					: this.#mode === "login"
+						? "No providers available"
+						: this.#mode === "revoke"
+							? "No stored provider credentials to revoke"
+							: "No stored provider credentials to log out";
 			this.#listContainer.addChild(new TruncatedText(theme.fg("muted", message), 0, 0));
 		}
 		if (this.#statusMessage) {
@@ -470,7 +480,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	/** Confirm the selected provider (Enter or mouse click). */
 	#confirmSelection(): void {
 		const selectedProvider = this.#filteredProviders[this.#selectedIndex];
-		if (selectedProvider && (this.#mode === "logout" || this.#canLogin(selectedProvider))) {
+		if (selectedProvider && (this.#mode !== "login" || this.#canLogin(selectedProvider))) {
 			this.#statusMessage = undefined;
 			this.stopValidation();
 			this.#onSelectCallback(selectedProvider.id);

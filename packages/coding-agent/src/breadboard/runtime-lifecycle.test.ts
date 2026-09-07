@@ -22,6 +22,7 @@ import {
 	prepareConnectedBreadboardRuntime,
 	resolveBreadboardCatalogModels,
 	resolveBreadboardSessionTarget,
+	resolveBreadboardStartupModelOverride,
 } from "./runtime";
 import {
 	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
@@ -103,6 +104,7 @@ function runtimeHarness(
 		readonly sessionCloseError?: Error;
 		readonly engineCloseError?: Error;
 		readonly snapshot?: SessionSnapshot;
+		readonly replacementSnapshot?: SessionSnapshot;
 		readonly sessionBinding?: BreadboardSessionBindingData;
 		readonly allowTerminalSnapshotRecovery?: boolean;
 	} = {},
@@ -119,10 +121,10 @@ function runtimeHarness(
 		registrationGeneration: 1,
 		ownerGeneration: 1,
 	});
-	const session: OpenedSession = {
-		sessionId: activeSnapshot.sessionId,
+	const makeSession = (active: SessionSnapshot, label = "session"): OpenedSession => ({
+		sessionId: active.sessionId,
 		async snapshot() {
-			return activeSnapshot;
+			return active;
 		},
 		async submit() {
 			throw new Error("submit not used");
@@ -135,10 +137,14 @@ function runtimeHarness(
 		},
 		async *events() {},
 		async close() {
-			lifecycle.push("session");
+			lifecycle.push(label);
 			if (options.sessionCloseError) throw options.sessionCloseError;
 		},
-	};
+	});
+	const session = makeSession(activeSnapshot);
+	const replacementSession = options.replacementSnapshot
+		? makeSession(options.replacementSnapshot, "replacement-session")
+		: undefined;
 	let capturedBridgeOptions: E4AgentStreamBridgeOptions | undefined;
 	const sessionTarget: OpenSession = { kind: "attach", sessionId: activeSnapshot.sessionId };
 	return {
@@ -179,6 +185,7 @@ function runtimeHarness(
 					providerAuth,
 					async openSession(target) {
 						targets.push(target);
+						if (target.kind === "create" && replacementSession) return replacementSession;
 						return session;
 					},
 					async close() {
@@ -187,6 +194,9 @@ function runtimeHarness(
 					},
 				},
 				sessionTarget,
+				terminalResumeTarget: replacementSession
+					? { kind: "create", request: { workspace: "/workspace", permissionMode: "configured" } }
+					: undefined,
 				sessionBinding: options.sessionBinding,
 				allowTerminalSnapshotRecovery: options.allowTerminalSnapshotRecovery,
 				modelRegistry: { getAll: () => [model] },
@@ -203,12 +213,19 @@ function runtimeHarness(
 						start() {},
 						async close() {
 							lifecycle.push("bridge");
-							await session.close();
+							await capturedBridgeOptions?.session.close();
 						},
 					};
 				},
 			}).then(runtime => {
-				expect(targets).toEqual([sessionTarget]);
+				expect(targets).toEqual(
+					replacementSession
+						? [
+								sessionTarget,
+								{ kind: "create", request: { workspace: "/workspace", permissionMode: "configured" } },
+							]
+						: [sessionTarget],
+				);
 				return runtime;
 			}),
 	};
@@ -243,6 +260,18 @@ test("projects configured evidence routes into the public session model scope", 
 		"cli_mock/reference",
 	]);
 	expect(models.every(candidate => candidate.baseUrl === "http://127.0.0.1:9/v1")).toBeTrue();
+});
+
+test("pins configured exact defaults into BreadBoard startup authority", () => {
+	const explicit = { provider: "mock", id: "reference" };
+
+	expect(resolveBreadboardStartupModelOverride(explicit, "cli_mock/reference")).toEqual(explicit);
+	expect(resolveBreadboardStartupModelOverride(undefined, "cli_mock/reference:high")).toEqual({
+		provider: "cli_mock",
+		id: "reference",
+	});
+	expect(resolveBreadboardStartupModelOverride(undefined, "cli_mock/*")).toBeUndefined();
+	expect(resolveBreadboardStartupModelOverride(undefined, undefined)).toBeUndefined();
 });
 
 test("pins explicit startup model and approval policy into the engine session request", () => {
@@ -304,8 +333,9 @@ describe("connected BreadBoard runtime lifecycle", () => {
 			turnId,
 		};
 		const interruptedBinding: BreadboardSessionBindingData = {
-			schemaVersion: "breadboard.session-binding.v3",
+			schemaVersion: "breadboard.session-binding.v4",
 			sessionId: snapshot.sessionId,
+			previousSessionId: null,
 			replayConfigurationDigest: replayDigest,
 			cursor: { eventId: "event-4" as EventId, sequence: 4 },
 			ownedSubmissions: [interruptedSubmission],
@@ -355,6 +385,61 @@ describe("connected BreadBoard runtime lifecycle", () => {
 		});
 		await runtime.close();
 	});
+	test("continues completed, failed, and stopped resumed sessions with fresh successors", async () => {
+		const terminalBinding: BreadboardSessionBindingData = {
+			schemaVersion: "breadboard.session-binding.v4",
+			sessionId: snapshot.sessionId,
+			previousSessionId: null,
+			replayConfigurationDigest: replayDigest,
+			cursor: { eventId: "event-5" as EventId, sequence: 5 },
+			ownedSubmissions: [],
+		};
+		for (const status of ["completed", "failed", "stopped"] as const) {
+			const harness = runtimeHarness({
+				snapshot: {
+					...snapshot,
+					status,
+					headSequence: 5,
+					headEventId: "event-5" as EventId,
+					earliestRetainedSequence: 1,
+					earliestRetainedEventId: "event-1" as EventId,
+				},
+				replacementSnapshot: {
+					...snapshot,
+					sessionId: "session-2" as SessionId,
+				},
+				sessionBinding: terminalBinding,
+				allowTerminalSnapshotRecovery: true,
+			});
+			const runtime = await harness.prepare();
+			expect(runtime.sessionId).toBe("session-2");
+			expect(harness.bridgeOptions().session.sessionId).toBe("session-2" as SessionId);
+			expect(harness.bridgeOptions().durableCursor).toBeUndefined();
+			const branch: Array<{ type: string; customType?: string; data?: unknown }> = [
+				{
+					type: "custom",
+					customType: BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
+					data: terminalBinding,
+				},
+			];
+			const store: BreadboardSessionBindingStore = {
+				getBranch: () => branch,
+				appendCustomEntry(customType, data) {
+					branch.push({ type: "custom", customType, data });
+				},
+				async flush() {},
+			};
+			await runtime.activate(store);
+			expect(branch.at(-1)?.data).toMatchObject({
+				sessionId: "session-2",
+				previousSessionId: snapshot.sessionId,
+				cursor: { eventId: null, sequence: 0 },
+				ownedSubmissions: [],
+			});
+			await runtime.close();
+			expect(harness.lifecycle).toEqual(["session", "bridge", "replacement-session", "engine"]);
+		}
+	});
 
 	test("reattaches one unchanged turn through a fresh runtime generation", async () => {
 		const oldMonitor = createLifecycleMonitor();
@@ -402,8 +487,9 @@ describe("connected BreadBoard runtime lifecycle", () => {
 				type: "custom",
 				customType: BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
 				data: {
-					schemaVersion: "breadboard.session-binding.v3",
+					schemaVersion: "breadboard.session-binding.v4",
 					sessionId: snapshot.sessionId,
+					previousSessionId: null,
 					replayConfigurationDigest: replayDigest,
 					cursor: { eventId: null, sequence: 0 },
 					ownedSubmissions: [],

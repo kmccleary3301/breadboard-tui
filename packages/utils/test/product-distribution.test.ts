@@ -6,7 +6,7 @@ describe("BreadBoard distribution policy", () => {
 		expect(Object.isFrozen(BREADBOARD_DISTRIBUTION_POLICY)).toBeTrue();
 		expect(BREADBOARD_DISTRIBUTION_POLICY).toMatchObject({
 			productName: "bb",
-			productVersion: "0.1.0-rc.4",
+			productVersion: "0.1.0-rc.7",
 			sdkVersion: "0.4.0",
 			engineApiRange: ">=0.4.0 <0.5.0",
 		});

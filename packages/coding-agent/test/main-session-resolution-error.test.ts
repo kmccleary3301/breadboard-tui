@@ -242,22 +242,22 @@ describe("createSessionManager — missing session (#2084)", () => {
 describe("resolveBreadboardSessionTarget", () => {
 	const workspace = "/canonical/project";
 	const binding = (overrides: Record<string, unknown> = {}) => ({
-		schemaVersion: "breadboard.session-binding.v3",
+		schemaVersion: "breadboard.session-binding.v4",
 		sessionId: "bb-session",
+		previousSessionId: null,
 		replayConfigurationDigest: "sha256:replay",
 		cursor: { eventId: "event-1", sequence: 1 },
 		ownedSubmissions: [],
 		...overrides,
 	});
-	const manager = (...bindings: unknown[]) =>
-		({
-			getBranch: () =>
-				bindings.map(data => ({
-					type: "custom" as const,
-					customType: "breadboard.session-binding",
-					data,
-				})),
-		}) as Parameters<typeof resolveBreadboardSessionTarget>[1];
+	const manager = (...bindings: unknown[]) => ({
+		getBranch: () =>
+			bindings.map(data => ({
+				type: "custom" as const,
+				customType: "breadboard.session-binding",
+				data,
+			})),
+	});
 
 	it("creates a default-profile session with the canonical workspace", () => {
 		expect(resolveBreadboardSessionTarget({}, undefined, undefined, workspace, true)).toEqual({
@@ -327,7 +327,7 @@ describe("resolveBreadboardSessionTarget", () => {
 		expect(() =>
 			resolveBreadboardSessionTarget(
 				{ continue: true },
-				manager({ schemaVersion: "breadboard.session-binding.v3" }),
+				manager({ schemaVersion: "breadboard.session-binding.v4" }),
 				undefined,
 				workspace,
 				true,

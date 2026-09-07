@@ -10,12 +10,18 @@
 
 - The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.
 - Unconfigured downstream-product task sessions default to four concurrent subagents, one delegation level, and a 30-minute per-subagent wall clock. Explicit settings still override these bounds, and OMP retains its existing 32/two-level/unlimited defaults.
+- The welcome screen exposes `/login` and `/model`, including on narrow terminals.
+- Streaming Markdown reuses fixed ANSI styles to reduce rendering overhead without changing terminal output.
 
 ### Fixed
 
 - Fixed the downstream provider-login adapter dropping auth scheme, flow, browser/device authorization metadata, callback fields, account labels, and completed credential summaries.
 - Fixed ordinary external-runtime submission failures entering ambiguous-receipt recovery, and bounded close when a signal-less submission remains unresolved.
 - Fixed Ask dialogs duplicating rendered `(Recommended)` suffixes and terminal-title spinners continuing after interactive shutdown.
+- Provider selection distinguishes pending discovery from an empty catalog, stops validation after dismissal, and allows revoking credentials when new logins are unavailable.
+- Restored completed-session continuation, configured startup model selection, and durable submission correlation across reconnects.
+- Restored the verified local product archive/install path and operator-owned persistent permission rules.
+- SDK provenance checks now reject workspace-local dependencies that shadow the verified SDK.
 
 ## [18.0.1] - 2026-08-23
 

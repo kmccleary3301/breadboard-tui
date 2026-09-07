@@ -2,11 +2,12 @@ import type { SessionSnapshot } from "@breadboard/sdk/session";
 import type { E4DurableCursor, E4OwnedSubmission } from "./e4-agent-stream";
 
 export const BREADBOARD_SESSION_BINDING_CUSTOM_TYPE = "breadboard.session-binding";
-const BREADBOARD_SESSION_BINDING_SCHEMA_VERSION = "breadboard.session-binding.v3";
+const BREADBOARD_SESSION_BINDING_SCHEMA_VERSION = "breadboard.session-binding.v4";
 
 export interface BreadboardSessionBindingData {
-	readonly schemaVersion: "breadboard.session-binding.v3";
+	readonly schemaVersion: "breadboard.session-binding.v4";
 	readonly sessionId: string;
+	readonly previousSessionId: string | null;
 	readonly replayConfigurationDigest: string;
 	readonly cursor: {
 		readonly eventId: string | null;
@@ -53,9 +54,11 @@ export function parseBreadboardSessionBindingData(value: unknown): BreadboardSes
 	if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
 	const data = value as Record<string, unknown>;
 	if (
-		Object.keys(data).length !== 5 ||
+		Object.keys(data).length !== 6 ||
 		data.schemaVersion !== BREADBOARD_SESSION_BINDING_SCHEMA_VERSION ||
 		!isExactSafeString(data.sessionId) ||
+		(data.previousSessionId !== null && !isExactSafeString(data.previousSessionId)) ||
+		data.previousSessionId === data.sessionId ||
 		!isExactSafeString(data.replayConfigurationDigest) ||
 		!data.cursor ||
 		typeof data.cursor !== "object" ||
@@ -114,6 +117,7 @@ export function parseBreadboardSessionBindingData(value: unknown): BreadboardSes
 	return {
 		schemaVersion: BREADBOARD_SESSION_BINDING_SCHEMA_VERSION,
 		sessionId: data.sessionId,
+		previousSessionId: data.previousSessionId,
 		replayConfigurationDigest: data.replayConfigurationDigest,
 		cursor: { eventId: normalizedCursorEventId, sequence: cursorSequence },
 		ownedSubmissions,
@@ -150,18 +154,24 @@ export function readBreadboardSessionBinding(
 	for (const entry of sessionManager.getBranch()) {
 		if (entry.type !== "custom" || entry.customType !== BREADBOARD_SESSION_BINDING_CUSTOM_TYPE) continue;
 		const candidate = parseBreadboardSessionBindingData(entry.data);
-		if (
-			binding &&
-			(candidate.sessionId !== binding.sessionId ||
+		if (binding) {
+			const isSuccessor =
+				candidate.sessionId !== binding.sessionId &&
+				candidate.previousSessionId === binding.sessionId &&
+				candidate.replayConfigurationDigest === binding.replayConfigurationDigest;
+			const conflictsWithinSession =
+				candidate.sessionId !== binding.sessionId ||
+				candidate.previousSessionId !== binding.previousSessionId ||
 				candidate.replayConfigurationDigest !== binding.replayConfigurationDigest ||
 				candidate.cursor.sequence < binding.cursor.sequence ||
 				(candidate.cursor.sequence === binding.cursor.sequence &&
 					(candidate.cursor.eventId !== binding.cursor.eventId ||
-						!containsOwnedSubmissions(candidate.ownedSubmissions, binding.ownedSubmissions))))
-		) {
-			throw new BreadboardSessionTransitionError(
-				"BreadBoard session binding conflicts with the active transcript or rolls back its durable cursor.",
-			);
+						!containsOwnedSubmissions(candidate.ownedSubmissions, binding.ownedSubmissions)));
+			if ((!isSuccessor && conflictsWithinSession) || (isSuccessor && candidate.ownedSubmissions.length !== 0)) {
+				throw new BreadboardSessionTransitionError(
+					"BreadBoard session binding conflicts with the active transcript or rolls back its durable cursor.",
+				);
+			}
 		}
 		binding = candidate;
 	}
@@ -172,13 +182,14 @@ export function validateBreadboardSnapshot(
 	openedSessionId: unknown,
 	snapshot: SessionSnapshot,
 	resumeBinding: BreadboardSessionBindingData | undefined,
+	previousSessionId: string | null = null,
 ): BreadboardSessionBindingData {
 	const sessionId: unknown = snapshot.sessionId;
 	const replayConfigurationDigest: unknown = snapshot.replayRetention.configurationDigest;
 	const headSequence = snapshot.headSequence;
 	const headEventId: unknown = snapshot.headEventId;
 	const earliestRetainedSequence = snapshot.earliestRetainedSequence;
-	const earliestRetainedEventId: unknown = snapshot.earliestRetainedEventId;
+	const earliestRetainedEventId = snapshot.earliestRetainedEventId;
 	const invalid =
 		!isExactSafeString(openedSessionId) ||
 		!isExactSafeString(sessionId) ||
@@ -186,6 +197,7 @@ export function validateBreadboardSnapshot(
 		!isExactSafeString(replayConfigurationDigest) ||
 		!Number.isSafeInteger(headSequence) ||
 		headSequence < 0 ||
+		previousSessionId === sessionId ||
 		(headSequence === 0 ? headEventId !== null : !isExactSafeString(headEventId)) ||
 		(headSequence === 0
 			? earliestRetainedSequence !== null || earliestRetainedEventId !== null
@@ -210,6 +222,7 @@ export function validateBreadboardSnapshot(
 		return {
 			schemaVersion: BREADBOARD_SESSION_BINDING_SCHEMA_VERSION,
 			sessionId,
+			previousSessionId,
 			replayConfigurationDigest,
 			cursor: { eventId: headEventId as string | null, sequence: headSequence },
 			ownedSubmissions: [],
@@ -275,10 +288,23 @@ export function advanceProjectionBinding(
 			"BreadBoard projection cursor conflicts with or rolls back the durable OMP session binding.",
 		);
 	}
+	const merged = new Map(current.ownedSubmissions.map(submission => [submission.turnId, submission]));
+	for (const submission of ownedSubmissions) {
+		const existing = merged.get(submission.turnId);
+		if (
+			existing &&
+			(existing.clientMessageId !== submission.clientMessageId || existing.inputId !== submission.inputId)
+		) {
+			throw new BreadboardSessionTransitionError(
+				`BreadBoard owned submission ${submission.turnId} conflicts with the durable binding.`,
+			);
+		}
+		merged.set(submission.turnId, submission);
+	}
 	return parseBreadboardSessionBindingData({
 		...current,
 		cursor: { eventId: cursor.eventId, sequence: cursor.sequence },
-		ownedSubmissions,
+		ownedSubmissions: [...merged.values()].sort((left, right) => left.turnId.localeCompare(right.turnId)),
 	});
 }
 
@@ -289,8 +315,17 @@ export function validateBreadboardActivation(
 ): "append" | "reuse" {
 	if (resuming) {
 		if (
+			existingBinding &&
+			initialBinding.previousSessionId === existingBinding.sessionId &&
+			initialBinding.sessionId !== existingBinding.sessionId &&
+			initialBinding.replayConfigurationDigest === existingBinding.replayConfigurationDigest
+		) {
+			return "append";
+		}
+		if (
 			!existingBinding ||
 			existingBinding.sessionId !== initialBinding.sessionId ||
+			existingBinding.previousSessionId !== initialBinding.previousSessionId ||
 			existingBinding.replayConfigurationDigest !== initialBinding.replayConfigurationDigest ||
 			existingBinding.cursor.sequence !== initialBinding.cursor.sequence ||
 			existingBinding.cursor.eventId !== initialBinding.cursor.eventId ||

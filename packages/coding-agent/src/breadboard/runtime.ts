@@ -12,6 +12,7 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import { getProjectDir, IS_BREADBOARD_PRODUCT, logger, postmortem } from "@oh-my-pi/pi-utils";
 import type { Args } from "../cli/args";
 import type { ModelRegistry } from "../config/model-registry";
+import { parseModelString } from "../config/model-resolver";
 import { type Settings, settings } from "../config/settings";
 import type { ExtensionUIContext } from "../extensibility/extensions/types";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
@@ -196,33 +197,19 @@ export function rejectBreadboardSessionTransition(plan: SessionTransitionPlan): 
 
 function exactModelRoute(selector: string | undefined): Pick<Model, "provider" | "id"> | undefined {
 	const normalized = selector?.trim();
-	if (!normalized) return undefined;
-	const separator = normalized.indexOf("/");
-	if (separator <= 0 || separator === normalized.length - 1) return undefined;
-	return {
-		provider: normalized.slice(0, separator),
-		id: normalized.slice(separator + 1),
-	};
+	if (!normalized || normalized.includes("*") || normalized.includes("?") || normalized.includes("["))
+		return undefined;
+	const parsed = parseModelString(normalized);
+	if (!parsed?.provider || !parsed.id) return undefined;
+	return { provider: parsed.provider, id: parsed.id };
 }
-
-export function resolveBreadboardSessionTarget(
-	parsed: Pick<Args, "continue" | "resume">,
-	sessionManager: BreadboardSessionBindingManager | undefined,
+function createBreadboardSessionTarget(
 	sessionConfigPath: string | undefined,
-	workspacePath: string = getProjectDir(),
-	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
+	workspacePath: string,
+	isBreadboardProduct: boolean,
 	selectedModel?: Pick<Model, "provider" | "id">,
 	approvalMode?: ApprovalMode,
-): OpenSession {
-	if (parsed.continue || parsed.resume === true || typeof parsed.resume === "string") {
-		const binding = sessionManager && readBreadboardSessionBinding(sessionManager);
-		if (!binding) {
-			throw new BreadboardSessionTransitionError(
-				"BreadBoard cannot resume this OMP transcript because it has no durable BreadBoard session binding. Start a new OMP session instead.",
-			);
-		}
-		return { kind: "attach", sessionId: binding.sessionId };
-	}
+): Extract<OpenSession, { readonly kind: "create" }> {
 	if (!isBreadboardProduct && sessionConfigPath === undefined) {
 		throw new BreadboardRunConfigError(
 			"invalid_session_config",
@@ -259,6 +246,33 @@ export function resolveBreadboardSessionTarget(
 	};
 }
 
+export function resolveBreadboardSessionTarget(
+	parsed: Pick<Args, "continue" | "resume">,
+	sessionManager: BreadboardSessionBindingManager | undefined,
+	sessionConfigPath: string | undefined,
+	workspacePath: string = getProjectDir(),
+	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
+	selectedModel?: Pick<Model, "provider" | "id">,
+	approvalMode?: ApprovalMode,
+): OpenSession {
+	if (parsed.continue || parsed.resume === true || typeof parsed.resume === "string") {
+		const binding = sessionManager && readBreadboardSessionBinding(sessionManager);
+		if (!binding) {
+			throw new BreadboardSessionTransitionError(
+				"BreadBoard cannot resume this OMP transcript because it has no durable BreadBoard session binding. Start a new OMP session instead.",
+			);
+		}
+		return { kind: "attach", sessionId: binding.sessionId };
+	}
+	return createBreadboardSessionTarget(
+		sessionConfigPath,
+		workspacePath,
+		isBreadboardProduct,
+		selectedModel,
+		approvalMode,
+	);
+}
+
 export interface PreparedBreadboardRuntime {
 	readonly providerAuth: ProviderAuthPort;
 	readonly stream: StreamFn;
@@ -284,6 +298,13 @@ export interface BreadboardRuntimeAuthority {
 	readonly selectedModel?: Pick<Model, "provider" | "id">;
 }
 
+export function resolveBreadboardStartupModelOverride(
+	explicitModel: Pick<Model, "provider" | "id"> | undefined,
+	configuredDefaultSelector: string | undefined,
+): Pick<Model, "provider" | "id"> | undefined {
+	return explicitModel ?? exactModelRoute(configuredDefaultSelector);
+}
+
 type ConnectedBreadboardEnginePort = Pick<
 	BreadboardEnginePort,
 	"lifecycleFailure" | "openSession" | "getModelCatalog" | "setSessionModel" | "providerAuth" | "close"
@@ -293,6 +314,7 @@ export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuth
 	readonly engine: ConnectedBreadboardEnginePort;
 	readonly sessionTarget: OpenSession;
 	readonly modelCatalogConfigPath?: string;
+	readonly terminalResumeTarget?: Extract<OpenSession, { readonly kind: "create" }>;
 	readonly emitAgentEvent: (event: AgentEvent, idempotencyKey: string) => Promise<void>;
 	readonly releaseAgentEvent: (idempotencyKey: string) => void;
 	readonly sessionBinding?: BreadboardSessionBindingData;
@@ -567,27 +589,52 @@ export async function prepareConnectedBreadboardRuntime(
 		throwIfLifecycleFailed();
 		opened = await options.engine.openSession(options.sessionTarget);
 		throwIfLifecycleFailed();
-		const snapshot = await opened.snapshot();
+		let snapshot = await opened.snapshot();
 		throwIfLifecycleFailed();
+		const resumeBinding =
+			options.sessionBinding === undefined ? undefined : parseBreadboardSessionBindingData(options.sessionBinding);
+		let activeResumeBinding = resumeBinding;
+		let previousSessionId: string | null = null;
+		if (
+			options.allowTerminalSnapshotRecovery &&
+			resumeBinding &&
+			(snapshot.status === "completed" || snapshot.status === "failed" || snapshot.status === "stopped")
+		) {
+			if (!options.terminalResumeTarget) {
+				throw new BreadboardSessionTransitionError(
+					"BreadBoard cannot continue a terminal session without a fresh session target.",
+				);
+			}
+			await closeOpened();
+			opened = await options.engine.openSession(options.terminalResumeTarget);
+			openedClosePromise = undefined;
+			snapshot = await opened.snapshot();
+			throwIfLifecycleFailed();
+			activeResumeBinding = undefined;
+			previousSessionId = resumeBinding.sessionId;
+		}
 		const catalog = await options.engine.getModelCatalog(
 			options.modelCatalogConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 		);
 		const catalogModels = resolveBreadboardCatalogModels(catalog, options.modelRegistry);
 		const catalogRegistry: BreadboardModelRegistry = { getAll: () => [...catalogModels] };
-		const resumeBinding =
-			options.sessionBinding === undefined ? undefined : parseBreadboardSessionBindingData(options.sessionBinding);
-		const initialBinding = validateBreadboardSnapshot(opened.sessionId, snapshot, resumeBinding);
+		const initialBinding = validateBreadboardSnapshot(
+			opened.sessionId,
+			snapshot,
+			activeResumeBinding,
+			previousSessionId,
+		);
 		let snapshotRecovery = false;
 		let bridgeBinding = initialBinding;
-		if (options.allowTerminalSnapshotRecovery && resumeBinding && snapshot.headEventId !== null) {
+		if (options.allowTerminalSnapshotRecovery && activeResumeBinding && snapshot.headEventId !== null) {
 			const everyOwnedTurnIsTerminal =
-				resumeBinding.ownedSubmissions.length > 0 &&
-				resumeBinding.ownedSubmissions.every(submission =>
+				activeResumeBinding.ownedSubmissions.length > 0 &&
+				activeResumeBinding.ownedSubmissions.every(submission =>
 					snapshot.terminalTurns.some(
 						terminal => terminal.inputId === submission.inputId && terminal.turnId === submission.turnId,
 					),
 				);
-			if (everyOwnedTurnIsTerminal && resumeBinding.cursor.sequence < snapshot.headSequence) {
+			if (everyOwnedTurnIsTerminal && activeResumeBinding.cursor.sequence < snapshot.headSequence) {
 				snapshotRecovery = true;
 				bridgeBinding = advanceProjectionBinding(
 					initialBinding,
@@ -607,6 +654,7 @@ export async function prepareConnectedBreadboardRuntime(
 				if (
 					!current ||
 					current.sessionId !== initialBinding.sessionId ||
+					current.previousSessionId !== initialBinding.previousSessionId ||
 					current.replayConfigurationDigest !== initialBinding.replayConfigurationDigest
 				) {
 					throw new BreadboardSessionTransitionError("BreadBoard durable session binding changed during runtime.");
@@ -692,7 +740,8 @@ export async function prepareConnectedBreadboardRuntime(
 						sessionManager.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, bridgeBinding);
 					}
 					await sessionManager.flush();
-					durableBinding = snapshotRecovery ? bridgeBinding : (existingBinding ?? initialBinding);
+					durableBinding =
+						snapshotRecovery || activation === "append" ? bridgeBinding : (existingBinding ?? initialBinding);
 					for (const entry of sessionManager.getBranch()) {
 						if (entry.type !== "message") continue;
 						const eventId = breadboardProjectionEventId(entry.message);
@@ -902,15 +951,29 @@ export async function prepareBreadboardRuntime(
 		parsed.continue || parsed.resume === true || typeof parsed.resume === "string"
 			? sessionManager && readBreadboardSessionBinding(sessionManager)
 			: undefined;
+	const startupModelOverride = resolveBreadboardStartupModelOverride(
+		authority.selectedModel ?? exactModelRoute(parsed.model),
+		activeSettings.getModelRole("default"),
+	);
 	const target = resolveBreadboardSessionTarget(
 		parsed,
 		sessionManager,
 		config.sessionConfigPath,
 		workspacePath,
 		IS_BREADBOARD_PRODUCT,
-		authority.selectedModel ?? exactModelRoute(parsed.model),
+		startupModelOverride,
 		activeSettings.get("tools.approvalMode"),
 	);
+	const terminalResumeTarget =
+		sessionBinding === undefined
+			? undefined
+			: createBreadboardSessionTarget(
+					config.sessionConfigPath,
+					workspacePath,
+					IS_BREADBOARD_PRODUCT,
+					startupModelOverride,
+					activeSettings.get("tools.approvalMode"),
+				);
 
 	const connectGeneration = async (
 		sessionTarget: OpenSession,
@@ -936,6 +999,7 @@ export async function prepareBreadboardRuntime(
 			engine: enginePort,
 			modelCatalogConfigPath: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			sessionTarget,
+			terminalResumeTarget,
 			emitAgentEvent: async (event, idempotencyKey) => {
 				await emitAgentEvent(event, idempotencyKey);
 			},

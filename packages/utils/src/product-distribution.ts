@@ -11,7 +11,7 @@ export interface BreadboardDistributionPolicy {
 /** Frozen product/SDK/engine-interface lineage for a BreadBoard distribution. */
 export const BREADBOARD_DISTRIBUTION_POLICY = Object.freeze({
 	productName: "bb",
-	productVersion: "0.1.0-rc.4",
+	productVersion: "0.1.0-rc.7",
 	ompVersion: version,
 	sdkVersion: "0.4.0",
 	engineApiRange: ">=0.4.0 <0.5.0",

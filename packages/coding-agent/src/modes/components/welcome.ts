@@ -314,7 +314,7 @@ export class WelcomeComponent implements Component {
 		// Dynamic model/provider labels are truncated inside the fixed column.
 		// Letting them influence the responsive breakpoint changes the box height
 		// when authoritative session data replaces the empty prepaint labels.
-		const leftMinContentWidth = Math.max(minLeftCol, visibleWidth("Welcome back!"));
+		const leftMinContentWidth = Math.max(minLeftCol, visibleWidth("Welcome!"));
 		const desiredLeftCol = Math.max(
 			Math.min(preferredLeftCol, Math.max(minLeftCol, Math.floor(dualContentWidth * 0.35))),
 			leftMinContentWidth,
@@ -334,7 +334,7 @@ export class WelcomeComponent implements Component {
 		// Left column - centered content
 		const leftLines = [
 			"",
-			this.#centerText(theme.bold("Welcome back!"), leftCol),
+			this.#centerText(theme.bold("Welcome!"), leftCol),
 			"",
 			...logoColored.map(l => this.#centerText(l, leftCol)),
 			"",
@@ -396,12 +396,14 @@ export class WelcomeComponent implements Component {
 		}
 
 		// Right column
+		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
+		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
 		const rightLines = [
-			` ${theme.bold(theme.fg("accent", "Tips"))}`,
-			` ${theme.fg("dim", "#")}${theme.fg("muted", " for prompt actions")}`,
-			` ${theme.fg("dim", "/")}${theme.fg("muted", " for commands")}`,
+			` ${theme.bold(theme.fg("accent", "Get started"))}`,
+			` ${loginHint}`,
+			` ${modelHint}`,
 			` ${theme.fg("dim", "!")}${theme.fg("muted", " to run bash")}`,
-			` ${theme.fg("dim", "$")}${theme.fg("muted", " to run python")}`,
+			` ${theme.fg("dim", "/")}${theme.fg("muted", " for commands")}`,
 			separator,
 			` ${theme.bold(theme.fg("accent", "LSP Servers"))}`,
 			...lspLines,
@@ -410,6 +412,9 @@ export class WelcomeComponent implements Component {
 			...sessionLines,
 			"",
 		];
+		if (!showRightColumn) {
+			leftLines.push("", this.#centerText(loginHint, leftCol), this.#centerText(modelHint, leftCol));
+		}
 
 		// Border characters (dim)
 		const hChar = theme.boxRound.horizontal;

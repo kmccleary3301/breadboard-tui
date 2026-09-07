@@ -16,7 +16,7 @@ The engine seam is the pinned `@breadboard/sdk` package. Direct imports from the
 
 Current product identity:
 
-- BreadBoard: `0.1.0-rc.4`
+- BreadBoard: `0.1.0-rc.7`
 - OMP: `18.0.1`
 - `@breadboard/sdk`: `0.4.0`
 - SDK engine API range: `>=0.4.0 <0.5.0`
@@ -30,7 +30,7 @@ bun install --frozen-lockfile
 bun packages/coding-agent/scripts/build-engine-distribution.ts \
   --backend-root /path/to/pinned/breadboard \
   --output-root /path/to/private/engine-distribution \
-  --product-version 18.0.1
+  --product-version 0.1.0-rc.7
 BREADBOARD_P30_BACKEND_ROOT=/path/to/pinned/breadboard \
   BREADBOARD_ENGINE_DISTRIBUTION_ROOT=/path/to/private/engine-distribution \
   bun run --cwd packages/coding-agent build:bb
@@ -41,6 +41,33 @@ BREADBOARD_P30_BACKEND_ROOT=/path/to/pinned/breadboard \
 The SDK provenance gate fails closed when the backend checkout, generated contract, or vendored artifact differs from the recorded identity.
 
 The engine distribution builder requires its pinned Bun `1.3.14`, Python and uv toolchain. It builds the engine from the clean backend commit rather than importing that checkout at runtime.
+
+## Supported product target
+
+| Archive tuple | Baseline | Status |
+|---|---|---|
+| `darwin-arm64` | macOS 14+ | Supported |
+
+Windows x64 ([#94](https://github.com/kmccleary3301/breadboard/issues/94)), Intel macOS ([#95](https://github.com/kmccleary3301/breadboard/issues/95)), Linux arm64 ([#96](https://github.com/kmccleary3301/breadboard/issues/96)), and Linux musl ([#97](https://github.com/kmccleary3301/breadboard/issues/97)) are deferred. No release claim covers those targets.
+
+For local human QC, build a clearly classified unsigned development artifact:
+
+```sh
+BB_DEVELOPMENT_EVIDENCE=1 \
+  BB_BINARY_PATH="$PWD/packages/coding-agent/dist/bb" \
+  BB_NATIVE_ADDON_PATH="$PWD/packages/natives/native/pi_natives.darwin-arm64.node" \
+  BB_LICENSE_PATH="$PWD/LICENSE" \
+  BB_NOTICES_PATH="$PWD/packages/coding-agent/THIRD_PARTY_NOTICES.txt" \
+  BB_ENGINE_DISTRIBUTION_ROOT=/path/to/private/engine-distribution \
+  BB_PRODUCT_VERSION=0.1.0-rc.7 \
+  BB_RELEASE_OUTPUT_ROOT=/private/release-output \
+  bun run bb:release
+bun run bb:install install /private/release-output/bb-darwin-arm64-0.1.0-rc.7.tar.gz /private/bb-install --allow-unsigned-development
+```
+
+Unsigned development evidence is rejected unless `--allow-unsigned-development` is explicit. A release-candidate archive instead requires an independently distributed archive digest via `--expected-archive-sha256 sha256:<digest>` until publisher-signature verification is available. The same trust flags apply to `update`.
+
+Managed `install`, `update`, `rollback`, `uninstall`, and `status` actions verify the archive before changing a private destination and retain authenticated predecessor revisions for rollback. Release-candidate installation also requires legal inputs, an engine release-envelope declaration, and the independently supplied whole-archive digest.
 
 ## Recorded-run comparison
 

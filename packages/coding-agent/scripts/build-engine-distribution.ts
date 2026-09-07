@@ -19,6 +19,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { BREADBOARD_DISTRIBUTION_POLICY } from "@oh-my-pi/pi-utils/product-distribution";
 import { TOML } from "bun";
 import { installEngineDistributionAtomically } from "../src/breadboard/lifecycle/engine-distribution-installer";
 import {
@@ -39,8 +40,8 @@ const PYTHON_VERSION = "3.11.15";
 const BUN_VERSION = "1.3.14";
 const UV_VERSION = "0.11.21";
 const PYINSTALLER_VERSION = "6.22.2";
-const ENGINE_INTERFACE_VERSION = "0.3.0";
-const ENGINE_INTERFACE_RANGE = ">=0.1.0 <0.4.0";
+const ENGINE_INTERFACE_VERSION = BREADBOARD_DISTRIBUTION_POLICY.sdkVersion;
+const ENGINE_INTERFACE_RANGE = BREADBOARD_DISTRIBUTION_POLICY.engineApiRange;
 const ENGINE_BUNDLE_FILENAME = "breadboard-engine-runtime.v1.bundle";
 const ENGINE_SELF_TEST_ARGUMENT = "--self-test-import-agent";
 const ENGINE_SELF_TEST_OUTPUT = "breadboard-engine-import-ok";

@@ -732,6 +732,14 @@ export async function verifyBreadboardSdkProvenance(
 	await verifyBackendIdentity(manifest, backendRoot ?? process.env[manifest.backendRootEnvironmentVariable], inspect);
 
 	const installedRoot = join(workspaceRoot, "node_modules", "@breadboard", "sdk");
+	for (const entrypoint of ["index", "engine", "session", "lifecycle"]) {
+		const specifier = entrypoint === "index" ? manifest.packageName : `${manifest.packageName}/${entrypoint}`;
+		invariant(
+			(await realpath(Bun.resolveSync(specifier, packageRoot))) ===
+				(await realpath(join(installedRoot, "dist", `${entrypoint}.js`))),
+			`${specifier} resolves outside the verified SDK installation; remove the shadowing dependency and reinstall`,
+		);
+	}
 	const expectedFiles = Object.keys(manifest.installedFilesSha256).sort();
 	const actualFiles = await installedFiles(installedRoot);
 	invariant(

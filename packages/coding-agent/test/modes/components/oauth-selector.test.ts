@@ -1,6 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import type { AuthCredentialView, ProviderAuthReadPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
+import type {
+	AuthCredentialView,
+	AuthProviderView,
+	ProviderAuthReadPort,
+} from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { OAuthSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/oauth-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -48,6 +52,76 @@ function providerDataSource(storedProviders: readonly string[] = []): ProviderAu
 }
 
 describe("OAuthSelectorComponent", () => {
+	it("distinguishes pending provider discovery from an empty catalog", async () => {
+		const pending = Promise.withResolvers<readonly AuthProviderView[]>();
+		const source = providerDataSource();
+		const component = new OAuthSelectorComponent(
+			"login",
+			{ ...source, listProviders: () => pending.promise },
+			() => {},
+			() => {},
+		);
+		const loading = component
+			.render(80)
+			.map(line => Bun.stripANSI(line))
+			.join("\n");
+		expect(loading).toMatch(/loading/i);
+		expect(loading).not.toMatch(/no .*providers/i);
+		pending.resolve(await source.listProviders());
+		await component.ready;
+		expect(
+			component
+				.render(80)
+				.map(line => Bun.stripANSI(line))
+				.join("\n"),
+		).not.toMatch(/loading/i);
+	});
+
+	it("does not restart credential validation after closing during discovery", async () => {
+		const pending = Promise.withResolvers<readonly AuthProviderView[]>();
+		const source = providerDataSource(["opencode-go"]);
+		const validated: string[] = [];
+		const component = new OAuthSelectorComponent(
+			"login",
+			{ ...source, listProviders: () => pending.promise },
+			() => {},
+			() => {},
+			{
+				validateAuth: async provider => {
+					validated.push(provider);
+					return true;
+				},
+			},
+		);
+		component.handleInput("\x1b");
+		pending.resolve(await source.listProviders());
+		await component.ready;
+		component.stopValidation();
+		expect(validated).toEqual([]);
+	});
+
+	it("allows revoking stored credentials when a provider cannot accept new logins", async () => {
+		const source = providerDataSource(["opencode-go"]);
+		const providers = (await source.listProviders())
+			.filter(provider => provider.providerId === "opencode-go")
+			.map(provider => ({
+				...provider,
+				available: false,
+				loginAvailable: false,
+				availabilityReason: "provider_managed" as const,
+			}));
+		const selected: string[] = [];
+		const component = new OAuthSelectorComponent(
+			"revoke",
+			{ ...source, listProviders: async () => providers },
+			provider => selected.push(provider),
+			() => {},
+		);
+		await component.ready;
+		component.handleInput("\n");
+		expect(selected).toEqual(["opencode-go"]);
+	});
+
 	it("fuzzy-filters overflowing provider lists from typed input", async () => {
 		const providers = getOAuthProviders();
 		expect(providers.length).toBeGreaterThan(10);

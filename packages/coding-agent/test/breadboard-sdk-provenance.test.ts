@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renameSync } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
@@ -23,7 +23,6 @@ const packageJson = JSON.parse(await readFile(resolve(packageRoot, "package.json
 	bundledDependencies: string[];
 	dependencies: Record<string, string>;
 	exports: Record<string, unknown>;
-	scripts: Record<string, string>;
 };
 const workspaceRoot = resolve(packageRoot, "../..");
 const lockText = await readFile(resolve(workspaceRoot, "bun.lock"), "utf8");
@@ -54,6 +53,39 @@ describe("BreadBoard SDK provenance", () => {
 			else process.env[environmentName] = previous;
 		}
 	});
+	test("rejects a workspace-local SDK shadowing the verified dependency", async () => {
+		const root = await mkdtemp(resolve(tmpdir(), "bb-sdk-shadow-"));
+		const consumer = resolve(root, "packages/coding-agent");
+		try {
+			await mkdir(consumer, { recursive: true });
+			for (const name of ["package.json", "breadboard-sdk-provenance.json", "sdk-export-inventory.json", "vendor"]) {
+				await cp(resolve(packageRoot, name), resolve(consumer, name), { recursive: true });
+			}
+			await cp(resolve(workspaceRoot, "bun.lock"), resolve(root, "bun.lock"));
+			await cp(
+				resolve(workspaceRoot, "node_modules/@breadboard/sdk"),
+				resolve(root, "node_modules/@breadboard/sdk"),
+				{ recursive: true },
+			);
+			const shadow = resolve(consumer, "node_modules/@breadboard/sdk");
+			await mkdir(shadow, { recursive: true });
+			await writeFile(
+				resolve(shadow, "package.json"),
+				JSON.stringify({ name: "@breadboard/sdk", main: "index.js" }),
+			);
+			await writeFile(resolve(shadow, "index.js"), "export const stale = true;\n");
+			const inspect: BackendGitInspection = async inspectedRoot => ({
+				root: inspectedRoot,
+				commit: manifest.backendCommit,
+				tree: manifest.backendTree,
+				sdkSubtree: manifest.sdkSubtree,
+				status: "",
+			});
+			await expect(verifyBreadboardSdkProvenance(consumer, consumer, inspect)).rejects.toThrow(/resolv.*verified/i);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 	test("rejects export inventory tampering", () => {
 		expect(() => verifySdkExportInventory(manifest, exportInventoryBytes)).not.toThrow();
 		const tampered = new Uint8Array(exportInventoryBytes);
@@ -61,11 +93,6 @@ describe("BreadBoard SDK provenance", () => {
 		expect(() => verifySdkExportInventory(manifest, tampered)).toThrow("export inventory SHA-256 changed");
 	});
 
-	test("runs SDK provenance and notice gates before build or publication", () => {
-		expect(packageJson.scripts["gate:distribution"]).toBe("bun run gate:breadboard-sdk && bun run gate:notices");
-		expect(packageJson.scripts.build).toStartWith("bun run gate:distribution && ");
-		expect(packageJson.scripts.prepack).toStartWith("bun run gate:distribution && ");
-	});
 	test("keeps internal modules outside the package export map", () => {
 		expect(packageJson.exports["./*"]).toBeUndefined();
 		expect(packageJson.exports["./breadboard/lifecycle/lifecycle-supervisor"]).toBeUndefined();

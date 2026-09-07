@@ -283,14 +283,17 @@ function createBuilder(context: ChalkContext, styles: readonly Style[]): ChalkIn
 	});
 	for (const name in STYLES) {
 		const style = STYLES[name];
-		if (style) Object.defineProperty(builder, name, { get: () => createBuilder(context, [...styles, style]) });
+		if (style) {
+			let cached: ChalkInstance | undefined;
+			Object.defineProperty(builder, name, { get: () => (cached ??= createBuilder(context, [...styles, style])) });
+		}
 	}
-	Object.defineProperty(builder, "grey", { get: () => createBuilder(context, [...styles, STYLES.gray!]) });
+	Object.defineProperty(builder, "grey", { get: () => builder.gray });
 	Object.defineProperty(builder, "bgGray", {
-		get: () => createBuilder(context, [...styles, STYLES.bgBlackBright!]),
+		get: () => builder.bgBlackBright,
 	});
 	Object.defineProperty(builder, "bgGrey", {
-		get: () => createBuilder(context, [...styles, STYLES.bgBlackBright!]),
+		get: () => builder.bgBlackBright,
 	});
 	Object.defineProperty(builder, "hex", {
 		value: (color: string) => createBuilder(context, [...styles, hexStyle(color, context.level)]),
