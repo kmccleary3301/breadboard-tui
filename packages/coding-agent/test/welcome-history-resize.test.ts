@@ -91,11 +91,12 @@ describe("composer welcome native-history resize", () => {
 	it("keeps one exact editor rectangle and retired welcome through repeated thinking and resize frames", async () => {
 		const terminal = new TrackingTerminal(80, 12);
 		const scheduler = new ResizeScheduler();
+		const welcomeMarker = "WELCOME_TEST";
 		const composer = new Composer({
 			terminal,
 			tuiOptions: { renderScheduler: scheduler },
 			preferences: { ...COMPOSER_DEFAULTS, quiet: false, resizeScrollback: "preserve" },
-			welcome: { version: "test", modelName: "test-model", providerName: "test-provider" },
+			welcome: { version: "test", modelName: welcomeMarker, providerName: "test-provider" },
 		});
 		const offered: number[] = [];
 		const acknowledged: number[] = [];
@@ -122,7 +123,7 @@ describe("composer welcome native-history resize", () => {
 		composer.setRuntimeChildren([transcript, tail]);
 		composer.start({ playWelcomeIntro: false });
 
-		expect(countRows(plainBuffer(terminal), "Welcome back!")).toBe(1);
+		expect(countRows(plainBuffer(terminal), welcomeMarker)).toBe(1);
 		expect(offered).toHaveLength(1);
 		expect(acknowledged).toEqual(offered);
 		const initialAnchor = expectOneExactEditor(
@@ -137,7 +138,7 @@ describe("composer welcome native-history resize", () => {
 			composer.ui.requestRender(true);
 			const viewport = terminal.getViewport().map(row => Bun.stripANSI(row));
 			expect(expectOneExactEditor(viewport, tail.status)).toBe(initialAnchor);
-			expect(countRows(plainBuffer(terminal), "Welcome back!")).toBe(1);
+			expect(countRows(plainBuffer(terminal), welcomeMarker)).toBe(1);
 		}
 		expect(offered).toHaveLength(1);
 		expect(acknowledged).toHaveLength(1);
@@ -150,7 +151,7 @@ describe("composer welcome native-history resize", () => {
 		] as const) {
 			terminal.resize(columns, rows);
 			lastTransient = terminal.getViewport().map(row => Bun.stripANSI(row));
-			expect(countRows(lastTransient, "Welcome back!")).toBe(1);
+			expect(countRows(lastTransient, welcomeMarker)).toBe(1);
 			expectOneExactEditor(lastTransient, tail.status);
 		}
 		expect(resizeFrames).toBe(3);
@@ -160,9 +161,9 @@ describe("composer welcome native-history resize", () => {
 		await terminal.flush();
 
 		let settledViewport = terminal.getViewport().map(row => Bun.stripANSI(row));
-		expect(countRows(settledViewport, "Welcome back!")).toBe(1);
+		expect(countRows(settledViewport, welcomeMarker)).toBe(1);
 		const settledEditorAnchor = expectOneExactEditor(settledViewport, tail.status);
-		expect(rowOf(settledViewport, "Welcome back!")).toBeLessThan(settledEditorAnchor);
+		expect(rowOf(settledViewport, welcomeMarker)).toBeLessThan(settledEditorAnchor);
 		expect(countRows(plainBuffer(terminal), "EDITOR TOP")).toBe(1);
 		scheduler.advance(101);
 
@@ -172,7 +173,7 @@ describe("composer welcome native-history resize", () => {
 		] as const) {
 			terminal.resize(columns, rows);
 			lastTransient = terminal.getViewport().map(row => Bun.stripANSI(row));
-			expect(countRows(lastTransient, "Welcome back!")).toBe(1);
+			expect(countRows(lastTransient, welcomeMarker)).toBe(1);
 			expectOneExactEditor(lastTransient, tail.status);
 		}
 		expect(resizeFrames).toBe(5);
@@ -180,10 +181,8 @@ describe("composer welcome native-history resize", () => {
 		await terminal.flush();
 
 		settledViewport = terminal.getViewport().map(row => Bun.stripANSI(row));
-		expect(countRows(settledViewport, "Welcome back!")).toBe(1);
-		expect(expectOneExactEditor(settledViewport, tail.status)).toBeGreaterThan(
-			rowOf(settledViewport, "Welcome back!"),
-		);
+		expect(countRows(settledViewport, welcomeMarker)).toBe(1);
+		expect(expectOneExactEditor(settledViewport, tail.status)).toBeGreaterThan(rowOf(settledViewport, welcomeMarker));
 		expect(countRows(plainBuffer(terminal), "EDITOR TOP")).toBe(1);
 		expect(offered).toHaveLength(1);
 		expect(acknowledged).toHaveLength(1);

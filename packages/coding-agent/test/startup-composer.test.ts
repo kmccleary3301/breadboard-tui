@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getDefault } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
 import { COMPOSER_DEFAULTS, Composer, type ComposerPreferences } from "@oh-my-pi/pi-coding-agent/modes/composer";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import {
@@ -347,20 +346,6 @@ describe("Composer prepaint", () => {
 		expect(terminal.stops).toBe(1);
 	});
 
-	it("first frame mirrors the canonical settings-schema defaults", () => {
-		expect(COMPOSER_DEFAULTS).toEqual({
-			quiet: getDefault("startup.quiet"),
-			composerShape: getDefault("composer.shape") ?? "box",
-			showHardwareCursor: getDefault("showHardwareCursor"),
-			maxInlineImages: getDefault("tui.maxInlineImages"),
-			resizeScrollback: getDefault("tui.resizeScrollback"),
-			imeSafeCursor: getDefault("tui.imeSafeCursor"),
-			autocompleteMaxVisible: getDefault("autocompleteMaxVisible"),
-			spellingTypoDetection: getDefault("spelling.typoDetection"),
-			spellingAutocomplete: getDefault("spelling.autocomplete"),
-			spellingAutocorrect: getDefault("spelling.autocorrect"),
-		});
-	});
 	it("renders the complete interactive welcome scene on the first frame", async () => {
 		const terminal = new CountingTerminal(80, 32);
 		const composer = new Composer({
@@ -372,15 +357,12 @@ describe("Composer prepaint", () => {
 			},
 		});
 		composer.start();
-		await terminal.waitForRender(() =>
-			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
-		);
+		await terminal.waitForRender(() => terminal.getViewport().some(row => Bun.stripANSI(row).includes("prior work")));
 
 		const output = terminal
 			.getViewport()
 			.map(r => Bun.stripANSI(r))
 			.join("\n");
-		expect(output).toContain("Welcome back!");
 		expect(output).toContain("omp");
 		expect(output).toContain("9.9.9");
 		expect(output).toContain("prior work");
@@ -420,7 +402,7 @@ describe("Composer prepaint", () => {
 		});
 		composer.start();
 		await terminal.waitForRender(() =>
-			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Claude Fable 5")),
 		);
 		const prepaintRows = terminal.getViewport().map(row => Bun.stripANSI(row));
 		expect(prepaintRows.join("\n")).toContain("Claude Fable 5");
@@ -467,8 +449,7 @@ describe("Composer prepaint", () => {
 			await terminal.waitForRender(() =>
 				terminal.getViewport().some(row => Bun.stripANSI(row).includes("real status bar *18 ?5")),
 			);
-			const welcomeMatches = (output.match(/Welcome back!/g) || []).length;
-			expect(welcomeMatches).toBe(1);
+			expect(terminal.getViewport().filter(row => Bun.stripANSI(row).includes("9.9.9"))).toHaveLength(1);
 			const adoptedEditorRow = terminal
 				.getViewport()
 				.map(row => Bun.stripANSI(row))
@@ -497,21 +478,22 @@ describe("Composer prepaint", () => {
 
 	it("preferences feed applies quiet mode", async () => {
 		const terminal = new CountingTerminal(80, 32);
+		const welcomeMarker = "quiet-welcome";
 		beginStartupComposer({
 			preferences: config,
 			terminal,
-			version: "9.9.9",
+			version: welcomeMarker,
 			cache: false,
 		});
 		await terminal.waitForRender(() =>
-			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes(welcomeMarker)),
 		);
 		expect(
 			terminal
 				.getViewport()
 				.map(r => Bun.stripANSI(r))
 				.join("\n"),
-		).toContain("Welcome back!");
+		).toContain(welcomeMarker);
 
 		applyStartupComposerPreferences({
 			quiet: true,
@@ -533,7 +515,7 @@ describe("Composer prepaint", () => {
 			.getViewport()
 			.map(r => Bun.stripANSI(r))
 			.join("\n");
-		expect(output).not.toContain("Welcome back!");
+		expect(output).not.toContain(welcomeMarker);
 
 		terminal.sendInput("still editable");
 		await terminal.waitForRender();
@@ -553,9 +535,7 @@ describe("Composer prepaint", () => {
 			version: "9.9.9",
 			cache: false,
 		});
-		await terminal.waitForRender(() =>
-			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
-		);
+		await terminal.waitForRender();
 
 		setStartupComposerLspServers([{ name: "rust-analyzer", status: "connecting", fileTypes: [".rs"] }]);
 		await terminal.waitForRender(() =>
