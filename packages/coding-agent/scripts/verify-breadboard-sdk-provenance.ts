@@ -731,7 +731,7 @@ export async function verifyBreadboardSdkProvenance(
 	verifyPinnedReferences(manifest, packageJson, lockText);
 	await verifyBackendIdentity(manifest, backendRoot ?? process.env[manifest.backendRootEnvironmentVariable], inspect);
 
-	const installedRoot = join(workspaceRoot, "node_modules", "@breadboard", "sdk");
+	const installedRoot = dirname(dirname(Bun.resolveSync(manifest.packageName, packageRoot)));
 	for (const entrypoint of ["index", "engine", "session", "lifecycle"]) {
 		const specifier = entrypoint === "index" ? manifest.packageName : `${manifest.packageName}/${entrypoint}`;
 		invariant(

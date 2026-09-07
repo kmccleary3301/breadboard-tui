@@ -53,7 +53,7 @@ describe("BreadBoard SDK provenance", () => {
 			else process.env[environmentName] = previous;
 		}
 	});
-	test("rejects a workspace-local SDK shadowing the verified dependency", async () => {
+	test("verifies the SDK bytes consumed from a workspace-local installation", async () => {
 		const root = await mkdtemp(resolve(tmpdir(), "bb-sdk-shadow-"));
 		const consumer = resolve(root, "packages/coding-agent");
 		try {
@@ -68,12 +68,7 @@ describe("BreadBoard SDK provenance", () => {
 				{ recursive: true },
 			);
 			const shadow = resolve(consumer, "node_modules/@breadboard/sdk");
-			await mkdir(shadow, { recursive: true });
-			await writeFile(
-				resolve(shadow, "package.json"),
-				JSON.stringify({ name: "@breadboard/sdk", main: "index.js" }),
-			);
-			await writeFile(resolve(shadow, "index.js"), "export const stale = true;\n");
+			await cp(resolve(root, "node_modules/@breadboard/sdk"), shadow, { recursive: true });
 			const inspect: BackendGitInspection = async inspectedRoot => ({
 				root: inspectedRoot,
 				commit: manifest.backendCommit,
@@ -81,7 +76,11 @@ describe("BreadBoard SDK provenance", () => {
 				sdkSubtree: manifest.sdkSubtree,
 				status: "",
 			});
-			await expect(verifyBreadboardSdkProvenance(consumer, consumer, inspect)).rejects.toThrow(/resolv.*verified/i);
+			await verifyBreadboardSdkProvenance(consumer, consumer, inspect);
+			await writeFile(resolve(shadow, "dist/client.js"), "export const stale = true;\n");
+			await expect(verifyBreadboardSdkProvenance(consumer, consumer, inspect)).rejects.toThrow(
+				"installed bytes changed for dist/client.js",
+			);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

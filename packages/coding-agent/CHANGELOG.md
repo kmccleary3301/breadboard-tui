@@ -21,7 +21,7 @@
 - Provider selection distinguishes pending discovery from an empty catalog, stops validation after dismissal, and allows revoking credentials when new logins are unavailable.
 - Restored completed-session continuation, configured startup model selection, and durable submission correlation across reconnects.
 - Restored the verified local product archive/install path and operator-owned persistent permission rules.
-- SDK provenance checks now reject workspace-local dependencies that shadow the verified SDK.
+- SDK provenance checks now verify the dependency actually resolved by the consumer, including workspace-local installations.
 
 ## [18.0.1] - 2026-08-23
 
