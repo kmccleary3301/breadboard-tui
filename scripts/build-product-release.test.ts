@@ -156,6 +156,35 @@ describe("product release builder", () => {
 		}
 	});
 
+	test("rejects a bundle changed after verification but before archive sealing", async () => {
+		const root = await mkdtemp(join(tmpdir(), "bb-product-build-test-"));
+		try {
+			const inputs = await fixture(root);
+			const distribution = await loadBuildEngineDistribution(inputs.engineDistributionRoot);
+			const versionScript = await readFile(inputs.binaryPath, "utf8");
+			const bundlePath = JSON.stringify(distribution.bundlePath);
+			await chmod(inputs.binaryPath, 0o700);
+			await writeFile(
+				inputs.binaryPath,
+				versionScript.replace(
+					"#!/bin/sh\n",
+					`#!/bin/sh\nset -eu\nchmod 600 ${bundlePath}\nprintf '%s' 'broken-runtime' > ${bundlePath}\nchmod 400 ${bundlePath}\n`,
+				),
+			);
+			await chmod(inputs.binaryPath, 0o500);
+			await expect(
+				buildProductRelease({
+					...inputs,
+					outputRoot: join(root, "release"),
+					productVersion: BREADBOARD_DISTRIBUTION_POLICY.productVersion,
+					developmentEvidence: true,
+				}),
+			).rejects.toThrow(/engine runtime bundle changed before archive sealing/);
+		} finally {
+			await removeFixtureRoot(root);
+		}
+	});
+
 	test("rejects a native addon path the installer cannot launch", async () => {
 		const root = await mkdtemp(join(tmpdir(), "bb-product-build-test-"));
 		try {

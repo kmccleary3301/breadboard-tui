@@ -151,12 +151,14 @@ export function readBreadboardSessionBinding(
 	sessionManager: BreadboardSessionBindingManager,
 ): BreadboardSessionBindingData | undefined {
 	let binding: BreadboardSessionBindingData | undefined;
+	const sessionIds = new Set<string>();
 	for (const entry of sessionManager.getBranch()) {
 		if (entry.type !== "custom" || entry.customType !== BREADBOARD_SESSION_BINDING_CUSTOM_TYPE) continue;
 		const candidate = parseBreadboardSessionBindingData(entry.data);
 		if (binding) {
 			const isSuccessor =
 				candidate.sessionId !== binding.sessionId &&
+				!sessionIds.has(candidate.sessionId) &&
 				candidate.previousSessionId === binding.sessionId &&
 				candidate.replayConfigurationDigest === binding.replayConfigurationDigest;
 			const conflictsWithinSession =
@@ -174,6 +176,7 @@ export function readBreadboardSessionBinding(
 			}
 		}
 		binding = candidate;
+		sessionIds.add(candidate.sessionId);
 	}
 	return binding;
 }

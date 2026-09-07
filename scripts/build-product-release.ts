@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
@@ -223,11 +223,6 @@ export async function buildProductRelease(options: ProductReleaseOptions): Promi
 		);
 	}
 	await verifyProductBinaryVersion(binary, options.productVersion);
-	const distributionRoot = await realpath(options.engineDistributionRoot);
-	const trustPath = join(
-		distributionRoot,
-		`${distribution.manifest.distributionId.slice("sha256:".length)}.trust.json`,
-	);
 	if (
 		distribution.manifest.target.platform !== target.platform ||
 		distribution.manifest.target.architecture !== target.architecture
@@ -253,15 +248,22 @@ export async function buildProductRelease(options: ProductReleaseOptions): Promi
 	if (!ARCHIVE_ROOT_PATTERN.test(rootName)) fail(`invalid release archive root name: ${rootName}`);
 	const distributionName = distribution.manifest.distributionId.slice("sha256:".length);
 	const engineDirectory = `engine/${distributionName}`;
+	const bundle = await sealedFile(distribution.bundlePath);
+	if (
+		bundle.byteLength !== distribution.manifest.engine.runtimeBundle.sizeBytes ||
+		sha256(bundle) !== distribution.manifest.engine.runtimeBundle.sha256
+	) {
+		fail("engine runtime bundle changed before archive sealing");
+	}
 	const entries = new Map<string, Buffer>();
 	entries.set(`${rootName}/${PRODUCT_BINARY_NAME}`, binary);
 	entries.set(`${rootName}/native/${PRODUCT_NATIVE_ADDON_NAME}`, addon);
 	entries.set(`${rootName}/${engineDirectory}/${basename(distribution.manifestPath)}`, distribution.manifestBytes);
+	entries.set(`${rootName}/${engineDirectory}/${basename(distribution.bundlePath)}`, bundle);
 	entries.set(
-		`${rootName}/${engineDirectory}/${basename(distribution.bundlePath)}`,
-		await sealedFile(distribution.bundlePath),
+		`${rootName}/engine/${distributionName}.trust.json`,
+		Buffer.from(`${JSON.stringify(distribution.trustRoot)}\n`),
 	);
-	entries.set(`${rootName}/engine/${basename(trustPath)}`, await sealedFile(trustPath));
 	if (options.licensePath) entries.set(`${rootName}/LICENSE`, await sealedFile(options.licensePath));
 	if (options.noticesPath) entries.set(`${rootName}/THIRD_PARTY_NOTICES.txt`, await sealedFile(options.noticesPath));
 	const provenance = {

@@ -143,6 +143,17 @@ describe("BreadBoard session binding", () => {
 		);
 	});
 
+	test("rejects revisiting an earlier session through a successor chain", () => {
+		const first = binding();
+		const second = binding({ sessionId: "session-2", previousSessionId: first.sessionId });
+		const revisited = binding({ previousSessionId: second.sessionId });
+		expect(() =>
+			readBreadboardSessionBinding({
+				getBranch: () => [customEntry(first), customEntry(second), customEntry(revisited)],
+			}),
+		).toThrow(BreadboardSessionTransitionError);
+	});
+
 	test("validates fresh history and the exact retained resume boundary", () => {
 		const fresh = validateBreadboardSnapshot(
 			"session-1",
