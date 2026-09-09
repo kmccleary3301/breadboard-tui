@@ -845,7 +845,7 @@ export function createRecoverableBreadboardRuntime(
 			closed = true;
 			if (replacementPromise) await replacementPromise.catch(() => {});
 			await current.runtime.close();
-			await Promise.all([...retiredClosures]);
+			await Promise.all(retiredClosures);
 		})();
 		return closePromise;
 	};

@@ -5,12 +5,21 @@ import * as path from "node:path";
 import { $ } from "bun";
 import {
 	legalPayloadFiles,
+	npmDistTag,
 	packages,
 	prepareNativeCorePackage,
 	rewriteManifest,
 	rewritePackedBundledDependencies,
 	stageLegalPayloads,
 } from "./ci-release-publish";
+
+describe("npm dist-tags", () => {
+	it("routes canaries while rejecting other prereleases", () => {
+		expect(npmDistTag("0.13.0-canary.2")).toBe("canary");
+		expect(npmDistTag("0.13.0")).toBe("latest");
+		expect(() => npmDistTag("0.13.0-rc.1")).toThrow("Unsupported prerelease version");
+	});
+});
 
 describe("published legal payloads", () => {
 	it("selects the exact payload for MIT packages", () => {

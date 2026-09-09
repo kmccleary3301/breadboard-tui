@@ -108,6 +108,8 @@ export class SignInTab implements SetupTab {
 	#authLaunchUrl: string | undefined;
 	#prompt: PromptState | undefined;
 	#promptResolve: ((value: string) => void) | undefined;
+	#promptReject: ((error: Error) => void) | undefined;
+	#promptAbortCleanup: (() => void) | undefined;
 	#loginAbort: AbortController | undefined;
 	#loggingInProvider: string | undefined;
 	#disposed = false;
@@ -333,8 +335,8 @@ export class SignInTab implements SetupTab {
 						this.#statusLines.push(theme.fg("dim", message));
 						this.host.requestRender();
 					},
-					onManualCodeInput: () =>
-						this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }),
+					onManualCodeInput: signal =>
+						this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }, signal),
 				});
 				accountLabel = identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined;
 				await this.host.ctx.session.modelRegistry.refreshProvider(providerId, "online");
@@ -394,8 +396,14 @@ export class SignInTab implements SetupTab {
 		this.host.requestRender();
 	}
 
-	#showPrompt(prompt: { message: string; placeholder?: string; secret?: boolean }): Promise<string> {
+	#showPrompt(
+		prompt: { message: string; placeholder?: string; secret?: boolean },
+		signal?: AbortSignal,
+	): Promise<string> {
 		this.#resolvePrompt("");
+		if (signal?.aborted) {
+			return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Login input cancelled"));
+		}
 		const input = new Input();
 		input.mask = prompt.secret === true;
 		const focusInput = new CopyablePromptInput(input, () => {
@@ -403,11 +411,20 @@ export class SignInTab implements SetupTab {
 		});
 		const pending = Promise.withResolvers<string>();
 		this.#promptResolve = pending.resolve;
+		this.#promptReject = pending.reject;
 		this.#prompt = {
 			message: prompt.message,
 			placeholder: prompt.secret ? undefined : prompt.placeholder,
 			input: focusInput,
 		};
+		if (signal) {
+			const onAbort = () => {
+				if (this.#promptReject !== pending.reject) return;
+				this.#rejectPrompt(signal.reason instanceof Error ? signal.reason : new Error("Login input cancelled"));
+			};
+			signal.addEventListener("abort", onAbort, { once: true });
+			this.#promptAbortCleanup = () => signal.removeEventListener("abort", onAbort);
+		}
 		input.onSubmit = value => {
 			focusInput.clear();
 			this.#resolvePrompt(value);
@@ -426,10 +443,24 @@ export class SignInTab implements SetupTab {
 		const resolve = this.#promptResolve;
 		this.#prompt?.input.clear();
 		if (!resolve) return;
+		this.#clearPrompt();
+		resolve(value);
+	}
+
+	#rejectPrompt(error: Error): void {
+		const reject = this.#promptReject;
+		if (!reject) return;
+		this.#clearPrompt();
+		reject(error);
+	}
+
+	#clearPrompt(): void {
+		this.#promptAbortCleanup?.();
+		this.#promptAbortCleanup = undefined;
 		this.#promptResolve = undefined;
+		this.#promptReject = undefined;
 		this.#prompt = undefined;
 		this.host.restoreFocus();
-		resolve(value);
 		this.host.requestRender();
 	}
 }

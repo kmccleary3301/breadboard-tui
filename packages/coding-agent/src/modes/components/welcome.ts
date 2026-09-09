@@ -164,6 +164,12 @@ export class WelcomeComponent implements Component {
 	#requestRender: (() => void) | null = null;
 	#selectedTip: string | undefined;
 	readonly #tips: readonly string[];
+	// Tip randomness is latched once so the tip is stable across renders, but
+	// the nerdfont-nag gate re-reads the live preset: the startup prepaint can
+	// run under the default "unicode" preset before settings resolve the real
+	// one, and a memoized nag would survive the switch to "nerd".
+	#nagRoll: number | undefined;
+	#tipRoll: number | undefined;
 	// Render cache: the welcome box is the first transcript-area component, so
 	// returning a stable array reference keeps the whole frame prefix stable.
 	// Bypassed while the intro animation runs (every frame differs).
@@ -184,14 +190,13 @@ export class WelcomeComponent implements Component {
 		this.#tips = getWelcomeTips(identity);
 	}
 	get tip(): string | undefined {
-		if (this.#selectedTip === undefined) {
-			if (theme.getSymbolPreset() === "unicode" && Math.random() < 0.1) {
-				this.#selectedTip = "Please use nerdfont 😭.";
-			} else {
-				this.#selectedTip = pickWeightedTip(this.#tips, Math.random());
-			}
+		this.#nagRoll ??= Math.random();
+		this.#tipRoll ??= Math.random();
+		if (theme.getSymbolPreset() === "unicode" && this.#nagRoll < 0.1) {
+			return "Please use nerdfont 😭.";
 		}
-		return this.#selectedTip || undefined;
+		if (this.#selectedTip === undefined) this.#selectedTip = pickWeightedTip(this.#tips, this.#tipRoll);
+		return this.#selectedTip;
 	}
 
 	invalidate(): void {
@@ -605,7 +610,7 @@ export function gradientEscape(
 }
 
 /**
- * Apply a multi-stop diagonal gradient (bottom-left → top-right) plus an
+ * Apply a multi-stop diagonal gradient (top-left → bottom-right) plus an
  * optional sliding shine band across multi-line art. `phase` (0..1) shifts the
  * gradient along the diagonal, wrapping at 1. When `shine` is provided, a soft
  * white highlight is composited on top, centered at `shine.pos`.
@@ -620,7 +625,9 @@ export function gradientLogo(
 	if (mode === "none") return [...lines];
 	const rows = lines.length;
 	const cols = Math.max(...lines.map(line => line.length));
-	const span = Math.max(1, cols + rows - 1);
+	const xSpan = Math.max(1, cols - 1);
+	const ySpan = Math.max(1, rows - 1);
+	const normalizedPhase = ((phase % 1) + 1) % 1;
 	return lines.map((line, y) => {
 		let result = "";
 		for (let x = 0; x < line.length; x++) {
@@ -629,8 +636,10 @@ export function gradientLogo(
 				result += char;
 				continue;
 			}
-			const base = (x + (rows - 1 - y)) / span;
-			const t = (((base + phase) % 1) + 1) % 1;
+			// SVG's (0,0) → (1,1) gradient projects both normalized axes
+			// equally: top-right and bottom-left land on the purple midpoint.
+			const base = (x / xSpan + y / ySpan) / 2;
+			const t = normalizedPhase === 0 ? base : (base + normalizedPhase) % 1;
 			result += paintAnsi(gradientEscape(t, shine, palette, mode), char);
 		}
 		return result;

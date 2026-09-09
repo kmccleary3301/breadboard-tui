@@ -25,6 +25,7 @@ import {
 	macOSCheckSpelling,
 	macOSSpellCheckerAvailable,
 	matchesKey,
+	PowerAssertion,
 	PtySession,
 	parseKey,
 	pdfToMarkdown,
@@ -48,6 +49,14 @@ describe("macOS spelling", () => {
 
 		expect(macOSSpellCheckerAvailable()).toBeTrue();
 		expect(await macOSCheckSpelling(nonsense)).toContainEqual({ start: 0, length: nonsense.length });
+	});
+	it("returns only word spans, never the whole-string orthography result", async () => {
+		if (process.platform !== "darwin") return;
+		// With automatic language identification, checkString: also yields an
+		// orthography result spanning the entire string; leaking it as a typo
+		// range doubled editor text under the undercurl renderer.
+		const text = "hello qzxvplmokn world ";
+		expect(await macOSCheckSpelling(text)).toEqual([{ start: 6, length: 10 }]);
 	});
 });
 
@@ -89,6 +98,14 @@ describe("countTokens", () => {
 	it("counts native UTF-16 content without its N-API terminator and sums arrays", () => {
 		expect(countTokens("hello world", Encoding.O200kBase)).toBe(2);
 		expect(countTokens(["hello world", "hello world"], Encoding.O200kBase)).toBe(4);
+	});
+
+	it("round-trips every Encoding through the local addon", () => {
+		for (const encoding of Object.values(Encoding)) {
+			const n = countTokens("hello", encoding);
+			expect(typeof n).toBe("number");
+			expect(n).toBeGreaterThan(0);
+		}
 	});
 });
 
@@ -766,6 +783,67 @@ describe("pi-natives", () => {
 			expect((await run).cancelled).toBeTrue();
 		});
 
+		// Needs this PR's rust; PR CI loads the published natives leaf.
+		it.skipIf(process.env.GITHUB_EVENT_NAME === "pull_request")(
+			"keeps a fast PTY child blocked while onChunk is stalled and still delivers every byte",
+			async () => {
+				if (process.platform === "win32") {
+					return;
+				}
+
+				const blockBytes = 64 * 1024;
+				const blocks = 80;
+				const scriptPath = path.join(testDir, "pty-slow-consumer.ts");
+				await Bun.write(
+					scriptPath,
+					`const block = Buffer.alloc(${blockBytes}, 0x78);\n` +
+						`for (let i = 0; i < ${blocks}; i++) process.stdout.write(block);\n` +
+						`process.stdout.write("END\\n");\n`,
+				);
+
+				const session = new PtySession();
+				let pid = 0;
+				let stalled = false;
+				let aliveDuringStall = false;
+				let output = "";
+				const result = await session.startArgv(
+					{
+						application: process.execPath,
+						args: [scriptPath],
+						cwd: testDir,
+						timeoutMs: 30_000,
+						cols: 400,
+						rows: 24,
+					},
+					(_error, chunk) => {
+						output += chunk;
+						if (stalled || !output.includes("x")) {
+							return;
+						}
+						stalled = true;
+						const until = Date.now() + 400;
+						while (Date.now() < until) {}
+						if (pid > 0) {
+							try {
+								process.kill(pid, 0);
+								aliveDuringStall = true;
+							} catch {}
+						}
+					},
+					(_error, childPid) => {
+						pid = childPid;
+					},
+				);
+
+				expect(result.timedOut).toBe(false);
+				expect(result.cancelled).toBe(false);
+				expect(result.exitCode).toBe(0);
+				expect(aliveDuringStall).toBe(true);
+				expect(output.split("x").length - 1).toBe(blockBytes * blocks);
+				expect(output.includes("END")).toBe(true);
+			},
+		);
+
 		it("should time out detached background workloads without hanging", async () => {
 			if (process.platform === "win32" || !Bun.which("bash")) {
 				return;
@@ -803,104 +881,6 @@ describe("pi-natives", () => {
 				} catch {}
 			}
 		});
-
-		it("delivers all output after an output callback stalls", async () => {
-			if (process.platform === "win32") {
-				return;
-			}
-
-			type CallbackStallProbe = {
-				outputBytes: number;
-				deliveredBytes: number;
-				producerMarkerExistsAfterDrain: boolean;
-				callbackError: string | null;
-				result: { exitCode?: number; cancelled: boolean; timedOut: boolean };
-			};
-			const outputBytes = 8 * 1024 * 1024;
-			const markerPath = path.join(testDir, "pty-callback-stall-producer.done");
-			await fs.rm(markerPath, { force: true });
-			const producerScript = [
-				"const fs = require('node:fs');",
-				"const chunk = Buffer.alloc(64 * 1024, 0x78);",
-				`let remaining = ${outputBytes};`,
-				"while (remaining > 0) {",
-				"const size = Math.min(remaining, chunk.length);",
-				"fs.writeSync(1, chunk, 0, size);",
-				"remaining -= size;",
-				"}",
-				`fs.writeFileSync(${JSON.stringify(markerPath)}, "done");`,
-			].join(" ");
-			const script = `
-import { existsSync } from "node:fs";
-import { PtySession } from ${JSON.stringify(addonUrl)};
-
-const outputBytes = ${outputBytes};
-const markerPath = ${JSON.stringify(markerPath)};
-const session = new PtySession();
-const started = Promise.withResolvers();
-let deliveredBytes = 0;
-let callbackError = null;
-let outputCallbackStalled = false;
-const run = session.startArgv(
-	{
-		application: process.execPath,
-		args: ["-e", ${JSON.stringify(producerScript)}],
-		timeoutMs: 30_000,
-		cols: 80,
-		rows: 24,
-	},
-	(error, chunk) => {
-		callbackError = error;
-		if (!outputCallbackStalled) {
-			outputCallbackStalled = true;
-			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000);
-		}
-		deliveredBytes += Buffer.byteLength(chunk);
-	},
-	(error) => {
-		if (error) started.reject(error);
-		else started.resolve();
-	},
-);
-await started.promise;
-const result = await run;
-console.log(JSON.stringify({
-	outputBytes,
-	deliveredBytes,
-	producerMarkerExistsAfterDrain: existsSync(markerPath),
-	callbackError: callbackError?.message ?? null,
-	result,
-}));
-`;
-			const child = Bun.spawn([process.execPath, "--eval", script], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			let watchdogFired = false;
-			const timer = setTimeout(() => {
-				if (child.exitCode === null) {
-					watchdogFired = true;
-					child.kill("SIGKILL");
-				}
-			}, 20_000);
-			const exited = child.exited.finally(() => clearTimeout(timer));
-			const [stdout, stderr, exitCode] = await Promise.all([
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
-				exited,
-			]);
-
-			if (watchdogFired || exitCode !== 0) {
-				throw new Error(
-					`PTY callback-stall probe failed: exitCode=${exitCode}, signalCode=${child.signalCode}, watchdogFired=${watchdogFired}, stderr=${stderr}`,
-				);
-			}
-			const probe = JSON.parse(stdout) as CallbackStallProbe;
-			expect(probe.producerMarkerExistsAfterDrain).toBeTrue();
-			expect(probe.deliveredBytes).toBe(probe.outputBytes);
-			expect(probe.callbackError).toBeNull();
-			expect(probe.result).toEqual({ exitCode: 0, cancelled: false, timedOut: false });
-		}, 30_000);
 	});
 
 	describe("shell", () => {
@@ -1087,6 +1067,44 @@ console.log("ok");
 				);
 			}
 		}, 30_000);
+	});
+
+	describe("PowerAssertion", () => {
+		it("should create a stoppable power assertion handle, or surface a descriptive bus/service failure where the host cannot provide one", () => {
+			let assertion: PowerAssertion | undefined;
+			try {
+				assertion = PowerAssertion.start({ reason: "pi-natives test" });
+			} catch (error) {
+				// A host with no bus must fail in the documented bus/service vocabulary,
+				// so a wrong export or a no-op stub fails on any other message.
+				const message = error instanceof Error ? error.message : String(error);
+				expect(message).toMatch(/(system|session) bus|login1|screensaver|inhibit/i);
+				return;
+			}
+			assertion?.stop();
+			assertion?.stop();
+		});
+
+		it.skipIf(process.platform !== "linux" || !Bun.which("systemd-inhibit"))(
+			"registers a login1 inhibitor for the handle's lifetime",
+			() => {
+				const reason = `pi-natives ${crypto.randomUUID()}`;
+				const held = (): boolean =>
+					Bun.spawnSync(["systemd-inhibit", "--list", "--no-pager"]).stdout.toString().includes(reason);
+				let assertion: PowerAssertion;
+				try {
+					assertion = PowerAssertion.start({ reason, idle: true });
+				} catch {
+					return; // No system bus here; the failure vocabulary is covered above.
+				}
+				try {
+					expect(held()).toBe(true);
+				} finally {
+					assertion.stop();
+				}
+				expect(held()).toBe(false);
+			},
+		);
 	});
 
 	describe("astMatch", () => {

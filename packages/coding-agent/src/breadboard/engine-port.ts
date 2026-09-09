@@ -291,7 +291,6 @@ function createConnectedPort(
 		assertOperational();
 		const runtime = await sessionPort.open(target, signal);
 		let sessionClosePromise: Promise<void> | undefined;
-		let opened: OpenedSession;
 		const adapted: OpenedSession = {
 			sessionId: runtime.sessionId,
 			snapshot: () => runtime.snapshot(),
@@ -304,7 +303,7 @@ function createConnectedPort(
 				return sessionClosePromise;
 			},
 		};
-		opened = Object.freeze(adapted);
+		const opened: OpenedSession = Object.freeze(adapted);
 		if (closed || monitor.signal.failure()) {
 			await opened.close().catch(() => {});
 			const failure = monitor.signal.failure();

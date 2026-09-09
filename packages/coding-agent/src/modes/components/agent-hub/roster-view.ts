@@ -258,7 +258,7 @@ export class RosterView {
 			return { lines, hitRows };
 		}
 
-		for (let grew = true; grew; ) {
+		for (let grew = true; grew;) {
 			grew = false;
 			if (end < rows.length) {
 				const next = entryAt(end);

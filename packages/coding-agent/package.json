@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@oh-my-pi/pi-coding-agent",
-  "version": "18.0.1",
+  "version": "18.1.15",
   "description": "Coding agent CLI with read, bash, edit, write tools and session management",
   "homepage": "https://omp.sh",
   "author": "Stencil Labs, Inc.",
@@ -38,12 +38,12 @@
     "build:release": "bun run gate:distribution && bun ../../scripts/build-product-release.ts",
     "install:release": "bun ../../scripts/install-product-release.ts",
     "build:omp": "bun run gate:distribution && BUILD_PRODUCT=omp bun scripts/build-binary.ts",
-    "check": "biome check . && bun run check:types",
+    "check": "bun run check:types",
     "check:types": "tsgo -p tsconfig.json --noEmit",
-    "lint": "biome lint .",
+    "lint": "oxlint .",
     "test": "bun ../../scripts/ci-test-ts.ts coding-agent-heavy --full",
-    "fix": "biome check --write --unsafe . && bun run format-prompts",
-    "fmt": "biome format --write . && bun run format-prompts",
+    "fix": "oxlint --fix --fix-suggestions . && bun run fmt",
+    "fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run format-prompts",
     "format-prompts": "bun scripts/format-prompts.ts",
     "gen:tool-views": "bun --cwd=../collab-web run gen:tool-views",
     "gen:bundle": "bun scripts/bundle-dist.ts",
@@ -58,8 +58,6 @@
   "dependencies": {
     "@babel/parser": "catalog:",
     "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz",
-    "@mozilla/readability": "catalog:",
-    "@oh-my-pi/hashline": "catalog:",
     "@oh-my-pi/omp-stats": "catalog:",
     "@oh-my-pi/omptype": "catalog:",
     "@oh-my-pi/pi-agent-core": "catalog:",
@@ -212,17 +210,17 @@
       "types": "./src/commit/changelog/*.ts",
       "import": "./src/commit/changelog/*.ts"
     },
+    "./commit/conventional": {
+      "types": "./src/commit/conventional/index.ts",
+      "import": "./src/commit/conventional/index.ts"
+    },
+    "./commit/conventional/*": {
+      "types": "./src/commit/conventional/*.ts",
+      "import": "./src/commit/conventional/*.ts"
+    },
     "./commit/git/*": {
       "types": "./src/commit/git/*.ts",
       "import": "./src/commit/git/*.ts"
-    },
-    "./commit/map-reduce": {
-      "types": "./src/commit/map-reduce/index.ts",
-      "import": "./src/commit/map-reduce/index.ts"
-    },
-    "./commit/map-reduce/*": {
-      "types": "./src/commit/map-reduce/*.ts",
-      "import": "./src/commit/map-reduce/*.ts"
     },
     "./commit/utils/*": {
       "types": "./src/commit/utils/*.ts",
@@ -263,10 +261,6 @@
     "./edit/*": {
       "types": "./src/edit/*.ts",
       "import": "./src/edit/*.ts"
-    },
-    "./edit/modes/*": {
-      "types": "./src/edit/modes/*.ts",
-      "import": "./src/edit/modes/*.ts"
     },
     "./exa": {
       "types": "./src/exa/index.ts",
@@ -363,6 +357,14 @@
     "./eval": {
       "types": "./src/eval/index.ts",
       "import": "./src/eval/index.ts"
+    },
+    "./if-bench": {
+      "types": "./src/if-bench/index.ts",
+      "import": "./src/if-bench/index.ts"
+    },
+    "./if-bench/*": {
+      "types": "./src/if-bench/*.ts",
+      "import": "./src/if-bench/*.ts"
     },
     "./eval/js/*": {
       "types": "./src/eval/js/*.ts",
@@ -512,6 +514,10 @@
     "./sdk": {
       "types": "./src/sdk.ts",
       "import": "./src/sdk.ts"
+    },
+    "./registry/*": {
+      "types": "./src/registry/*.ts",
+      "import": "./src/registry/*.ts"
     },
     "./secrets": {
       "types": "./src/secrets/index.ts",

@@ -62,7 +62,12 @@ interface RenderedAgentRow {
 	selected: boolean;
 }
 
-const ROSTER_ENTRY_PATTERN = /^(❯| ) (\S+) (?:(?:(?:│ {3}| {4})*)(?:├── |└── ))?(\S+)/u;
+const ROSTER_ENTRY_PATTERN = /^(❯| ) (?:(?:(?:│ {3}| {4})*)(?:├── |└── ))?(\S+) (\S+)/u;
+function rosterEntryMatch(cell: string | undefined): RegExpExecArray | null {
+	if (!cell) return null;
+	const match = ROSTER_ENTRY_PATTERN.exec(cell);
+	return match?.[2] === "│" ? null : match;
+}
 
 function rosterCell(raw: string): string | undefined {
 	const line = Bun.stripANSI(raw);
@@ -73,13 +78,11 @@ function rosterCell(raw: string): string | undefined {
 }
 
 function renderedAgentRows(hub: AgentHubOverlayComponent, width = 120): RenderedAgentRow[] {
-	// Roster entry first cells are
-	// `<cursor> <status-glyph> [tree-prefix] <id> …`; task cells are
-	// indented deeper and never match the cursor/status slots.
+	// `<cursor> <status-glyph> [tree-prefix] <id> …`; continuation rows may
+	// carry `│` in the status column and are rejected by rosterEntryMatch.
 	const rows: RenderedAgentRow[] = [];
 	for (const raw of hub.render(width)) {
-		const cell = rosterCell(raw);
-		const match = cell ? ROSTER_ENTRY_PATTERN.exec(cell) : null;
+		const match = rosterEntryMatch(rosterCell(raw));
 		if (match) rows.push({ id: match[3]!, selected: match[1] === "❯" });
 	}
 	return rows;
@@ -95,26 +98,19 @@ function selectedAgentId(hub: AgentHubOverlayComponent): string | undefined {
 
 function renderedRosterEntry(hub: AgentHubOverlayComponent, id: string, width: number): string {
 	const cells = hub.render(width).map(rosterCell);
-	const start = cells.findIndex(cell => {
-		const match = cell ? ROSTER_ENTRY_PATTERN.exec(cell) : null;
-		return match?.[3] === id;
-	});
+	const start = cells.findIndex(cell => rosterEntryMatch(cell)?.[3] === id);
 	expect(start).toBeGreaterThanOrEqual(0);
 	const entry: string[] = [];
 	for (let i = start; i < cells.length; i++) {
 		const cell = cells[i];
 		if (cell === undefined || cell.trim().length === 0) break;
-		if (i > start && ROSTER_ENTRY_PATTERN.test(cell)) break;
+		if (i > start && rosterEntryMatch(cell)) break;
 		entry.push(cell.trimEnd());
 	}
 	return entry.join("\n");
 }
 function renderedRosterHeaderLineRaw(hub: AgentHubOverlayComponent, id: string, width: number): string {
-	const line = hub.render(width).find(raw => {
-		const cell = rosterCell(raw);
-		const match = cell ? ROSTER_ENTRY_PATTERN.exec(cell) : null;
-		return match?.[3] === id;
-	});
+	const line = hub.render(width).find(raw => rosterEntryMatch(rosterCell(raw))?.[3] === id);
 	if (!line) throw new Error(`No rendered roster header for ${id}`);
 	return line;
 }
@@ -131,7 +127,7 @@ describe("Agent hub row ordering", () => {
 	let geometry: GeometryStub | undefined;
 
 	beforeAll(async () => {
-		await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
+		await initTheme();
 	});
 
 	afterEach(() => {
@@ -157,7 +153,36 @@ describe("Agent hub row ordering", () => {
 		}
 	});
 
-	it("freezes the initial lastActivity order while the hub is open", () => {
+	it("captures initial ranking when agents load after empty construction", () => {
+		vi.useFakeTimers();
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		const hub = makeHub(agents);
+
+		try {
+			expect(renderedAgentIds(hub)).toEqual([]);
+
+			setSystemTime(3000);
+			agents.register({
+				id: "Parked",
+				displayName: "Parked",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			setSystemTime(1000);
+			agents.register({ id: "Older", displayName: "Older", kind: "sub", session: {} as AgentSession });
+			setSystemTime(2000);
+			agents.register({ id: "Newer", displayName: "Newer", kind: "sub", session: {} as AgentSession });
+
+			vi.advanceTimersByTime(100);
+			expect(renderedAgentIds(hub)).toEqual(["Newer", "Older", "Parked"]);
+		} finally {
+			hub.dispose();
+		}
+	});
+
+	it("keeps row order stable as agents heartbeat and appends new agents", () => {
 		vi.useFakeTimers();
 		let hub: AgentHubOverlayComponent | undefined;
 		try {
@@ -176,23 +201,56 @@ describe("Agent hub row ordering", () => {
 			agents.register({ id: "C", displayName: "Gamma", kind: "sub", session: sessionC });
 
 			hub = makeHub(agents);
+			// Captured once on open: status then recency (most-recent first).
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
-			// Bump A's lastActivity far ahead of the others; captured order wins.
+
+			// A heartbeats far ahead of the others; a stable roster must NOT bubble
+			// it to the top while the hub is open (issue #10524).
 			setSystemTime(4000);
 			agents.setActivity("A", "still running");
 
-			// Status changes must not reorder the captured roster either.
-			agents.setStatus("B", "idle");
-
-			// Registering a new agent schedules a coalesced row refresh; even a
-			// different status is appended after all rows captured on open.
+			// A new agent appears and forces a refresh: existing rows keep their
+			// captured order, and the newcomer appends at the end.
 			setSystemTime(5000);
 			const sessionD = {} as AgentSession;
 			agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD, status: "parked" });
-
+			// Renders coalesce: the immediate frame still shows the captured order.
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
 			vi.advanceTimersByTime(100);
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A", "D"]);
+
+			// Reusing an unregistered id creates a new agent generation. It must
+			// append rather than reclaiming the removed generation's old rank.
+			agents.unregister("B", sessionB);
+			agents.register({ id: "B", displayName: "Beta 2", kind: "sub", session: {} as AgentSession });
+			vi.advanceTimersByTime(100);
+			expect(renderedAgentIds(hub)).toEqual(["C", "A", "D", "B"]);
+		} finally {
+			hub?.dispose();
+			vi.useRealTimers();
+			setSystemTime();
+		}
+	});
+
+	it("filters agents with a fuzzy query and clears on Escape", () => {
+		vi.useFakeTimers();
+		let hub: AgentHubOverlayComponent | undefined;
+		try {
+			geometry = stubStdoutGeometry(120);
+			const agents = new AgentRegistry();
+			const sessionA = {} as AgentSession;
+			agents.register({ id: "alpha-one", displayName: "Alpha", kind: "sub", session: sessionA });
+			const sessionB = {} as AgentSession;
+			agents.register({ id: "beta-two", displayName: "Beta", kind: "sub", session: sessionB });
+
+			hub = makeHub(agents);
+			expect(renderedAgentIds(hub)).toEqual(["alpha-one", "beta-two"]);
+			hub.handleInput("/");
+			hub.handleInput("a");
+			hub.handleInput("p");
+			expect(renderedAgentIds(hub)).toEqual(["alpha-one"]);
+			hub.handleInput("\u001b");
+			expect(renderedAgentIds(hub)).toEqual(["alpha-one", "beta-two"]);
 		} finally {
 			hub?.dispose();
 			vi.useRealTimers();
@@ -748,7 +806,7 @@ describe("Agent hub row ordering", () => {
 
 			const historical = renderedRosterEntry(hub, "Historical", 160);
 			expect(historical).toContain("Restored task");
-			expect(historical).toContain("usage —");
+			expect(historical).toMatch(/usage\s+·/);
 			expect(historical).not.toContain("$0.000");
 		} finally {
 			hub.dispose();
@@ -811,8 +869,8 @@ describe("Agent hub row ordering", () => {
 		try {
 			const rendered = Bun.stripANSI(hub.render(160).join("\n"));
 			expect(rendered).toContain("0/2 measured");
-			expect(renderedRosterEntry(hub, "Incomplete", 160)).toContain("usage —");
-			expect(renderedRosterEntry(hub, "NonFinite", 160)).toContain("usage —");
+			expect(renderedRosterEntry(hub, "Incomplete", 160)).toMatch(/usage\s+·/);
+			expect(renderedRosterEntry(hub, "NonFinite", 160)).toMatch(/usage\s+·/);
 			expect(getSessionStats).not.toHaveBeenCalled();
 		} finally {
 			hub.dispose();
@@ -948,9 +1006,46 @@ describe("Agent hub row ordering", () => {
 
 		try {
 			hub.handleInput("t");
-			expect(Bun.stripANSI(renderedRosterHeaderLineRaw(hub, "First", 120))).toContain("├── First");
-			expect(Bun.stripANSI(renderedRosterHeaderLineRaw(hub, "Grandchild", 120))).toContain("│   └── Grandchild");
-			expect(Bun.stripANSI(renderedRosterHeaderLineRaw(hub, "Last", 120))).toContain("└── Last");
+			expect(Bun.stripANSI(renderedRosterHeaderLineRaw(hub, "First", 120))).toContain("├── ⟳ First");
+			expect(Bun.stripANSI(renderedRosterHeaderLineRaw(hub, "Grandchild", 120))).toContain("│   └── ⟳ Grandchild");
+			expect(Bun.stripANSI(renderedRosterHeaderLineRaw(hub, "Last", 120))).toContain("└── ⟳ Last");
+		} finally {
+			hub.dispose();
+		}
+	});
+	it("keeps tree rails continuous across task and metrics rows", () => {
+		geometry = stubStdoutGeometry(120);
+		geometry.setRows(32);
+		const agents = new AgentRegistry();
+		agents.register({ id: "Parent", displayName: "Parent", kind: "sub", parentId: "Main", session: null });
+		agents.setActivity("Parent", "Parent task");
+		agents.register({ id: "First", displayName: "First", kind: "sub", parentId: "Parent", session: null });
+		agents.setActivity("First", "First task");
+		agents.register({ id: "Grandchild", displayName: "Grandchild", kind: "sub", parentId: "First", session: null });
+		agents.setActivity("Grandchild", "Grandchild task");
+		agents.register({ id: "Last", displayName: "Last", kind: "sub", parentId: "Parent", session: null });
+		agents.setActivity("Last", "Last task");
+		const hub = makeHub(agents);
+
+		try {
+			hub.handleInput("t");
+			const parentDetails = renderedRosterEntry(hub, "Parent", 120).split("\n").slice(1);
+			const firstDetails = renderedRosterEntry(hub, "First", 120).split("\n").slice(1);
+			const grandchildDetails = renderedRosterEntry(hub, "Grandchild", 120).split("\n").slice(1);
+			const lastDetails = renderedRosterEntry(hub, "Last", 120).split("\n").slice(1);
+			expect(parentDetails).toHaveLength(2);
+			expect(firstDetails).toHaveLength(2);
+			expect(grandchildDetails).toHaveLength(2);
+			expect(lastDetails).toHaveLength(2);
+			expect(parentDetails.every(line => line.startsWith("  │ "))).toBe(true);
+			expect(firstDetails.every(line => line.startsWith("  │   │ "))).toBe(true);
+			expect(grandchildDetails.every(line => line.startsWith("  │         "))).toBe(true);
+			expect(lastDetails.every(line => line.startsWith("        ") && !line.includes("│"))).toBe(true);
+			const metadataOrigins = [parentDetails, firstDetails, grandchildDetails, lastDetails].map(lines =>
+				lines[1]!.indexOf("usage"),
+			);
+			expect(new Set(metadataOrigins)).toEqual(new Set([metadataOrigins[0]]));
+			expect(metadataOrigins[0]).toBeGreaterThan(0);
 		} finally {
 			hub.dispose();
 		}
@@ -1083,258 +1178,6 @@ describe("Agent hub row ordering", () => {
 			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("paused");
 			hub.handleInput("1");
 			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("Roster");
-		} finally {
-			hub.dispose();
-		}
-	});
-
-	it("renders durable IRC conversations and sends replies from the Messages view", async () => {
-		geometry = stubStdoutGeometry(120);
-		geometry.setRows(28);
-		const agents = new AgentRegistry();
-		const delivered: Array<{ body: string; replyTo?: string }> = [];
-		const { promise: deliveryObserved, resolve: resolveDelivery } = Promise.withResolvers<void>();
-		const session = {
-			deliverIrcMessage: async (message: { body: string; replyTo?: string }) => {
-				delivered.push(message);
-				resolveDelivery();
-				return "injected" as const;
-			},
-			emitIrcRelayObservation() {},
-		} as unknown as AgentSession;
-		agents.register({ id: "Worker", displayName: "Worker", kind: "sub", parentId: "Main", session });
-		const irc = new IrcBus(agents);
-		irc.history.recordMessage({ id: "m1", from: "Main", to: "Worker", body: "Inspect auth", ts: 1_000 });
-		irc.history.recordDelivery("m1", { to: "Worker", outcome: "injected" });
-		irc.history.recordMessage({
-			id: "m2",
-			from: "Worker",
-			to: "Main",
-			body: "Found one issue",
-			ts: 2_000,
-			replyTo: "m1",
-		});
-		irc.history.recordDelivery("m2", { to: "Main", outcome: "injected" });
-		const hub = makeHub(agents, { irc, initialSection: "messages" });
-
-		try {
-			const wide = Bun.stripANSI(hub.render(120).join("\n"));
-			expect(wide).toContain("3 Messages");
-			expect(wide).toContain("Conversations");
-			expect(wide).toContain("Worker · 2 messages");
-			expect(wide).toContain("Found one issue");
-			expect(wide).toContain("↳m1");
-
-			const narrowList = Bun.stripANSI(hub.render(80).join("\n"));
-			expect(narrowList).toContain("Conversations");
-			hub.handleInput("\r");
-			const narrowThread = Bun.stripANSI(hub.render(80).join("\n"));
-			expect(narrowThread).toContain("Inspect auth");
-			expect(narrowThread).toContain("Found one issue");
-
-			hub.handleInput("R");
-			for (const key of "Please patch it") hub.handleInput(key);
-			hub.handleInput("\r");
-			await deliveryObserved;
-			expect(delivered).toHaveLength(1);
-			expect(delivered[0]).toMatchObject({ body: "Please patch it", replyTo: "m2" });
-			expect(Bun.stripANSI(hub.render(80).join("\n"))).toContain("Please patch it");
-		} finally {
-			hub.dispose();
-		}
-	});
-
-	it("keeps scrolled Messages selections visible and mouse hit targets aligned", () => {
-		geometry = stubStdoutGeometry(120);
-		geometry.setRows(14);
-		const agents = new AgentRegistry();
-		agents.register({ id: "Target", displayName: "Target", kind: "sub", parentId: "Main", session: null });
-		const irc = new IrcBus(agents);
-		for (let index = 0; index < 30; index++) {
-			irc.history.recordMessage({
-				id: `target-${index}`,
-				from: "Target",
-				to: "Main",
-				body: `Target update ${index}`,
-				ts: 10_000 + index,
-			});
-		}
-		for (let index = 0; index < 20; index++) {
-			const id = `Other-${index.toString().padStart(2, "0")}`;
-			agents.register({
-				id,
-				displayName: `Other ${index.toString().padStart(2, "0")}`,
-				kind: "sub",
-				parentId: "Main",
-				session: null,
-			});
-			irc.history.recordMessage({
-				id: `other-${index}`,
-				from: id,
-				to: "Main",
-				body: `Other update ${index}`,
-				ts: 2_000 + index,
-			});
-		}
-		const hub = makeHub(agents, { irc, initialSection: "messages" });
-
-		try {
-			hub.handleInput("\t");
-			for (let index = 0; index < 20; index++) hub.handleInput("k");
-			const scrolledThread = Bun.stripANSI(hub.render(120).join("\n"));
-			expect(scrolledThread).toContain("Target update 9");
-
-			hub.handleInput("\t");
-			for (let index = 0; index < 10; index++) hub.handleInput("j");
-			const frame = hub.render(120).map(Bun.stripANSI);
-			const visible = frame
-				.map((line, index) => ({ line, index, match: / (Other \d{2}) /u.exec(line) }))
-				.find(entry => entry.match);
-			expect(visible).toBeDefined();
-			hub.handleInput(leftClick(visible!.index + 1));
-			const selected = Bun.stripANSI(hub.render(120).join("\n"));
-			expect(selected).toContain(`❯ ${visible!.match![1]}`);
-		} finally {
-			hub.dispose();
-		}
-	});
-	it("loads and sends Messages through the collab Agent Hub remote", async () => {
-		geometry = stubStdoutGeometry(120);
-		geometry.setRows(28);
-		const agents = new AgentRegistry();
-		agents.register({ id: "Worker", displayName: "Worker", kind: "sub", parentId: "Main", session: null });
-		const records = [
-			{
-				message: { id: "m1", from: "Main", to: "Worker", body: "Inspect auth", ts: 1_000 },
-				outcome: "injected" as const,
-				updatedAt: 1_000,
-			},
-			{
-				message: { id: "m2", from: "Worker", to: "Main", body: "Found one issue", ts: 2_000, replyTo: "m1" },
-				outcome: "injected" as const,
-				updatedAt: 2_000,
-			},
-		];
-		const sent: Array<{ to: string; body: string; replyTo?: string }> = [];
-		const firstRender = Promise.withResolvers<void>();
-		const sendObserved = Promise.withResolvers<void>();
-		const refreshObserved = Promise.withResolvers<void>();
-		let readCount = 0;
-		const hub = makeHub(agents, {
-			initialSection: "messages",
-			requestRender: () => firstRender.resolve(),
-			remote: {
-				chat: () => {},
-				kill: () => {},
-				revive: () => {},
-				readTranscript: async () => null,
-				readMessages: async () => {
-					readCount++;
-					if (readCount === 2) refreshObserved.resolve();
-					return records;
-				},
-				sendMessage: async (to, body, replyTo) => {
-					sent.push({ to, body, replyTo });
-					sendObserved.resolve();
-					return undefined;
-				},
-			},
-		});
-
-		try {
-			await firstRender.promise;
-			const rendered = Bun.stripANSI(hub.render(120).join("\n"));
-			expect(rendered).toContain("Worker · 2 messages");
-			expect(rendered).toContain("Found one issue");
-
-			records.push({
-				message: { id: "m3", from: "Worker", to: "Main", body: "New remote update", ts: 3_000 },
-				outcome: "injected",
-				updatedAt: 3_000,
-			});
-			hub.handleInput("1");
-			hub.handleInput("3");
-			await refreshObserved.promise;
-			await Promise.resolve();
-			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("New remote update");
-
-			hub.handleInput("R");
-			for (const key of "Please patch it remotely") hub.handleInput(key);
-			hub.handleInput("\r");
-			await sendObserved.promise;
-			expect(sent).toEqual([{ to: "Worker", body: "Please patch it remotely", replyTo: "m2" }]);
-		} finally {
-			hub.dispose();
-		}
-	});
-
-	it("preserves unread on narrow conversation list until the thread is opened", () => {
-		geometry = stubStdoutGeometry(80);
-		geometry.setRows(28);
-		const agents = new AgentRegistry();
-		agents.register({ id: "Worker", displayName: "Worker", kind: "sub", parentId: "Main", session: null });
-		const irc = new IrcBus(agents);
-		irc.history.recordMessage({
-			id: "m1",
-			from: "Worker",
-			to: "Main",
-			body: "Needs attention",
-			ts: 2_000,
-		});
-		irc.history.recordDelivery("m1", { to: "Main", outcome: "injected" });
-		const hub = makeHub(agents, { irc, initialSection: "messages" });
-		try {
-			const list = Bun.stripANSI(hub.render(80).join("\n"));
-			expect(list).toContain("Conversations");
-			expect(list).toContain("Needs attention");
-			expect(list).toMatch(/Worker\s+1/);
-			// Periodic/history refresh and list navigation must not clear unread while only the list is visible.
-			hub.handleInput("j");
-			hub.handleInput("k");
-			const stillUnread = Bun.stripANSI(hub.render(80).join("\n"));
-			expect(stillUnread).toMatch(/Worker\s+1/);
-			hub.handleInput("\r");
-			const thread = Bun.stripANSI(hub.render(80).join("\n"));
-			expect(thread).toContain("Needs attention");
-			expect(thread).not.toMatch(/Worker\s+1/);
-		} finally {
-			hub.dispose();
-		}
-	});
-
-	it("lets compose start a fresh direct or broadcast conversation with no prior history", async () => {
-		geometry = stubStdoutGeometry(120);
-		geometry.setRows(28);
-		const agents = new AgentRegistry();
-		const delivered: string[] = [];
-		const { promise: deliveryObserved, resolve: resolveDelivery } = Promise.withResolvers<void>();
-		const session = {
-			deliverIrcMessage: async (message: { body: string }) => {
-				delivered.push(message.body);
-				resolveDelivery();
-				return "injected" as const;
-			},
-			emitIrcRelayObservation() {},
-		} as unknown as AgentSession;
-		agents.register({ id: "Worker", displayName: "Worker", kind: "sub", parentId: "Main", session, status: "idle" });
-		const irc = new IrcBus(agents);
-		const hub = makeHub(agents, { irc, initialSection: "messages" });
-		try {
-			const empty = Bun.stripANSI(hub.render(120).join("\n"));
-			expect(empty).toContain("All agents");
-			expect(empty).toContain("Worker");
-			hub.handleInput("j"); // move from All agents to Worker if needed
-			// Ensure Worker direct conversation is selected
-			for (let i = 0; i < 3; i++) {
-				const frame = Bun.stripANSI(hub.render(120).join("\n"));
-				if (frame.includes("❯ Worker") || frame.includes("Worker · 0 messages") || frame.includes("Message")) break;
-				hub.handleInput("j");
-			}
-			hub.handleInput("c");
-			for (const key of "Hello fresh") hub.handleInput(key);
-			hub.handleInput("\r");
-			await deliveryObserved;
-			expect(delivered).toEqual(["Hello fresh"]);
 		} finally {
 			hub.dispose();
 		}

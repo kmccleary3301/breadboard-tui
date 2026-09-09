@@ -1100,7 +1100,9 @@ abstract class ModeStrategy {
 	}
 
 	async handshake(options: { readonly ignoreAbort?: boolean } = {}): Promise<BoundLifecycleE4Client> {
-		return await (await this.unboundClient()).handshake({
+		return await (
+			await this.unboundClient()
+		).handshake({
 			signal: options.ignoreAbort ? undefined : this.abortController.signal,
 		});
 	}

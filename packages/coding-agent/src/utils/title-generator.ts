@@ -19,7 +19,7 @@ import { isTinyTitleLocalModelKey, ONLINE_TINY_TITLE_MODEL_KEY } from "../tiny/m
 import { isLowSignalTitleInput, normalizeGeneratedTitle } from "../tiny/text";
 import { tinyTitleClient } from "../tiny/title-client";
 
-const TITLE_SYSTEM_PROMPT = prompt.render(titleSystemPrompt);
+const TITLE_SYSTEM_PROMPT = prompt.render(titleSystemPrompt, { includeExamples: true });
 const TITLE_MARKER_INSTRUCTION = prompt.render(titleMarkerInstruction);
 
 const DEFAULT_TERMINAL_TITLE = ACTIVE_PRODUCT_IDENTITY.compactLogo.unicode;
@@ -134,6 +134,8 @@ function getTitleModel(registry: ModelRegistry, settings: Settings, currentModel
  *   reflects the credential actually selected for this request.
  * @param customSystemPrompt Optional title-specific system prompt override
  * @param signal Session-lifecycle cancellation for background title requests
+ * @param credentialSourceSessionId Optional foreground session whose selected
+ *   OAuth credential should seed an isolated title-request session.
  */
 export async function generateSessionTitle(
 	firstMessage: string,
@@ -144,6 +146,7 @@ export async function generateSessionTitle(
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined,
 	customSystemPrompt?: string,
 	signal?: AbortSignal,
+	credentialSourceSessionId?: string,
 ): Promise<string | null> {
 	// Defer titling for greetings / acknowledgements / empty input. The default
 	// tiny title model can't reliably decline trivial input, so this happens
@@ -166,6 +169,7 @@ export async function generateSessionTitle(
 			metadataResolver,
 			signal,
 			titleSystemPrompt,
+			credentialSourceSessionId,
 		);
 	}
 
@@ -224,6 +228,7 @@ export async function generateTitleOnline(
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined,
 	signal?: AbortSignal,
 	customSystemPrompt?: string,
+	credentialSourceSessionId?: string,
 ): Promise<string | null> {
 	const model = getTitleModel(registry, settings, currentModel);
 	if (!model) {
@@ -249,6 +254,14 @@ export async function generateTitleOnline(
 	logger.debug("title-generator: start", modelContext);
 
 	try {
+		if (credentialSourceSessionId && sessionId && credentialSourceSessionId !== sessionId) {
+			const foregroundCredential = registry.authStorage
+				.listOAuthAccounts(model.provider, credentialSourceSessionId)
+				.find(account => account.active);
+			if (foregroundCredential) {
+				registry.authStorage.pinSessionOAuthAccount(model.provider, sessionId, foregroundCredential.credentialId);
+			}
+		}
 		const apiKey = await registry.getApiKey(model, sessionId);
 		if (!apiKey) {
 			logger.warn("title-generator: no API key", { ...modelContext, reason: "missing-api-key" });
@@ -274,6 +287,7 @@ export async function generateTitleOnline(
 					},
 					{
 						apiKey: registry.resolver(model, sessionId),
+						sessionId,
 						maxTokens,
 						disableReasoning: true,
 						// Greedy decode: titling is extraction, not generation. Backends that

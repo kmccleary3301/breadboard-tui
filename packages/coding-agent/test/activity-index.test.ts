@@ -51,8 +51,6 @@ describe("AgentActivityIndex", () => {
 		});
 		expect(activity.query({ kinds: new Set(["tool"]) })).toHaveLength(1);
 		expect(activity.query({ search: "SRC/A.TS" })).toHaveLength(1);
-		expect(activity.recent("Worker", 0)).toEqual([]);
-		expect(activity.query({ limit: 0 })).toEqual([]);
 	});
 
 	it("tails appended JSONL incrementally and scopes rows by agent subtree", async () => {
@@ -125,6 +123,33 @@ describe("AgentActivityIndex", () => {
 		expect(rows[0]?.toolCallId).toBe("call-44");
 		expect(rows.at(-1)?.toolCallId).toBe("call-299");
 		expect(activity.retainedToolMappings("Worker")).toBe(0);
+	});
+
+	it("tails remote transcripts from a bounded offset and refetches after rotation", async () => {
+		let transcript = `${"x".repeat(300_000)}\n${messageEntry("recent", 2_000, {
+			role: "assistant",
+			content: "Recent remote result",
+		})}\n`;
+		const offsets: number[] = [];
+		const activity = new AgentActivityIndex({
+			remote: {
+				readTranscript: async (_agentId, fromByte) => {
+					offsets.push(fromByte);
+					const bytes = Buffer.from(transcript);
+					if (fromByte >= bytes.byteLength) return { text: "", newSize: bytes.byteLength };
+					return { text: bytes.subarray(fromByte).toString("utf-8"), newSize: bytes.byteLength };
+				},
+			},
+		});
+
+		await activity.sync("Guest");
+		expect(offsets[0]).toBe(Number.MAX_SAFE_INTEGER);
+		expect(offsets[1]).toBe(Buffer.byteLength(transcript) - 256 * 1024);
+		expect(activity.query().map(row => row.summary)).toEqual(["Recent remote result"]);
+
+		transcript = `${messageEntry("rotated", 3_000, { role: "assistant", content: "After rotation" })}\n`;
+		await activity.sync("Guest");
+		expect(activity.query().map(row => row.summary)).toEqual(["After rotation"]);
 	});
 
 	it("swallows rejecting remote transcript reads without throwing", async () => {

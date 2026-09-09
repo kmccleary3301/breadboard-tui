@@ -2148,7 +2148,6 @@ describe("E4AgentStreamBridge", () => {
 		};
 		const persistenceAtCommit: Array<{ sequence: number; roles: string[] }> = [];
 		const releasedProjectionKeys: string[] = [];
-		let agent!: Agent;
 		const bridge = new E4AgentStreamBridge({
 			async submissionOwned() {},
 			session: runtime,
@@ -2173,7 +2172,7 @@ describe("E4AgentStreamBridge", () => {
 			modelPolicy: { kind: "fixed", model },
 		});
 		bridge.start();
-		agent = new Agent({
+		const agent = new Agent({
 			initialState: {
 				model,
 				systemPrompt: ["Test"],

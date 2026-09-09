@@ -201,7 +201,7 @@ function parseNul(output: string): string[] {
 function parseDiffRecords(output: string): ChangedPathRecord[] {
 	const fields = parseNul(output);
 	const records: ChangedPathRecord[] = [];
-	for (let index = 0; index < fields.length; ) {
+	for (let index = 0; index < fields.length;) {
 		const status = fields[index++] ?? "";
 		if (/^[RC]/.test(status)) {
 			const oldPath = fields[index++];
@@ -219,7 +219,7 @@ function parseDiffRecords(output: string): ChangedPathRecord[] {
 function parseStatusRecords(output: string): ChangedPathRecord[] {
 	const fields = parseNul(output);
 	const records: ChangedPathRecord[] = [];
-	for (let index = 0; index < fields.length; ) {
+	for (let index = 0; index < fields.length;) {
 		const entry = fields[index++] ?? "";
 		if (entry.length < 3) continue;
 		const status = entry.slice(0, 2).trim() || entry.slice(0, 2);
@@ -620,7 +620,7 @@ function tarSize(bytes: Uint8Array, offset: number, length: number): number {
 
 function readTarMember(archiveBytes: Uint8Array, wantedPath: string): Uint8Array | undefined {
 	const tarBytes = new Uint8Array(gunzipSync(archiveBytes));
-	for (let offset = 0; offset + 512 <= tarBytes.byteLength; ) {
+	for (let offset = 0; offset + 512 <= tarBytes.byteLength;) {
 		const header = tarBytes.subarray(offset, offset + 512);
 		if (header.every(byte => byte === 0)) return undefined;
 		const name = tarString(header, 0, 100);

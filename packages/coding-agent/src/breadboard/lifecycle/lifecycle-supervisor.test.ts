@@ -2784,7 +2784,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 	});
 
 	test("abort during authority commit preserves the adoptable authenticated record without hard control", async () => {
-		let supervisor: LifecycleSupervisor | undefined;
+		let supervisor: LifecycleSupervisor | undefined = undefined;
 		const store = await temporaryStore({
 			beforeAtomicRename: (_from, to) => {
 				if (to.endsWith(".authority.json")) supervisor?.abort();

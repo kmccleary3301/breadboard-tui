@@ -288,8 +288,7 @@ export class E4AgentStreamBridge {
 				this.#pushStandaloneError(stream, model, "BreadBoard E4 bridge is not started", "error");
 				return stream;
 			}
-			let admission!: Promise<void>;
-			admission = this.#startTurn(model, context, stream, streamOptions?.signal).finally(() => {
+			const admission: Promise<void> = this.#startTurn(model, context, stream, streamOptions?.signal).finally(() => {
 				this.#submissionsInFlight.delete(admission);
 			});
 			this.#submissionsInFlight.add(admission);
@@ -319,7 +318,7 @@ export class E4AgentStreamBridge {
 		if (this.#submissionsInFlight.size > 0) {
 			let timeout: ReturnType<typeof setTimeout> | undefined;
 			const outcome = await Promise.race([
-				Promise.all([...this.#submissionsInFlight]).then(() => "settled" as const),
+				Promise.all(this.#submissionsInFlight).then(() => "settled" as const),
 				new Promise<"timeout">(resolve => {
 					timeout = setTimeout(() => resolve("timeout"), CLOSE_SUBMISSION_GRACE_MS);
 				}),
@@ -327,10 +326,10 @@ export class E4AgentStreamBridge {
 			if (timeout !== undefined) clearTimeout(timeout);
 			if (outcome === "timeout") this.#closeAdmissionAbort.abort();
 		}
-		await Promise.all([...this.#submissionsInFlight]);
-		await Promise.all([...this.#lateSubmissionRecoveries]);
-		await Promise.all([...this.#cancellationsInFlight]);
-		await Promise.all([...this.#eventApplicationsInFlight]);
+		await Promise.all(this.#submissionsInFlight);
+		await Promise.all(this.#lateSubmissionRecoveries);
+		await Promise.all(this.#cancellationsInFlight);
+		await Promise.all(this.#eventApplicationsInFlight);
 		this.#sinks.clear();
 		this.#adoptedTerminalTurnIds.clear();
 		this.#observedSubmitAttempts.clear();
@@ -482,8 +481,7 @@ export class E4AgentStreamBridge {
 	}
 
 	#trackLateSubmissionRecovery(operation: Promise<void>): void {
-		let recovery!: Promise<void>;
-		recovery = operation
+		const recovery: Promise<void> = operation
 			.catch(error => {
 				if (!this.#closed) {
 					this.#invalidateBridge(`BreadBoard aborted submission recovery failed: ${safeErrorMessage(error)}`);
@@ -1240,8 +1238,8 @@ export class E4AgentStreamBridge {
 			this.#failSinkPendingTerminal(sink, message, "error", String(event.eventId));
 			this.#trackCancellation(sink, "timeout");
 		}
-		await Promise.all([...this.#submissionsInFlight]);
-		await Promise.all([...this.#cancellationsInFlight]);
+		await Promise.all(this.#submissionsInFlight);
+		await Promise.all(this.#cancellationsInFlight);
 		for (const sink of sinks) {
 			await this.#terminalFailure(sink, event, message, "error", true);
 		}
@@ -1372,8 +1370,7 @@ export class E4AgentStreamBridge {
 	#trackCancellation(sink: TurnSink, reason: "user_requested" | "timeout"): Promise<boolean> | undefined {
 		if (sink.cancelRequested || sink.turnId === undefined) return undefined;
 		sink.cancelRequested = true;
-		let cancellation!: Promise<boolean>;
-		cancellation = this.#cancel(sink.turnId, reason).finally(() => {
+		const cancellation: Promise<boolean> = this.#cancel(sink.turnId, reason).finally(() => {
 			this.#cancellationsInFlight.delete(cancellation);
 		});
 		this.#cancellationsInFlight.add(cancellation);

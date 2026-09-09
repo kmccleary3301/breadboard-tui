@@ -1,16 +1,15 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { AgentSession, type SessionTransitionPlan } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { BuildSessionContextOptions, SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { assistantMsg, userMsg } from "./utilities";
 
 /**
  * Regression for issue #3846: in-TUI `/resume` rebuilt the *previous*
@@ -74,75 +73,6 @@ describe("AgentSession.switchSession previous-context build", () => {
 		});
 		sessions.push(session);
 		return { session, sessionManager };
-	}
-
-	async function seedConversation(session: AgentSession, sessionManager: SessionManager) {
-		const firstUserId = sessionManager.appendMessage(userMsg("first user"));
-		sessionManager.appendMessage(assistantMsg("first assistant"));
-		const secondUserId = sessionManager.appendMessage(userMsg("second user"));
-		sessionManager.appendMessage(assistantMsg("second assistant"));
-		await sessionManager.flush();
-		session.agent.replaceMessages(sessionManager.buildSessionContext().messages);
-		session.agent.replaceQueues([userMsg("queued steer")], [userMsg("queued follow-up")]);
-		return { firstUserId, secondUserId };
-	}
-
-	async function captureSessionState(session: AgentSession, sessionManager: SessionManager) {
-		const sessionFile = session.sessionFile;
-		return {
-			sessionFile,
-			sessionId: session.sessionId,
-			leafId: sessionManager.getLeafId(),
-			entries: JSON.stringify(sessionManager.getEntries()),
-			messages: JSON.stringify(session.messages),
-			model: session.model && `${session.model.provider}/${session.model.id}`,
-			steeringQueue: JSON.stringify(session.agent.peekSteeringQueue()),
-			followUpQueue: JSON.stringify(session.agent.peekFollowUpQueue()),
-			persisted: sessionFile ? await Bun.file(sessionFile).text() : undefined,
-		};
-	}
-
-	async function expectConnectionIntact(session: AgentSession): Promise<void> {
-		let observed = false;
-		const unsubscribe = session.subscribe(event => {
-			if (event.type === "agent_start") observed = true;
-		});
-		try {
-			session.agent.emitExternalEvent({ type: "agent_start" });
-			for (let turn = 0; turn < 4 && !observed; turn++) await Promise.resolve();
-			expect(observed).toBe(true);
-		} finally {
-			unsubscribe();
-		}
-	}
-
-	async function expectGuardedTransition(options: {
-		session: AgentSession;
-		sessionManager: SessionManager;
-		expectedPlan: SessionTransitionPlan;
-		run: () => Promise<unknown>;
-		order?: string[];
-	}): Promise<void> {
-		const plans: SessionTransitionPlan[] = [];
-		const transitionError = new Error(`blocked ${options.expectedPlan.reason}`);
-		options.session.setSessionTransitionGuard(plan => {
-			options.order?.push("guard");
-			plans.push(plan);
-			throw transitionError;
-		});
-		const before = await captureSessionState(options.session, options.sessionManager);
-
-		let failure: unknown;
-		try {
-			await options.run();
-		} catch (error) {
-			failure = error;
-		}
-
-		expect(failure).toBe(transitionError);
-		expect(plans).toEqual([options.expectedPlan]);
-		expect(await captureSessionState(options.session, options.sessionManager)).toEqual(before);
-		await expectConnectionIntact(options.session);
 	}
 
 	/** Wrap `sessionManager.buildSessionContext` so each call's caller-visible
@@ -228,152 +158,143 @@ describe("AgentSession.switchSession previous-context build", () => {
 		]);
 	});
 
-	it("guards newSession and fork after their public before-hooks and before state mutation", async () => {
-		const tempDir = TempDir.createSync("@pi-session-transition-new-fork-");
-		tempDirs.push(tempDir);
-		const order: string[] = [];
-		const extensionRunner = {
-			hasHandlers: (eventType: string) => eventType === "session_before_switch",
-			emit: async (event: { type: string }) => {
-				if (event.type === "session_before_switch") order.push(event.type);
-				return undefined;
-			},
-		} as unknown as ExtensionRunner;
-		const { session, sessionManager } = buildSession(tempDir, extensionRunner);
-		await seedConversation(session, sessionManager);
+	it("restores the previous session when cwd adoption is rejected", async () => {
+		const sourceDir = TempDir.createSync("@pi-switch-cwd-source-");
+		const targetDir = TempDir.createSync("@pi-switch-cwd-target-");
+		tempDirs.push(sourceDir, targetDir);
 
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "new" },
-			run: () => session.newSession(),
-			order,
-		});
-		expect(order).toEqual(["session_before_switch", "guard"]);
-
-		order.length = 0;
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "fork" },
-			run: () => session.fork(),
-			order,
-		});
-		expect(order).toEqual(["session_before_switch", "guard"]);
-	});
-
-	it("guards switchSession and reload after their public before-hooks and before state mutation", async () => {
-		const tempDir = TempDir.createSync("@pi-session-transition-resume-");
-		tempDirs.push(tempDir);
-		const order: string[] = [];
-		const extensionRunner = {
-			hasHandlers: (eventType: string) => eventType === "session_before_switch",
-			emit: async (event: { type: string }) => {
-				if (event.type === "session_before_switch") order.push(event.type);
-				return undefined;
-			},
-		} as unknown as ExtensionRunner;
-		const { session, sessionManager } = buildSession(tempDir, extensionRunner);
-		await seedConversation(session, sessionManager);
-		const targetManager = SessionManager.create(tempDir.path(), tempDir.path());
-		targetManager.appendMessage(userMsg("target session"));
+		const { session, sessionManager } = buildSession(sourceDir);
+		sessionManager.appendMessage({ role: "user", content: "source", timestamp: 1 });
+		await sessionManager.flush();
+		const previousSessionFile = sessionManager.getSessionFile();
+		const targetManager = SessionManager.create(targetDir.path(), targetDir.path());
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: 2 });
+		await targetManager.ensureOnDisk();
 		await targetManager.flush();
 		const targetSessionFile = targetManager.getSessionFile();
 		await targetManager.close();
-		if (!targetSessionFile) throw new Error("Expected target session file");
+		expect(previousSessionFile).toBeString();
+		expect(targetSessionFile).toBeString();
 
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "resume", targetSessionFile },
-			run: () => session.switchSession(targetSessionFile),
-			order,
-		});
-		expect(order).toEqual(["session_before_switch", "guard"]);
+		const onCwdChange = vi.fn(async () => false);
+		const switched = await session.switchSession(targetSessionFile!, { onCwdChange });
 
-		order.length = 0;
-		const currentSessionFile = session.sessionFile;
-		if (!currentSessionFile) throw new Error("Expected current session file");
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "resume", targetSessionFile: currentSessionFile },
-			run: () => session.reload(),
-			order,
+		expect(switched).toBe(false);
+		expect(onCwdChange).toHaveBeenCalledWith(targetDir.path(), sourceDir.path());
+		expect(sessionManager.getSessionFile()).toBe(previousSessionFile);
+		expect(sessionManager.getCwd()).toBe(sourceDir.path());
+	});
+	it("rejects callback-free switches across project directories", async () => {
+		const sourceDir = TempDir.createSync("@pi-switch-no-callback-source-");
+		const targetDir = TempDir.createSync("@pi-switch-no-callback-target-");
+		tempDirs.push(sourceDir, targetDir);
+
+		const { session, sessionManager } = buildSession(sourceDir);
+		sessionManager.appendMessage({ role: "user", content: "source", timestamp: 1 });
+		await sessionManager.flush();
+		const previousSessionFile = sessionManager.getSessionFile();
+
+		const targetManager = SessionManager.create(targetDir.path(), targetDir.path());
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: 2 });
+		await targetManager.ensureOnDisk();
+		await targetManager.flush();
+		const targetSessionFile = targetManager.getSessionFile();
+		await targetManager.close();
+
+		const switched = await session.switchSession(targetSessionFile!);
+
+		expect(switched).toBe(false);
+		expect(sessionManager.getSessionFile()).toBe(previousSessionFile);
+		expect(sessionManager.getCwd()).toBe(sourceDir.path());
+	});
+	it("adopts a foreign replica without changing the local cwd", async () => {
+		const sourceDir = TempDir.createSync("@pi-switch-collab-source-");
+		const targetDir = TempDir.createSync("@pi-switch-collab-target-");
+		const extraDir = TempDir.createSync("@pi-switch-collab-extra-");
+		tempDirs.push(sourceDir, targetDir, extraDir);
+
+		const { session, sessionManager } = buildSession(sourceDir);
+		sessionManager.appendMessage({ role: "user", content: "source", timestamp: 1 });
+		await sessionManager.flush();
+		const targetManager = SessionManager.create(targetDir.path(), targetDir.path());
+		targetManager.appendMessage({ role: "user", content: "host snapshot", timestamp: 2 });
+		await targetManager.ensureOnDisk();
+		await targetManager.flush();
+		const targetSessionFile = targetManager.getSessionFile();
+		await targetManager.close();
+		expect(targetSessionFile).toBeString();
+
+		const processCwd = process.cwd();
+		const onCwdChange = vi.fn(async () => {
+			throw new Error("collab must not invoke cwd callback");
 		});
-		expect(order).toEqual(["session_before_switch", "guard"]);
+		const switched = await session.switchSession(targetSessionFile!, {
+			preserveLocalCwd: true,
+			onCwdChange,
+		});
+
+		expect(switched).toBe(true);
+		expect(onCwdChange).not.toHaveBeenCalled();
+		expect(process.cwd()).toBe(processCwd);
+		expect(sessionManager.getSessionFile()).toBe(targetSessionFile);
+		expect(sessionManager.getCwd()).toBe(sourceDir.path());
+		expect(sessionManager.getRecordedCwd()).toBe(targetDir.path());
+		await sessionManager.addWorkspaceDirectory(extraDir.path());
+		expect(await Bun.file(targetSessionFile!).text()).not.toContain(extraDir.path());
 	});
 
-	it("guards branch and branchFromBtw after their public before-hooks and before state mutation", async () => {
-		const tempDir = TempDir.createSync("@pi-session-transition-branch-");
+	it("fails closed when cwd rollback throws after changing it", async () => {
+		const sourceDir = TempDir.createSync("@pi-switch-cwd-error-source-");
+		const targetDir = TempDir.createSync("@pi-switch-cwd-error-target-");
+		tempDirs.push(sourceDir, targetDir);
+
+		const { session, sessionManager } = buildSession(sourceDir);
+		const targetManager = SessionManager.create(targetDir.path(), targetDir.path());
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: 2 });
+		await targetManager.ensureOnDisk();
+		await targetManager.flush();
+		const targetSessionFile = targetManager.getSessionFile();
+		await targetManager.close();
+		expect(targetSessionFile).toBeString();
+
+		let actualCwd = sourceDir.path();
+		let callbackCount = 0;
+		const onCwdChange = vi.fn(async (newCwd: string, _previousCwd: string) => {
+			actualCwd = newCwd;
+			const call = callbackCount++;
+			if (call === 0) throw new Error("settings reload failed");
+			if (call === 1) throw new Error("cwd restore denied");
+			return true;
+		});
+
+		await expect(session.switchSession(targetSessionFile!, { onCwdChange })).rejects.toThrow(
+			/settings reload failed.*cwd restore denied.*process may remain in/,
+		);
+
+		expect(actualCwd).toBe(sourceDir.path());
+		expect(onCwdChange).toHaveBeenCalledTimes(2);
+		expect(onCwdChange).toHaveBeenNthCalledWith(2, sourceDir.path(), targetDir.path());
+		expect(sessionManager.getCwd()).toBe(sourceDir.path());
+		expect(session.isDisposed).toBe(true);
+	});
+	it("rejects reload when the session-before-switch hook cancels", async () => {
+		const tempDir = TempDir.createSync("@pi-switch-reload-cancel-");
 		tempDirs.push(tempDir);
-		const order: string[] = [];
+
+		const emit = vi.fn(async () => ({ cancel: true }));
 		const extensionRunner = {
-			hasHandlers: (eventType: string) => eventType === "session_before_branch",
-			emit: async (event: { type: string }) => {
-				if (event.type === "session_before_branch") order.push(event.type);
-				return undefined;
-			},
+			hasHandlers: (eventType: string) => eventType === "session_before_switch",
+			emit,
 		} as unknown as ExtensionRunner;
 		const { session, sessionManager } = buildSession(tempDir, extensionRunner);
-		const { firstUserId } = await seedConversation(session, sessionManager);
+		sessionManager.appendMessage({ role: "user", content: "current", timestamp: 1 });
+		await sessionManager.flush();
+		const sessionFile = session.sessionFile;
+		expect(sessionFile).toBeString();
 
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "branch", targetEntryId: firstUserId },
-			run: () => session.branch(firstUserId),
-			order,
-		});
-		expect(order).toEqual(["session_before_branch", "guard"]);
-
-		order.length = 0;
-		const leafId = sessionManager.getLeafId();
-		if (!leafId) throw new Error("Expected current leaf");
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "branchFromBtw", targetEntryId: leafId },
-			run: () =>
-				session.branchFromBtw("side question", assistantMsg("side answer"), leafId, sessionManager.getSessionId()),
-			order,
-		});
-		expect(order).toEqual(["session_before_branch", "guard"]);
-	});
-
-	it("guards navigateTree after its public before-hook and before state mutation", async () => {
-		const tempDir = TempDir.createSync("@pi-session-transition-tree-");
-		tempDirs.push(tempDir);
-		const order: string[] = [];
-		const extensionRunner = {
-			hasHandlers: (eventType: string) => eventType === "session_before_tree",
-			emit: async (event: { type: string }) => {
-				if (event.type === "session_before_tree") order.push(event.type);
-				return undefined;
-			},
-		} as unknown as ExtensionRunner;
-		const { session, sessionManager } = buildSession(tempDir, extensionRunner);
-		const { firstUserId } = await seedConversation(session, sessionManager);
-
-		await expectGuardedTransition({
-			session,
-			sessionManager,
-			expectedPlan: { reason: "navigateTree", targetEntryId: firstUserId },
-			run: () => session.navigateTree(firstUserId),
-			order,
-		});
-		expect(order).toEqual(["session_before_tree", "guard"]);
-	});
-
-	it("leaves native AgentSession tree navigation unchanged when no guard is installed", async () => {
-		const tempDir = TempDir.createSync("@pi-session-transition-native-");
-		tempDirs.push(tempDir);
-		const { session, sessionManager } = buildSession(tempDir);
-		const { firstUserId } = await seedConversation(session, sessionManager);
-
-		const result = await session.navigateTree(firstUserId);
-
-		expect(result.cancelled).toBe(false);
-		expect(sessionManager.getLeafId()).toBeNull();
+		await expect(session.reload()).rejects.toThrow("Session reload cancelled");
+		expect(emit).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "session_before_switch", targetSessionFile: sessionFile }),
+		);
 	});
 });

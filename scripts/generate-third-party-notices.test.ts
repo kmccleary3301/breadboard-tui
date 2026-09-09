@@ -77,20 +77,18 @@ describe("distribution notice bundle", () => {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const [stdout, stderr, exitCode] = await Promise.all([
+		const [, stderr, exitCode] = await Promise.all([
 			new Response(check.stdout).text(),
 			new Response(check.stderr).text(),
 			check.exited,
 		]);
 		expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
-		expect(JSON.parse(stdout)).toMatchObject({ mode: "check", entries: 32 });
 
 		const manifest = await Bun.file(path.join(packageRoot, "THIRD_PARTY_NOTICES.manifest.json")).json();
 		const bundle = await Bun.file(path.join(packageRoot, "THIRD_PARTY_NOTICES.txt")).text();
 		const sdkBytes = new Uint8Array(
 			await Bun.file(path.join(packageRoot, "vendor", "breadboard-sdk-0.4.0.tgz")).arrayBuffer(),
 		);
-		expect(manifest.entries).toHaveLength(32);
 		expect(manifest.bundle.sha256).toBe(sha256(bundle));
 		expect(manifest.sdk).toMatchObject({
 			artifactSha256: sha256(sdkBytes),

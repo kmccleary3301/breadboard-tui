@@ -3,6 +3,7 @@ import {
 	HighlightStream as NativeHighlightStream,
 	highlightCode as nativeHighlightCode,
 	supportsLanguage as nativeSupportsLanguage,
+	warmHighlighter as nativeWarmHighlighter,
 } from "@oh-my-pi/pi-natives";
 import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme, SymbolTheme } from "@oh-my-pi/pi-tui";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
@@ -96,6 +97,34 @@ export function highlightCode(code: string, lang?: string, highlightTheme: Theme
 	return (highlighted ?? code).split("\n");
 }
 
+/** Create a stateful highlighter for progressive terminal rendering. */
+export function createHighlightStream(lang?: string, highlightTheme: Theme = theme): NativeHighlightStream | null {
+	const validLang = lang && nativeSupportsLanguage(lang) ? lang : undefined;
+	if (!validLang) return null;
+	// Workspace loads skip the natives version sentinel, so a stale local
+	// `.node` can omit `HighlightStream` after a pull. Napi constructors can
+	// also throw; callers degrade to plain text instead of aborting a render.
+	try {
+		if (typeof NativeHighlightStream !== "function") return null;
+		return new NativeHighlightStream(validLang, getHighlightColors(highlightTheme));
+	} catch {
+		return null;
+	}
+}
+
+let highlighterWarmup: Promise<void> | undefined;
+
+/** Warm native syntax grammars off-thread once per process. */
+export function warmHighlighter(): Promise<void> {
+	if (!highlighterWarmup) {
+		highlighterWarmup =
+			typeof nativeWarmHighlighter === "function"
+				? nativeWarmHighlighter().catch(() => undefined)
+				: Promise.resolve();
+	}
+	return highlighterWarmup;
+}
+
 export function getSymbolTheme(): SymbolTheme {
 	// Guard against `theme` being undefined (pre-init or cross-module-instance
 	// plugin calls). Fall back to the ASCII preset so the returned symbols are
@@ -186,7 +215,8 @@ export function getMarkdownTheme(): MarkdownTheme {
 		italic: (text: string) => theme.italic(text),
 		underline: (text: string) => theme.underline(text),
 		strikethrough: (text: string) => theme.strikethrough(text),
-		colorSwatch: (color: string, glyph: string) => theme.customColor(color, glyph),
+		colorSwatch: (color, glyph, text, contrastColor) =>
+			`${theme.customColor(color, glyph)} ${theme.customBg(color, theme.customColor(contrastColor, text))}`,
 		symbols: getSymbolTheme(),
 		resolveMermaidAscii: mermaid
 			? (source, maxWidth) =>
@@ -202,11 +232,7 @@ export function getMarkdownTheme(): MarkdownTheme {
 			if (highlighted !== null) return highlighted.split("\n");
 			return code.split("\n").map(line => theme.fg("mdCodeBlock", line));
 		},
-		createHighlightStream: (lang?: string) => {
-			const validLang = lang && nativeSupportsLanguage(lang) ? lang : undefined;
-			if (!validLang) return null;
-			return new NativeHighlightStream(validLang, getHighlightColors(theme));
-		},
+		createHighlightStream: lang => createHighlightStream(lang, theme),
 	};
 	cachedMarkdownTheme = markdownTheme;
 	cachedMarkdownThemeRef = theme;
@@ -267,7 +293,9 @@ export function getEditorTheme(): EditorTheme {
 	return {
 		borderColor: (text: string) => theme.fg("borderMuted", text),
 		accentColor: (text: string) => theme.fg("accent", text),
-		surfaceColor: (text: string) => theme.bgFill("userMessageBg", text),
+		surfaceColor: (text: string) =>
+			theme.bgFill("userMessageBg", theme.fgOnBg("userMessageText", "userMessageBg", text)),
+		textColor: (text: string) => theme.fgResolved("text", text),
 		selectList: getSelectListTheme(),
 		symbols: getSymbolTheme(),
 		hintStyle: (text: string) => theme.fg("dim", text),
