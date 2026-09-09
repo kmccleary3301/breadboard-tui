@@ -24,8 +24,6 @@ import {
 	E4AgentStreamBridge,
 	type E4AgentStreamBridgeOptions,
 	type E4BackendModelAttribution,
-	type E4DurableCursor,
-	type E4OwnedSubmission,
 	type E4PermissionHandler,
 } from "./e4-agent-stream";
 import {
@@ -46,17 +44,15 @@ import {
 import type { ProviderAuthPort } from "./provider-auth-port";
 import { createBreadboardProviderFreeModel } from "./provider-free-model";
 import {
-	addOwnedSubmission,
 	advanceProjectionBinding,
-	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
 	type BreadboardSessionBindingData,
 	type BreadboardSessionBindingManager,
 	type BreadboardSessionBindingStore,
 	BreadboardSessionTransitionError,
+	createBreadboardSessionBindingPersistence,
 	durableBridgeCursor,
 	parseBreadboardSessionBindingData,
 	readBreadboardSessionBinding,
-	validateBreadboardActivation,
 	validateBreadboardSnapshot,
 } from "./session-binding";
 import type { OpenedSession, OpenSession } from "./session-port";
@@ -521,10 +517,8 @@ export async function prepareConnectedBreadboardRuntime(
 	let preparedClosePromise: Promise<void> | undefined;
 	let activationPromise: Promise<void> | undefined;
 	let lifecycleFailure: BreadboardLifecycleFailureResult | undefined;
-	let activatedSessionManager: BreadboardSessionBindingStore | undefined;
-	let durableBinding: BreadboardSessionBindingData | undefined;
-	let bindingWritePromise = Promise.resolve();
 	let runtimeStarted = false;
+	let runtimeActivated = false;
 	const projectionReceiptEventIds = new Set<string>();
 
 	const closeOpened = (): Promise<void> => {
@@ -624,7 +618,6 @@ export async function prepareConnectedBreadboardRuntime(
 			activeResumeBinding,
 			previousSessionId,
 		);
-		let snapshotRecovery = false;
 		let bridgeBinding = initialBinding;
 		if (options.allowTerminalSnapshotRecovery && activeResumeBinding && snapshot.headEventId !== null) {
 			const everyOwnedTurnIsTerminal =
@@ -635,7 +628,6 @@ export async function prepareConnectedBreadboardRuntime(
 					),
 				);
 			if (everyOwnedTurnIsTerminal && activeResumeBinding.cursor.sequence < snapshot.headSequence) {
-				snapshotRecovery = true;
 				bridgeBinding = advanceProjectionBinding(
 					initialBinding,
 					{ eventId: snapshot.headEventId, sequence: snapshot.headSequence },
@@ -643,36 +635,12 @@ export async function prepareConnectedBreadboardRuntime(
 				);
 			}
 		}
+		const bindingPersistence = createBreadboardSessionBindingPersistence(
+			initialBinding,
+			bridgeBinding,
+			resumeBinding !== undefined,
+		);
 		const model = resolveBreadboardBackendModel(snapshot.model, catalogRegistry);
-		const persistBinding = (
-			update: (current: BreadboardSessionBindingData) => BreadboardSessionBindingData,
-		): Promise<void> => {
-			const operation = bindingWritePromise.then(async () => {
-				const sessionManager = activatedSessionManager;
-				if (!sessionManager) throw new Error("BreadBoard binding changed before runtime activation");
-				const current = durableBinding;
-				if (
-					!current ||
-					current.sessionId !== initialBinding.sessionId ||
-					current.previousSessionId !== initialBinding.previousSessionId ||
-					current.replayConfigurationDigest !== initialBinding.replayConfigurationDigest
-				) {
-					throw new BreadboardSessionTransitionError("BreadBoard durable session binding changed during runtime.");
-				}
-				const next = parseBreadboardSessionBindingData(update(current));
-				sessionManager.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, next);
-				await sessionManager.flush();
-				durableBinding = next;
-			});
-			bindingWritePromise = operation.catch(() => {});
-			return operation;
-		};
-		const submissionOwned = (submission: E4OwnedSubmission): Promise<void> =>
-			persistBinding(current => addOwnedSubmission(current, submission));
-		const projectionCommitted = (
-			cursor: E4DurableCursor,
-			ownedSubmissions: readonly E4OwnedSubmission[],
-		): Promise<void> => persistBinding(current => advanceProjectionBinding(current, cursor, ownedSubmissions));
 		const selectModel = async (selected: E4BackendModelAttribution): Promise<E4BackendModelAttribution> => {
 			const selector = `${selected.provider}/${selected.id}`;
 			const expected = catalogModels.find(
@@ -710,8 +678,8 @@ export async function prepareConnectedBreadboardRuntime(
 			ownedSubmissions: bridgeBinding.ownedSubmissions,
 			emitAgentEvent: options.emitAgentEvent,
 			releaseAgentEvent: options.releaseAgentEvent,
-			submissionOwned,
-			projectionCommitted,
+			submissionOwned: bindingPersistence.submissionOwned,
+			projectionCommitted: bindingPersistence.projectionCommitted,
 			modelPolicy: { kind: "fixed", model },
 			requestPermission: options.requestPermission,
 			selectModel,
@@ -724,30 +692,13 @@ export async function prepareConnectedBreadboardRuntime(
 		const activate = (sessionManager: BreadboardSessionBindingStore): Promise<void> => {
 			activationPromise ??= (async () => {
 				try {
-					const existingBinding = readBreadboardSessionBinding(sessionManager);
-					const activation = validateBreadboardActivation(
-						existingBinding,
-						initialBinding,
-						resumeBinding !== undefined,
-					);
-					if (activation === "append") {
-						sessionManager.appendCustomEntry(
-							BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
-							initialBinding satisfies BreadboardSessionBindingData,
-						);
-					}
-					if (snapshotRecovery) {
-						sessionManager.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, bridgeBinding);
-					}
-					await sessionManager.flush();
-					durableBinding =
-						snapshotRecovery || activation === "append" ? bridgeBinding : (existingBinding ?? initialBinding);
+					await bindingPersistence.activate(sessionManager);
 					for (const entry of sessionManager.getBranch()) {
 						if (entry.type !== "message") continue;
 						const eventId = breadboardProjectionEventId(entry.message);
 						if (eventId) projectionReceiptEventIds.add(eventId);
 					}
-					activatedSessionManager = sessionManager;
+					runtimeActivated = true;
 					throwIfLifecycleFailed();
 				} catch (error) {
 					try {
@@ -761,7 +712,7 @@ export async function prepareConnectedBreadboardRuntime(
 			return activationPromise;
 		};
 		const start = (): void => {
-			if (!activatedSessionManager) {
+			if (!runtimeActivated) {
 				throw new Error("BreadBoard runtime cannot start before AgentSession activation");
 			}
 			if (runtimeStarted) return;

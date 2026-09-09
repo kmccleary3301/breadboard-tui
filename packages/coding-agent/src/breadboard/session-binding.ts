@@ -347,3 +347,65 @@ export function validateBreadboardActivation(
 	}
 	return "append";
 }
+
+export interface BreadboardSessionBindingPersistence {
+	activate(sessionManager: BreadboardSessionBindingStore): Promise<void>;
+	submissionOwned(submission: E4OwnedSubmission): Promise<void>;
+	projectionCommitted(cursor: E4DurableCursor, ownedSubmissions: readonly E4OwnedSubmission[]): Promise<void>;
+}
+
+export function createBreadboardSessionBindingPersistence(
+	initialBinding: BreadboardSessionBindingData,
+	bridgeBinding: BreadboardSessionBindingData,
+	resuming: boolean,
+): BreadboardSessionBindingPersistence {
+	let active: { store: BreadboardSessionBindingStore; binding: BreadboardSessionBindingData } | undefined;
+	let bindingWritePromise = Promise.resolve();
+
+	const persistBinding = (
+		update: (current: BreadboardSessionBindingData) => BreadboardSessionBindingData,
+	): Promise<void> => {
+		const operation = bindingWritePromise.then(async () => {
+			const activated = active;
+			if (!activated) throw new Error("BreadBoard binding changed before runtime activation");
+			const { store, binding: current } = activated;
+			if (
+				current.sessionId !== initialBinding.sessionId ||
+				current.previousSessionId !== initialBinding.previousSessionId ||
+				current.replayConfigurationDigest !== initialBinding.replayConfigurationDigest
+			) {
+				throw new BreadboardSessionTransitionError("BreadBoard durable session binding changed during runtime.");
+			}
+			const next = parseBreadboardSessionBindingData(update(current));
+			store.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, next);
+			await store.flush();
+			activated.binding = next;
+		});
+		bindingWritePromise = operation.catch(() => {});
+		return operation;
+	};
+
+	return {
+		async activate(store) {
+			const existingBinding = readBreadboardSessionBinding(store);
+			const activation = validateBreadboardActivation(existingBinding, initialBinding, resuming);
+			if (activation === "append") {
+				store.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, initialBinding);
+			}
+			if (bridgeBinding !== initialBinding) {
+				store.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, bridgeBinding);
+			}
+			await store.flush();
+			active = {
+				store,
+				binding:
+					bridgeBinding !== initialBinding || activation === "append"
+						? bridgeBinding
+						: (existingBinding ?? initialBinding),
+			};
+		},
+		submissionOwned: submission => persistBinding(current => addOwnedSubmission(current, submission)),
+		projectionCommitted: (cursor, ownedSubmissions) =>
+			persistBinding(current => advanceProjectionBinding(current, cursor, ownedSubmissions)),
+	};
+}

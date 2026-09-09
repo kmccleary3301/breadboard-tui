@@ -34,6 +34,7 @@ import {
 	uninstallManagedProductArchive,
 	updateManagedProductArchive,
 } from "./install-product-release";
+import { openProductArchive } from "./product-archive";
 
 const PRODUCT_TARGET = INSTALLED_ENGINE_SUPPORTED_TARGET;
 const ALLOW_UNSIGNED = Object.freeze({ allowUnsignedDevelopment: true });
@@ -194,6 +195,19 @@ async function clean(root: string): Promise<void> {
 }
 
 describe("managed product lifecycle", () => {
+	test("installs the verified snapshot even if its source archive is replaced", async () => {
+		const setup = await fixture();
+		try {
+			const archive = await openProductArchive(setup.archives.a, ALLOW_UNSIGNED);
+			await chmod(setup.archives.a, 0o600);
+			await writeFile(setup.archives.a, "invalid replacement archive");
+			await expect(openProductArchive(setup.archives.a, ALLOW_UNSIGNED)).rejects.toThrow(Error);
+			const installed = await archive.install(join(setup.root, "snapshot-install"));
+			expect(await readFile(join(installed, "bb"), "utf8")).toBe("binary-1.0.0");
+		} finally {
+			await clean(setup.root);
+		}
+	});
 	test("rejects unsigned development evidence without explicit authorization", async () => {
 		const setup = await fixture();
 		try {

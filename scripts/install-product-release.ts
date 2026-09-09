@@ -1,571 +1,47 @@
 #!/usr/bin/env bun
 
-import { dlopen, FFIType, type Library, ptr, read } from "bun:ffi";
-import { createHash, randomUUID } from "node:crypto";
+import { dlopen, FFIType, type Library } from "bun:ffi";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
-import { openPinnedDirectory } from "../packages/coding-agent/src/breadboard/lifecycle/darwin-pinned-directory";
+import { lstat, open, readdir, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
-	ENGINE_DISTRIBUTION_MANIFEST_FILENAME,
-	type EngineDistributionManifest,
-	type EngineDistributionTrustRoot,
-	INSTALLED_ENGINE_SUPPORTED_TARGET,
-	parseTrustedEngineDistributionManifest,
-} from "../packages/coding-agent/src/breadboard/lifecycle/installed-engine-manifest";
-import { BREADBOARD_DISTRIBUTION_POLICY } from "../packages/utils/src/product-distribution";
+	ensureDestinationRoot,
+	ensurePrivateDirectory,
+	installProductArchive,
+	isMissingError,
+	isSemver,
+	manifestRecord,
+	openProductArchive,
+	type ProductArchive,
+	type ProductArchiveTrustOptions,
+	privateRegular,
+	removePinnedDirectoryTree,
+	renameNoReplace,
+	safeRelativePath,
+	syncDirectory,
+	targetKey,
+	verifyProductRoot,
+} from "./product-archive";
 
-const INSTALL_SCHEMA = "bb.product_install_manifest.v1";
-const ARCHIVE_SCHEMA = "bb.product_archive.v1";
-const ROOT = /^bb-darwin-arm64-[0-9A-Za-z.-]+$/;
-const HEX = /^[0-9a-f]{64}$/;
+export type { ProductArchiveTrustOptions } from "./product-archive";
+export { installProductArchive, requireInstallableTrust, verifyProductArchive } from "./product-archive";
+
 const PRODUCT_STATE_DIRECTORY = ".bb-product-state";
+const ROOT = /^bb-darwin-arm64-[0-9A-Za-z.-]+$/;
 const LIFECYCLE_SCHEMA = "bb.product_lifecycle.v1";
-const SEMVER_PATTERN =
-	/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 const LOCK_EX = 2;
 const LOCK_NB = 4;
 const LOCK_UN = 8;
 const LOCK_TIMEOUT_MS = 30_000;
 const RETIREMENT_NAME_PATTERN = /^\.bb-retire-[0-9a-f]+-[0-9a-f]+$/;
-const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
-const MAX_ARCHIVE_EXPANDED_BYTES = 8 * 1024 * 1024 * 1024;
-const MAX_ARCHIVE_FILE_BYTES = 4 * 1024 * 1024 * 1024;
-const MAX_ARCHIVE_ENTRIES = 4096;
-const MAX_CONTROL_FILE_BYTES = 16 * 1024 * 1024;
-const MAX_ARCHIVE_LISTING_BYTES = 4 * 1024 * 1024;
-const MAX_ARCHIVE_PATH_BYTES = 512;
 const MAX_LIFECYCLE_REVISIONS = 1_000;
-const O_NOFOLLOW = constants.O_NOFOLLOW;
-const PRODUCT_TARGET = INSTALLED_ENGINE_SUPPORTED_TARGET;
-const PRODUCT_BINARY_PATH = "bb";
-const PRODUCT_NATIVE_ADDON_PATH = "native/pi_natives.darwin-arm64.node";
-
-export interface ProductArchiveTrustOptions {
-	readonly allowUnsignedDevelopment?: boolean;
-	readonly expectedArchiveSha256?: `sha256:${string}`;
-}
-
-function targetKey(target = PRODUCT_TARGET): string {
-	return `${target.platform}-${target.architecture}`;
-}
-async function removePinnedDirectoryTree(
-	path: string,
-	expected?: { readonly device: number | bigint; readonly inode: number | bigint },
-): Promise<void> {
-	const parent = await openPinnedDirectory(dirname(path));
-	try {
-		await parent.removeDirectoryTree(
-			basename(path),
-			expected === undefined ? undefined : { dev: BigInt(expected.device), ino: BigInt(expected.inode) },
-		);
-	} finally {
-		await parent.close();
-	}
-}
-
 const LOCK_SYMBOLS = {
 	flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-} as const;
-const DARWIN_SYMBOLS = {
-	renameatx_np: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
-	__error: { args: [], returns: FFIType.ptr },
 } as const;
 
 function fail(message: string, cause?: unknown): never {
 	throw new Error(message, cause === undefined ? undefined : { cause });
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
-
-async function privateRegular(path: string, maxBytes = MAX_CONTROL_FILE_BYTES): Promise<Buffer> {
-	const stat = await lstat(path).catch(error => fail(`archive input unavailable: ${path}`, error));
-	if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o022) !== 0)
-		fail(`archive input is not a private regular file: ${path}`);
-	const fd = await open(path, constants.O_RDONLY | O_NOFOLLOW);
-	try {
-		const current = await fd.stat();
-		if (!current.isFile() || current.nlink !== 1 || current.dev !== stat.dev || current.ino !== stat.ino)
-			fail(`archive input identity changed: ${path}`);
-		if (current.size > maxBytes) fail(`archive input exceeds its byte limit: ${path}`);
-		return await fd.readFile();
-	} finally {
-		await fd.close();
-	}
-}
-
-async function hashPrivateRegular(path: string): Promise<{ readonly sizeBytes: number; readonly sha256: string }> {
-	const pathname = await lstat(path).catch(error => fail(`archive input unavailable: ${path}`, error));
-	if (
-		!pathname.isFile() ||
-		pathname.isSymbolicLink() ||
-		pathname.nlink !== 1 ||
-		(pathname.mode & 0o022) !== 0 ||
-		pathname.size > MAX_ARCHIVE_FILE_BYTES
-	) {
-		fail(`archive input is not one bounded private regular file: ${path}`);
-	}
-	const file = await open(path, constants.O_RDONLY | O_NOFOLLOW);
-	try {
-		const opened = await file.stat();
-		if (
-			!opened.isFile() ||
-			opened.nlink !== 1 ||
-			opened.dev !== pathname.dev ||
-			opened.ino !== pathname.ino ||
-			opened.size !== pathname.size
-		) {
-			fail(`archive input identity changed: ${path}`);
-		}
-		const digest = createHash("sha256");
-		const buffer = Buffer.allocUnsafe(1024 * 1024);
-		let position = 0;
-		for (;;) {
-			const { bytesRead } = await file.read(buffer, 0, buffer.byteLength, position);
-			if (bytesRead === 0) break;
-			digest.update(buffer.subarray(0, bytesRead));
-			position += bytesRead;
-		}
-		const completed = await file.stat();
-		if (
-			position !== opened.size ||
-			completed.size !== opened.size ||
-			completed.dev !== opened.dev ||
-			completed.ino !== opened.ino
-		) {
-			fail(`archive input changed while hashing: ${path}`);
-		}
-		return { sizeBytes: position, sha256: digest.digest("hex") };
-	} finally {
-		await file.close();
-	}
-}
-
-async function validateArchivePayload(bytes: Buffer): Promise<void> {
-	if (bytes.byteLength > MAX_ARCHIVE_BYTES) fail("product archive exceeds its compressed byte limit");
-	const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
-	let expandedBytes = 0;
-	try {
-		for (;;) {
-			const chunk = await reader.read();
-			if (chunk.done) break;
-			expandedBytes += chunk.value.byteLength;
-			if (expandedBytes > MAX_ARCHIVE_EXPANDED_BYTES) {
-				await reader.cancel();
-				fail("product archive exceeds its expanded byte limit");
-			}
-		}
-	} catch (error) {
-		if (error instanceof Error && error.message.startsWith("product archive exceeds")) throw error;
-		fail("product archive gzip payload is invalid", error);
-	} finally {
-		reader.releaseLock();
-	}
-}
-
-async function boundedText(stream: ReadableStream<Uint8Array>, maxBytes: number, label: string): Promise<string> {
-	const reader = stream.getReader();
-	const chunks: Buffer[] = [];
-	let totalBytes = 0;
-	try {
-		for (;;) {
-			const chunk = await reader.read();
-			if (chunk.done) break;
-			totalBytes += chunk.value.byteLength;
-			if (totalBytes > maxBytes) {
-				await reader.cancel();
-				fail(`${label} exceeds its byte limit`);
-			}
-			chunks.push(Buffer.from(chunk.value));
-		}
-		return Buffer.concat(chunks, totalBytes).toString("utf8");
-	} finally {
-		reader.releaseLock();
-	}
-}
-async function runTarExtract(archivePath: string, destination: string): Promise<void> {
-	const child = Bun.spawn(
-		["tar", "-xzf", archivePath, "--no-same-owner", "--no-same-permissions", "-C", destination],
-		{
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-		},
-	);
-	let code: number;
-	let stderr: string;
-	try {
-		[code, stderr] = await Promise.all([
-			child.exited,
-			boundedText(child.stderr, MAX_CONTROL_FILE_BYTES, "archive extraction stderr"),
-		]);
-	} catch (error) {
-		child.kill();
-		throw error;
-	}
-	if (code !== 0) fail(`archive extraction failed: ${stderr.trim()}`);
-}
-
-async function stageArchive(
-	parent: string,
-	bytes: Buffer,
-): Promise<{ readonly archivePath: string; readonly payloadRoot: string }> {
-	const archivePath = join(parent, "input.tar.gz");
-	const payloadRoot = join(parent, "payload");
-	await Bun.write(archivePath, bytes);
-	await chmod(archivePath, 0o400);
-	await mkdir(payloadRoot, { mode: 0o700 });
-	return { archivePath, payloadRoot };
-}
-async function validateArchiveNames(archivePath: string): Promise<void> {
-	const child = Bun.spawn(["tar", "-tzf", archivePath], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-	let code: number;
-	let stdout: string;
-	let stderr: string;
-	try {
-		[code, stdout, stderr] = await Promise.all([
-			child.exited,
-			boundedText(child.stdout, MAX_ARCHIVE_LISTING_BYTES, "archive name listing"),
-			boundedText(child.stderr, MAX_CONTROL_FILE_BYTES, "archive listing stderr"),
-		]);
-	} catch (error) {
-		child.kill();
-		throw error;
-	}
-	if (code !== 0) fail(`archive listing failed: ${stderr.trim()}`);
-	const names = stdout
-		.split("\n")
-		.map(name => name.trim())
-		.filter(Boolean);
-	if (names.length === 0) fail("archive is empty");
-	if (names.length > MAX_ARCHIVE_ENTRIES) fail("archive contains too many entries");
-	if (new Set(names).size !== names.length) fail("archive contains duplicate entries");
-	for (const name of names) {
-		if (Buffer.byteLength(name, "utf8") > MAX_ARCHIVE_PATH_BYTES) fail(`archive contains an overlong path`);
-		if (name.startsWith("/") || name.split("/").some(component => component === ".." || component === "."))
-			fail(`archive contains an unsafe path: ${name}`);
-	}
-	const roots = new Set(names.map(name => name.split("/")[0]));
-	if (roots.size !== 1 || !ROOT.test([...roots][0] as string)) fail("archive must contain one supported target root");
-	const types = Bun.spawn(["tar", "-tvzf", archivePath], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-	let typeCode: number;
-	let typeOutput: string;
-	let typeError: string;
-	try {
-		[typeCode, typeOutput, typeError] = await Promise.all([
-			types.exited,
-			boundedText(types.stdout, MAX_ARCHIVE_LISTING_BYTES, "archive type listing"),
-			boundedText(types.stderr, MAX_CONTROL_FILE_BYTES, "archive type listing stderr"),
-		]);
-	} catch (error) {
-		types.kill();
-		throw error;
-	}
-	if (typeCode !== 0) fail(`archive type listing failed: ${typeError.trim()}`);
-	if (typeOutput.split("\n").some(line => line.length > 0 && line[0] !== "-" && line[0] !== "d"))
-		fail("archive contains a non-regular entry");
-}
-
-function safeRelativePath(value: unknown): value is string {
-	return (
-		typeof value === "string" &&
-		value.length > 0 &&
-		!value.startsWith("/") &&
-		value.split("/").every(component => component.length > 0 && component !== "." && component !== "..")
-	);
-}
-interface JsonRecord {
-	readonly [key: string]: unknown;
-}
-
-function manifestRecord(value: unknown, message: string): JsonRecord {
-	if (value === null || typeof value !== "object" || Array.isArray(value)) fail(message);
-	return value;
-}
-
-async function verifyTree(root: string, expectedRoot: string): Promise<readonly string[]> {
-	const found: string[] = [];
-	let totalBytes = 0;
-	const visit = async (directory: string, prefix: string): Promise<void> => {
-		for (const entry of await readdir(directory, { withFileTypes: true })) {
-			if (entry.isSymbolicLink()) fail(`archive contains a symlink: ${prefix}${entry.name}`);
-			const relative = prefix + entry.name;
-			const absolute = join(directory, entry.name);
-			if (entry.isDirectory()) {
-				await visit(absolute, `${relative}/`);
-				continue;
-			}
-			if (!entry.isFile()) fail(`archive contains a special file: ${relative}`);
-			const metadata = await lstat(absolute);
-			if (metadata.size > MAX_ARCHIVE_FILE_BYTES) fail(`archive file exceeds its byte limit: ${relative}`);
-			totalBytes += metadata.size;
-			if (totalBytes > MAX_ARCHIVE_EXPANDED_BYTES) fail("archive tree exceeds its expanded byte limit");
-			found.push(relative);
-			if (found.length > MAX_ARCHIVE_ENTRIES) fail("archive contains too many regular files");
-		}
-	};
-	await visit(root, "");
-	if (!found.includes("install-manifest.v1.json") || !found.includes("checksums.sha256"))
-		fail("archive is missing its install manifest or checksums");
-	if (!expectedRoot.startsWith("bb-")) fail("archive root is invalid");
-	return found.sort();
-}
-
-function decodeChecksums(bytes: Buffer): ReadonlyMap<string, string> {
-	const values = new Map<string, string>();
-	for (const line of bytes.toString("utf8").trimEnd().split("\n")) {
-		const match = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
-		if (!match || !HEX.test(match[1] as string) || values.has(match[2] as string))
-			fail("checksums manifest is malformed");
-		values.set(match[2] as string, match[1] as string);
-	}
-	return values;
-}
-
-async function verifyProductRoot(
-	root: string,
-	rootName: string,
-): Promise<{ readonly rootName: string; readonly manifest: Record<string, unknown>; readonly treeSha256: string }> {
-	const files = await verifyTree(root, rootName);
-	const manifestBytes = await privateRegular(join(root, "install-manifest.v1.json"));
-	let manifest: Record<string, unknown>;
-	try {
-		manifest = JSON.parse(manifestBytes.toString("utf8"));
-	} catch (error) {
-		fail("install manifest is not JSON", error);
-	}
-	if (
-		manifest.schemaVersion !== INSTALL_SCHEMA ||
-		manifest.archiveSchemaVersion !== ARCHIVE_SCHEMA ||
-		manifest.product !== BREADBOARD_DISTRIBUTION_POLICY.productName
-	)
-		fail("install manifest schema is invalid");
-	const target = manifestRecord(manifest.target, "archive target is invalid");
-	if (target.platform !== PRODUCT_TARGET.platform || target.architecture !== PRODUCT_TARGET.architecture)
-		fail("archive target does not match this host");
-	if (!isSemver(manifest.productVersion)) fail("install manifest product version is invalid");
-	const expectedRoot = `${BREADBOARD_DISTRIBUTION_POLICY.productName}-${targetKey()}-${manifest.productVersion}`;
-	if (rootName !== expectedRoot) fail("archive root does not match its target and product version");
-	const checksumsBytes = await privateRegular(join(root, "checksums.sha256"));
-	const checksums = decodeChecksums(checksumsBytes);
-	const checkableFiles = files.filter(file => file !== "checksums.sha256");
-	if (checksums.size !== checkableFiles.length || checkableFiles.some(file => !checksums.has(file)))
-		fail("archive checksums are incomplete");
-	for (const [relative, digest] of checksums) {
-		if (!safeRelativePath(relative) || !files.includes(relative))
-			fail(`checksum references missing archive entry: ${relative}`);
-		const identity = await hashPrivateRegular(join(root, relative));
-		if (identity.sha256 !== digest) fail(`archive digest mismatch: ${relative}`);
-	}
-	const binary = manifestRecord(manifest.binary, "install manifest binary identity is invalid");
-	const addon = manifestRecord(manifest.nativeAddon, "install manifest native addon identity is invalid");
-	if (binary.path !== PRODUCT_BINARY_PATH || addon.path !== PRODUCT_NATIVE_ADDON_PATH)
-		fail("install manifest executable paths are invalid");
-	for (const item of [binary, addon]) {
-		if (
-			!safeRelativePath(item.path) ||
-			typeof item.sizeBytes !== "number" ||
-			!Number.isSafeInteger(item.sizeBytes) ||
-			item.sizeBytes < 0 ||
-			typeof item.sha256 !== "string"
-		) {
-			fail("install manifest content identity is invalid");
-		}
-		const identity = await hashPrivateRegular(join(root, item.path));
-		if (identity.sizeBytes !== item.sizeBytes || item.sha256 !== `sha256:${identity.sha256}`)
-			fail("install manifest content identity mismatch");
-	}
-	const engine = manifestRecord(manifest.engine, "install manifest engine identity is invalid");
-	if (typeof engine.distributionId !== "string" || !engine.distributionId.startsWith("sha256:")) {
-		fail("install manifest engine identity is invalid");
-	}
-	const engineDirectory = `engine/${engine.distributionId.slice("sha256:".length)}`;
-	if (
-		!safeRelativePath(engine.manifestPath) ||
-		!safeRelativePath(engine.bundlePath) ||
-		engine.manifestPath !== `${engineDirectory}/${ENGINE_DISTRIBUTION_MANIFEST_FILENAME}`
-	) {
-		fail("install manifest engine paths are invalid");
-	}
-	const engineManifestBytes = await privateRegular(join(root, engine.manifestPath));
-	const trustFiles = files.filter(file => file.startsWith("engine/") && file.endsWith(".trust.json"));
-	const expectedTrustPath = `engine/${engine.distributionId.slice("sha256:".length)}.trust.json`;
-	if (trustFiles.length !== 1 || trustFiles[0] !== expectedTrustPath)
-		fail("archive must contain exactly one detached engine trust root");
-	const trustFile = trustFiles[0];
-	if (trustFile === undefined) fail("archive trust root is missing");
-	let trustRoot: EngineDistributionTrustRoot;
-	try {
-		trustRoot = JSON.parse((await privateRegular(join(root, trustFile))).toString("utf8"));
-	} catch (error) {
-		fail("engine trust root is not JSON", error);
-	}
-	let engineManifest: EngineDistributionManifest;
-	try {
-		engineManifest = parseTrustedEngineDistributionManifest(engineManifestBytes, trustRoot);
-	} catch (error) {
-		fail("engine manifest trust verification failed", error);
-	}
-	if (
-		engineManifest.productVersion !== manifest.productVersion ||
-		engineManifest.target.platform !== PRODUCT_TARGET.platform ||
-		engineManifest.target.architecture !== PRODUCT_TARGET.architecture ||
-		engineManifest.distributionId !== engine.distributionId ||
-		engine.bundlePath !== `${engineDirectory}/${engineManifest.engine.runtimeBundle.path}`
-	) {
-		fail("install manifest engine identity mismatch");
-	}
-	const bundleIdentity = await hashPrivateRegular(join(root, engine.bundlePath));
-	if (
-		bundleIdentity.sizeBytes !== engineManifest.engine.runtimeBundle.sizeBytes ||
-		`sha256:${bundleIdentity.sha256}` !== engineManifest.engine.runtimeBundle.sha256
-	) {
-		fail("engine runtime bundle identity mismatch");
-	}
-	const legal = manifestRecord(manifest.legal, "install manifest legal posture is invalid");
-	if (manifest.classification === "release-candidate") {
-		if (engineManifest.signature.kind !== "release-envelope")
-			fail("release candidate has no trusted engine release envelope");
-		if (
-			legal.posture !== "release-ready" ||
-			legal.inputsPresent !== true ||
-			!files.includes("LICENSE") ||
-			!files.includes("THIRD_PARTY_NOTICES.txt")
-		)
-			fail("release candidate is missing legal inputs");
-	} else if (
-		manifest.classification !== "development-evidence" ||
-		engineManifest.signature.kind !== "unsigned-development" ||
-		legal.posture !== "unsigned-development"
-	) {
-		fail("archive classification is invalid");
-	}
-	return { rootName, manifest, treeSha256: `sha256:${sha256(checksumsBytes)}` };
-}
-export function requireInstallableTrust(
-	manifest: Record<string, unknown>,
-	options: ProductArchiveTrustOptions,
-	archiveSha256: `sha256:${string}`,
-): void {
-	const expected = options.expectedArchiveSha256;
-	if (expected !== undefined && (!/^sha256:[0-9a-f]{64}$/.test(expected) || expected !== archiveSha256)) {
-		fail("product archive does not match its independently supplied digest");
-	}
-	const externallyPinned = expected === archiveSha256;
-	if (manifest.classification === "development-evidence" && options.allowUnsignedDevelopment !== true) {
-		fail("unsigned development archive requires explicit authorization");
-	}
-	if (manifest.classification === "release-candidate" && !externallyPinned) {
-		fail("release candidate requires an independently supplied archive digest");
-	}
-}
-
-async function verifyExtracted(
-	root: string,
-): Promise<{ readonly rootName: string; readonly manifest: Record<string, unknown>; readonly treeSha256: string }> {
-	const entries = await readdir(root, { withFileTypes: true });
-	if (entries.length !== 1 || !entries[0]?.isDirectory() || !ROOT.test(entries[0].name))
-		fail("archive must contain exactly one target-named root directory");
-	const rootName = entries[0].name;
-	return await verifyProductRoot(join(root, rootName), rootName);
-}
-
-function renameNoReplace(source: string, destination: string): void {
-	if (process.platform !== "darwin" || process.arch !== "arm64")
-		fail(`macOS arm64 product install is unsupported on ${process.platform}/${process.arch}`);
-	const from = ptr(Buffer.from(`${source}\0`));
-	const to = ptr(Buffer.from(`${destination}\0`));
-	const lib = dlopen("/usr/lib/libSystem.B.dylib", DARWIN_SYMBOLS);
-	try {
-		const result = Number(lib.symbols.renameatx_np(-2, from, -2, to, 4));
-		if (result !== 0) fail(`atomic product install failed with errno ${read.i32(lib.symbols.__error())}`);
-	} finally {
-		lib.close();
-	}
-}
-
-async function verifyProductArchiveBytes(
-	bytes: Buffer,
-	options: ProductArchiveTrustOptions = {},
-): Promise<Record<string, unknown>> {
-	await validateArchivePayload(bytes);
-	const root = await mkdtemp(join("/tmp", "bb-archive-"));
-	try {
-		const staged = await stageArchive(root, bytes);
-		await validateArchiveNames(staged.archivePath);
-		await runTarExtract(staged.archivePath, staged.payloadRoot);
-		const verified = await verifyExtracted(staged.payloadRoot);
-		requireInstallableTrust(verified.manifest, options, `sha256:${sha256(bytes)}`);
-		return Object.freeze({
-			...verified.manifest,
-			archiveSha256: `sha256:${sha256(bytes)}`,
-			rootSha256: verified.treeSha256,
-		});
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
-}
-
-export async function verifyProductArchive(
-	archivePath: string,
-	options: ProductArchiveTrustOptions = {},
-): Promise<Record<string, unknown>> {
-	if (process.platform !== "darwin" || process.arch !== "arm64")
-		fail(`macOS arm64 product lifecycle is unsupported on ${process.platform}/${process.arch}`);
-	return await verifyProductArchiveBytes(await privateRegular(archivePath, MAX_ARCHIVE_BYTES), options);
-}
-
-async function installProductArchiveBytes(
-	bytes: Buffer,
-	destinationRoot: string,
-	payloadValidated: boolean,
-	options: ProductArchiveTrustOptions = {},
-): Promise<string> {
-	if (!payloadValidated) await validateArchivePayload(bytes);
-	const destinationPath = await ensureDestinationRoot(destinationRoot);
-	const stage = await mkdtemp(join(destinationPath, ".bb-install-"));
-	const stageIdentity = await lstat(stage);
-	if (
-		!stageIdentity.isDirectory() ||
-		stageIdentity.isSymbolicLink() ||
-		(typeof process.geteuid === "function" && stageIdentity.uid !== process.geteuid())
-	) {
-		fail("product install staging root identity is invalid");
-	}
-	try {
-		const staged = await stageArchive(stage, bytes);
-		await validateArchiveNames(staged.archivePath);
-		await runTarExtract(staged.archivePath, staged.payloadRoot);
-		const verified = await verifyExtracted(staged.payloadRoot);
-		requireInstallableTrust(verified.manifest, options, `sha256:${sha256(bytes)}`);
-		const source = join(staged.payloadRoot, verified.rootName);
-		const destination = join(destinationPath, verified.rootName);
-		await chmod(join(source, "bb"), 0o500);
-		const engine = manifestRecord(verified.manifest.engine, "install manifest engine identity is invalid");
-		const engineDirectory = dirname(engine.manifestPath);
-		await chmod(join(source, engineDirectory), 0o500);
-		await chmod(join(source, "engine"), 0o500);
-		await chmod(join(source, "native"), 0o500);
-		await chmod(source, 0o700);
-		await syncTree(source);
-		renameNoReplace(source, destination);
-		await syncDirectory(destinationPath);
-		return destination;
-	} finally {
-		await removePinnedDirectoryTree(stage, { device: stageIdentity.dev, inode: stageIdentity.ino });
-	}
-}
-
-export async function installProductArchive(
-	archivePath: string,
-	destinationRoot: string,
-	options: ProductArchiveTrustOptions = {},
-): Promise<string> {
-	const bytes = await privateRegular(archivePath, MAX_ARCHIVE_BYTES);
-	const destinationPath = await ensureDestinationRoot(destinationRoot);
-	return await installProductArchiveBytes(bytes, destinationPath, false, options);
 }
 
 export const PRODUCT_LIFECYCLE_STATE_DIRECTORY = PRODUCT_STATE_DIRECTORY;
@@ -601,18 +77,6 @@ interface LifecycleState {
 	readonly revision: number;
 	readonly record: ProductLifecycleRecord | null;
 	readonly previousRecord: ProductLifecycleRecord | null;
-}
-
-function isMissingError(error: unknown): boolean {
-	return error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT";
-}
-
-function isSemver(value: unknown): value is string {
-	if (typeof value !== "string") return false;
-	const match = SEMVER_PATTERN.exec(value);
-	if (value.includes("+")) return false;
-	if (match === null) return false;
-	return !(match[1]?.split(".").some(identifier => /^0\d+$/.test(identifier)) ?? false);
 }
 
 function compareProductVersions(left: string, right: string): number {
@@ -854,101 +318,6 @@ function validateLifecycleTransition(previous: ProductLifecycleRecord | null, cu
 	if (!sameNames(current.removed, expectedRemoved)) fail("product lifecycle uninstall transition is invalid");
 }
 
-async function ensurePrivateDirectory(path: string, label: string): Promise<void> {
-	const firstCreated = await mkdir(path, { recursive: true, mode: 0o700 });
-	const metadata = await lstat(path);
-	const effectiveUser = typeof process.geteuid === "function" ? process.geteuid() : undefined;
-	if (
-		!metadata.isDirectory() ||
-		metadata.isSymbolicLink() ||
-		(metadata.mode & 0o777) !== 0o700 ||
-		(effectiveUser !== undefined && metadata.uid !== effectiveUser)
-	)
-		fail(`${label} must be one private directory owned by the effective user`);
-	if (firstCreated !== undefined) {
-		let current = path;
-		for (;;) {
-			await syncDirectory(current);
-			const parent = dirname(current);
-			await syncDirectory(parent);
-			if (current === firstCreated) break;
-			current = parent;
-		}
-	}
-}
-
-async function ensureTrustedDestinationDirectory(path: string, label: string): Promise<void> {
-	const effectiveUser = typeof process.geteuid === "function" ? process.geteuid() : undefined;
-	if (effectiveUser === undefined) fail(`${label} ownership cannot be verified`);
-	const components = resolve(path)
-		.split("/")
-		.filter(component => component.length > 0);
-	let current = "/";
-	for (const [index, component] of components.entries()) {
-		current = join(current, component);
-		let created = false;
-		let metadata: Awaited<ReturnType<typeof lstat>>;
-		try {
-			metadata = await lstat(current);
-		} catch (error) {
-			if (!isMissingError(error)) throw error;
-			try {
-				await mkdir(current, { mode: 0o700 });
-				created = true;
-			} catch (mkdirError) {
-				if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
-			}
-			metadata = await lstat(current);
-		}
-		const isDestination = index === components.length - 1;
-		if (metadata.uid !== 0 && metadata.uid !== effectiveUser)
-			fail(`${label} has a path component owned by another user`);
-		if (metadata.isSymbolicLink()) fail(`${label} has a symbolic-link path component`);
-		if (!metadata.isDirectory()) fail(`${label} has a non-directory path component`);
-		if ((metadata.mode & 0o022) !== 0 && (metadata.mode & 0o1000) === 0)
-			fail(`${label} has a non-sticky group- or world-writable path component`);
-		if (isDestination && (metadata.uid !== effectiveUser || (metadata.mode & 0o777) !== 0o700))
-			fail(`${label} must be one private directory owned by the effective user`);
-		if (created) {
-			await syncDirectory(current);
-			await syncDirectory(dirname(current));
-		}
-	}
-}
-
-async function assertTrustedPathComponents(path: string, label: string): Promise<void> {
-	const effectiveUser = typeof process.geteuid === "function" ? process.geteuid() : undefined;
-	if (effectiveUser === undefined) fail(`${label} ownership cannot be verified`);
-	const components = resolve(path)
-		.split("/")
-		.filter(component => component.length > 0);
-	let current = "/";
-	for (const component of components) {
-		current = join(current, component);
-		const metadata = await lstat(current);
-		if (metadata.uid !== 0 && metadata.uid !== effectiveUser)
-			fail(`${label} has a path component owned by another user`);
-		if (metadata.isSymbolicLink()) continue;
-		if (!metadata.isDirectory()) fail(`${label} has a non-directory path component`);
-		if ((metadata.mode & 0o022) !== 0 && (metadata.mode & 0o1000) === 0)
-			fail(`${label} has a non-sticky group- or world-writable path component`);
-	}
-}
-
-async function ensureDestinationRoot(destinationRoot: string): Promise<string> {
-	if (process.platform !== "darwin" || process.arch !== "arm64")
-		fail(`macOS arm64 product lifecycle is unsupported on ${process.platform}/${process.arch}`);
-	const requested = resolve(destinationRoot);
-	await ensureTrustedDestinationDirectory(requested, "product install root");
-	await assertTrustedPathComponents(requested, "product install root");
-	const canonical = await realpath(requested);
-	await assertTrustedPathComponents(canonical, "canonical product install root");
-	await ensurePrivateDirectory(canonical, "canonical product install root");
-	await syncDirectory(canonical);
-	await syncDirectory(dirname(canonical));
-	return canonical;
-}
-
 async function ensureLifecycleDirectories(
 	destinationRoot: string,
 ): Promise<{ readonly stateRoot: string; readonly revisionsRoot: string }> {
@@ -1029,40 +398,6 @@ async function readLifecycleState(destinationRoot: string): Promise<LifecycleSta
 	return { revision: highest, record, previousRecord: records.at(-2) ?? null };
 }
 
-async function syncDirectory(path: string): Promise<void> {
-	const directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | O_NOFOLLOW);
-	try {
-		await directory.sync();
-	} finally {
-		await directory.close();
-	}
-}
-
-async function syncRegularFile(path: string): Promise<void> {
-	const file = await open(path, constants.O_RDONLY | O_NOFOLLOW);
-	try {
-		const metadata = await file.stat();
-		if (!metadata.isFile() || metadata.nlink !== 1) fail(`durable product input is not one regular file: ${path}`);
-		await file.sync();
-	} finally {
-		await file.close();
-	}
-}
-
-async function syncTree(root: string): Promise<void> {
-	for (const entry of await readdir(root, { withFileTypes: true })) {
-		const path = join(root, entry.name);
-		if (entry.isDirectory() && !entry.isSymbolicLink()) {
-			await syncTree(path);
-		} else if (entry.isFile() && !entry.isSymbolicLink()) {
-			await syncRegularFile(path);
-		} else {
-			fail(`product tree contains an unsafe entry during durability sync: ${entry.name}`);
-		}
-	}
-	await syncDirectory(root);
-}
-
 function lifecycleLockLibrary(): Library<typeof LOCK_SYMBOLS> {
 	if (process.platform !== "darwin" || process.arch !== "arm64")
 		fail(`macOS arm64 product lifecycle locking is unsupported on ${process.platform}/${process.arch}`);
@@ -1072,7 +407,7 @@ function lifecycleLockLibrary(): Library<typeof LOCK_SYMBOLS> {
 async function withLifecycleLock<T>(destinationRoot: string, operation: () => Promise<T>): Promise<T> {
 	const { stateRoot } = await ensureLifecycleDirectories(destinationRoot);
 	const lockPath = join(stateRoot, "operation.lock");
-	const lockFile = await open(lockPath, constants.O_RDWR | constants.O_CREAT | O_NOFOLLOW, 0o600);
+	const lockFile = await open(lockPath, constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
 	const library = lifecycleLockLibrary();
 	let acquired = false;
 	try {
@@ -1129,7 +464,11 @@ async function publishLifecycleRevision(
 	const published = Object.freeze({ ...record, revision }) satisfies ProductLifecycleRecord;
 	const pending = join(revisionsRoot, `.pending-${revision}-${randomUUID()}.json`);
 	const finalPath = join(revisionsRoot, `revision-${revision}.json`);
-	const file = await open(pending, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | O_NOFOLLOW, 0o600);
+	const file = await open(
+		pending,
+		constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+		0o600,
+	);
 	try {
 		await file.writeFile(`${JSON.stringify(published)}\n`);
 		await file.sync();
@@ -1152,20 +491,13 @@ async function publishLifecycleRevision(
 	}
 }
 
-function candidateFromManifest(manifest: Record<string, unknown>): ProductLifecycleRoot {
-	if (
-		!isSemver(manifest.productVersion) ||
-		!validArchiveDigest(manifest.archiveSha256) ||
-		!validArchiveDigest(manifest.rootSha256)
-	) {
-		fail("verified product archive has no valid product identity");
-	}
+function candidateFromArchive(archive: ProductArchive): ProductLifecycleRoot {
 	return Object.freeze({
-		rootName: expectedRootName(manifest.productVersion),
-		target: targetKey(),
-		version: manifest.productVersion,
-		archiveSha256: manifest.archiveSha256,
-		treeSha256: manifest.rootSha256,
+		rootName: archive.rootName,
+		target: archive.target,
+		version: archive.productVersion,
+		archiveSha256: archive.archiveSha256,
+		treeSha256: archive.treeSha256,
 	});
 }
 
@@ -1253,7 +585,7 @@ async function verifyInstalledRoot(root: ProductLifecycleRoot, destinationRoot: 
 	const after = await rootMetadata(path, `product root ${root.rootName}`);
 	if (!sameDirectoryIdentity(before, after) || !sameTreeIdentity(beforeTree, afterTree))
 		fail(`product root ${root.rootName} changed during verification`);
-	if (verified.manifest.productVersion !== root.version || verified.treeSha256 !== root.treeSha256)
+	if (verified.productVersion !== root.version || verified.treeSha256 !== root.treeSha256)
 		fail(`product root ${root.rootName} has a conflicting identity`);
 }
 
@@ -1294,11 +626,10 @@ async function collectResidue(
 }
 
 async function installOrRecoverCandidate(
-	archiveBytes: Buffer,
+	archive: ProductArchive,
 	destinationRoot: string,
 	candidate: ProductLifecycleRoot,
 	known: ProductLifecycleRoot | undefined,
-	options: ProductArchiveTrustOptions,
 ): Promise<void> {
 	const path = join(destinationRoot, candidate.rootName);
 	let existing = true;
@@ -1314,7 +645,7 @@ async function installOrRecoverCandidate(
 		await verifyInstalledRoot(candidate, destinationRoot);
 		return;
 	}
-	await installProductArchiveBytes(archiveBytes, destinationRoot, true, options);
+	await archive.install(destinationRoot);
 }
 
 function retainedAfterActivation(
@@ -1337,71 +668,55 @@ function outputRecord(record: ProductLifecycleRecord, residue: readonly string[]
 	return Object.freeze({ ...record, residue: Object.freeze([...residue]) });
 }
 
-async function installManagedProductArchiveUnlocked(
-	archivePath: string,
-	destinationRoot: string,
-	options: ProductArchiveTrustOptions,
-): Promise<ProductLifecycleRecord> {
-	const archiveBytes = await privateRegular(archivePath, MAX_ARCHIVE_BYTES);
-	const candidate = candidateFromManifest(await verifyProductArchiveBytes(archiveBytes, options));
-	const inspected = await managedRecord(destinationRoot);
-	const pendingRemoval = inspected.state.record?.removal;
-	if (pendingRemoval !== null && pendingRemoval !== undefined)
-		fail("interrupted product uninstall cleanup must be resumed before install");
-	if (inspected.state.record?.active !== null && inspected.state.record?.active !== undefined)
-		fail("a product is already active; use update");
-	const known = inspected.state.record?.retained.find(root => root.rootName === candidate.rootName);
-	await installOrRecoverCandidate(archiveBytes, destinationRoot, candidate, known, options);
-	const retained =
-		inspected.state.record === null ? [] : retainedAfterActivation(candidate, inspected.state.record.retained);
-	const residue = await collectResidue(destinationRoot, candidate, retained);
-	const published = await publishLifecycleRevision(destinationRoot, inspected.state.revision, {
-		schema: LIFECYCLE_SCHEMA,
-		action: "install",
-		allowDowngrade: false,
-		active: candidate,
-		retained,
-		removal: null,
-		removed: (inspected.state.record?.removed ?? []).filter(rootName => rootName !== candidate.rootName),
-		residue,
-	});
-	return outputRecord(published, await collectResidue(destinationRoot, published.active, published.retained));
-}
-
 export interface ProductLifecycleUpdateOptions extends ProductArchiveTrustOptions {
 	readonly allowDowngrade?: boolean;
 }
 
-async function updateManagedProductArchiveUnlocked(
+async function activateManagedProductArchiveUnlocked(
+	action: "install" | "update",
 	archivePath: string,
 	destinationRoot: string,
-	options: ProductLifecycleUpdateOptions = {},
+	options: ProductLifecycleUpdateOptions,
 ): Promise<ProductLifecycleRecord> {
-	const archiveBytes = await privateRegular(archivePath, MAX_ARCHIVE_BYTES);
-	const candidate = candidateFromManifest(await verifyProductArchiveBytes(archiveBytes, options));
+	const verified = await openProductArchive(archivePath, options);
+	const candidate = candidateFromArchive(verified);
 	const inspected = await managedRecord(destinationRoot);
 	const previous = inspected.state.record;
-	if (previous === null || previous.active === null) fail("cannot update without an active product");
-	const comparison = compareProductVersions(candidate.version, previous.active.version);
-	if (comparison === 0) {
-		if (!sameRoot(previous.active, candidate)) fail("same-version product archive conflicts with the active release");
-		await verifyInstalledRoot(previous.active, destinationRoot);
-		return outputRecord(previous, await collectResidue(destinationRoot, previous.active, previous.retained));
+	let displaced: ProductLifecycleRoot | null = null;
+	let comparison = 0;
+	if (action === "install") {
+		const pendingRemoval = previous?.removal;
+		if (pendingRemoval !== null && pendingRemoval !== undefined)
+			fail("interrupted product uninstall cleanup must be resumed before install");
+		if (previous?.active !== null && previous?.active !== undefined) fail("a product is already active; use update");
+	} else {
+		if (previous === null || previous.active === null) fail("cannot update without an active product");
+		comparison = compareProductVersions(candidate.version, previous.active.version);
+		if (comparison === 0) {
+			if (!sameRoot(previous.active, candidate))
+				fail("same-version product archive conflicts with the active release");
+			await verifyInstalledRoot(previous.active, destinationRoot);
+			return outputRecord(previous, await collectResidue(destinationRoot, previous.active, previous.retained));
+		}
+		if (comparison < 0 && options.allowDowngrade !== true) fail("product downgrade requires explicit authorization");
+		if (inspected.state.revision >= MAX_LIFECYCLE_REVISIONS) fail("product lifecycle revision capacity is exhausted");
+		displaced = previous.active;
 	}
-	if (comparison < 0 && options.allowDowngrade !== true) fail("product downgrade requires explicit authorization");
-	if (inspected.state.revision >= MAX_LIFECYCLE_REVISIONS) fail("product lifecycle revision capacity is exhausted");
-	const known = [...(previous.retained ?? []), previous.active].find(root => root.rootName === candidate.rootName);
-	await installOrRecoverCandidate(archiveBytes, destinationRoot, candidate, known, options);
-	const retained = Object.freeze([previous.active, ...retainedAfterActivation(candidate, previous.retained)]);
+	const known =
+		previous?.retained.find(root => root.rootName === candidate.rootName) ??
+		(displaced && displaced.rootName === candidate.rootName ? displaced : undefined);
+	await installOrRecoverCandidate(verified, destinationRoot, candidate, known);
+	let retained = previous === null ? [] : retainedAfterActivation(candidate, previous.retained);
+	if (displaced) retained = Object.freeze([displaced, ...retained]);
 	const residue = await collectResidue(destinationRoot, candidate, retained);
 	const published = await publishLifecycleRevision(destinationRoot, inspected.state.revision, {
 		schema: LIFECYCLE_SCHEMA,
-		action: "update",
+		action,
 		allowDowngrade: comparison < 0,
 		active: candidate,
 		retained,
 		removal: null,
-		removed: previous.removed.filter(rootName => rootName !== candidate.rootName),
+		removed: (previous?.removed ?? []).filter(rootName => rootName !== candidate.rootName),
 		residue,
 	});
 	return outputRecord(published, await collectResidue(destinationRoot, published.active, published.retained));
@@ -1556,7 +871,7 @@ export async function installManagedProductArchive(
 ): Promise<ProductLifecycleRecord> {
 	const destinationPath = await ensureDestinationRoot(destinationRoot);
 	return await withLifecycleMutationLock(destinationPath, () =>
-		installManagedProductArchiveUnlocked(archivePath, destinationPath, options),
+		activateManagedProductArchiveUnlocked("install", archivePath, destinationPath, options),
 	);
 }
 
@@ -1568,7 +883,7 @@ export async function updateManagedProductArchive(
 	const destinationPath = await ensureDestinationRoot(destinationRoot);
 	return await withLifecycleMutationLock(
 		destinationPath,
-		() => updateManagedProductArchiveUnlocked(archivePath, destinationPath, options),
+		() => activateManagedProductArchiveUnlocked("update", archivePath, destinationPath, options),
 		0,
 	);
 }
@@ -1599,7 +914,6 @@ export async function statusManagedProductArchive(destinationRoot: string): Prom
 	const destinationPath = await ensureDestinationRoot(destinationRoot);
 	return await withLifecycleLock(destinationPath, () => statusManagedProductArchiveUnlocked(destinationPath));
 }
-
 function parseArchiveTrustFlags(flags: readonly string[], allowDowngradeFlag: boolean): ProductLifecycleUpdateOptions {
 	let allowDowngrade = false;
 	let allowUnsignedDevelopment = false;
@@ -1629,24 +943,18 @@ function parseArchiveTrustFlags(flags: readonly string[], allowDowngradeFlag: bo
 if (import.meta.main) {
 	const args = Bun.argv.slice(2);
 	const action = args[0];
-	if (action === "install") {
-		if (args.length < 3)
+	if (action === "install" || action === "update") {
+		const archivePath = args[1];
+		const destination = args[2];
+		if (archivePath === undefined || destination === undefined)
 			fail(
-				"usage: bun scripts/install-product-release.ts install <archive.tar.gz> <destination> [--allow-unsigned-development] [--expected-archive-sha256 <sha256:...>]",
+				action === "install"
+					? "usage: bun scripts/install-product-release.ts install <archive.tar.gz> <destination> [--allow-unsigned-development] [--expected-archive-sha256 <sha256:...>]"
+					: "usage: bun scripts/install-product-release.ts update <archive.tar.gz> <destination> [--allow-downgrade] [--allow-unsigned-development] [--expected-archive-sha256 <sha256:...>]",
 			);
-		const options = parseArchiveTrustFlags(args.slice(3), false);
-		process.stdout.write(
-			`${JSON.stringify(await installManagedProductArchive(args[1] as string, args[2] as string, options))}\n`,
-		);
-	} else if (action === "update") {
-		if (args.length < 3)
-			fail(
-				"usage: bun scripts/install-product-release.ts update <archive.tar.gz> <destination> [--allow-downgrade] [--allow-unsigned-development] [--expected-archive-sha256 <sha256:...>]",
-			);
-		const options = parseArchiveTrustFlags(args.slice(3), true);
-		process.stdout.write(
-			`${JSON.stringify(await updateManagedProductArchive(args[1] as string, args[2] as string, options))}\n`,
-		);
+		const options = parseArchiveTrustFlags(args.slice(3), action === "update");
+		const activate = action === "install" ? installManagedProductArchive : updateManagedProductArchive;
+		process.stdout.write(`${JSON.stringify(await activate(archivePath, destination, options))}\n`);
 	} else if (action === "rollback") {
 		if (args.length !== 2) fail("usage: bun scripts/install-product-release.ts rollback <destination>");
 		process.stdout.write(`${JSON.stringify(await rollbackManagedProductArchive(args[1] as string))}\n`);
