@@ -1,142 +1,187 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SyncPolicy } from "./inspect-upstream-sync";
-import { type CommandResult, type CommandRunner, verifyUpstreamSync } from "./verify-upstream-sync";
+import { createCommandRunner, verifyUpstreamSync } from "./verify-upstream-sync";
 
-const policy: SyncPolicy = {
-	schemaVersion: "p31.upstream-sync-policy.v1",
-	upstream: {
-		tag: "v18.0.1",
-		commit: "6c1209842323bb4713f127ac303c97fd043d585c",
-		tree: "67a19f0d45a71af8c3d9ae83562ffb1fcb579d61",
-	},
-	classes: ["breadboard-owned", "upstream-owned", "generated", "manual-review"],
-	rules: [
-		{
-			id: "known",
-			class: "breadboard-owned",
-			description: "known BreadBoard seam",
-			patterns: ["packages/coding-agent/src/breadboard/**"],
-		},
-		{
-			id: "manual-review-unknown",
-			class: "manual-review",
-			description: "fail closed",
-			patterns: ["**"],
-			fallback: true,
-		},
-	],
-};
+const valuePath = "packages/coding-agent/src/breadboard/value.txt";
+const featurePath = "packages/coding-agent/src/breadboard/feature.txt";
 
-function result(exitCode = 0, stdout = "", stderr = ""): CommandResult {
-	return { exitCode, stdout, stderr };
-}
-
-function fixtureRunner(options: { rebaseExit?: number; proofExit?: number; conflicts?: string } = {}): {
-	run: CommandRunner;
-	calls: string[][];
-} {
-	const calls: string[][] = [];
-	const run: CommandRunner = async command => {
-		const args = [...command];
-		calls.push(args);
-		if (args[0] === "git" && args[1] === "rev-parse" && args.at(-1)?.includes("^{commit}")) {
-			return result(
-				0,
-				args.at(-1)?.startsWith("HEAD")
-					? "rebased\n"
-					: args.at(-1)?.startsWith("candidate")
-						? "candidate\n"
-						: "upstream\n",
-			);
-		}
-		if (args[0] === "git" && args[1] === "rev-parse" && args.at(-1) === "HEAD^{tree}") return result(0, "tree\n");
-		if (args[0] === "git" && args[1] === "worktree") return result();
-		if (args[0] === "git" && args[1] === "rebase" && args[2] !== "--abort") return result(options.rebaseExit ?? 0);
-		if (args[0] === "git" && args[1] === "rebase" && args[2] === "--abort") return result();
-		if (args[0] === "git" && args[1] === "diff") return result(0, options.conflicts ?? "");
-		if (args[0] === "proof") return result(options.proofExit ?? 0, "proof output\n", "");
-		throw new Error(`unexpected command: ${args.join(" ")}`);
+async function fixture(conflicting: boolean) {
+	const root = await mkdtemp(join(tmpdir(), "p31-sync-test-"));
+	const run = createCommandRunner();
+	const git = async (...args: string[]): Promise<string> => {
+		const result = await run(["git", ...args], root);
+		if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+		return result.stdout.trim();
 	};
-	return { run, calls };
+	try {
+		await git("init", "--initial-branch=upstream", "--template=");
+		await git("config", "user.name", "Sync test");
+		await git("config", "user.email", "sync@example.invalid");
+		await git("config", "commit.gpgsign", "false");
+		await git("config", "core.hooksPath", "/dev/null");
+		await mkdir(join(root, "packages/coding-agent/src/breadboard"), { recursive: true });
+		await writeFile(join(root, valuePath), "base\n");
+		await git("add", ".");
+		await git("commit", "-m", "base");
+		await git("checkout", "-b", "candidate");
+		await writeFile(join(root, conflicting ? valuePath : featurePath), "feature\n");
+		await git("add", ".");
+		await git("commit", "-m", "feature");
+		await git("checkout", "upstream");
+		await writeFile(join(root, valuePath), "upstream\n");
+		await git("commit", "-am", "upstream");
+		const upstream = await git("rev-parse", "HEAD");
+		const upstreamTree = await git("rev-parse", "HEAD^{tree}");
+		await git("-c", "tag.gpgsign=false", "tag", "v1.0.0");
+		await git("checkout", "candidate");
+		const policy: SyncPolicy = {
+			schemaVersion: "p31.upstream-sync-policy.v1",
+			upstream: { tag: "v1.0.0", commit: upstream, tree: upstreamTree },
+			classes: ["breadboard-owned", "upstream-owned", "generated", "manual-review"],
+			rules: [
+				{
+					id: "known",
+					class: "breadboard-owned",
+					description: "known BreadBoard seam",
+					patterns: ["packages/coding-agent/src/breadboard/**"],
+				},
+				{
+					id: "manual-review-unknown",
+					class: "manual-review",
+					description: "fail closed",
+					patterns: ["**"],
+					fallback: true,
+				},
+			],
+		};
+		const verificationRoot = join(root, "verification");
+		return {
+			root,
+			git,
+			run,
+			verificationRoot,
+			options: {
+				repoRoot: root,
+				upstreamRef: upstream,
+				policy,
+				linkNodeModules: false,
+				createTempRoot: async () => {
+					await mkdir(verificationRoot);
+					return verificationRoot;
+				},
+			},
+		};
+	} catch (error) {
+		await rm(root, { recursive: true, force: true });
+		throw error;
+	}
 }
 
-const inspect = async () => ({
-	unresolvedPaths: [] as string[],
-	summary: {
-		pathCount: 59,
-		byClass: { "breadboard-owned": 30, "upstream-owned": 16, generated: 2, "manual-review": 11 },
-	},
-});
+function outputHash(text: string): string {
+	return createHash("sha256").update(text).digest("hex");
+}
+
+const valueProof = [
+	process.execPath,
+	"-e",
+	`process.stdout.write(await Bun.file(${JSON.stringify(valuePath)}).text())`,
+];
 
 describe("verifyUpstreamSync", () => {
-	test("rebases in a disposable worktree and records redacted proof receipts", async () => {
-		const fixture = fixtureRunner();
-		const receipt = await verifyUpstreamSync({
-			repoRoot: "/repo",
-			candidateRef: "candidate",
-			policy,
-			run: fixture.run,
-			inspect,
-			proofCommands: [["proof"]],
-			createTempRoot: async () => "/tmp/p31-sync-pass",
-			linkNodeModules: false,
-		});
-
-		expect(receipt.status).toBe("pass");
-		expect(receipt.commits).toEqual({
-			upstream: "upstream",
-			candidateBefore: "candidate",
-			candidateAfter: "rebased",
-			treeAfter: "tree",
-		});
-		expect(receipt.proofReceipts).toHaveLength(1);
-		expect(receipt.proofReceipts[0]).toMatchObject({ command: ["proof"], exitCode: 0, stdoutBytes: 13 });
-		expect(receipt.proofReceipts[0]?.stdoutSha256).toHaveLength(64);
-		expect(fixture.calls).toContainEqual(["git", "worktree", "remove", "--force", "/tmp/p31-sync-pass/candidate"]);
+	test("preserves an integrated merge resolution and proves its exact tree", async () => {
+		const repo = await fixture(true);
+		try {
+			const merge = await repo.run(["git", "merge", "--no-commit", "upstream"], repo.root);
+			expect(merge.exitCode).toBe(1);
+			await writeFile(join(repo.root, valuePath), "resolved\n");
+			await repo.git("add", valuePath);
+			await repo.git("commit", "-m", "retain resolved merge");
+			const candidate = await repo.git("rev-parse", "HEAD");
+			const tree = await repo.git("rev-parse", "HEAD^{tree}");
+			const receipt = await verifyUpstreamSync({ ...repo.options, proofCommands: [valueProof] });
+			expect(receipt).toMatchObject({
+				status: "pass",
+				mode: "disposable-worktree-existing-ancestry",
+				rebaseExitCode: null,
+				commits: { candidateBefore: candidate, candidateAfter: candidate, treeAfter: tree },
+				proofReceipts: [{ exitCode: 0, stdoutSha256: outputHash("resolved\n") }],
+			});
+			expect(await repo.git("rev-parse", "HEAD")).toBe(candidate);
+			expect(await readFile(join(repo.root, valuePath), "utf8")).toBe("resolved\n");
+			await expect(access(repo.verificationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await rm(repo.root, { recursive: true, force: true });
+		}
 	});
 
-	test("fails closed with classified conflict paths and runs no proofs", async () => {
-		const fixture = fixtureRunner({
-			rebaseExit: 1,
-			conflicts: "packages/coding-agent/src/breadboard/engine-port.ts\0 unknown/future.txt \0",
-		});
-		const receipt = await verifyUpstreamSync({
-			repoRoot: "/repo",
-			candidateRef: "candidate",
-			policy,
-			run: fixture.run,
-			inspect,
-			proofCommands: [["proof"]],
-			createTempRoot: async () => "/tmp/p31-sync-conflict",
-			linkNodeModules: false,
-		});
-
-		expect(receipt.status).toBe("conflict");
-		expect(receipt.conflicts.map(item => [item.path, item.class, item.rule])).toEqual([
-			[" unknown/future.txt ", "manual-review", "manual-review-unknown"],
-			["packages/coding-agent/src/breadboard/engine-port.ts", "breadboard-owned", "known"],
-		]);
-		expect(receipt.unresolvedPaths).toEqual([" unknown/future.txt "]);
-		expect(receipt.proofReceipts).toEqual([]);
-		expect(fixture.calls).not.toContainEqual(["proof"]);
+	test("rebases a divergent candidate only in the disposable worktree", async () => {
+		const repo = await fixture(false);
+		try {
+			const candidate = await repo.git("rev-parse", "HEAD");
+			const receipt = await verifyUpstreamSync({ ...repo.options, proofCommands: [valueProof] });
+			expect(receipt).toMatchObject({
+				status: "pass",
+				mode: "disposable-worktree-rebase",
+				rebaseExitCode: 0,
+				proofReceipts: [{ exitCode: 0, stdoutSha256: outputHash("upstream\n") }],
+			});
+			expect(receipt.commits.candidateAfter).not.toBe(candidate);
+			expect(await repo.git("rev-parse", "HEAD")).toBe(candidate);
+			expect(await readFile(join(repo.root, valuePath), "utf8")).toBe("base\n");
+			await expect(access(repo.verificationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await rm(repo.root, { recursive: true, force: true });
+		}
 	});
 
-	test("reports the first failed proof without exposing raw output", async () => {
-		const fixture = fixtureRunner({ proofExit: 7 });
-		const receipt = await verifyUpstreamSync({
-			repoRoot: "/repo",
-			candidateRef: "candidate",
-			policy,
-			run: fixture.run,
-			inspect,
-			proofCommands: [["proof"], ["proof"]],
-			createTempRoot: async () => "/tmp/p31-sync-proof",
-			linkNodeModules: false,
-		});
+	test("reports real rebase conflicts without running proofs or changing the candidate", async () => {
+		const repo = await fixture(true);
+		const marker = join(repo.root, "proof-ran");
+		try {
+			const candidate = await repo.git("rev-parse", "HEAD");
+			const receipt = await verifyUpstreamSync({
+				...repo.options,
+				proofCommands: [[process.execPath, "-e", `await Bun.write(${JSON.stringify(marker)}, "ran")`]],
+			});
+			expect(receipt.status).toBe("conflict");
+			expect(receipt.conflicts).toEqual([
+				{ path: valuePath, sides: ["upstream", "candidate"], class: "breadboard-owned", rule: "known" },
+			]);
+			expect(receipt.proofReceipts).toEqual([]);
+			expect(await repo.git("rev-parse", "HEAD")).toBe(candidate);
+			await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
+			await expect(access(repo.verificationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await rm(repo.root, { recursive: true, force: true });
+		}
+	});
 
-		expect(receipt.status).toBe("proof-failed");
-		expect(receipt.proofReceipts).toHaveLength(1);
-		expect(receipt.proofReceipts[0]).toMatchObject({ exitCode: 7, stdoutBytes: 13, stderrBytes: 0 });
-		expect(JSON.stringify(receipt)).not.toContain("proof output");
+	test("stops after a failed proof and retains hashes rather than raw output", async () => {
+		const repo = await fixture(false);
+		const marker = join(repo.root, "second-proof-ran");
+		try {
+			const receipt = await verifyUpstreamSync({
+				...repo.options,
+				proofCommands: [
+					[process.execPath, "-e", 'console.log(["sensitive", "proof", "output"].join(" ")); process.exit(7)'],
+					[process.execPath, "-e", `await Bun.write(${JSON.stringify(marker)}, "ran")`],
+				],
+			});
+			expect(receipt.status).toBe("proof-failed");
+			expect(receipt.proofReceipts).toHaveLength(1);
+			expect(receipt.proofReceipts[0]).toMatchObject({
+				exitCode: 7,
+				stdoutSha256: outputHash("sensitive proof output\n"),
+			});
+			expect(JSON.stringify(receipt)).not.toContain("sensitive proof output");
+			await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
+			await expect(access(repo.verificationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await rm(repo.root, { recursive: true, force: true });
+		}
 	});
 });

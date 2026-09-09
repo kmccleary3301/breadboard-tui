@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Fixed upstream sync verification replaying already-resolved merge conflicts in its disposable worktree.
 - Fixed the downstream provider-login adapter dropping auth scheme, flow, browser/device authorization metadata, callback fields, account labels, and completed credential summaries.
 - Fixed ordinary external-runtime submission failures entering ambiguous-receipt recovery, and bounded close when a signal-less submission remains unresolved.
 - Fixed Ask dialogs duplicating rendered `(Recommended)` suffixes and terminal-title spinners continuing after interactive shutdown.

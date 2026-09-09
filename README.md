@@ -105,6 +105,8 @@ Each stable OMP train follows one reviewable sequence:
 5. Run the delta audit, BBOMP-CORE-52, full build, and compiled-binary smoke.
 6. Promote through a pull request to protected `main`.
 
+`bun scripts/verify-upstream-sync.ts` verifies the exact candidate in a disposable worktree when the pinned upstream is already an ancestor. Otherwise it attempts a disposable rebase. Both routes run the same classification and proof commands; neither rewrites the source branch. Its receipt distinguishes existing ancestry from an attempted rebase.
+
 BreadBoard changes should remain concentrated in owned adapters, product entrypoints, packaging, tests, and governance controls. Changes generally useful to OMP should be replayed onto the clean contribution fork and proposed upstream.
 
 ## Upstream documentation and attribution

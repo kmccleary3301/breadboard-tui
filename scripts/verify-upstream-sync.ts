@@ -32,7 +32,7 @@ export interface ProofCommandReceipt {
 
 export interface UpstreamSyncVerification {
 	readonly schemaVersion: "p31.upstream-sync-verification.v1";
-	readonly mode: "disposable-worktree-rebase";
+	readonly mode: "disposable-worktree-rebase" | "disposable-worktree-existing-ancestry";
 	readonly status: "pass" | "conflict" | "proof-failed";
 	readonly commits: {
 		readonly upstream: string;
@@ -40,7 +40,7 @@ export interface UpstreamSyncVerification {
 		readonly candidateAfter: string | null;
 		readonly treeAfter: string | null;
 	};
-	readonly rebaseExitCode: number;
+	readonly rebaseExitCode: number | null;
 	readonly conflicts: readonly ClassifiedPath[];
 	readonly unresolvedPaths: readonly string[];
 	readonly inspectionPathCount: number;
@@ -137,6 +137,11 @@ export async function verifyUpstreamSync(options: VerifyUpstreamSyncOptions = {}
 		["git", "rev-parse", "--verify", `${candidateRef}^{commit}`],
 		repoRoot,
 	);
+	const ancestry = await run(["git", "merge-base", "--is-ancestor", upstream, candidateBefore], repoRoot);
+	if (ancestry.exitCode !== 0 && ancestry.exitCode !== 1) {
+		throw new Error(`git merge-base failed with exit ${ancestry.exitCode}`);
+	}
+	const mode = ancestry.exitCode === 0 ? "disposable-worktree-existing-ancestry" : "disposable-worktree-rebase";
 	const tempRoot = await createTempRoot();
 	const worktree = path.join(tempRoot, "candidate");
 	let worktreeAdded = false;
@@ -145,8 +150,9 @@ export async function verifyUpstreamSync(options: VerifyUpstreamSyncOptions = {}
 		const added = await run(["git", "worktree", "add", "--detach", worktree, candidateBefore], repoRoot);
 		if (added.exitCode !== 0) throw new Error(`git worktree add failed with exit ${added.exitCode}`);
 		worktreeAdded = true;
-		const rebased = await run(["git", "rebase", upstream], worktree);
-		if (rebased.exitCode !== 0) {
+		const rebaseExitCode =
+			ancestry.exitCode === 0 ? null : (await run(["git", "rebase", upstream], worktree)).exitCode;
+		if (rebaseExitCode !== null && rebaseExitCode !== 0) {
 			const conflictOutput = await run(["git", "diff", "--name-only", "--diff-filter=U", "-z"], worktree);
 			const conflictPaths = conflictOutput.stdout
 				.split("\0")
@@ -160,10 +166,10 @@ export async function verifyUpstreamSync(options: VerifyUpstreamSyncOptions = {}
 			await run(["git", "rebase", "--abort"], worktree);
 			return {
 				schemaVersion: "p31.upstream-sync-verification.v1",
-				mode: "disposable-worktree-rebase",
+				mode,
 				status: "conflict",
 				commits: { upstream, candidateBefore, candidateAfter: null, treeAfter: null },
-				rebaseExitCode: rebased.exitCode,
+				rebaseExitCode,
 				conflicts,
 				unresolvedPaths: conflicts.filter(item => item.rule === "manual-review-unknown").map(item => item.path),
 				inspectionPathCount: 0,
@@ -188,10 +194,10 @@ export async function verifyUpstreamSync(options: VerifyUpstreamSyncOptions = {}
 			if (result.exitCode !== 0) {
 				return {
 					schemaVersion: "p31.upstream-sync-verification.v1",
-					mode: "disposable-worktree-rebase",
+					mode,
 					status: "proof-failed",
 					commits: { upstream, candidateBefore, candidateAfter, treeAfter },
-					rebaseExitCode: rebased.exitCode,
+					rebaseExitCode,
 					conflicts: [],
 					unresolvedPaths: inspection.unresolvedPaths,
 					inspectionPathCount: inspection.summary.pathCount,
@@ -201,10 +207,10 @@ export async function verifyUpstreamSync(options: VerifyUpstreamSyncOptions = {}
 		}
 		return {
 			schemaVersion: "p31.upstream-sync-verification.v1",
-			mode: "disposable-worktree-rebase",
+			mode,
 			status: inspection.unresolvedPaths.length === 0 ? "pass" : "conflict",
 			commits: { upstream, candidateBefore, candidateAfter, treeAfter },
-			rebaseExitCode: rebased.exitCode,
+			rebaseExitCode,
 			conflicts: [],
 			unresolvedPaths: inspection.unresolvedPaths,
 			inspectionPathCount: inspection.summary.pathCount,
@@ -225,7 +231,7 @@ if (import.meta.main) {
 		console.error(
 			JSON.stringify({
 				schemaVersion: "p31.upstream-sync-verification.v1",
-				mode: "disposable-worktree-rebase",
+				mode: "disposable-worktree-verification",
 				status: "proof-failed",
 				error: error instanceof Error ? error.message : String(error),
 			}),
