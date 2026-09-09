@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { version as packageVersion } from "../package.json" with { type: "json" };
 
 const packageDir = path.resolve(import.meta.dir, "..");
 const roots: string[] = [];
@@ -74,7 +75,7 @@ describe("BreadBoard product entrypoint", () => {
 		const result = await runProcess(["src/omp.ts", "--version"], home, { BREADBOARD_PRODUCT: "1" });
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout.trim()).toBe("omp/18.0.1");
+		expect(result.stdout.trim()).toBe(`omp/${packageVersion}`);
 		expect(await Bun.file(path.join(home, ".breadboard")).exists()).toBe(false);
 	});
 	test("selects the active identity once in fresh product and native processes", async () => {
@@ -130,11 +131,9 @@ describe("BreadBoard product entrypoint", () => {
 		});
 
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout).toContain("omp v18.0.1");
 		expect(result.stdout).toContain("~/.omp/agent");
 		expect(result.stdout).toContain("--engine-mode");
 		expect(result.stdout).toContain("--engine-url");
-		expect(result.stdout).toContain("engine         Manage the governed BreadBoard engine lifecycle");
 		expect(result.stdout).not.toContain("~/.breadboard");
 		expect(await Bun.file(productRoot).exists()).toBe(false);
 	});

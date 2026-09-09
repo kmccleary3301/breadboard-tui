@@ -64,6 +64,7 @@ export interface VerifyUpstreamSyncOptions {
 }
 
 const DEFAULT_PROOF_COMMANDS: readonly (readonly string[])[] = [
+	["bun", "run", "gen:tool-views"],
 	[
 		"bun",
 		"test",
