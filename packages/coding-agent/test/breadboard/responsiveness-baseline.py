@@ -549,6 +549,44 @@ def _cleanup_receipt(child: Any, before: list[dict[str, Any]], root: Path | None
     }
 
 
+def _cleanup_root_orphans(root: Path) -> dict[str, Any]:
+    owned = _owned_processes(root, -1)
+    term_pids: list[int] = []
+    for row in owned:
+        pid = int(row["pid"])
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            term_pids.append(pid)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + 5.0
+    survivors = owned
+    while survivors and time.monotonic() < deadline:
+        time.sleep(0.1)
+        survivors = _owned_processes(root, -1)
+    kill_pids: list[int] = []
+    for row in survivors:
+        pid = int(row["pid"])
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            kill_pids.append(pid)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.05)
+    final_owned = _owned_processes(root, -1)
+    return {
+        "rootProcessesBefore": owned,
+        "rootProcessesAfter": final_owned,
+        "sigtermPids": term_pids,
+        "sigkillPids": kill_pids,
+        "rootProcessesGone": not final_owned,
+    }
+
+
 def _screen_hash(child: Any) -> str:
     return hashlib.sha256(child.screen.text().encode("utf-8", "replace")).hexdigest()
 
@@ -905,6 +943,8 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
             finally:
                 if child is not None:
                     cell["cleanup"] = _cleanup_receipt(child, descendants, root.base)
+                elif args.product == "bb":
+                    cell["cleanup"] = _cleanup_root_orphans(root.base)
             cells[cell_key] = cell
     return {
         "product": args.product,
@@ -979,7 +1019,10 @@ def run_soak(args: argparse.Namespace) -> dict[str, Any]:
                 time.sleep(0.01)
             resources.append({"elapsedSeconds": time.monotonic() - started, **_resource_sample(int(child.pid))})
     finally:
-        cleanup = _cleanup_receipt(child, descendants, root.base) if child is not None else None
+        if child is not None:
+            cleanup = _cleanup_receipt(child, descendants, root.base)
+        elif args.product == "bb":
+            cleanup = _cleanup_root_orphans(root.base)
     rss_values = [int(row["totalRssKb"]) for row in resources if row.get("totalRssKb") is not None]
     return {
         "product": args.product,
