@@ -50,5 +50,5 @@
   },
   "exportInventoryPath": "./sdk-export-inventory.json",
   "backendRootEnvironmentVariable": "BREADBOARD_P30_BACKEND_ROOT",
-  "exportInventorySha256": "901488a9a2f255d8de7897a4a00a0e9b0f4b07c47fc5a56c4aafe6f3ae1eaddc"
+  "exportInventorySha256": "c3fc211caf9cbec846a3729f7b8d23ca59e888744fcc8c407a2115a4600b47b9"
 }
