@@ -63,7 +63,7 @@ EVENT_ID_RE = re.compile(
 GIT_OBJECT_RE = re.compile(r"[0-9a-f]{40}")
 EXPECTED_ARTIFACT_SHA256 = {
     "sdkArtifact": "9109259210ea7b4cc8a14553a503fabeee0db3a706d8732213f0a3d3850267da",
-    "sdkProvenance": "ac62f1ecd9ebca3f0b5d628fa0f3c9d16a18f33bad26e15deba8ed183c8d8fe0",
+    "sdkProvenance": "227b1ce55fd8b029af91a38671f89edb119de7436133d2f5b78f0844dc2e00e0",
 }
 SYNTHETIC_TOOLS = ("todo.write_board", "write", "run_shell")
 ANSI_RE = re.compile(
@@ -85,6 +85,20 @@ class TerminalScreen:
         self.saved = (0, 0)
         self.pending = ""
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
+
+
+    def resize(self, rows: int, columns: int) -> None:
+        if rows <= 0 or columns <= 0:
+            raise ValueError("terminal dimensions must be positive")
+        self.rows = rows
+        self.columns = columns
+        self.grid = [[" "] * columns for _ in range(rows)]
+        self.row = max(0, min(self.row, rows - 1))
+        self.column = max(0, min(self.column, columns - 1))
+        self.saved = (
+            max(0, min(self.saved[0], rows - 1)),
+            max(0, min(self.saved[1], columns - 1)),
+        )
 
     def feed(self, data: bytes) -> None:
         self.pending += self.decoder.decode(data)
@@ -241,13 +255,22 @@ class TerminalScreen:
 
 
 class PtyChild:
-    def __init__(self, argv: list[str], cwd: Path, env: dict[str, str]) -> None:
+    def __init__(
+        self,
+        argv: list[str],
+        cwd: Path,
+        env: dict[str, str],
+        rows: int = ROWS,
+        columns: int = COLUMNS,
+    ) -> None:
+        if rows <= 0 or columns <= 0:
+            raise ValueError("terminal dimensions must be positive")
         pid, master = pty.fork()
         if pid == 0:
             try:
                 os.chdir(cwd)
                 fcntl.ioctl(
-                    0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0)
+                    0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0)
                 )
                 os.closerange(3, os.sysconf("SC_OPEN_MAX"))
                 os.execve(argv[0], argv, env)
@@ -257,13 +280,18 @@ class PtyChild:
         self.pid = pid
         self.master = master
         self.raw = bytearray()
-        self.screen = TerminalScreen()
+        self.screen = TerminalScreen(rows, columns)
+        self.rows = rows
+        self.columns = columns
+        self.last_output_at: float | None = None
+        self.output_reads = 0
         self.exit_status: int | None = None
         fcntl.ioctl(
-            master, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0)
+            master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0)
         )
         flags = fcntl.fcntl(master, fcntl.F_GETFL)
         fcntl.fcntl(master, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
 
     def _observe_exit(self) -> None:
         if self.exit_status is not None:
@@ -286,11 +314,23 @@ class PtyChild:
                     raise
                 if not data:
                     break
+                self.last_output_at = time.monotonic()
+                self.output_reads += 1
                 self.raw.extend(data)
                 self.screen.feed(data)
                 if len(data) < 65536:
                     break
         self._observe_exit()
+
+    def resize(self, rows: int, columns: int) -> None:
+        if rows <= 0 or columns <= 0:
+            raise ValueError("terminal dimensions must be positive")
+        fcntl.ioctl(
+            self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0)
+        )
+        self.screen.resize(rows, columns)
+        self.rows = rows
+        self.columns = columns
 
     def wait_until(
         self, predicate: Callable[[], Any], timeout: float, label: str
@@ -1589,8 +1629,20 @@ def run_tamper_failure(
     return result
 
 
+def positive_dimension(value: str) -> int:
+    try:
+        dimension = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if dimension <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return dimension
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument("--bb", type=Path, required=True)
     parser.add_argument("--pi-natives", type=Path, required=True)
     parser.add_argument("--sdk-artifact", type=Path, required=True)
@@ -1604,6 +1656,12 @@ def main() -> int:
     parser.add_argument("--temp-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--forbid-root", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--rows", type=positive_dimension, default=ROWS, help="PTY row count"
+    )
+    parser.add_argument(
+        "--cols", type=positive_dimension, default=COLUMNS, help="PTY column count"
+    )
     parser.add_argument("--startup-timeout", type=float, default=120.0)
     parser.add_argument("--turn-timeout", type=float, default=180.0)
     options = parser.parse_args()
@@ -1811,7 +1869,13 @@ def main() -> int:
         raise JourneyFailure(
             "preflight status created runtime authority or process state"
         )
-    initial = PtyChild([str(bb)], roots["workspace"], environment)
+    initial = PtyChild(
+        [str(bb)],
+        roots["workspace"],
+        environment,
+        rows=options.rows,
+        columns=options.cols,
+    )
     provider_free_tui_pid = initial.pid
     try:
         initial.wait_until(
@@ -1823,6 +1887,49 @@ def main() -> int:
             "initial TUI readiness",
         )
         write_capture(output, "initial-ready", initial)
+        initial_text = initial.screen.text()
+        resize_started_at = time.monotonic()
+        initial.resize(24, 80)
+
+        def composer_visible(columns: int) -> bool:
+            text = initial.screen.text()
+            return (
+                "mock/reference" in text
+                and "No LSP servers" in text
+                and all(len(line.rstrip()) <= columns for line in text.splitlines())
+            )
+
+        initial.wait_until(
+            lambda: (
+                initial.screen.text() != initial_text and composer_visible(80)
+            ),
+            10.0,
+            "resize to 80-column TUI",
+        )
+        record_action(
+            "resize",
+            rows=24,
+            cols=80,
+            redraw_seconds=round(time.monotonic() - resize_started_at, 6),
+        )
+        write_capture(output, "resize-80x24", initial)
+
+        restore_reads = initial.output_reads
+        resize_started_at = time.monotonic()
+        initial.resize(options.rows, options.cols)
+        initial.wait_until(
+            lambda: initial.output_reads > restore_reads
+            and composer_visible(options.cols),
+            10.0,
+            "restore original TUI geometry",
+        )
+        record_action(
+            "resize-restore",
+            rows=options.rows,
+            cols=options.cols,
+            redraw_seconds=round(time.monotonic() - resize_started_at, 6),
+        )
+        write_capture(output, "resize-restore", initial)
         if binding_snapshot(roots["agent"]) is not None:
             raise JourneyFailure(
                 "new TUI created a session binding before the first submitted turn"
@@ -1988,7 +2095,13 @@ def main() -> int:
         initial.close()
 
         record_action("launch-synthetic-tui", model="cli_mock/reference")
-        initial = PtyChild([str(bb)], roots["workspace"], environment)
+        initial = PtyChild(
+            [str(bb)],
+            roots["workspace"],
+            environment,
+            rows=options.rows,
+            columns=options.cols,
+        )
         synthetic_tui_pid = initial.pid
         initial.wait_until(
             lambda: "reference" in initial.screen.text() and "No LSP servers" in initial.screen.text(),
@@ -2576,6 +2689,8 @@ def main() -> int:
         [str(bb), "--resume", str(final_initial.session_file)],
         roots["workspace"],
         environment,
+        rows=options.rows,
+        columns=options.cols,
     )
     resume_tui_pid = resume.pid
     try:
