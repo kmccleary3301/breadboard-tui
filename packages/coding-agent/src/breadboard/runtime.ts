@@ -5,7 +5,6 @@
  * assembly live here so the CLI entry point only coordinates startup.
  */
 import * as fsSync from "node:fs";
-import * as path from "node:path";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
 import type { AgentEvent, StreamFn } from "@oh-my-pi/pi-agent-core";
@@ -212,18 +211,6 @@ function exactModelRoute(selector: string | undefined): Pick<Model, "provider" |
 	if (!parsed?.provider || !parsed.id) return undefined;
 	return { provider: parsed.provider, id: parsed.id };
 }
-function siblingHarnessLockPath(harnessPath: string, workspacePath: string): string | undefined {
-	if (harnessPath.endsWith(".yaml")) {
-		const lockPath = `${harnessPath.slice(0, -5)}.lock.json`;
-		return fsSync.existsSync(path.resolve(workspacePath, lockPath)) ? lockPath : undefined;
-	}
-	if (harnessPath.endsWith(".yml")) {
-		const lockPath = `${harnessPath.slice(0, -4)}.lock.json`;
-		return fsSync.existsSync(path.resolve(workspacePath, lockPath)) ? lockPath : undefined;
-	}
-	return undefined;
-}
-
 function createBreadboardSessionTarget(
 	sessionConfigPath: string | undefined,
 	workspacePath: string,
@@ -238,17 +225,13 @@ function createBreadboardSessionTarget(
 			"a selected sessionConfigPath is required to create a session",
 		);
 	}
-	const selectedConfigPath =
-		sessionConfigPath === undefined
-			? undefined
-			: (siblingHarnessLockPath(sessionConfigPath, workspacePath) ?? sessionConfigPath);
 	const hasOverrides = selectedModel !== undefined || approvalMode === "yolo";
 	return {
 		kind: "create",
 		request: {
 			workspace: workspacePath,
 			permissionMode: "configured",
-			...(selectedConfigPath === undefined ? {} : { configPath: selectedConfigPath }),
+			...(sessionConfigPath === undefined ? {} : { configPath: sessionConfigPath }),
 			...(hasOverrides
 				? {
 						overrides: {
@@ -1075,16 +1058,9 @@ export async function prepareBreadboardRuntime(
 			sessionTarget.kind === "create" && harnessRequestId !== undefined && !harnessRequestId.endsWith(".lock.json");
 		if (shouldResolveHarness && enginePort.harnessClient) {
 			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, harnessRequestId);
-			const sessionConfigPath = sessionTarget.kind === "create" ? sessionTarget.request.configPath : undefined;
 			resolvedSessionTarget = {
 				kind: "create",
-				request: {
-					...sessionTarget.request,
-					configPath:
-						typeof sessionConfigPath === "string" && sessionConfigPath.endsWith(".lock.json")
-							? sessionConfigPath
-							: resolvedHarnessId,
-				},
+				request: { ...sessionTarget.request, configPath: resolvedHarnessId },
 			};
 		}
 		const runtime = await prepareConnectedBreadboardRuntime({
