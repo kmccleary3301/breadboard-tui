@@ -1,0 +1,106 @@
+import type { HarnessSnapshot } from "@oh-my-pi/pi-coding-agent/breadboard/harness-port";
+
+/** Effective graph compiled from the codex_0-107-0_e4_3-6-2026.yaml shape. */
+export const EFFECTIVE_LOCK_FIXTURE = {
+	schema_version: "bb.effective_config_graph.v1",
+	graph_id: "agent_config:codex_0-107-0_e4_3-6-2026",
+	graph_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+	effective_values: [
+		{
+			path: "multi_agent.enabled",
+			value_kind: "boolean",
+			value: true,
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
+			value_kind: "number",
+			value: 2,
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "provider_tools.use_native",
+			value_kind: "boolean",
+			value: true,
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "provider_tools.api_variant",
+			value_kind: "string",
+			value: "responses",
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "modes",
+			value_kind: "array",
+			value: [{ name: "plan" }, { name: "build" }, { name: "compact" }],
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "long_running.enabled",
+			value_kind: "boolean",
+			value: false,
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "tools.dialects.preference.default",
+			value_kind: "array",
+			value: ["aider_search_replace", "unified_diff", "bash_block"],
+			source_layer_id: "workspace_project",
+			visibility: "model-visible",
+			env_gate_ids: [],
+		},
+		{
+			path: "providers.openai.api_key",
+			value_kind: "secret-ref",
+			value: "secret://env/OPENAI_API_KEY",
+			source_layer_id: "workspace_project",
+			visibility: "redacted",
+			env_gate_ids: ["env.OPENAI_API_KEY"],
+		},
+	],
+	source_layers: [],
+	env_gates: [],
+	merge_policy: {
+		policy_id: "workspace_over_defaults",
+		strategy: "deep-merge",
+		conflict_resolution: "highest-precedence",
+	},
+	migrations: [],
+	visibility: {
+		model_visible_paths: [
+			"multi_agent.enabled",
+			"multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
+			"provider_tools.use_native",
+			"provider_tools.api_variant",
+			"modes",
+			"long_running.enabled",
+			"tools.dialects.preference.default",
+		],
+		host_only_paths: [],
+		redacted_paths: ["providers.openai.api_key"],
+	},
+} as const;
+
+export const EFFECTIVE_HARNESS_SNAPSHOT: HarnessSnapshot = {
+	harnessId: "codex-e4",
+	name: "codex-e4",
+	lockHash: EFFECTIVE_LOCK_FIXTURE.graph_hash,
+	generation: "3",
+	mode: "build",
+	lock: EFFECTIVE_LOCK_FIXTURE,
+	provenance: {},
+	loadedAt: 0,
+};

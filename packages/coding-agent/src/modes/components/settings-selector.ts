@@ -25,9 +25,9 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { teamSize } from "../../breadboard/harness-lock-view";
 import type { HarnessSnapshot } from "../../breadboard/harness-port";
 import type { ShapeTarget } from "@oh-my-pi/snapcompact";
-import { isRecord } from "@oh-my-pi/pi-utils";
 import {
 	getDefault,
 	getType,
@@ -1063,9 +1063,7 @@ export class SettingsSelectorComponent implements Component {
 	 */
 	#getCurrentValue(def: SettingDef): unknown {
 		if (def.path === "breadboard.harness.max_concurrent_agents") {
-			const lock = this.context.harness?.lock;
-			const limit = isRecord(lock) ? lock.max_concurrent_agents : undefined;
-			return typeof limit === "number" && Number.isFinite(limit) ? limit : undefined;
+			return teamSize(this.context.harness?.lock ?? null);
 		}
 		return settings.get(def.path);
 	}

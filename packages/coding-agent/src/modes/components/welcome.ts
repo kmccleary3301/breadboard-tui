@@ -6,8 +6,8 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import { isRecord } from "@oh-my-pi/pi-utils";
 import type { HarnessSnapshot } from "../../breadboard/harness-port";
+import { posture, teamSize } from "../../breadboard/harness-lock-view";
 import { paintAnsi } from "../../modes/theme/color";
 import type { ColorMode } from "../../modes/theme/schema";
 import { theme } from "../../modes/theme/theme";
@@ -412,25 +412,27 @@ export class WelcomeComponent implements Component {
 		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
 		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
 		// BreadBoard's identity line is intentionally a single compact row.
-		const lock = this.harness?.lock;
-		const teamSize =
-			isRecord(lock) && typeof lock.max_concurrent_agents === "number" ? String(lock.max_concurrent_agents) : "—";
-		const posture = isRecord(lock) && typeof lock.compute_posture === "string" ? lock.compute_posture : "unknown";
-		const harnessName = this.harness ? sanitizeStatusText(this.harness.name) : "";
-		const harnessMode = this.harness ? sanitizeStatusText(this.harness.mode ?? "unknown") : "";
-		const harnessGeneration = this.harness ? sanitizeStatusText(this.harness.generation ?? "unknown") : "";
-		const harnessIdentity = this.harness
-			? [
-					`Harness ${harnessName} (${harnessMode}, g${harnessGeneration})`,
-					`team ${teamSize}`,
-					sanitizeStatusText(posture),
-					"/harness",
-				].join(" · ")
-			: "";
-		const harnessLine = this.harness ? ` ${theme.fg("muted", harnessIdentity)}` : "";
+		const harness = this.harness;
+		let harnessIdentity = "";
+		if (harness) {
+			const identityParts = [`Harness ${sanitizeStatusText(harness.name)}`];
+			const detailParts: string[] = [];
+			if (harness.mode !== null) detailParts.push(sanitizeStatusText(harness.mode));
+			if (harness.generation !== null) detailParts.push(`g${sanitizeStatusText(harness.generation)}`);
+			if (detailParts.length > 0) identityParts[0] += ` (${detailParts.join(", ")})`;
+			const lock = harness.lock;
+			const size = teamSize(lock);
+			if (size !== undefined) identityParts.push(`team ${size}`);
+			const postureParts = posture(lock);
+			if (postureParts.length > 0) identityParts.push(...postureParts);
+			identityParts.push("/harness");
+			harnessIdentity = identityParts.join(" · ");
+		}
+		// Keep every known identity part and the hint visible in the fixed right column.
+		const harnessLines = harnessIdentity ? wrapTextWithAnsi(` ${harnessIdentity}`, rightCol) : [];
 		const rightLines = [
 			` ${theme.bold(theme.fg("accent", "Get started"))}`,
-			harnessLine,
+			...harnessLines,
 			` ${loginHint}`,
 			` ${modelHint}`,
 			` ${theme.fg("dim", "!")}${theme.fg("muted", " to run bash")}`,

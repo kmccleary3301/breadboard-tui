@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { HarnessSnapshot } from "@oh-my-pi/pi-coding-agent/breadboard/harness-port";
+import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
 import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
@@ -125,25 +125,18 @@ describe("WelcomeComponent", () => {
 	});
 });
 
-const harnessSnapshot: HarnessSnapshot = {
-	harnessId: "codex-e4",
-	name: "codex-e4",
-	lockHash: null,
-	generation: "3",
-	mode: "build",
-	lock: { max_concurrent_agents: 4, compute_posture: "native tools" },
-	provenance: {},
-	loadedAt: 0,
-};
+const harnessSnapshot = EFFECTIVE_HARNESS_SNAPSHOT;
 
 describe("WelcomeComponent harness identity", () => {
 	it("renders the harness identity, team posture, and /harness hint", () => {
+		// Catches canonical-path regressions that drop lock-derived identity fields or the hint.
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
 		welcome.setHarness(harnessSnapshot);
 
-		const plain = welcome.render(140).map(stripAnsi).join("\n");
+		const plain = welcome.render(220).map(stripAnsi).join("\n");
 
-		expect(plain).toContain("Harness codex-e4 (build, g3) · team 4 · native tools · /harness");
+		expect(plain).toContain("Harness codex-e4 (build, g3) · team 2 · native tools · responses API ·");
+		expect(plain).toContain("plan→build · /harness");
 	});
 
 	it("omits the harness identity line when no snapshot is active", () => {

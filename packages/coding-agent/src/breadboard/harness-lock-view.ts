@@ -34,7 +34,6 @@ export interface EffectiveLockValueResult {
 
 type Lock = HarnessSnapshot["lock"];
 
-
 function isLockValue(value: unknown): value is EffectiveLockValue {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
 	if (typeof value === "number") return Number.isFinite(value);
@@ -100,13 +99,13 @@ export function longRunEnabled(lock: Lock): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined;
 }
 
-/** Ordered mode names exposed by the lock, excluding the transient compact mode. */
 export function modeNames(lock: Lock): readonly string[] {
 	const value = lockValue(lock, "modes")?.value;
 	if (!Array.isArray(value)) return [];
 	const names: string[] = [];
 	for (const mode of value) {
-		if (!isRecord(mode) || typeof mode.name !== "string" || mode.name.length === 0 || mode.name === "compact") continue;
+		if (!isRecord(mode) || typeof mode.name !== "string" || mode.name.length === 0 || mode.name === "compact")
+			continue;
 		names.push(mode.name);
 	}
 	return names;
