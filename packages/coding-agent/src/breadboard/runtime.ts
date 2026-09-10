@@ -894,6 +894,12 @@ export function createRecoverableBreadboardRuntime(
 	cancelRegisteredCleanup = registerCleanup?.(close);
 
 	return Object.freeze({
+		get harnessClient() {
+			return current.runtime.harnessClient;
+		},
+		get harnessId() {
+			return current.runtime.harnessId;
+		},
 		get providerAuth() {
 			return current.runtime.providerAuth;
 		},
