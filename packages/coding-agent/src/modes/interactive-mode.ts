@@ -53,8 +53,11 @@ import {
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
+import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { reset as resetCapabilities } from "../capability";
+import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
+import { createHarnessPort } from "../breadboard/harness-port-client";
+import type { HarnessPort } from "../breadboard/harness-port";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
@@ -746,6 +749,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	oauthManualInput: OAuthManualInputManager = new OAuthManualInputManager();
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
+	readonly harnessPort: HarnessPort | undefined;
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
@@ -866,6 +870,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#observerUiSyncTimer?: NodeJS.Timeout;
 	#observerUiSyncNeedsTodoReconcile = false;
+	#harnessRefreshTimer?: NodeJS.Timeout;
 	#agentRegistryUnsubscribe?: () => void;
 	#agentRegistrySubscriptionTarget?: AgentRegistry;
 	#mcpStatusOrder: string[] = [];
@@ -891,10 +896,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		private readonly providerAuthPort?: ProviderAuthPort,
 		subagentEventBus?: EventBus,
 		private readonly beforeSessionDispose?: () => Promise<void>,
+		harnessClient?: BreadboardClient,
+		harnessId?: string,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
 		this.settings = session.settings;
+		const sessionId = this.sessionManager.getSessionId();
+		this.harnessPort =
+			harnessClient && harnessId && sessionId
+				? createHarnessPort({ client: harnessClient, sessionId, harnessId })
+				: undefined;
 		const preferences = {
 			quiet: settings.get("startup.quiet"),
 			composerShape: settings.get("composer.shape") ?? "band",
@@ -1182,6 +1194,19 @@ export class InteractiveMode implements InteractiveModeContext {
 		// `Settings.instance` is the disk-backed singleton; passing it explicitly
 		// guarantees the decision persists even when the prompt is triggered
 		// from a subagent whose own `Settings` is an in-memory snapshot.
+		if (this.harnessPort) {
+			try {
+				await this.harnessPort.refresh("session-open");
+			} catch (error) {
+				logger.warn("BreadBoard harness snapshot unavailable", { error: String(error) });
+			}
+			this.#harnessRefreshTimer = setInterval(() => {
+				void this.harnessPort?.refresh("generation-change").catch(error => {
+					logger.warn("BreadBoard harness refresh failed", { error: String(error) });
+				});
+			}, 1_000);
+			this.#harnessRefreshTimer.unref?.();
+		}
 		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
 
 		await logger.time(
@@ -4797,6 +4822,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#appearanceRefreshRequest = undefined;
 		// Last chance to refresh the startup status placeholder for the next launch.
 		this.#persistComposerStatus();
+		if (this.#harnessRefreshTimer) {
+			clearInterval(this.#harnessRefreshTimer);
+			this.#harnessRefreshTimer = undefined;
+		}
 		if (this.loadingAnimation) {
 			this.#stopLoadingAnimation(false);
 		}

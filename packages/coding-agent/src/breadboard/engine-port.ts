@@ -77,6 +77,8 @@ export class BreadboardEngineLifecycleError extends Error {
 export interface BreadboardEnginePort {
 	readonly authority: BreadboardEngineAuthorityFacts;
 	readonly lifecycleFailure: BreadboardLifecycleFailureSignal;
+	/** Control-plane SDK client for read-only product projections such as harness identity. */
+	readonly harnessClient?: BreadboardClient;
 	openSession(target: OpenSession, signal?: AbortSignal): Promise<OpenedSession>;
 	/** Explicit control-plane calls; native OMP remains provider/UI authority until invoked. */
 	getFeatures(): Promise<EngineStatusResponse>;
@@ -386,6 +388,7 @@ function createConnectedPort(
 	const port: BreadboardEnginePort = {
 		authority,
 		lifecycleFailure: monitor.signal,
+		harnessClient: controlClient,
 		openSession,
 		getFeatures: async () => {
 			assertOperational();

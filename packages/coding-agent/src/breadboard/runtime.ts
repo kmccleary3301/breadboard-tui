@@ -5,6 +5,7 @@
  * assembly live here so the CLI entry point only coordinates startup.
  */
 import * as fsSync from "node:fs";
+import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
 import type { AgentEvent, StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
@@ -268,9 +269,10 @@ export function resolveBreadboardSessionTarget(
 		approvalMode,
 	);
 }
-
 export interface PreparedBreadboardRuntime {
 	readonly providerAuth: ProviderAuthPort;
+	readonly harnessClient?: BreadboardClient;
+	readonly harnessId?: string;
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
@@ -303,12 +305,19 @@ export function resolveBreadboardStartupModelOverride(
 
 type ConnectedBreadboardEnginePort = Pick<
 	BreadboardEnginePort,
-	"lifecycleFailure" | "openSession" | "getModelCatalog" | "setSessionModel" | "providerAuth" | "close"
+	| "harnessClient"
+	| "lifecycleFailure"
+	| "openSession"
+	| "getModelCatalog"
+	| "setSessionModel"
+	| "providerAuth"
+	| "close"
 >;
 
 export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuthority {
 	readonly engine: ConnectedBreadboardEnginePort;
 	readonly sessionTarget: OpenSession;
+	readonly harnessId?: string;
 	readonly modelCatalogConfigPath?: string;
 	readonly terminalResumeTarget?: Extract<OpenSession, { readonly kind: "create" }>;
 	readonly emitAgentEvent: (event: AgentEvent, idempotencyKey: string) => Promise<void>;
@@ -721,6 +730,8 @@ export async function prepareConnectedBreadboardRuntime(
 			runtimeStarted = true;
 		};
 		return {
+			harnessClient: options.engine.harnessClient,
+			harnessId: options.harnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			stream: bridge.stream,
 			sessionId: initialBinding.sessionId,
 			providerAuth: options.engine.providerAuth,
@@ -948,6 +959,7 @@ export async function prepareBreadboardRuntime(
 		const enginePort = connected.port;
 		const runtime = await prepareConnectedBreadboardRuntime({
 			engine: enginePort,
+			harnessId: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			modelCatalogConfigPath: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			sessionTarget,
 			terminalResumeTarget,

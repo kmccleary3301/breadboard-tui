@@ -24,8 +24,9 @@ import {
 	VERSION,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
+import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
 import {
 	applyCliApiKeyOverride,
 	BreadboardLifecycleStartupError,
@@ -552,6 +553,8 @@ async function runInteractiveMode(
 	startupLease?: ComposerLease,
 	providerAuthPort?: ProviderAuthPort,
 	beforeSessionDispose?: () => Promise<void>,
+	harnessClient?: BreadboardClient,
+	harnessId?: string,
 ): Promise<void> {
 	let mode: InteractiveMode;
 	try {
@@ -567,6 +570,8 @@ async function runInteractiveMode(
 			providerAuthPort,
 			subagentEventBus,
 			beforeSessionDispose,
+			harnessClient,
+			harnessId,
 		);
 		startupLease?.adopt();
 	} catch (error) {
@@ -2294,6 +2299,8 @@ export async function runRootCommand(
 						startupLease,
 						preparedBreadboardRuntime?.providerAuth,
 						preparedBreadboardRuntime?.close,
+						preparedBreadboardRuntime?.harnessClient,
+						preparedBreadboardRuntime?.harnessId,
 					);
 				} finally {
 					startupLease?.dispose();
