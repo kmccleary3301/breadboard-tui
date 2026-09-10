@@ -33,11 +33,20 @@ export interface HarnessSnapshot {
 	readonly lock: Readonly<Record<string, unknown>> | null;
 	/** `harness.explain` provenance keyed by dotted path. */
 	readonly provenance: Readonly<Record<string, HarnessProvenance>>;
+
 	/** `Date.now()` when the snapshot was loaded. */
 	readonly loadedAt: number;
 }
+export interface HarnessCommandSpec {
+	readonly name: string;
+	/** Effective-lock section that admitted or rejected the command. */
+	readonly source: string;
+	readonly enabled: boolean;
+	/** Why the command is dimmed or unavailable, when it is not enabled. */
+	readonly reason?: string;
+}
 
-export type HarnessRefreshReason = "session-open" | "generation-change" | "turn-boundary" | "manual";
+export type HarnessRefreshReason = "session-open" | "harness-use" | "generation-change" | "turn-boundary" | "manual";
 
 export interface HarnessPort {
 	/** Last loaded snapshot; `null` before the first successful load or when no harness is bound. */
