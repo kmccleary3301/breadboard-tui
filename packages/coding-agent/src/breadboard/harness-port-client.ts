@@ -7,11 +7,17 @@ type PublicData = Readonly<Record<string, unknown>>;
 
 type HarnessDefinition = Readonly<Record<string, unknown>>;
 
+export interface ResolvedHarness {
+	readonly id: string;
+	readonly name: string;
+}
+
 type HarnessChoice = {
 	readonly id: string;
 	readonly name: string;
 	readonly path: string;
 };
+
 
 export interface CreateHarnessPortOptions {
 	readonly client: BreadboardClient;
@@ -43,6 +49,16 @@ function publicData(result: PublicResult, operation: string): PublicData {
 		throw new Error(`BreadBoard ${operation} failed: ${detail}`);
 	}
 	return result.data;
+}
+
+/**
+ * Require a successful public harness operation and return its payload.
+ *
+ * The SDK deliberately returns validation and lock failures as typed result
+ * envelopes, so callers must check the envelope before reading `data`.
+ */
+export function requireHarnessResultData(result: PublicResult, operation: string): PublicData {
+	return publicData(result, operation);
 }
 
 function dataRecord(result: PublicResult, operation: string, key: string): PublicData {
@@ -170,11 +186,21 @@ function choiceFromPath(path: string): HarnessChoice {
 	return { id: path, name, path };
 }
 
-/** Resolve a CLI or palette harness name to the engine's source path. */
-export async function resolveHarnessId(client: BreadboardClient, requested: string): Promise<string> {
+/** Resolve a CLI or palette harness reference to the engine id and display name. */
+export async function resolveHarness(client: BreadboardClient, requested: string): Promise<ResolvedHarness> {
 	const data = publicData(await client.getHarness(requested), "harness.get");
 	const harness = isRecord(data.harness) ? data.harness : data;
-	return typeof harness.path === "string" && harness.path.trim() ? harness.path : requested;
+	const id = typeof harness.path === "string" && harness.path.trim() ? harness.path : requested;
+	const definition =
+		(isRecord(data.definition) && data.definition) ||
+		(isRecord(harness.definition) && harness.definition) ||
+		harness;
+	return { id, name: harnessName(definition, requested) };
+}
+
+/** Resolve a CLI or palette harness name to the engine's source path. */
+export async function resolveHarnessId(client: BreadboardClient, requested: string): Promise<string> {
+	return (await resolveHarness(client, requested)).id;
 }
 
 export async function listHarnessChoices(

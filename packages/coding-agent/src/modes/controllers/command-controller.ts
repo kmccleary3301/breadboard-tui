@@ -1055,9 +1055,6 @@ export class CommandController {
 		return true;
 	}
 
-	async startNewSession(options?: NewSessionOptions, label: string = "New session started"): Promise<boolean> {
-		return this.#runNewSessionFlow(options, label);
-	}
 
 	async handleClearCommand(): Promise<void> {
 		await this.#runNewSessionFlow();

@@ -185,13 +185,7 @@ function harnessUse(runtime: TuiSlashCommandRuntime, target: string): Promise<bo
 		runtime.ctx.showStatus("/harness use is unavailable: no BreadBoard session route");
 		return Promise.resolve(true);
 	}
-	return start(target).then(success => {
-		if (!success) return true;
-		runtime.ctx.showStatus(
-			`Started a new BreadBoard session on harness ${target}; previous session remains resumable.`,
-		);
-		return true;
-	});
+	return start(target);
 }
 
 export async function executeHarnessSlashCommand(
@@ -216,6 +210,12 @@ export async function executeHarnessSlashCommand(
 		if (verb === "use") {
 			if (!rest) {
 				runtime.ctx.showStatus("Usage: /harness use <name|path>");
+				return true;
+			}
+			if (rest.split(/\s+/u).includes("--here")) {
+				runtime.ctx.showStatus(
+					"A BreadBoard session is pinned to its engine session and lock; an in-process harness switch is not possible.",
+				);
 				return true;
 			}
 			return harnessUse(runtime, rest);

@@ -61,8 +61,6 @@ export interface NewSessionOptions {
 	drop?: boolean;
 	/** Additional workspace directories to seed on the new session. */
 	additionalDirectories?: string[];
-	/** BreadBoard source path selected for a product session transition. */
-	configPath?: string;
 }
 
 export interface SessionEntryBase {

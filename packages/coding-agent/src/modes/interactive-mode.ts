@@ -56,7 +56,11 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { reset as resetCapabilities } from "../capability";
 import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
-import { createHarnessPort, resolveHarnessId } from "../breadboard/harness-port-client";
+import {
+	createHarnessPort,
+	requireHarnessResultData,
+	resolveHarness,
+} from "../breadboard/harness-port-client";
 import type { HarnessPort } from "../breadboard/harness-port";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
@@ -5813,26 +5817,23 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		try {
-			const resolvedHarnessPath = await resolveHarnessId(this.#harnessClient, harnessId);
-			const started = await this.#commandController.startNewSession(
-				{ configPath: resolvedHarnessPath },
-				`New BreadBoard session started on harness ${resolvedHarnessPath}`,
+			const resolvedHarness = await resolveHarness(this.#harnessClient, harnessId);
+			requireHarnessResultData(
+				await this.#harnessClient.validateHarness(resolvedHarness.id),
+				"harness.validate",
 			);
-			if (!started) return false;
-
-			this.harnessPort = createHarnessPort({
-				client: this.#harnessClient,
-				sessionId: () => this.sessionManager.getSessionId(),
-				harnessId: resolvedHarnessPath,
-			});
-			await this.harnessPort.refresh("harness-use");
-			this.#refreshHarnessPaletteCommands();
-			await this.refreshSlashCommandState();
+			const lockResult = await this.#harnessClient.lockHarness(resolvedHarness.id);
+			const lockData = requireHarnessResultData(lockResult, "harness.lock");
+			const lockHashCandidate = lockData.graph_hash ?? lockResult.hashes.graph;
+			if (typeof lockHashCandidate !== "string" || !lockHashCandidate.trim()) {
+				throw new Error("BreadBoard harness.lock response missing graph_hash");
+			}
+			this.showStatus(
+				`Harness ${resolvedHarness.name} validated and locked with lock hash ${lockHashCandidate}. Current session stays pinned to its lock. Relaunch with: bb --harness ${resolvedHarness.name}`,
+			);
 			return true;
 		} catch (error) {
-			this.showError(
-				`Failed to start BreadBoard harness session: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			this.showError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
 	}
