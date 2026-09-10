@@ -118,7 +118,7 @@ function bindingFor(
 		launchId,
 		protocolVersion: "1.0",
 		sessionContractId: "p30-e4-session-v1",
-		sessionSchemaSha256: "sha256:979bff06137b659c0110c0f9324703b955e22da85a7aac93bee7f639290475a9",
+		sessionSchemaSha256: "sha256:bb9f6867d4e8ffed40fd565848207c08abc32b96beb6473daaa66efbc8071695",
 		sessionReplayContractDigest: {} as LifecycleEngineBinding["sessionReplayContractDigest"],
 		liveness: { status: "live" },
 		process: {
@@ -138,7 +138,7 @@ function bindingFor(
 		protocol: { protocolVersion: "1.0" },
 		sessionContract: {
 			contractId: "p30-e4-session-v1",
-			schemaSha256: "sha256:979bff06137b659c0110c0f9324703b955e22da85a7aac93bee7f639290475a9",
+			schemaSha256: "sha256:bb9f6867d4e8ffed40fd565848207c08abc32b96beb6473daaa66efbc8071695",
 			compatibility: "compatible",
 			sessionReplayContractDigest: {} as LifecycleEngineBinding["sessionReplayContractDigest"],
 		},

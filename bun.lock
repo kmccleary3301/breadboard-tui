@@ -452,7 +452,7 @@
 
     "@bgotink/kdl": ["@bgotink/kdl@0.4.0", "", {}, "sha512-F0uJCjo5FQvFdcGF5QbYVNfcGiRWlocuzyIdQxottZF2+gu6L2xjMGEu9PIpse2hifAca/19vIospgaETCKxIg=="],
 
-    "@breadboard/sdk": ["@breadboard/sdk@./vendor/breadboard-sdk-0.4.0.tgz", { "dependencies": { "eventsource-parser": "^1.1.2" } }, "sha512-yJYcNjBK6TvES7Dj+o6GcFGXmcohWBf8YcUOpsWkoTY6EjBDNAVw6h+2cSkdidFbD5AXhKdzW5UES/cxkbIxZw=="],
+    "@breadboard/sdk": ["@breadboard/sdk@./vendor/breadboard-sdk-0.4.0.tgz", { "dependencies": { "eventsource-parser": "^1.1.2" } }, "sha512-tKysZpui+L+aK9RyDWB2jzteESNH6CDCACVSDb/5p2Fmp40M48eFx9rDtZ7d8XqFg1Cc2GHWPNY2V88O79ksfA=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@2.14.1", "", {}, "sha512-agRJn3+EJDUe8AvxTx/LnHA/GErvLE62pSaSk7+MwFOtOv8eWBu/qCq2qoZjBjVZ3C2aiFJCveuSs17KMkYGOw=="],
 
