@@ -50,6 +50,10 @@ export type E4CloseResult =
 	| { readonly kind: "unresolved_cleanup"; readonly reason: string };
 
 type PermissionTeardownState = "idle" | "responding" | "denying" | "cancelled" | "closed";
+type PermissionResponseState = {
+	readonly decision: Exclude<E4PermissionDecision, "cancel">;
+	readonly response: Promise<PermissionDecisionReceipt>;
+};
 
 async function raceWithCloseDeadline<T>(
 	operation: Promise<T>,
@@ -198,9 +202,8 @@ interface TurnSink {
 	readonly adopted: boolean;
 	readonly permissionAbort: AbortController;
 	permissionRequestId: string | undefined;
+	permissionResponses?: Map<string, PermissionResponseState>;
 	permissionTeardown: Promise<boolean> | undefined;
-	permissionResponse: Promise<PermissionDecisionReceipt> | undefined;
-	permissionResponseDecision: "allow" | "deny" | undefined;
 	permissionTeardownState: PermissionTeardownState;
 	readonly toolCallsByCallId: Map<string, Extract<LoggedSessionEvent, { readonly kind: "tool_called" }>>;
 	readonly projectedToolCallIds: Set<string>;
@@ -471,8 +474,6 @@ export class E4AgentStreamBridge {
 			permissionAbort: new AbortController(),
 			permissionRequestId: undefined,
 			permissionTeardown: undefined,
-			permissionResponse: undefined,
-			permissionResponseDecision: undefined,
 			permissionTeardownState: "idle",
 			toolCallsByCallId: new Map(),
 			projectedToolCallIds: new Set(),
@@ -1317,33 +1318,30 @@ export class E4AgentStreamBridge {
 					"BreadBoard permission request requires OMP permission UI wiring",
 					"error",
 				);
-				return this.#denyPermissionAndCancel(sink, event.payload.requestId);
+				return this.#denyPermissionAndCancel(sink, requestId);
 			}
 			let decision: E4PermissionDecision;
 			try {
 				decision = await requestPermission(event.payload, sink.permissionAbort.signal);
 			} catch (error) {
 				this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-				return this.#denyPermissionAndCancel(sink, event.payload.requestId);
+				return this.#denyPermissionAndCancel(sink, requestId);
 			}
 			if (sink.terminal || sink.permissionAbort.signal.aborted || this.#closed) return false;
 			if (decision === "cancel") {
 				this.#failSinkPendingTerminal(sink, "BreadBoard permission request cancelled in OMP", "aborted");
-				return this.#denyPermissionAndCancel(sink, event.payload.requestId);
+				return this.#denyPermissionAndCancel(sink, requestId);
 			}
 			if (sink.permissionTeardownState !== "idle") return false;
 			sink.permissionTeardownState = "responding";
-			sink.permissionResponseDecision = decision;
-			if (sink.permissionTeardownState !== "responding") return false;
 			try {
-				const response = this.#session.respondPermission({ requestId: event.payload.requestId, decision });
-				sink.permissionResponse = response;
-				await response;
+				const response = this.#permissionResponse(sink, requestId, decision);
+				await this.#awaitPermissionResponse(requestId, response);
 				if (this.#permissionTeardownClaimed(sink) && decision === "allow") return false;
 				return !this.#permissionTeardownClaimed(sink);
 			} catch (error) {
 				this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-				return this.#denyPermissionAndCancel(sink, event.payload.requestId);
+				return this.#denyPermissionAndCancel(sink, requestId);
 			}
 		} finally {
 			if (sink.permissionRequestId === requestId) sink.permissionRequestId = undefined;
@@ -1548,6 +1546,34 @@ export class E4AgentStreamBridge {
 		);
 	}
 
+	#permissionResponse(
+		sink: TurnSink,
+		requestId: string,
+		decision: Exclude<E4PermissionDecision, "cancel">,
+	): PermissionResponseState {
+		const responses = (sink.permissionResponses ??= new Map());
+		const existing = responses.get(requestId);
+		if (existing !== undefined) {
+			if (existing.decision !== decision) {
+				throw new Error(`BreadBoard permission request ${requestId} received conflicting decisions`);
+			}
+			return existing;
+		}
+		const state: PermissionResponseState = {
+			decision,
+			response: this.#session.respondPermission({ requestId, decision }),
+		};
+		responses.set(requestId, state);
+		return state;
+	}
+
+	async #awaitPermissionResponse(requestId: string, state: PermissionResponseState): Promise<void> {
+		const receipt = await state.response;
+		if (receipt.requestId !== requestId || receipt.decision !== state.decision) {
+			throw new Error(`BreadBoard permission response correlation mismatch for ${requestId}`);
+		}
+	}
+
 	async #cancel(
 		turnId: TurnId,
 		reason: "user_requested" | "timeout",
@@ -1593,14 +1619,15 @@ export class E4AgentStreamBridge {
 		sink.permissionTeardownState = "denying";
 		const teardown = (async (): Promise<boolean> => {
 			try {
-				if (sink.permissionResponse !== undefined) {
-					await sink.permissionResponse;
-					if (sink.permissionResponseDecision !== "deny") {
+				const response = sink.permissionResponses?.get(requestId);
+				if (response !== undefined) {
+					await this.#awaitPermissionResponse(requestId, response);
+					if (response.decision !== "deny") {
 						this.#invalidateBridge("BreadBoard permission allow crossed cancellation teardown boundary");
 						return false;
 					}
 				} else {
-					await this.#session.respondPermission({ requestId, decision: "deny" });
+					await this.#awaitPermissionResponse(requestId, this.#permissionResponse(sink, requestId, "deny"));
 				}
 				sink.permissionTeardownState = "cancelled";
 			} catch (error) {

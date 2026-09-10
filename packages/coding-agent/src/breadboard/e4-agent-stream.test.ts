@@ -1361,7 +1361,7 @@ describe("E4AgentStreamBridge", () => {
 		expect(closeOutcome).toEqual({ kind: "closed" });
 		expect(cancellations).toHaveLength(1);
 		expect(cancellations[0]).toMatchObject({ turnId: "turn-1", reason: "user_requested" });
-		expect(cancellations[0]?.cancellationRequestKey).toEqual(expect.any(String));
+		expect(cancellations[0]?.cancellationRequestKey).toBe("breadboard:session-1:turn-1");
 	});
 	test("rejects an allow response that reaches the boundary during teardown", async () => {
 		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
@@ -3479,6 +3479,243 @@ describe("E4AgentStreamBridge", () => {
 				}),
 			]);
 			expect(order).toEqual(["deny", "cancel", "close"]);
+		} finally {
+			await bridge.close();
+		}
+	});
+	test("keeps sequential permission responses owned by their request IDs", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async snapshot() {
+				return { activeTurnId: null } as never;
+			},
+			async respondPermission(request) {
+				responded.push(request);
+				return {
+					requestId: request.requestId as PermissionDecisionReceipt["requestId"],
+					decision: request.decision,
+				};
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "permission_request", {
+					request_id: "permission-allow",
+					tool: "edit",
+					kind: "write",
+					summary: "Allow the first write",
+					default_scope: null,
+					rewindable: true,
+				});
+				yield wireEvent(4, "permission_request", {
+					request_id: "permission-deny",
+					tool: "edit",
+					kind: "write",
+					summary: "Deny the second write",
+					default_scope: null,
+					rewindable: true,
+				});
+				yield wireEvent(5, "assistant.message.delta", { text: "completed" });
+				yield wireEvent(6, "assistant.message.end", { text: "completed" });
+				yield wireEvent(7, "turn_completed", {});
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async request => (request.requestId === "permission-allow" ? "allow" : "deny"),
+		});
+
+		try {
+			const stream = await startBridgeStream(bridge, model, context);
+			const result = await stream.result();
+			expect(result.stopReason).toBe("stop");
+			expect(responded).toEqual([
+				{ requestId: "permission-allow", decision: "allow" },
+				{ requestId: "permission-deny", decision: "deny" },
+			]);
+		} finally {
+			await bridge.close();
+		}
+	});
+
+	test("does not bleed a prior deny into a later turn's allow", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const secondReceipt: SubmitReceipt = {
+			...receipt,
+			clientMessageId: "client-message-2" as ClientMessageId,
+			inputId: "input-2" as SubmitReceipt["inputId"],
+			turnId: "turn-2" as SubmitReceipt["turnId"],
+		};
+		let submissionCount = 0;
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async snapshot() {
+				return { activeTurnId: null } as never;
+			},
+			async submit(input) {
+				submissionCount++;
+				const selected = submissionCount === 1 ? receipt : secondReceipt;
+				return {
+					...selected,
+					clientMessageId: (input as StructuredSubmit).clientMessageId as ClientMessageId,
+				};
+			},
+			async respondPermission(request) {
+				responded.push(request);
+				return {
+					requestId: request.requestId as PermissionDecisionReceipt["requestId"],
+					decision: request.decision,
+				};
+			},
+			async cancel() {
+				throw new Error("cancel not expected");
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(
+					3,
+					"permission_request",
+					{
+						request_id: "permission-deny",
+						tool: "edit",
+						kind: "write",
+						summary: "Deny the first turn",
+						default_scope: null,
+						rewindable: true,
+					},
+					"turn-1",
+				);
+				yield wireEvent(4, "turn_completed", {}, "turn-1");
+				yield wireEvent(5, "turn_start", {}, "turn-2");
+				yield wireEvent(
+					6,
+					"permission_request",
+					{
+						request_id: "permission-allow",
+						tool: "edit",
+						kind: "write",
+						summary: "Allow the second turn",
+						default_scope: null,
+						rewindable: true,
+					},
+					"turn-2",
+				);
+				yield wireEvent(7, "assistant.message.delta", { text: "healthy" }, "turn-2");
+				yield wireEvent(8, "assistant.message.end", { text: "healthy" }, "turn-2");
+				yield wireEvent(9, "turn_completed", {}, "turn-2");
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async request => (request.requestId === "permission-allow" ? "allow" : "deny"),
+		});
+
+		try {
+			const firstStream = await startBridgeStream(bridge, model, context);
+			const secondStream = await startBridgeStream(bridge, model, {
+				messages: [{ role: "user", content: "second prompt", timestamp: 4 }],
+			});
+			const [firstResult, secondResult] = await Promise.all([firstStream.result(), secondStream.result()]);
+			expect(firstResult.stopReason).toBe("stop");
+			expect(secondResult.stopReason).toBe("stop");
+			expect(secondResult.content).toEqual([{ type: "text", text: "healthy" }]);
+			expect(responded).toEqual([
+				{ requestId: "permission-deny", decision: "deny" },
+				{ requestId: "permission-allow", decision: "allow" },
+			]);
+		} finally {
+			await bridge.close();
+		}
+	});
+	test("tears down the current permission request after an earlier response", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const currentPermissionStarted = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async snapshot() {
+				return { activeTurnId: null } as never;
+			},
+			async respondPermission(request) {
+				responded.push(request);
+				return {
+					requestId: request.requestId as PermissionDecisionReceipt["requestId"],
+					decision: request.decision,
+				};
+			},
+			async cancel(request) {
+				cancelled.push(request);
+				return {} as CancellationReceipt;
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "permission_request", {
+					request_id: "permission-first",
+					tool: "edit",
+					kind: "write",
+					summary: "Allow the first write",
+					default_scope: null,
+					rewindable: true,
+				});
+				yield wireEvent(4, "permission_request", {
+					request_id: "permission-current",
+					tool: "edit",
+					kind: "write",
+					summary: "Teardown the current write",
+					default_scope: null,
+					rewindable: true,
+				});
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async (request, signal) => {
+				if (request.requestId === "permission-first") return "allow";
+				currentPermissionStarted.resolve();
+				return await new Promise<"allow">(resolve => {
+					if (signal.aborted) resolve("allow");
+					else signal.addEventListener("abort", () => resolve("allow"), { once: true });
+				});
+			},
+		});
+
+		try {
+			const stream = await startBridgeStream(bridge, model, context);
+			await currentPermissionStarted.promise;
+			const closeOutcome = await bridge.close();
+			expect(closeOutcome).toEqual({ kind: "closed" });
+			expect((await stream.result()).stopReason).toBe("aborted");
+			expect(responded).toEqual([
+				{ requestId: "permission-first", decision: "allow" },
+				{ requestId: "permission-current", decision: "deny" },
+			]);
+			expect(cancelled).toMatchObject([
+				{ turnId: receipt.turnId, reason: "user_requested", cancellationRequestKey: "breadboard:session-1:turn-1" },
+			]);
 		} finally {
 			await bridge.close();
 		}

@@ -76,7 +76,7 @@ export interface HarnessPort {
 	 * List harness definitions from the current BreadBoard engine workspace.
 	 * The optional directory is forwarded to the public harness operation.
 	 */
-	readonly listHarnessChoices?: (directory?: string) => Promise<
-		readonly { readonly id: string; readonly name: string; readonly path: string }[]
-	>;
+	readonly listHarnessChoices?: (
+		directory?: string,
+	) => Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]>;
 }

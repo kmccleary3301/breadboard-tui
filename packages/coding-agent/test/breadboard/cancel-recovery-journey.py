@@ -21,6 +21,22 @@ LOCK_MODULE = Path(
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:9099"
 SYNTHETIC_PROMPT = "Create and validate the deterministic bubble sort fixture."
+IDENTITY_FIELDS = (
+    "pid",
+    "osProcessStartToken",
+    "engineInstanceId",
+    "engineBootId",
+    "launchId",
+)
+PROOF_FIELDS = (
+    "engineInstanceId",
+    "engineBootId",
+    "launchId",
+    "registrationId",
+    "registrationGeneration",
+    "clientInstanceId",
+    "credentialSha256",
+)
 
 
 def load_runner(path: Path):
@@ -46,6 +62,81 @@ def load_lock(path: Path):
 def mkdir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.chmod(0o700)
+def authority_identity(authority: dict[str, Any]) -> dict[str, Any]:
+    return {
+        field: authority.get(field)
+        for field in IDENTITY_FIELDS
+        + ("ownerGeneration", "recordRevision", "normalizedEndpoint")
+    }
+
+
+def same_authority(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return all(left.get(field) == right.get(field) for field in IDENTITY_FIELDS)
+
+
+def valid_digest(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def valid_request_proof(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required_strings = (
+        "engineInstanceId",
+        "engineBootId",
+        "launchId",
+        "registrationId",
+        "clientInstanceId",
+    )
+    return (
+        all(isinstance(value.get(field), str) and value[field] for field in required_strings)
+        and type(value.get("registrationGeneration")) is int
+        and value["registrationGeneration"] >= 1
+        and valid_digest(value.get("credentialSha256"))
+    )
+
+
+def proof_matches_authority(trace: dict[str, Any], authority: dict[str, Any]) -> bool:
+    proof = trace.get("proof")
+    return (
+        valid_request_proof(proof)
+        and all(proof.get(field) == authority.get(field) for field in IDENTITY_FIELDS[2:])
+    )
+
+
+def trace_is_input(trace: dict[str, Any], session_id: str) -> bool:
+    return (
+        trace.get("method") == "POST"
+        and trace.get("path")
+        == f"/v1/internal/sessions/{urllib.parse.quote(session_id, safe='')}/input"
+        and valid_digest(trace.get("bodySha256"))
+    )
+
+
+def replacement_registration_trace(
+    traces: list[dict[str, Any]],
+    authority: dict[str, Any],
+    predecessor: dict[str, Any],
+) -> dict[str, Any] | None:
+    for trace in traces:
+        if not isinstance(trace, dict) or not proof_matches_authority(trace, authority):
+            continue
+        proof = trace["proof"]
+        if all(
+            proof.get(field) == predecessor.get(field)
+            for field in ("engineInstanceId", "engineBootId", "launchId")
+        ):
+            continue
+        return dict(trace)
+    return None
+
+
+def write_json(path: Path, value: Any) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def request_json(endpoint: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -139,25 +230,6 @@ def write_orphan_snapshot(
     (raw_root / f"orphan-engine-{pid}.txt").write_text(text, encoding="utf-8")
 
 
-def terminate_pid(pid: int) -> None:
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        return
-    time.sleep(0.2)
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-
-
-def cleanup_leaked_endpoint(lock_mod: Any, runner: Any, raw_root: Path, endpoint: str, label: str) -> None:
-    with lock_mod.installed_candidate_launch(label, require_endpoint_closed=False):
-        pids, _ = listener_pids(runner, endpoint)
-        for pid in pids:
-            write_orphan_snapshot(runner, raw_root, endpoint, pid, "engine listener remained before launch")
-            terminate_pid(pid)
-        lock_mod.wait_endpoint_closed(deadline_seconds=5)
 
 
 def wait_engine_exit(
@@ -175,9 +247,18 @@ def wait_engine_exit(
         return {"observed": True, "seconds": round(time.monotonic() - started, 3)}
     return {"observed": False, "seconds": None}
 
-def launch(runner: Any, bb: Path, roots: dict[str, Path], rows: int, cols: int):
+def launch(
+    runner: Any,
+    bb: Path,
+    roots: dict[str, Path],
+    rows: int,
+    cols: int,
+    proxy: Any | None = None,
+):
     (roots["agent"] / "config.yml").write_text("tools:\n  approvalMode: always-ask\n", encoding="utf-8")
     env = runner.exact_environment(roots["home"], roots["config"], roots["agent"], roots["temp"])
+    if proxy is not None:
+        env.update(proxy.environment())
     runner.create_browser_launch_guard(roots["temp"], env)
     child = runner.PtyChild(
         [str(bb), "--model", "cli_mock/reference"],
@@ -226,46 +307,85 @@ def capture(runner: Any, output: Path, name: str, child: Any, roots: dict[str, P
 def end_child(
     runner: Any,
     raw_root: Path,
+    agent_root: Path,
     child: Any,
     descendants: list[dict[str, Any]],
     endpoint: str,
     engine_pid: int | None,
+    engine_authority: dict[str, Any] | None,
 ) -> dict[str, Any]:
     tui_exit_code: int | None = child.exit_status
+    cleanup_forced = False
+    child_start_token = runner.process_start_token(child.pid)
+    for row in descendants:
+        row["osProcessStartToken"] = runner.process_start_token(row["pid"])
+    current_authority = runner.active_authority(agent_root)
+    authenticated_engine = (
+        engine_pid is not None
+        and isinstance(engine_authority, dict)
+        and current_authority is not None
+        and same_authority(current_authority[1], engine_authority)
+        and int(engine_authority.get("pid", -1)) == engine_pid
+        and runner.process_alive(engine_pid)
+        and runner.process_start_token(engine_pid) == engine_authority["osProcessStartToken"]
+        and any(int(row.get("pid", -1)) == engine_pid for row in descendants)
+    )
     try:
         child.send_line("/exit")
         tui_exit_code = child.wait_for_exit(20)
     except Exception:
-        try:
-            os.kill(child.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        runner.signal_process_if_same(child.pid, child_start_token, signal.SIGTERM)
     engine_exited = wait_engine_exit(runner, endpoint, engine_pid, timeout=5)
     listener_pids_after, _ = listener_pids(runner, endpoint)
     leaked_pids = list(listener_pids_after)
     if not engine_exited["observed"]:
-        if engine_pid is not None and runner.process_alive(engine_pid) and engine_pid not in leaked_pids:
-            leaked_pids.append(engine_pid)
+        if (
+            authenticated_engine
+            and engine_pid is not None
+            and runner.process_alive(engine_pid)
+        ):
+            cleanup_forced = runner.signal_process_if_same(
+                engine_pid, engine_authority["osProcessStartToken"], signal.SIGTERM,
+            )
+            deadline = time.monotonic() + 0.5
+            while runner.process_alive(engine_pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if runner.process_alive(engine_pid):
+                cleanup_forced = runner.signal_process_if_same(
+                    engine_pid, engine_authority["osProcessStartToken"], signal.SIGKILL,
+                ) or cleanup_forced
+            wait_engine_exit(runner, endpoint, engine_pid, timeout=5)
         for pid in leaked_pids:
-            write_orphan_snapshot(runner, raw_root, endpoint, pid, "engine listener remained after teardown")
-            terminate_pid(pid)
+            write_orphan_snapshot(
+                runner,
+                raw_root,
+                endpoint,
+                pid,
+                "authenticated engine listener remained after teardown"
+                if authenticated_engine and pid == engine_pid
+                else "unowned engine listener remained after teardown",
+            )
     for row in reversed(descendants):
-        try:
-            os.kill(int(row["pid"]), signal.SIGTERM)
-        except (KeyError, ProcessLookupError, PermissionError):
-            pass
+        pid = row.get("pid")
+        if not isinstance(pid, int) or pid == engine_pid:
+            continue
+        runner.signal_process_if_same(pid, row.get("osProcessStartToken"), signal.SIGTERM)
     time.sleep(0.2)
     for row in reversed(descendants):
-        try:
-            os.kill(int(row["pid"]), signal.SIGKILL)
-        except (KeyError, ProcessLookupError, PermissionError):
-            pass
+        pid = row.get("pid")
+        if not isinstance(pid, int) or pid == engine_pid:
+            continue
+        runner.signal_process_if_same(pid, row.get("osProcessStartToken"), signal.SIGKILL)
     child.close()
     endpoint_closed = not runner.endpoint_open(endpoint)
     return {
         "tuiExitCode": tui_exit_code,
         "engineExited": engine_exited,
-        "engineCleanupForced": bool(leaked_pids),
+        "engineCleanupForced": cleanup_forced,
+        "engineTargetAuthenticated": authenticated_engine,
+        "unownedListenerPids": [
+            pid for pid in leaked_pids if not authenticated_engine or pid != engine_pid
+        ],
         "endpointClosed": endpoint_closed,
     }
 
@@ -299,7 +419,9 @@ def observation(
     output = base / "captures" / row
     mkdir(output)
     child = None
+    proxy = None
     engine_pid: int | None = None
+    engine_authority: dict[str, Any] | None = None
     endpoint = DEFAULT_ENDPOINT
     started = time.monotonic()
     record: dict[str, Any] = {
@@ -317,22 +439,52 @@ def observation(
     }
 
     def run_locked(held: Any) -> None:
-        nonlocal child, engine_pid, endpoint
+        nonlocal child, proxy, engine_pid, engine_authority, endpoint
         record["lockWaitSeconds"] = round(held.waited_seconds, 3)
         try:
-            child, authority, _ = launch(runner, bb, roots, rows, cols)
-            endpoint = str(authority["normalizedEndpoint"])
-            listeners, listener_receipt = listener_pids(runner, endpoint)
-            (output / "listener-after-start.json").write_text(
-                json.dumps(listener_receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            if row == "F10a":
+                proxy_type = getattr(runner, "HeldSessionMutationProxy", None)
+                if proxy_type is None:
+                    raise RuntimeError("installed runner does not provide HeldSessionMutationProxy")
+                proxy = proxy_type(DEFAULT_ENDPOINT)
+                proxy.start()
+                record["proxyEnvironment"] = dict(proxy.environment())
+            child, authority, _ = launch(
+                runner,
+                bb,
+                roots,
+                rows,
+                cols,
+                proxy,
             )
+            endpoint = str(authority["normalizedEndpoint"])
+            if proxy is not None and endpoint != DEFAULT_ENDPOINT:
+                raise RuntimeError(
+                    f"proxy target endpoint mismatch: authority={endpoint!r}, target={DEFAULT_ENDPOINT!r}"
+                )
+            listeners, listener_receipt = listener_pids(runner, endpoint)
+            write_json(output / "listener-after-start.json", listener_receipt)
             if not listeners:
                 raise RuntimeError("engine authority has no listener on the default endpoint")
-            engine_pid = listeners[0]
+            authority_pid = authority.get("pid")
+            if type(authority_pid) is not int or authority_pid not in listeners:
+                raise RuntimeError("engine authority PID is not the listener observed on its endpoint")
+            engine_pid = authority_pid
+            engine_authority = dict(authority)
             record["enginePid"] = engine_pid
             record["engineEndpoint"] = endpoint
-            result = action(runner, child, roots, output, endpoint, authority)
+            record["engineAuthority"] = authority_identity(authority)
+            if proxy is None:
+                result = action(runner, child, roots, output, endpoint, authority)
+            else:
+                result = action(runner, child, roots, output, endpoint, authority, proxy)
             record.update(result)
+            replacement = result.get("replacementAuthority")
+            if isinstance(replacement, dict) and type(replacement.get("pid")) is int:
+                engine_pid = int(replacement["pid"])
+                engine_authority = dict(replacement)
+                record["cleanupEnginePid"] = engine_pid
+                record["cleanupEngineAuthority"] = authority_identity(replacement)
             record["actionResult"] = result.get("verdict", "UNKNOWN")
             record["verdict"] = record["actionResult"]
         except Exception as error:
@@ -341,29 +493,52 @@ def observation(
                 capture(runner, output, "exception", child, roots, None)
         finally:
             if child is not None:
-                descendants = runner.process_descendants(child.pid)
-                record["processBeforeClose"] = descendants
-                record.update(end_child(runner, base, child, descendants, endpoint, engine_pid))
-                engine_exit = record.get("engineExited")
-                engine_exit_within_deadline = (
-                    isinstance(engine_exit, dict)
-                    and engine_exit.get("observed") is True
-                    and isinstance(engine_exit.get("seconds"), (int, float))
-                    and engine_exit["seconds"] <= 5
-                )
-                endpoint_closed = record.get("endpointClosed") is True
-                finalize_teardown(record, engine_exit_within_deadline, endpoint_closed)
+                try:
+                    descendants = runner.process_descendants(child.pid)
+                    record["processBeforeClose"] = descendants
+                    record.update(
+                        end_child(
+                            runner,
+                            base,
+                            roots["agent"],
+                            child,
+                            descendants,
+                            endpoint,
+                            engine_pid,
+                            engine_authority,
+                        )
+                    )
+                    engine_exit = record.get("engineExited")
+                    engine_exit_within_deadline = (
+                        isinstance(engine_exit, dict)
+                        and engine_exit.get("observed") is True
+                        and isinstance(engine_exit.get("seconds"), (int, float))
+                        and engine_exit["seconds"] <= 5
+                    )
+                    endpoint_closed = record.get("endpointClosed") is True
+                    finalize_teardown(record, engine_exit_within_deadline, endpoint_closed)
+                except Exception as error:
+                    record["verdict"] = "UNKNOWN"
+                    record["reason"] = (
+                        f"{record.get('reason', '')}; teardown failed: "
+                        f"{type(error).__name__}: {error}"
+                    ).lstrip("; ")
+            if proxy is not None:
+                try:
+                    record["proxyCleanup"] = proxy.stop()
+                except Exception as error:
+                    record["proxyCleanup"] = {
+                        "closed": False,
+                        "error": f"{type(error).__name__}: {error}",
+                    }
+                    record["verdict"] = "fail"
+                    record["reason"] = (
+                        f"{record.get('reason', '')}; proxy cleanup failed"
+                    ).lstrip("; ")
 
     try:
-        try:
-            with lock_mod.installed_candidate_launch(label=f"E3 {row}") as held:
-                run_locked(held)
-        except RuntimeError:
-            if lock_mod.endpoint_closed():
-                raise
-            cleanup_leaked_endpoint(lock_mod, runner, base, DEFAULT_ENDPOINT, f"E3 cleanup before {row}")
-            with lock_mod.installed_candidate_launch(label=f"E3 {row}") as held:
-                run_locked(held)
+        with lock_mod.installed_candidate_launch(label=f"E3 {row}") as held:
+            run_locked(held)
     except Exception as error:
         record.update({"verdict": "UNKNOWN", "reason": f"{type(error).__name__}: {error}"})
     finally:
@@ -372,9 +547,8 @@ def observation(
             for name, path in roots.items()
         }
         record["elapsedSeconds"] = round(time.monotonic() - started, 3)
-        (output / "observation.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_json(output / "observation.json", record)
     return record
-
 
 def f04a(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint: str, authority: dict[str, Any]) -> dict[str, Any]:
     child.send_line("Stream a long deterministic response and keep streaming.")
@@ -505,27 +679,409 @@ def permission_request(runner: Any, child: Any, roots: dict[str, Path], output: 
     return {"matrix": "F03a", "requestId": request_id, "staleResponse": stale, "visible": child.screen.text(), "durable": after, "resource": runner.process_descendants(child.pid), "verdict": "pass" if stale.get("status") in (400, 409) else "fail"}
 
 
-def f10a(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint: str, authority: dict[str, Any]) -> dict[str, Any]:
-    child.send_typed_line(SYNTHETIC_PROMPT)
-    request_id = child.wait_until(lambda: child.permission_dialog_ready(), 30, "restart permission action")
-    binding = child.wait_until(
+def f10a(
+    runner: Any,
+    child: Any,
+    roots: dict[str, Path],
+    output: Path,
+    endpoint: str,
+    authority: dict[str, Any],
+    proxy: Any | None = None,
+) -> dict[str, Any]:
+    if proxy is None:
+        raise RuntimeError("F10a requires the installed runner HeldSessionMutationProxy")
+    if endpoint != DEFAULT_ENDPOINT:
+        raise RuntimeError(f"F10a requires the loopback engine endpoint {DEFAULT_ENDPOINT}")
+
+    prior_prompt = "Establish a deterministic prior turn and wait for permission."
+    child.send_typed_line(prior_prompt)
+    prior_request_id = child.wait_until(
+        lambda: child.permission_dialog_ready(),
+        30,
+        "F10a prior-turn permission",
+    )
+    prior_binding = child.wait_until(
+        lambda: runner.binding_snapshot(roots["agent"]),
+        30,
+        "F10a prior-turn binding",
+    )
+    child.send_escape()
+    prior_terminal = runner.wait_for_terminal_state(
+        child,
+        roots["agent"],
+        1,
+        30,
+        "F10a prior-turn denial",
+        "cancelled",
+    )
+    prior = capture(runner, output, "prior-turn-denied", child, roots, endpoint)
+    session_id = prior_binding.data.get("sessionId")
+    if not isinstance(session_id, str) or not session_id:
+        raise RuntimeError("F10a session binding has no session id")
+
+    proxy.arm(session_id)
+    old_prompt = SYNTHETIC_PROMPT
+    child.send_typed_line(old_prompt)
+    held = child.wait_until(
         lambda: (
-            snapshot
-            if (snapshot := runner.binding_snapshot(roots["agent"])) is not None
-            and isinstance(snapshot.data.get("ownedSubmissions"), list)
-            and snapshot.data["ownedSubmissions"]
+            trace
+            if isinstance(trace := proxy.held_request, dict)
+            and trace_is_input(trace, session_id)
             else None
         ),
         30,
-        "restart turn admission",
+        "F10a held old session input",
     )
-    os.kill(int(authority["pid"]), signal.SIGKILL)
-    child.pump(1.0)
-    capture(runner, output, "engine-killed", child, roots, endpoint)
-    child.send_line("Submit after engine replacement.")
-    child.pump(2.0)
-    value = capture(runner, output, "post-replacement-submit", child, roots, endpoint)
-    return {"matrix": "F10a", "requestId": request_id, "actionReached": bool(binding.data["ownedSubmissions"]), "visible": child.screen.text(), "durable": value, "resource": runner.process_descendants(child.pid), "verdict": "UNKNOWN", "reason": "forced engine kill is escalation evidence; classify only with replacement authority receipt"}
+    held_request = dict(held)
+    if not proof_matches_authority(held_request, authority):
+        raise RuntimeError("F10a held request proof does not identify the current engine")
+    if proxy.outcome is not None:
+        raise RuntimeError("F10a held request already has an upstream outcome")
+    write_json(output / "held-request.json", held_request)
+    before_discontinuity = capture(
+        runner,
+        output,
+        "before-discontinuity",
+        child,
+        roots,
+        endpoint,
+    )
+
+    old_pid = authority.get("pid")
+    if (
+        type(old_pid) is not int
+        or any(
+            not isinstance(authority.get(field), str) or not authority[field]
+            for field in ("osProcessStartToken", "engineInstanceId", "engineBootId", "launchId")
+        )
+    ):
+        raise RuntimeError("F10a current authority lacks complete process identity")
+    current_path_authority = runner.active_authority(roots["agent"])
+    descendants_before_kill = runner.process_descendants(child.pid)
+    kill_authenticated = (
+        current_path_authority is not None
+        and same_authority(current_path_authority[1], authority)
+        and runner.process_alive(old_pid)
+        and runner.process_start_token(old_pid) == authority["osProcessStartToken"]
+        and any(int(row.get("pid", -1)) == old_pid for row in descendants_before_kill)
+    )
+    write_json(
+        output / "kill-authentication.json",
+        {
+            "authorityPath": None if current_path_authority is None else str(current_path_authority[0]),
+            "authority": authority_identity(authority),
+            "descendantsBeforeKill": descendants_before_kill,
+            "authenticated": kill_authenticated,
+        },
+    )
+    if not kill_authenticated:
+        raise RuntimeError("F10a refused to kill an unauthenticated engine PID")
+    if not runner.signal_process_if_same(old_pid, authority["osProcessStartToken"], signal.SIGKILL):
+        raise RuntimeError("F10a engine identity changed before kill")
+    child.wait_until(
+        lambda: not runner.process_alive(old_pid),
+        30,
+        "F10a old engine death",
+    )
+    write_json(
+        output / "engine-killed.json",
+        {
+            "authority": authority_identity(authority),
+            "pidDead": not runner.process_alive(old_pid),
+            "descendantsBeforeKill": descendants_before_kill,
+        },
+    )
+
+    def replacement_authority_ready() -> tuple[Path, dict[str, Any]] | None:
+        selected = runner.active_authority(roots["agent"])
+        if selected is None:
+            return None
+        candidate = selected[1]
+        if selected[0] != current_path_authority[0]:
+            return None
+        if any(candidate.get(field) == authority.get(field) for field in IDENTITY_FIELDS):
+            return None
+        candidate_pid = candidate.get("pid")
+        candidate_endpoint = candidate.get("normalizedEndpoint")
+        if (
+            type(candidate_pid) is not int
+            or candidate_endpoint != endpoint
+            or any(
+                not isinstance(candidate.get(field), str) or not candidate[field]
+                for field in ("osProcessStartToken", "engineInstanceId", "engineBootId", "launchId")
+            )
+            or not runner.process_alive(candidate_pid)
+            or runner.process_start_token(candidate_pid) != candidate["osProcessStartToken"]
+            or not runner.endpoint_open(str(candidate_endpoint))
+        ):
+            return None
+        if not any(int(row.get("pid", -1)) == candidate_pid for row in runner.process_descendants(child.pid)):
+            return None
+        return selected
+
+    replacement_path, replacement = child.wait_until(
+        replacement_authority_ready,
+        60,
+        "F10a replacement authority",
+    )
+    replacement_registration = child.wait_until(
+        lambda: replacement_registration_trace(
+            list(proxy.requests),
+            replacement,
+            authority,
+        ),
+        30,
+        "F10a replacement registration proof",
+    )
+    if replacement_registration is None:
+        raise RuntimeError("F10a replacement registration proof was not observed")
+    write_json(
+        output / "replacement-authority.json",
+        {
+            "path": str(replacement_path),
+            "authority": authority_identity(replacement),
+            "process": runner.process_snapshot(int(replacement["pid"])),
+            "descendants": runner.process_descendants(child.pid),
+            "registrationProof": replacement_registration,
+        },
+    )
+
+    def settled_before_release() -> tuple[Path, dict[str, Any], bytes] | None:
+        snapshot = runner.retained_state_snapshot(roots["agent"])
+        if snapshot is None:
+            return None
+        state = snapshot[1]
+        turns = state.get("turns")
+        if (
+            not isinstance(turns, list)
+            or not turns
+            or any(
+                not isinstance(turn, dict)
+                or turn.get("terminal_resolution_committed") is not True
+                for turn in turns
+            )
+        ):
+            return None
+        binding = runner.binding_snapshot(roots["agent"])
+        if binding is None or binding.data.get("sessionId") != session_id:
+            return None
+        if child.permission_dialog_ready():
+            return None
+        return snapshot
+
+    settled_snapshot = child.wait_until(
+        settled_before_release,
+        30,
+        "F10a settled replacement state before stale release",
+    )
+    settled_before_release_value = capture(
+        runner,
+        output,
+        "settled-before-release",
+        child,
+        roots,
+        endpoint,
+    )
+    write_json(
+        output / "restart-terminalization-delta.json",
+        {
+            "beforeDiscontinuity": before_discontinuity,
+            "settledBeforeRelease": settled_before_release_value,
+            "equal": before_discontinuity == settled_before_release_value,
+        },
+    )
+
+    proxy.release()
+    stale_outcome = child.wait_until(
+        lambda: proxy.outcome,
+        30,
+        "F10a stale request outcome",
+    )
+    if not isinstance(stale_outcome, dict):
+        raise RuntimeError("F10a stale request outcome was not an object")
+    error_code = stale_outcome.get("errorCode")
+    typed_stale_rejection = (
+        type(stale_outcome.get("status")) is int
+        and stale_outcome["status"] == 409
+        and error_code == "engine_identity_mismatch"
+        and "responseBody" in stale_outcome
+    )
+    write_json(output / "stale-outcome.json", stale_outcome)
+    after_stale_release = capture(
+        runner,
+        output,
+        "after-stale-release",
+        child,
+        roots,
+        endpoint,
+    )
+    stale_release_sections = {
+        field: settled_before_release_value.get(field) == after_stale_release.get(field)
+        for field in ("binding", "retainedState", "session", "records", "events", "authority")
+    }
+    stale_release_unchanged = all(stale_release_sections.values())
+    write_json(
+        output / "stale-release-delta.json",
+        {
+            "before": settled_before_release_value,
+            "after": after_stale_release,
+            "sectionsEqual": stale_release_sections,
+            "equal": settled_before_release_value == after_stale_release,
+        },
+    )
+
+    baseline_binding = runner.binding_snapshot(roots["agent"])
+    baseline_submission_keys = {
+        (
+            item.get("clientMessageId"),
+            item.get("inputId"),
+            item.get("turnId"),
+        )
+        for item in (
+            []
+            if baseline_binding is None
+            else baseline_binding.data.get("ownedSubmissions", [])
+        )
+        if isinstance(item, dict)
+    }
+    settled_state = settled_snapshot[1]
+    settled_turns = settled_state.get("turns", [])
+    if not isinstance(settled_turns, list):
+        raise RuntimeError("F10a settled state has no turns")
+    baseline_terminal_count = sum(
+        isinstance(turn, dict) and turn.get("terminal_resolution_committed") is True
+        for turn in settled_turns
+    )
+    fresh_prompt = "Prove the replacement engine can execute one deterministic validation."
+    child.send_line(fresh_prompt)
+    fresh_terminal, approvals = runner.wait_for_terminal_state_with_permissions(
+        child,
+        roots["agent"],
+        baseline_terminal_count + 1,
+        60,
+        "F10a replacement positive-control turn",
+        "completed",
+    )
+    fresh_binding = child.wait_until(
+        lambda: (
+            snapshot
+            if (snapshot := runner.binding_snapshot(roots["agent"])) is not None
+            and any(
+                isinstance(item, dict)
+                and (
+                    item.get("clientMessageId"),
+                    item.get("inputId"),
+                    item.get("turnId"),
+                )
+                not in baseline_submission_keys
+                for item in snapshot.data.get("ownedSubmissions", [])
+            )
+            else None
+        ),
+        30,
+        "F10a replacement positive-control admission",
+    )
+    positive_requests = [
+        dict(trace)
+        for trace in list(proxy.requests)
+        if isinstance(trace, dict)
+        and proof_matches_authority(trace, replacement)
+        and valid_digest(trace.get("bodySha256"))
+    ]
+    positive_input_requests = [
+        trace for trace in positive_requests if trace_is_input(trace, session_id)
+    ]
+    fresh_state = fresh_terminal[1]
+    fresh_terminal_turns = [
+        turn
+        for turn in fresh_state.get("turns", [])
+        if isinstance(turn, dict) and turn.get("terminal_resolution_committed") is True
+    ]
+    fresh_turn = fresh_terminal_turns[-1] if fresh_terminal_turns else None
+    fresh_submission = next(
+        item
+        for item in fresh_binding.data.get("ownedSubmissions", [])
+        if isinstance(item, dict)
+        and (
+            item.get("clientMessageId"),
+            item.get("inputId"),
+            item.get("turnId"),
+        )
+        not in baseline_submission_keys
+    )
+    fresh_submission_key = (
+        fresh_submission.get("clientMessageId"),
+        fresh_submission.get("inputId"),
+        fresh_submission.get("turnId"),
+    )
+    positive = capture(
+        runner,
+        output,
+        "replacement-positive-control",
+        child,
+        roots,
+        endpoint,
+    )
+    write_json(
+        output / "positive-control.json",
+        {
+            "replacementAuthority": authority_identity(replacement),
+            "registrationProof": replacement_registration,
+            "requests": positive_requests,
+            "inputRequests": positive_input_requests,
+            "submission": fresh_submission,
+            "approvals": approvals,
+            "terminalTurn": fresh_turn,
+            "durable": positive,
+        },
+    )
+    positive_control = (
+        isinstance(fresh_turn, dict)
+        and fresh_turn.get("terminal_outcome") == "completed"
+        and bool(positive_input_requests)
+        and fresh_submission_key not in baseline_submission_keys
+        and fresh_prompt in child.screen.text()
+    )
+    checks = {
+        "heldFullProof": trace_is_input(held_request, session_id)
+        and proof_matches_authority(held_request, authority),
+        "killAuthenticated": kill_authenticated,
+        "replacementAuthority": replacement.get("pid") != authority.get("pid")
+        and replacement.get("launchId") != authority.get("launchId"),
+        "replacementRegistration": replacement_registration is not None,
+        "typedStaleRejection": typed_stale_rejection,
+        "staleReleaseUnchanged": stale_release_unchanged,
+        "positiveControl": positive_control,
+    }
+    return {
+        "matrix": "F10a",
+        "priorRequestId": prior_request_id,
+        "sessionId": session_id,
+        "oldAuthority": authority_identity(authority),
+        "replacementAuthority": replacement,
+        "heldRequest": held_request,
+        "staleOutcome": stale_outcome,
+        "restartTerminalization": {
+            "settled": True,
+            "changed": before_discontinuity != settled_before_release_value,
+        },
+        "staleReleaseDelta": {
+            "sectionsEqual": stale_release_sections,
+            "unchanged": stale_release_unchanged,
+        },
+        "positiveControl": {
+            "submission": fresh_submission,
+            "terminalTurn": fresh_turn,
+            "requests": positive_requests,
+            "approvals": approvals,
+        },
+        "visible": child.screen.text(),
+        "durable": positive,
+        "resource": runner.process_descendants(child.pid),
+        "checks": checks,
+        "verdict": "pass" if all(checks.values()) else "fail",
+        "reason": None if all(checks.values()) else "F10a oracle assertion failed",
+    }
 
 def owned_engine_exit_after_turn(
     runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint: str, authority: dict[str, Any]

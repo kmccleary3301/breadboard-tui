@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import atexit
-import argparse
+import copy
+import http.client
+import http.server
 import codecs
 import csv
+import ctypes
 import errno
 import fcntl
 import hashlib
@@ -27,11 +30,12 @@ import sys
 import termios
 import time
 import unicodedata
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 ROWS = 36
 COLUMNS = 120
@@ -73,6 +77,721 @@ ANSI_RE = re.compile(
 
 class JourneyFailure(RuntimeError):
     pass
+
+
+class _HeldSessionMutationProxyServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = False
+
+    def __init__(
+        self,
+        proxy: "HeldSessionMutationProxy",
+        server_address: tuple[str, int],
+    ) -> None:
+        self.proxy = proxy
+        super().__init__(server_address, _HeldSessionMutationProxyHandler)
+
+
+class _HeldSessionMutationProxyHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def setup(self) -> None:
+        super().setup()
+        self._proxy = self.server.proxy
+        self._upstream: http.client.HTTPConnection | None = None
+        self._proxy._register_handler(self)
+
+    def finish(self) -> None:
+        try:
+            super().finish()
+        finally:
+            self._proxy._unregister_handler(self)
+
+    def log_message(self, _format: str, *_args: Any) -> None:
+        return
+
+    def do_GET(self) -> None:
+        self._proxy_request()
+
+    def do_HEAD(self) -> None:
+        self._proxy_request()
+
+    def do_POST(self) -> None:
+        self._proxy_request()
+
+    def do_PUT(self) -> None:
+        self._proxy_request()
+
+    def do_PATCH(self) -> None:
+        self._proxy_request()
+
+    def do_DELETE(self) -> None:
+        self._proxy_request()
+
+    def do_OPTIONS(self) -> None:
+        self._proxy_request()
+
+    def do_TRACE(self) -> None:
+        self._proxy_request()
+
+    def do_CONNECT(self) -> None:
+        self._send_proxy_error(501, "proxy_connect_unsupported")
+
+    def _send_proxy_error(self, status: int, error_code: str) -> None:
+        body = json.dumps({"errorCode": error_code}, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        self.close_connection = True
+        try:
+            self.send_response_only(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+        except OSError:
+            pass
+
+    def _proxy_request(self) -> None:
+        try:
+            path = self._proxy.request_path(self.path, self.headers)
+            body = self._proxy.request_body(self.headers, self.rfile)
+            trace = self._proxy.request_trace(self.command, path, self.headers, body)
+            release_event = self._proxy.claim_held_request(
+                self.command, path, trace, self
+            )
+            held = release_event is not None
+            if held:
+                while not release_event.wait(0.1):
+                    if self._proxy.stopping:
+                        self._send_proxy_error(503, "proxy_stopped")
+                        return
+                if self._proxy.stopping:
+                    self._send_proxy_error(503, "proxy_stopped")
+                    return
+            self._proxy.forward(self, self.command, path, body, trace, held)
+        except _ProxyRejected as rejected:
+            self._send_proxy_error(rejected.status, rejected.error_code)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            self.close_connection = True
+        except Exception:
+            self._send_proxy_error(502, "proxy_upstream_error")
+
+
+class _ProxyRejected(Exception):
+    def __init__(self, status: int, error_code: str) -> None:
+        self.status = status
+        self.error_code = error_code
+        super().__init__(error_code)
+
+
+class HeldSessionMutationProxy:
+    """A loopback-only HTTP forwarder with one request mutation hold point."""
+
+    _HOP_BY_HOP_HEADERS = frozenset(
+        {
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "proxy-connection",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade",
+        }
+    )
+    _PROOF_HEADERS = {
+        "x-breadboard-engine-instance-id": "engineInstanceId",
+        "x-breadboard-engine-boot-id": "engineBootId",
+        "x-breadboard-launch-id": "launchId",
+        "x-breadboard-registration-id": "registrationId",
+        "x-breadboard-registration-generation": "registrationGeneration",
+        "x-breadboard-client-instance-id": "clientInstanceId",
+        "x-breadboard-registration-credential": "credentialSha256",
+    }
+    _MAX_CAPTURE_BYTES = 1024 * 1024
+    _REDACTED = "<redacted>"
+    _SENSITIVE_KEY_RE = re.compile(
+        r"(?:authorization|credential|password|passwd|secret|token|api.?key)",
+        re.IGNORECASE,
+    )
+    _BEARER_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+")
+
+    def __init__(self, endpoint: str) -> None:
+        self._endpoint = endpoint
+        self._target = None
+        self._target_host: str | None = None
+        self._target_port: int | None = None
+        self._target_authority: str | None = None
+        self._lock = threading.RLock()
+        self._server: _HeldSessionMutationProxyServer | None = None
+        self._server_thread: threading.Thread | None = None
+        self._handler_threads: set[threading.Thread] = set()
+        self._handlers: set[_HeldSessionMutationProxyHandler] = set()
+        self._upstreams: set[http.client.HTTPConnection] = set()
+        self._proxy_port: int | None = None
+        self._armed_session_id: str | None = None
+        self._held_request: dict[str, Any] | None = None
+        self._held_event: threading.Event | None = None
+        self._held_handler: _HeldSessionMutationProxyHandler | None = None
+        self._outcome: dict[str, Any] | None = None
+        self._requests: list[dict[str, Any]] = []
+        self._stopping = False
+        self._stop_receipt: dict[str, Any] | None = None
+
+    @staticmethod
+    def _validate_endpoint(endpoint: str):
+        parsed = urlsplit(endpoint)
+        if (
+            parsed.scheme.lower() != "http"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.hostname is None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("proxy endpoint must be a bare loopback HTTP URL")
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+            port = parsed.port or 80
+        except (ValueError, TypeError):
+            raise ValueError("proxy endpoint must use a loopback IP literal") from None
+        if not address.is_loopback or not 1 <= port <= 65535:
+            raise ValueError("proxy endpoint must be a loopback HTTP URL")
+        return parsed
+
+    @staticmethod
+    def _format_authority(host: str | None, port: int) -> str:
+        if host is None:
+            raise ValueError("proxy endpoint has no host")
+        if ":" in host:
+            return f"[{host}]:{port}"
+        return f"{host}:{port}"
+
+    @property
+    def stopping(self) -> bool:
+        with self._lock:
+            return self._stopping
+
+    @property
+    def held_request(self) -> dict[str, Any] | None:
+        with self._lock:
+            return copy.deepcopy(self._held_request)
+
+    @property
+    def outcome(self) -> dict[str, Any] | None:
+        with self._lock:
+            return copy.deepcopy(self._outcome)
+
+    @property
+    def requests(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(self._requests)
+
+    def start(self) -> None:
+        with self._lock:
+            if self._server is not None:
+                if self._stopping:
+                    raise RuntimeError("proxy has been stopped")
+                return
+            if self._stopping:
+                raise RuntimeError("proxy has been stopped")
+            target = self._validate_endpoint(self._endpoint)
+            target_host = target.hostname
+            target_port = target.port or 80
+            target_authority = self._format_authority(target_host, target_port)
+            server = _HeldSessionMutationProxyServer(self, ("127.0.0.1", 0))
+            thread = threading.Thread(
+                target=server.serve_forever,
+                name="held-session-mutation-proxy",
+                daemon=True,
+            )
+            self._target = target
+            self._target_host = target_host
+            self._target_port = target_port
+            self._target_authority = target_authority
+            self._server = server
+            self._server_thread = thread
+            self._proxy_port = int(server.server_port)
+            try:
+                thread.start()
+            except BaseException:
+                self._server = None
+                self._server_thread = None
+                self._proxy_port = None
+                server.server_close()
+                raise
+
+    def environment(self) -> dict[str, str]:
+        with self._lock:
+            if self._server is None or self._proxy_port is None or self._stopping:
+                raise RuntimeError("proxy is not running")
+            proxy = f"http://127.0.0.1:{self._proxy_port}"
+            return {
+                "HTTP_PROXY": proxy,
+                "http_proxy": proxy,
+                "NO_PROXY": "",
+                "no_proxy": "",
+            }
+
+    def arm(self, session_id: str) -> None:
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("session_id must be a non-empty string")
+        with self._lock:
+            if self._server is None or self._stopping:
+                raise RuntimeError("proxy is not running")
+            if self._armed_session_id is not None or self._held_event is not None:
+                raise RuntimeError("proxy already has an armed or held request")
+            self._armed_session_id = session_id
+            self._held_request = None
+            self._outcome = None
+
+    def release(self) -> None:
+        with self._lock:
+            event = self._held_event
+        if event is not None:
+            event.set()
+
+    def _register_handler(self, handler: _HeldSessionMutationProxyHandler) -> None:
+        with self._lock:
+            self._handlers.add(handler)
+            self._handler_threads.add(threading.current_thread())
+            if self._stopping:
+                try:
+                    handler.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def _unregister_handler(self, handler: _HeldSessionMutationProxyHandler) -> None:
+        with self._lock:
+            self._handlers.discard(handler)
+            self._handler_threads.discard(threading.current_thread())
+            if self._held_handler is handler:
+                self._held_handler = None
+
+    def _register_upstream(self, upstream: http.client.HTTPConnection) -> bool:
+        with self._lock:
+            if self._stopping:
+                return False
+            self._upstreams.add(upstream)
+            return True
+
+    def _unregister_upstream(self, upstream: http.client.HTTPConnection) -> None:
+        with self._lock:
+            self._upstreams.discard(upstream)
+
+    def request_path(self, request_target: str, headers: Any) -> str:
+        try:
+            parsed = urlsplit(request_target)
+            absolute = bool(parsed.scheme or parsed.netloc)
+            if absolute:
+                if (
+                    self._target is None
+                    or parsed.scheme.lower() != self._target.scheme.lower()
+                    or parsed.hostname != self._target_host
+                    or (parsed.port or 80) != self._target_port
+                    or parsed.username is not None
+                    or parsed.password is not None
+                    or parsed.fragment
+                ):
+                    raise _ProxyRejected(403, "proxy_destination_rejected")
+                path = parsed.path or "/"
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
+            else:
+                if not request_target.startswith("/"):
+                    raise _ProxyRejected(400, "proxy_request_target_rejected")
+                host = headers.get("Host")
+                if not isinstance(host, str) or not self._authority_matches(host):
+                    raise _ProxyRejected(403, "proxy_destination_rejected")
+                path = request_target
+        except ValueError:
+            raise _ProxyRejected(403, "proxy_destination_rejected") from None
+        if "\r" in path or "\n" in path:
+            raise _ProxyRejected(400, "proxy_request_target_rejected")
+        return path
+
+    def _authority_matches(self, authority: str) -> bool:
+        if not authority or "," in authority:
+            return False
+        try:
+            parsed = urlsplit(f"http://{authority}")
+            return (
+                parsed.hostname == self._target_host
+                and (parsed.port or 80) == self._target_port
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.path == ""
+                and not parsed.query
+                and not parsed.fragment
+            )
+        except ValueError:
+            return False
+
+    def request_body(self, headers: Any, stream: Any) -> bytes:
+        transfer_encodings = headers.get_all("Transfer-Encoding", [])
+        if transfer_encodings:
+            raise _ProxyRejected(501, "proxy_transfer_encoding_unsupported")
+        if headers.get_all("Expect", []):
+            raise _ProxyRejected(417, "proxy_expect_unsupported")
+        values = headers.get_all("Content-Length", [])
+        if not values:
+            return b""
+        lengths: list[int] = []
+        for value in values:
+            if not re.fullmatch(r"[0-9]+", value.strip()):
+                raise _ProxyRejected(400, "proxy_content_length_invalid")
+            try:
+                lengths.append(int(value.strip()))
+            except ValueError:
+                raise _ProxyRejected(400, "proxy_content_length_invalid") from None
+        if any(length != lengths[0] for length in lengths[1:]):
+            raise _ProxyRejected(400, "proxy_content_length_conflict")
+        try:
+            body = stream.read(lengths[0])
+        except (OSError, ValueError):
+            raise _ProxyRejected(400, "proxy_request_body_unreadable") from None
+        if len(body) != lengths[0]:
+            raise _ProxyRejected(400, "proxy_request_body_incomplete")
+        return body
+
+    def request_trace(
+        self, method: str, path: str, headers: Any, body: bytes
+    ) -> dict[str, Any]:
+        proof: dict[str, Any] = {}
+        for header, field in self._PROOF_HEADERS.items():
+            value = headers.get(header)
+            if value is None:
+                proof[field] = None
+            elif field == "registrationGeneration":
+                try:
+                    proof[field] = int(value.strip())
+                except (TypeError, ValueError):
+                    raise _ProxyRejected(400, "proxy_proof_invalid") from None
+            elif field == "credentialSha256":
+                proof[field] = hashlib.sha256(value.encode("utf-8")).hexdigest()
+            else:
+                proof[field] = value
+        return {
+            "method": method,
+            "path": path,
+            "proof": proof,
+            "bodySha256": hashlib.sha256(body).hexdigest(),
+        }
+
+    def claim_held_request(
+        self,
+        method: str,
+        path: str,
+        trace: dict[str, Any],
+        handler: _HeldSessionMutationProxyHandler,
+    ) -> threading.Event | None:
+        with self._lock:
+            session_id = self._armed_session_id
+            if session_id is None or method != "POST":
+                return None
+            expected_path = (
+                f"/v1/internal/sessions/{quote(session_id, safe='')}/input"
+            )
+            if path != expected_path:
+                return None
+            event = threading.Event()
+            self._armed_session_id = None
+            self._held_request = copy.deepcopy(trace)
+            self._held_event = event
+            self._held_handler = handler
+            return event
+
+    def _request_headers(self, headers: Any) -> list[tuple[str, str]]:
+        connection_tokens: set[str] = set()
+        for value in headers.get_all("Connection", []):
+            connection_tokens.update(
+                token.strip().lower() for token in value.split(",") if token.strip()
+            )
+        if "content-length" in connection_tokens:
+            raise _ProxyRejected(400, "proxy_hop_header_conflict")
+        excluded = self._HOP_BY_HOP_HEADERS | connection_tokens | {"host"}
+        outgoing: list[tuple[str, str]] = [("Host", self._target_authority)]
+        for name, value in headers.raw_items():
+            if name.lower() not in excluded:
+                outgoing.append((name, value))
+        return outgoing
+
+    def forward(
+        self,
+        handler: _HeldSessionMutationProxyHandler,
+        method: str,
+        path: str,
+        body: bytes,
+        trace: dict[str, Any],
+        held_request: bool,
+    ) -> None:
+        with self._lock:
+            if self._stopping:
+                raise _ProxyRejected(503, "proxy_stopped")
+        upstream = http.client.HTTPConnection(
+            self._target_host,
+            self._target_port,
+            timeout=2.0,
+        )
+        handler._upstream = upstream
+        if not self._register_upstream(upstream):
+            upstream.close()
+            raise _ProxyRejected(503, "proxy_stopped")
+        held = held_request
+        try:
+            upstream.connect()
+            upstream.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+            for name, value in self._request_headers(handler.headers):
+                upstream.putheader(name, value)
+            upstream.endheaders(body)
+            with self._lock:
+                self._requests.append(copy.deepcopy(trace))
+            response = upstream.getresponse()
+            capture = self._relay_response(handler, response, method)
+            if held:
+                credential = handler.headers.get(
+                    "X-Breadboard-Registration-Credential"
+                )
+                self._record_outcome(response.status, capture, credential)
+        except _ProxyRejected as rejected:
+            if held:
+                credential = handler.headers.get(
+                    "X-Breadboard-Registration-Credential"
+                )
+                body = json.dumps(
+                    {"errorCode": rejected.error_code}, separators=(",", ":")
+                ).encode("utf-8")
+                self._record_outcome(rejected.status, body, credential)
+            raise
+        except (http.client.HTTPException, OSError, ValueError):
+            if held:
+                credential = handler.headers.get(
+                    "X-Breadboard-Registration-Credential"
+                )
+                self._record_outcome(
+                    502,
+                    b'{"errorCode":"proxy_upstream_error"}',
+                    credential,
+                )
+            raise _ProxyRejected(502, "proxy_upstream_error") from None
+        finally:
+            self._unregister_upstream(upstream)
+            upstream.close()
+            handler._upstream = None
+
+    def _relay_response(
+        self,
+        handler: _HeldSessionMutationProxyHandler,
+        response: http.client.HTTPResponse,
+        method: str,
+    ) -> bytes:
+        response_headers = response.getheaders()
+        connection_tokens: set[str] = set()
+        transfer_encodings: list[str] = []
+        content_lengths: list[int] = []
+        for name, value in response_headers:
+            lower = name.lower()
+            if lower == "connection":
+                connection_tokens.update(
+                    token.strip().lower()
+                    for token in value.split(",")
+                    if token.strip()
+                )
+            elif lower == "transfer-encoding":
+                transfer_encodings.extend(
+                    token.strip().lower()
+                    for token in value.split(",")
+                    if token.strip()
+                )
+            elif lower == "content-length":
+                if not re.fullmatch(r"[0-9]+", value.strip()):
+                    raise _ProxyRejected(502, "proxy_response_content_length_invalid")
+                content_lengths.append(int(value.strip()))
+        if "content-length" in connection_tokens:
+            raise _ProxyRejected(502, "proxy_response_hop_header_conflict")
+        if any(length != content_lengths[0] for length in content_lengths[1:]):
+            raise _ProxyRejected(502, "proxy_response_content_length_conflict")
+        if transfer_encodings and transfer_encodings != ["chunked"]:
+            raise _ProxyRejected(502, "proxy_response_transfer_encoding_unsupported")
+        if transfer_encodings and content_lengths:
+            raise _ProxyRejected(502, "proxy_response_transfer_length_conflict")
+        no_body = method == "HEAD" or response.status in (
+            *range(100, 200),
+            204,
+            304,
+        )
+        fixed_length = content_lengths[0] if content_lengths else None
+        downstream_closes = fixed_length is None and not no_body
+        handler.close_connection = downstream_closes
+        handler.send_response_only(response.status, response.reason)
+        excluded = self._HOP_BY_HOP_HEADERS | connection_tokens
+        sent_content_length = False
+        for name, value in response_headers:
+            lower = name.lower()
+            if lower in excluded:
+                continue
+            if lower == "content-length":
+                if sent_content_length:
+                    continue
+                sent_content_length = True
+            handler.send_header(name, value)
+        if downstream_closes:
+            handler.send_header("Connection", "close")
+        handler.end_headers()
+        if no_body:
+            return b""
+        captured = bytearray()
+
+        def relay(chunk: bytes) -> None:
+            if not chunk:
+                return
+            handler.wfile.write(chunk)
+            handler.wfile.flush()
+            if len(captured) < self._MAX_CAPTURE_BYTES:
+                captured.extend(chunk[: self._MAX_CAPTURE_BYTES - len(captured)])
+
+        if fixed_length is not None:
+            remaining = fixed_length
+            while remaining:
+                chunk = response.read(min(65536, remaining))
+                if not chunk:
+                    raise http.client.IncompleteRead(bytes(captured), remaining)
+                remaining -= len(chunk)
+                relay(chunk)
+        else:
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                relay(chunk)
+        return bytes(captured)
+
+    def _record_outcome(
+        self, status: int, body: bytes, credential: str | None
+    ) -> None:
+        response_body = self._sanitize_response_body(body, credential)
+        error_code: str | None = None
+        if isinstance(response_body, dict):
+            value = response_body.get("error", response_body.get("errorCode"))
+            if isinstance(value, str):
+                error_code = value
+        with self._lock:
+            self._outcome = {
+                "status": int(status),
+                "errorCode": error_code,
+                "responseBody": response_body,
+            }
+            self._held_event = None
+            self._held_handler = None
+
+    def _sanitize_response_body(
+        self, body: bytes, credential: str | None
+    ) -> Any:
+        if not body:
+            return ""
+        text = body[: self._MAX_CAPTURE_BYTES].decode("utf-8", "replace")
+        if len(body) > self._MAX_CAPTURE_BYTES:
+            text += "…"
+        try:
+            value: Any = json.loads(text)
+        except (TypeError, ValueError):
+            return self._sanitize_text(text, credential)
+        return self._sanitize_json(value, credential)
+
+    def _sanitize_json(self, value: Any, credential: str | None) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: self._REDACTED
+                if self._SENSITIVE_KEY_RE.search(str(key))
+                else self._sanitize_json(item, credential)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._sanitize_json(item, credential) for item in value]
+        if isinstance(value, str):
+            return self._sanitize_text(value, credential)
+        return value
+
+    def _sanitize_text(self, text: str, credential: str | None) -> str:
+        if credential:
+            text = text.replace(credential, self._REDACTED)
+        return self._BEARER_RE.sub(self._REDACTED, text)
+
+    @staticmethod
+    def _close_socket(value: Any) -> None:
+        socket_value = getattr(value, "connection", None)
+        if socket_value is None:
+            socket_value = getattr(value, "socket", None)
+        if socket_value is None:
+            socket_value = getattr(value, "sock", None)
+        if socket_value is not None:
+            try:
+                socket_value.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                socket_value.close()
+            except OSError:
+                pass
+        close = getattr(value, "close", None)
+        if close is not None:
+            try:
+                close()
+            except OSError:
+                pass
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            if self._stop_receipt is not None:
+                return copy.deepcopy(self._stop_receipt)
+            self._stopping = True
+            release_event = self._held_event
+            server = self._server
+            server_thread = self._server_thread
+            handlers = list(self._handlers)
+            upstreams = list(self._upstreams)
+            handler_threads = list(self._handler_threads)
+            was_started = server is not None
+        if release_event is not None:
+            release_event.set()
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+        for handler in handlers:
+            self._close_socket(handler)
+        for upstream in upstreams:
+            self._close_socket(upstream)
+        deadline = time.monotonic() + 2.0
+        threads = ([server_thread] if server_thread is not None else []) + handler_threads
+        for thread in threads:
+            if thread is None or thread is threading.current_thread():
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(remaining)
+        with self._lock:
+            alive_threads = sum(
+                thread.is_alive() for thread in threads if thread is not None
+            )
+            receipt = {
+                "stopped": True,
+                "wasStarted": was_started,
+                "releasedHeldRequest": release_event is not None,
+                "handlersAtStop": len(handlers),
+                "upstreamsAtStop": len(upstreams),
+                "threadsAlive": alive_threads,
+                "closed": alive_threads == 0,
+            }
+            self._stop_receipt = receipt
+            self._server = None
+            self._server_thread = None
+            self._proxy_port = None
+            return copy.deepcopy(receipt)
 
 
 class TerminalScreen:
@@ -872,6 +1591,39 @@ def endpoint_open(endpoint: str) -> bool:
             return True
     except OSError:
         return False
+
+
+def process_start_token(pid: int) -> str | None:
+    """Observe Darwin's kernel start identity, not the authority file's claim."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        proc_pidinfo = ctypes.CDLL("/usr/lib/libproc.dylib").proc_pidinfo
+        proc_pidinfo.argtypes = [
+            ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int,
+        ]
+        proc_pidinfo.restype = ctypes.c_int
+        info = ctypes.create_string_buffer(136)
+        if proc_pidinfo(pid, 3, 0, info, len(info)) != len(info):
+            return None
+        if struct.unpack_from("=I", info, 12)[0] != pid:
+            return None
+        seconds, microseconds = struct.unpack_from("=QQ", info, 120)
+        if seconds == 0 or microseconds >= 1_000_000:
+            return None
+        return f"darwin:{seconds}:{microseconds}"
+    except (AttributeError, OSError):
+        return None
+
+
+def signal_process_if_same(pid: int, start_token: str | None, sig: int) -> bool:
+    if start_token is None or process_start_token(pid) != start_token:
+        return False
+    try:
+        os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 def process_alive(pid: int) -> bool:

@@ -418,6 +418,25 @@ export class AgentActivityIndex {
 			const message = recordOf(entry.message) as ActivityMessage | undefined;
 			if (!message) continue;
 			const timestamp = timestampOf(message.timestamp, timestampOf(entry.timestamp, Date.now()));
+			if (message.role === "custom" && message.customType === "breadboard:e4-observation") {
+				const summary = textContent(message.content);
+				if (!summary) continue;
+				pruneToolRows(
+					state,
+					boundedPush(state.rows, {
+						id: `${agentId}:lifecycle:${entry.id}`,
+						agentId,
+						timestamp,
+						kind: "lifecycle",
+						title: "BreadBoard",
+						summary,
+						entryId: entry.id,
+						source: "transcript",
+					}),
+				);
+				changed = true;
+				continue;
+			}
 			if (message.role === "assistant") {
 				const response = textContent(message.content);
 				if (response) {

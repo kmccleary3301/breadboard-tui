@@ -337,8 +337,7 @@ export async function listHarnessChoices(
 	directory?: string,
 ): Promise<readonly HarnessChoice[]> {
 	try {
-		const result =
-			directory === undefined ? await client.listHarness() : await client.listHarness(directory);
+		const result = directory === undefined ? await client.listHarness() : await client.listHarness(directory);
 		const data = publicData(result, "harness.list");
 		if (!Array.isArray(data.harnesses)) throw new Error("BreadBoard harness.list response missing harnesses");
 		return data.harnesses.map(value => choiceFromPath(requiredString(value, "harness path")));

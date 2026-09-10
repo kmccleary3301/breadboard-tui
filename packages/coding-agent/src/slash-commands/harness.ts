@@ -193,12 +193,11 @@ export function harnessCommandsAsSlashCommands(
 	return materializeHarnessCommands(snapshot, settings).map(spec => {
 		const command: SlashCommand = {
 			name: spec.name,
-			description:
-				isStaticPanelCommand(spec.name)
-					? "[Harness] Static harness panel"
-					: spec.name === "harness" && header
-						? `${header} · ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`
-						: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
+			description: isStaticPanelCommand(spec.name)
+				? "[Harness] Static harness panel"
+				: spec.name === "harness" && header
+					? `${header} · ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`
+					: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
 			allowArgs: true,
 		};
 		if (snapshot && ["mode", "model", "role", "skills"].includes(spec.name)) {

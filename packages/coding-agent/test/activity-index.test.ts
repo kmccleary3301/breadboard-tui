@@ -9,6 +9,31 @@ function messageEntry(id: string, timestamp: number, message: Record<string, unk
 }
 
 describe("AgentActivityIndex", () => {
+	it("indexes persisted BreadBoard observations without exposing unrelated custom messages", async () => {
+		using tempDir = TempDir.createSync("activity-observations-");
+		const sessionFile = path.join(tempDir.path(), "main.jsonl");
+		await Bun.write(
+			sessionFile,
+			`${[
+				messageEntry("notice", 1_000, {
+					role: "custom",
+					customType: "breadboard:e4-observation",
+					content: "Stream gap observed",
+				}),
+				messageEntry("private", 2_000, {
+					role: "custom",
+					customType: "extension-private",
+					content: "Unrelated private content",
+				}),
+			].join("\n")}\n`,
+		);
+		const activity = new AgentActivityIndex();
+		await activity.sync("Main", sessionFile);
+		expect(activity.query().map(({ kind, summary, entryId }) => ({ kind, summary, entryId }))).toEqual([
+			{ kind: "lifecycle", summary: "Stream gap observed", entryId: "notice" },
+		]);
+	});
+
 	it("normalizes transcript responses and paired tool calls without duplicating terminal rows", async () => {
 		using tempDir = TempDir.createSync("activity-index-");
 		const sessionFile = path.join(tempDir.path(), "worker.jsonl");

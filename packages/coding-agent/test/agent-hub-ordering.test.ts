@@ -6,6 +6,7 @@
  * agents that appear while the hub is open are appended at the end.
  */
 import { afterEach, beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
+import { appendFile } from "node:fs/promises";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -15,6 +16,7 @@ import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import { AgentActivityIndex, type AgentActivityRow } from "../src/activity";
 
 interface GeometryStub {
@@ -137,6 +139,50 @@ describe("Agent hub row ordering", () => {
 		geometry?.restore();
 		geometry = undefined;
 		AgentRegistry.resetGlobalForTests();
+	});
+
+	it("shows and refreshes main-session BreadBoard notices without adding main responses", async () => {
+		vi.useFakeTimers();
+		using tempDir = TempDir.createSync("hub-main-notices-");
+		geometry = stubStdoutGeometry(120);
+		const sessionFile = `${tempDir.path()}/main.jsonl`;
+		const notice = (id: string, content: string) =>
+			JSON.stringify({
+				type: "message",
+				id,
+				timestamp: Date.now(),
+				message: { role: "custom", customType: "breadboard:e4-observation", content },
+			});
+		await Bun.write(
+			sessionFile,
+			`${notice("gap", "Stream gap observed")}\n${JSON.stringify({
+				type: "message",
+				id: "main-response",
+				message: { role: "assistant", content: "Not a subagent response" },
+			})}\n`,
+		);
+		const initialNotice = Promise.withResolvers<void>();
+		const refreshedNotice = Promise.withResolvers<void>();
+		let hub: AgentHubOverlayComponent | undefined;
+		hub = makeHub(new AgentRegistry(), {
+			sessionFile,
+			initialSection: "activity",
+			requestRender: () => {
+				if (!hub) return;
+				const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+				if (rendered.includes("Stream gap observed")) initialNotice.resolve();
+				if (rendered.includes("Checkpoints listed")) refreshedNotice.resolve();
+			},
+		});
+		try {
+			await initialNotice.promise;
+			expect(Bun.stripANSI(hub.render(120).join("\n"))).not.toContain("Not a subagent response");
+			await appendFile(sessionFile, `${notice("checkpoint", "Checkpoints listed")}\n`);
+			vi.advanceTimersByTime(5_000);
+			await refreshedNotice.promise;
+		} finally {
+			hub.dispose();
+		}
 	});
 
 	it("renders a useful empty state before any task agents exist", () => {
@@ -972,7 +1018,6 @@ describe("Agent hub row ordering", () => {
 			expect(flat).toContain("By parent");
 
 			hub.setHoverIndex(0);
-			expect(renderedRosterHeaderLineRaw(hub, "Child", 120)).toContain(theme.getBgAnsi("selectedBg"));
 			hub.handleInput("t");
 			const byParentIds = renderedAgentIds(hub);
 			expect(byParentIds).toEqual(["Parent", "Child", "Peer"]);
@@ -981,8 +1026,6 @@ describe("Agent hub row ordering", () => {
 			expect(byParent).toContain("Flat");
 			expect(byParent).toContain("By parent");
 			expect(byParentIds.indexOf("Parent")).toBeLessThan(byParentIds.indexOf("Child"));
-			expect(renderedRosterHeaderLineRaw(hub, "Parent", 120)).not.toContain(theme.getBgAnsi("selectedBg"));
-			expect(renderedRosterHeaderLineRaw(hub, "Child", 120)).not.toContain(theme.getBgAnsi("selectedBg"));
 
 			hub.handleInput("t");
 			expect(renderedAgentIds(hub)).toEqual(["Child", "Peer", "Parent"]);

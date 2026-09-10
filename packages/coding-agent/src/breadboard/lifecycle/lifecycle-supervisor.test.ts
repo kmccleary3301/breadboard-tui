@@ -685,13 +685,15 @@ describe("LifecycleSupervisor mode authority", () => {
 		}
 	});
 
-	test("ready handle exposes an authenticated request transport without exposing the token", async () => {
+	test("ready handle exposes authenticated and generation-bound request transport without exposing the token", async () => {
 		const originalFetch = globalThis.fetch;
 		let observedAuthorization: string | null = null;
 		let observedCustomHeader: string | null = null;
+		let observedHeaders: Headers | undefined;
 		globalThis.fetch = Object.assign(
 			async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
 				const headers = new Headers(init?.headers);
+				observedHeaders = headers;
 				observedAuthorization = headers.get("authorization");
 				observedCustomHeader = headers.get("x-product");
 				return new Response(null, { status: 204 });
@@ -710,6 +712,16 @@ describe("LifecycleSupervisor mode authority", () => {
 			});
 			const supervisor = new LifecycleSupervisor(config, {
 				...TEST_LIFECYCLE_DEFAULTS,
+				randomCredential: (() => {
+					const credentials = ["client-instance-test", "registration-credential-test"] as const;
+					let index = 0;
+					return () => {
+						const credential = credentials[index];
+						if (credential === undefined) throw new Error("test credential exhausted");
+						index++;
+						return credential;
+					};
+				})(),
 				resolveRemoteSecurity: async () => ({ bearerToken: "resolved-token" }),
 				createClient: () => ({ handshake: async () => boundClient(binding, []) }),
 			});
@@ -718,9 +730,20 @@ describe("LifecycleSupervisor mode authority", () => {
 			if (result.kind !== "ready") throw new Error("expected ready lifecycle result");
 			expect(result.handle).not.toHaveProperty("bearerToken");
 			await result.handle.requestFetch("https://engine.example/v1/sessions", {
-				headers: { "x-product": "breadboard" },
+				headers: {
+					"x-product": "breadboard",
+					"x-breadboard-engine-instance-id": "caller-forged-engine",
+				},
 			});
 			expect([observedAuthorization, observedCustomHeader].join("|")).toBe("Bearer resolved-token|breadboard");
+			expect(observedHeaders?.get("x-breadboard-engine-instance-id")).toBe(binding.engineInstanceId);
+			expect(observedHeaders?.get("x-breadboard-engine-boot-id")).toBe(binding.engineBootId);
+			expect(observedHeaders?.get("x-breadboard-launch-id")).toBe(binding.launchId);
+			expect(observedHeaders?.get("x-breadboard-registration-id")).toBe("registration_client-instance-test");
+			expect(observedHeaders?.get("x-breadboard-registration-generation")).toBe("1");
+			expect(observedHeaders?.get("x-breadboard-client-instance-id")).toBe("client-instance-test");
+			expect(observedHeaders?.get("x-breadboard-registration-credential")).toBe("registration-credential-test");
+			expect(observedHeaders?.get("x-product")).toBe("breadboard");
 			expect((await supervisor.close({ consumerClosed: true })).kind).toBe("detached");
 		} finally {
 			globalThis.fetch = originalFetch;
@@ -2613,7 +2636,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			process.exitOnNextWait();
 			expect((await supervisor.stop({ consumerClosed: true })).kind).toBe("stopped");
 			expect(cancellationRequests).toHaveLength(1);
-			expect(cancellationRequests[0]?.cancellation_request_key).toEqual(expect.any(String));
+			expect(cancellationRequests[0]?.cancellation_request_key).toBe("breadboard:session-1:turn-1");
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

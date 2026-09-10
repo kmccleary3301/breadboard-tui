@@ -200,6 +200,8 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#section: AgentHubSection;
 	#activity: AgentActivityIndex;
 	#manageActivityLive: boolean;
+	readonly #mainSessionFile: string | undefined;
+	#mainActivitySync: Promise<void> | undefined;
 	#activityRows: AgentActivityRow[] = [];
 	#selectedActivityRow = 0;
 	#activityFilter: ActivityFilter = "all";
@@ -282,6 +284,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#section = deps.initialSection ?? "agents";
 		this.#activity = deps.activity ?? new AgentActivityIndex({ remote: deps.remote });
 		this.#manageActivityLive = !deps.activity;
+		this.#mainSessionFile = deps.remote ? undefined : (deps.sessionFile ?? undefined);
 		this.#registry = deps.registry ?? AgentRegistry.global();
 		this.#observers = deps.observers;
 		this.#settings = deps.settings;
@@ -346,6 +349,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			}
 			this.#requestRender();
 			if (this.#remote) this.#messages.refresh();
+			if (this.#mainSessionFile) this.#refreshActivityData([]);
 		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
 
@@ -647,6 +651,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 		const generation = ++this.#activitySyncGeneration;
 		const pending: Promise<void>[] = [];
+		if (this.#mainSessionFile) {
+			this.#mainActivitySync ??= this.#activity.sync(MAIN_AGENT_ID, this.#mainSessionFile).finally(() => {
+				this.#mainActivitySync = undefined;
+			});
+			pending.push(this.#mainActivitySync);
+		}
 		for (const ref of refs) {
 			if (!this.#remote && !ref.sessionFile) continue;
 			const stamp = `${ref.sessionFile ?? ""}:${ref.lastActivity}`;
@@ -696,6 +706,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			search: this.#activitySearch,
 			limit: 2_000,
 		});
+		rows = rows.filter(row => row.agentId !== MAIN_AGENT_ID || row.kind === "lifecycle");
 		if (this.#activityFilter === "errors") rows = rows.filter(row => row.status === "error");
 		this.#activityRows = rows;
 		if (rows.length === 0) this.#selectedActivityRow = 0;

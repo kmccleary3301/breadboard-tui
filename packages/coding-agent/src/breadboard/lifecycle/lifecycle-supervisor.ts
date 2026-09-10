@@ -113,6 +113,36 @@ function createAuthenticatedRequestFetch(security: {
 	};
 	return Object.assign(authenticatedFetch, { preconnect: transport.preconnect });
 }
+interface ReadyRequestProof {
+	readonly engineInstanceId: string;
+	readonly engineBootId: string;
+	readonly launchId: string;
+	readonly registrationId: string;
+	readonly registrationGeneration: number;
+	readonly clientInstanceId: string;
+	readonly registrationCredential: string;
+}
+
+function createReadyRequestFetch(requestFetch: typeof fetch, proof: ReadyRequestProof): typeof fetch {
+	const proofHeaders = Object.freeze([
+		["X-Breadboard-Engine-Instance-Id", proof.engineInstanceId],
+		["X-Breadboard-Engine-Boot-Id", proof.engineBootId],
+		["X-Breadboard-Launch-Id", proof.launchId],
+		["X-Breadboard-Registration-Id", proof.registrationId],
+		["X-Breadboard-Registration-Generation", String(proof.registrationGeneration)],
+		["X-Breadboard-Client-Instance-Id", proof.clientInstanceId],
+		["X-Breadboard-Registration-Credential", proof.registrationCredential],
+	] as const);
+	const readyFetch = (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
+		const headers = new Headers(input instanceof Request ? input.headers : undefined);
+		new Headers(init?.headers).forEach((value, name) => {
+			headers.set(name, value);
+		});
+		for (const [name, value] of proofHeaders) headers.set(name, value);
+		return requestFetch(input, { ...init, headers });
+	};
+	return Object.assign(readyFetch, { preconnect: requestFetch.preconnect });
+}
 
 export interface LifecycleSupervisorDependencies {
 	readonly store?: LocalAuthorityStore;
@@ -1163,9 +1193,18 @@ abstract class ModeStrategy {
 			registrationCredential: this.registrationCredential,
 			signal: this.abortController.signal,
 		});
+		const requestProof = Object.freeze({
+			engineInstanceId: client.binding.engineInstanceId,
+			engineBootId: client.binding.engineBootId,
+			launchId: client.binding.launchId,
+			registrationId: registration.registrationId,
+			registrationGeneration: registration.registrationGeneration,
+			clientInstanceId: this.clientInstanceId,
+			registrationCredential: this.registrationCredential,
+		});
 		return {
 			client,
-			requestFetch: this.requestFetch,
+			requestFetch: createReadyRequestFetch(this.requestFetch, requestProof),
 			binding: client.binding,
 			registration,
 			clientInstanceId: this.clientInstanceId,

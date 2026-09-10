@@ -131,11 +131,7 @@ describe("HarnessView canonical lock projection", () => {
 		] as const;
 
 		for (const [panel, panelNumber, emptyMessage] of cases) {
-			const view = viewFor(
-				emptyLock,
-				panel === "evidence" ? { lockHash: null, generation: null } : {},
-				panel,
-			);
+			const view = viewFor(emptyLock, panel === "evidence" ? { lockHash: null, generation: null } : {}, panel);
 			const output = rendered(view);
 			expect(output).toContain(`Harness panel ${panelNumber}/8: ${panel}`);
 			expect(output).toContain(emptyMessage);
