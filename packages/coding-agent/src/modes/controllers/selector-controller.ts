@@ -222,6 +222,7 @@ export class SelectorController {
 					imageBudget: this.ctx.ui.imageBudget,
 					requestRender: () => this.ctx.ui.requestRender(),
 					composerPreviewStatus: this.ctx.statusLine,
+					harness: this.ctx.harnessPort?.current() ?? null,
 				},
 				{
 					onChange: (id, value) => this.handleSettingChange(id, value),

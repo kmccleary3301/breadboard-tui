@@ -22,6 +22,8 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { LoggedSessionEvent, OpenedSession, TurnId } from "./session-port";
+import { mapE4Observation, type E4ObservationEvent, type E4ObservationNotice } from "./e4-observations";
+import type { CustomMessage } from "../session/messages";
 
 const ZERO_USAGE: Usage = {
 	input: 0,
@@ -132,6 +134,20 @@ function classifyEvent(event: LoggedSessionEvent): ClassifiedEvent {
 		default:
 			return assertNever(event);
 	}
+}
+
+const E4_OBSERVATION_MESSAGE_TYPE = "breadboard:e4-observation";
+
+function e4ObservationMessage(event: E4ObservationEvent): CustomMessage<E4ObservationNotice> {
+	const notice = mapE4Observation(event);
+	return {
+		role: "custom",
+		customType: E4_OBSERVATION_MESSAGE_TYPE,
+		content: notice.text,
+		display: true,
+		details: notice,
+		timestamp: event.occurredAtMs,
+	};
 }
 
 interface StreamedToolCallState {
@@ -702,6 +718,24 @@ export class E4AgentStreamBridge {
 			this.#eventApplicationsInFlight.delete(application);
 		}
 	}
+	async #emitObservationNotice(event: SessionObservationEvent): Promise<string[]> {
+		switch (event.kind) {
+			case "todo_updated":
+			case "stream_gap_observed":
+			case "session_control_observed":
+			case "checkpoint_list_observed":
+			case "checkpoint_restored": {
+				const message = e4ObservationMessage(event);
+				const startKey = `${String(event.eventId)}:observation_message_start`;
+				const endKey = `${String(event.eventId)}:observation_message_end`;
+				await this.#emitAgentEvent({ type: "message_start", message }, startKey);
+				await this.#emitAgentEvent({ type: "message_end", message }, endKey);
+				return [startKey, endKey];
+			}
+			default:
+				return [];
+		}
+	}
 
 	async #observe(): Promise<void> {
 		try {
@@ -710,9 +744,11 @@ export class E4AgentStreamBridge {
 				if (this.#closed) break;
 				const classified = classifyEvent(event);
 				switch (classified.scope) {
-					case "session-observation":
-						await this.#trackEventApplication(this.#commit(classified.event, []));
+					case "session-observation": {
+						const noticeKeys = await this.#emitObservationNotice(classified.event);
+						await this.#trackEventApplication(this.#commit(classified.event, noticeKeys));
 						break;
+					}
 					case "session-failure":
 						await this.#trackEventApplication(this.#terminalSessionFailure(classified.event));
 						return;

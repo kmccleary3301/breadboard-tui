@@ -62,8 +62,9 @@ describe("InteractiveMode BreadBoard harness wiring", () => {
 	let session: AgentSession;
 	let mode: InteractiveMode;
 
-	beforeAll(() => {
-		initTheme();
+	beforeAll(async () => {
+		// Pin the color mode: `fgResolved` throws under NO_COLOR/TERM=dumb (bb-ewnk.16), and init renders the editor.
+		await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 	});
 
 	beforeEach(async () => {
@@ -126,5 +127,39 @@ describe("InteractiveMode BreadBoard harness wiring", () => {
 
 		expect(sessionIds).toEqual([ENGINE_SESSION_ID]);
 		expect(ENGINE_SESSION_ID).not.toBe(session.sessionManager.getSessionId());
+	});
+	test("propagates the live snapshot to status and welcome identity", async () => {
+		const client = {
+			getHarness: async () => envelope({ path: HARNESS_ID, definition }),
+			explainHarness: async () => envelope({ fields: [] }),
+			getHarnessLock: async () => envelope({ path: "daily_driver.v1.lock.json", lock }),
+			getSession: async () => sessionSummary,
+		} as unknown as BreadboardClient;
+		const composer = new Composer({ terminal: new VirtualTerminal(120, 32) });
+		mode = new InteractiveMode(
+			session,
+			"test",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			composer,
+			undefined,
+			undefined,
+			undefined,
+			client,
+			HARNESS_ID,
+			undefined,
+			undefined,
+			() => ENGINE_SESSION_ID,
+		);
+
+		await mode.init({ suppressWelcomeIntro: true });
+
+		const status = Bun.stripANSI(mode.statusLine.renderBottomBar(120, "full"));
+		const welcome = Bun.stripANSI(mode.composer.welcome?.render(120).join("\n") ?? "");
+		expect(status).toContain("Daily Driver");
+		expect(welcome).toContain("Harness Daily Driver");
 	});
 });

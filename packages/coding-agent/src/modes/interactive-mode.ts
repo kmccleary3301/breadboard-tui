@@ -1068,6 +1068,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor);
 		this.statusLine = new StatusLineComponent(session);
+		this.statusLine.setHarness(this.harnessPort?.current() ?? null);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
 		this.#codexResetFireworksController = new CodexResetFireworksController(this);
 		this.statusLine.setCodexResetFireworksHandler(event => {
@@ -1235,6 +1236,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				logger.warn("BreadBoard harness snapshot unavailable", { error: String(error) });
 			}
 		}
+		this.statusLine.setHarness(this.harnessPort?.current() ?? null);
 		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
 
 		await logger.time(
@@ -1266,6 +1268,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			recentSessions,
 			lspServers: this.#getWelcomeLspServers(),
 		});
+		this.composer.welcome?.setHarness(this.harnessPort?.current() ?? null);
 		this.#persistComposerWelcome(modelName, providerName);
 		const headerBefore = this.#buildConfigWarningComponents();
 		const headerAfter: Component[] = [];
@@ -1460,7 +1463,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		);
 		if (this.harnessPort) {
 			this.#eventBusUnsubscribers.push(
-				this.harnessPort.subscribe(() => {
+				this.harnessPort.subscribe(snapshot => {
+					this.statusLine.setHarness(snapshot);
+					this.composer.welcome?.setHarness(snapshot);
 					this.#refreshHarnessPaletteCommands();
 					void this.refreshSlashCommandState().catch(error => {
 						logger.warn("BreadBoard harness palette refresh failed", { error: String(error) });
