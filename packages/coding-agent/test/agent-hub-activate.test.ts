@@ -598,6 +598,55 @@ describe("Agent hub Enter activation", () => {
 		expect(focusTargets.at(-1)).toBe(editor);
 		capturedHub!.dispose();
 	});
+
+	it("selector controller carries the initial harness panel to the hub", () => {
+		let capturedHub: AgentHubOverlayComponent | undefined;
+		const snapshot = {
+			harnessId: "daily_driver.yaml",
+			name: "Daily Driver",
+			lockHash: null,
+			generation: null,
+			mode: null,
+			lock: { effective_values: [] },
+			provenance: {},
+			loadedAt: 1,
+		} as const;
+		const editor = {};
+		const agents = new AgentRegistry();
+		const ctx = {
+			keybindings: { getKeys: () => [] },
+			ui: {
+				showOverlay: (component: AgentHubOverlayComponent) => {
+					capturedHub = component;
+					return { hide: () => {} };
+				},
+				setFocus: () => {},
+				requestRender: () => {},
+			},
+			editor,
+			editorContainer: {
+				children: [editor],
+				clear: () => {},
+				addChild: () => {},
+			},
+			collabGuest: { agentRegistry: agents, hubRemote: undefined },
+			focusAgentSession: async () => {},
+			session: { getToolByName: () => undefined, extensionRunner: undefined },
+			sessionManager: { getCwd: () => TEST_CWD, getSessionFile: () => null },
+			hideThinkingBlock: false,
+			harnessPort: { current: () => snapshot, subscribe: () => () => {} },
+		};
+		const controller = new SelectorController(ctx as unknown as InteractiveModeContext);
+
+		controller.showAgentHub(new SessionObserverRegistry(), {
+			initialSection: "harness",
+			initialHarnessPanel: "team",
+		});
+
+		expect(capturedHub).toBeDefined();
+		expect(Bun.stripANSI(capturedHub!.render(120).join("\n"))).toContain("Harness panel 2/8: team");
+		capturedHub!.dispose();
+	});
 });
 
 describe("Agent hub double-← gating", () => {

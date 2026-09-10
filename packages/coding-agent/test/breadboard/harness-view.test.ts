@@ -4,6 +4,7 @@ import {
 	HarnessView,
 	projectHarnessEffectiveRows,
 	projectHarnessEffectiveRowsByPanel,
+	type HarnessPanel,
 } from "../../src/modes/components/agent-hub/harness-view";
 import { initTheme } from "../../src/modes/theme/theme";
 
@@ -15,7 +16,11 @@ beforeAll(async () => {
 	await initTheme(false);
 });
 
-function viewFor(lock: Readonly<Record<string, unknown>>, overrides: Partial<HarnessSnapshot> = {}): HarnessView {
+function viewFor(
+	lock: Readonly<Record<string, unknown>>,
+	overrides: Partial<HarnessSnapshot> = {},
+	initialPanel: HarnessPanel = "overview",
+): HarnessView {
 	const snapshot: HarnessSnapshot = {
 		harnessId: "codex_e4.yaml",
 		name: "Codex E4",
@@ -31,6 +36,7 @@ function viewFor(lock: Readonly<Record<string, unknown>>, overrides: Partial<Har
 		getSnapshot: () => snapshot,
 		requestRender: () => {},
 		renderTabs: () => "1 agents  2 activity  3 messages  4 harness",
+		initialPanel,
 	});
 }
 
@@ -115,6 +121,25 @@ describe("HarnessView canonical lock projection", () => {
 		nextPanel(view, 1);
 		expect(rendered(view)).toContain("workspace.sandbox.driver: process");
 		expect(rendered(view)).toContain("No permissions.* or guardrails.* rows in the effective lock.");
+	});
+	test("opens directly on static panels and explains empty projections", () => {
+		const emptyLock = { effective_values: [] };
+		const cases = [
+			["team", 2, "No multi_agent.* rows in the effective lock."],
+			["prompts", 4, "No prompts.* rows in the effective lock."],
+			["evidence", 8, "No lock or generation metadata is available."],
+		] as const;
+
+		for (const [panel, panelNumber, emptyMessage] of cases) {
+			const view = viewFor(
+				emptyLock,
+				panel === "evidence" ? { lockHash: null, generation: null } : {},
+				panel,
+			);
+			const output = rendered(view);
+			expect(output).toContain(`Harness panel ${panelNumber}/8: ${panel}`);
+			expect(output).toContain(emptyMessage);
+		}
 	});
 
 	test("never renders redacted or secret-reference rows in any panel", () => {

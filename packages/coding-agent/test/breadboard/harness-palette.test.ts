@@ -34,7 +34,7 @@ describe("lock-derived harness palette", () => {
 	test("maps the real lock to the expected enabled command set and reasons", () => {
 		const commands = materializeHarnessCommands(snapshot(lockFixture), settings);
 		const enabled = new Set(commands.filter(command => command.enabled).map(command => command.name));
-		expect([...enabled].sort()).toEqual(["harness", "mode", "model"].sort());
+		expect([...enabled].sort()).toEqual(["evidence", "harness", "mode", "model", "prompts", "team"].sort());
 		expect(commands.find(command => command.name === "checkpoint")).toMatchObject({
 			enabled: false,
 			source: "long_running.enabled",
@@ -50,10 +50,17 @@ describe("lock-derived harness palette", () => {
 			source: "features.todos.enabled",
 			reason: expect.stringContaining("features.todos.enabled"),
 		});
+		expect(commands.find(command => command.name === "team")).toMatchObject({
+			enabled: true,
+			source: "multi_agent.enabled",
+		});
 		expect(commands.find(command => command.name === "prompts")).toMatchObject({
-			enabled: false,
+			enabled: true,
 			source: "prompts.*",
-			reason: "no host implementation",
+		});
+		expect(commands.find(command => command.name === "evidence")).toMatchObject({
+			enabled: true,
+			source: "evidence",
 		});
 	});
 
@@ -74,13 +81,16 @@ describe("lock-derived harness palette", () => {
 		expect(skills?.getAutocompleteDescription?.()).toContain("no skills leaf");
 	});
 
-	test("dims unsupported commands with a reason and hides them when configured", () => {
+	test("dims unsupported commands with a reason and keeps static panels available", () => {
 		const lock = {
 			effective_values: [{ path: "modes", value: [{ name: "build" }], visibility: "model-visible" }],
 		};
 		const dimmed = materializeHarnessCommands(snapshot(lock), settings);
 		const mode = dimmed.find(command => command.name === "mode");
 		expect(mode).toMatchObject({ enabled: true, source: "modes" });
+		for (const name of ["team", "prompts", "evidence"]) {
+			expect(dimmed.find(command => command.name === name)).toMatchObject({ enabled: true });
+		}
 		expect(dimmed.find(command => command.name === "longrun")).toMatchObject({
 			enabled: false,
 			reason: expect.stringContaining("long_running.enabled"),

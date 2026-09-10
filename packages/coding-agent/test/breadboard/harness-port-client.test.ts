@@ -70,7 +70,10 @@ function clientFor(calls: string[], nextSession: SessionSummary = session): Brea
 			calls.push(`session:${id}`);
 			return nextSession;
 		},
-		listHarness: async () => envelope({ harnesses: ["daily_driver.v1.yaml", "codex.yaml"], count: 2 }),
+		listHarness: async directory => {
+			calls.push(`list:${directory ?? "."}`);
+			return envelope({ harnesses: ["daily_driver.v1.yaml", "codex.yaml"], count: 2 });
+		},
 	} as BreadboardClient;
 }
 
@@ -194,6 +197,12 @@ test("listHarnessChoices parses public harness references", async () => {
 		{ id: "daily_driver.v1.yaml", name: "daily_driver.v1", path: "daily_driver.v1.yaml" },
 		{ id: "codex.yaml", name: "codex", path: "codex.yaml" },
 	]);
+});
+
+test("listHarnessChoices forwards an explicit directory", async () => {
+	const calls: string[] = [];
+	await listHarnessChoices(clientFor(calls), "agent_configs");
+	expect(calls).toContain("list:agent_configs");
 });
 
 test("resolves bare harness names through the engine-resolvable v2 path", async () => {

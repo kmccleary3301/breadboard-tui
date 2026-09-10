@@ -11,6 +11,7 @@ export interface HarnessViewDeps {
 	readonly getSnapshot: () => HarnessSnapshot | null;
 	readonly requestRender: () => void;
 	readonly renderTabs: () => string;
+	readonly initialPanel?: HarnessPanel;
 }
 
 const PANELS: readonly HarnessPanel[] = [
@@ -191,8 +192,8 @@ function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly H
 			break;
 		case "evidence":
 			fields = [
-				{ label: "Lock hash", path: "lock_hash", value: snapshot.lockHash },
-				{ label: "Generation", path: "generation", value: snapshot.generation },
+				{ label: "Lock hash", path: "lock_hash", value: snapshot.lockHash ?? undefined },
+				{ label: "Generation", path: "generation", value: snapshot.generation ?? undefined },
 			];
 			break;
 	}
@@ -200,9 +201,11 @@ function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly H
 }
 
 export class HarnessView {
-	#panel: HarnessPanel = "overview";
+	#panel: HarnessPanel;
 
-	constructor(private readonly deps: HarnessViewDeps) {}
+	constructor(private readonly deps: HarnessViewDeps) {
+		this.#panel = deps.initialPanel ?? "overview";
+	}
 
 	render(width: number, height: number): readonly string[] {
 		const snapshot = this.deps.getSnapshot();
@@ -212,10 +215,20 @@ export class HarnessView {
 		} else {
 			const panelIndex = PANELS.indexOf(this.#panel) + 1;
 			body.push(theme.fg("accent", `Harness panel ${panelIndex}/${PANELS.length}: ${this.#panel}`), "");
-			for (const field of panelFields(snapshot, this.#panel)) {
+			const fields = panelFields(snapshot, this.#panel);
+			for (const field of fields) {
 				body.push(
 					`${theme.bold(field.label)}: ${displayValue(field.value)}${provenanceSuffix(snapshot, field.path)}`,
 				);
+			}
+			if (fields.length === 0) {
+				if (this.#panel === "team") {
+					body.push(theme.fg("muted", "No multi_agent.* rows in the effective lock."));
+				} else if (this.#panel === "prompts") {
+					body.push(theme.fg("muted", "No prompts.* rows in the effective lock."));
+				} else if (this.#panel === "evidence") {
+					body.push(theme.fg("muted", "No lock or generation metadata is available."));
+				}
 			}
 			if (
 				this.#panel === "trust" &&

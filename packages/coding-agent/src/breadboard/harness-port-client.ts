@@ -243,7 +243,7 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 			}
 		},
 		setSessionModel: options.setSessionModel,
-		listHarnessChoices: () => listHarnessChoices(options.client),
+		listHarnessChoices: (directory?: string) => listHarnessChoices(options.client, directory),
 	};
 }
 
@@ -332,9 +332,13 @@ export async function resolveHarnessId(
 	return (await resolveHarness(client, requested)).id;
 }
 
-export async function listHarnessChoices(client: BreadboardClient): Promise<readonly HarnessChoice[]> {
+export async function listHarnessChoices(
+	client: BreadboardClient,
+	directory?: string,
+): Promise<readonly HarnessChoice[]> {
 	try {
-		const result = await client.listHarness();
+		const result =
+			directory === undefined ? await client.listHarness() : await client.listHarness(directory);
 		const data = publicData(result, "harness.list");
 		if (!Array.isArray(data.harnesses)) throw new Error("BreadBoard harness.list response missing harnesses");
 		return data.harnesses.map(value => choiceFromPath(requiredString(value, "harness path")));

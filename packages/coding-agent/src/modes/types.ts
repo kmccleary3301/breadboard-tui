@@ -34,6 +34,7 @@ import type { AssistantMessageComponent } from "./components/assistant-message";
 import type { BashExecutionComponent } from "./components/bash-execution";
 import type { CustomEditor } from "./components/custom-editor";
 import type { EvalExecutionComponent } from "./components/eval-execution";
+import type { HarnessPanel } from "./components/agent-hub/harness-view";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorOptions } from "./components/hook-selector";
@@ -110,6 +111,7 @@ export interface AgentHubOpenOptions {
 	requireContent?: boolean;
 	armCloseTap?: boolean;
 	initialSection?: "agents" | "activity" | "messages" | "harness";
+	initialHarnessPanel?: HarnessPanel;
 }
 
 export interface InteractiveModeContext {

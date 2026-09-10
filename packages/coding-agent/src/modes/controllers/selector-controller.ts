@@ -2669,6 +2669,7 @@ export class SelectorController {
 			hubKeys,
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
 			initialSection: options?.initialSection,
+			initialHarnessPanel: options?.initialHarnessPanel,
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
 			registry: this.ctx.collabGuest?.agentRegistry,

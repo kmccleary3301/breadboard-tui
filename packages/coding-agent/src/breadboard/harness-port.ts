@@ -74,9 +74,9 @@ export interface HarnessPort {
 	readonly setSessionSkills?: (skills: readonly string[]) => Promise<void>;
 	/**
 	 * List harness definitions from the current BreadBoard engine workspace.
-	 * The public control-plane operation does not accept a directory argument.
+	 * The optional directory is forwarded to the public harness operation.
 	 */
-	readonly listHarnessChoices?: () => Promise<
+	readonly listHarnessChoices?: (directory?: string) => Promise<
 		readonly { readonly id: string; readonly name: string; readonly path: string }[]
 	>;
 }

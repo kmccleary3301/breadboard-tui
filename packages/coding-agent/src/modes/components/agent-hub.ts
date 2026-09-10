@@ -75,7 +75,7 @@ import {
 	treeMetadataIndent,
 } from "./agent-hub-renderer";
 import { AgentTranscriptViewer } from "./agent-transcript-viewer";
-import { HarnessView } from "./agent-hub/harness-view";
+import { HarnessView, type HarnessPanel } from "./agent-hub/harness-view";
 import type { HarnessPort } from "../../breadboard/harness-port";
 import { AgentHubMessagesView, type AgentHubRemote } from "./agent-hub/messages-view";
 import {
@@ -170,6 +170,8 @@ export interface AgentHubDeps {
 	sessionFile?: string | null;
 	/** Initial top-level projection; slash commands deep-link into this surface. */
 	initialSection?: AgentHubSection;
+	/** Initial harness panel when the harness section is selected. */
+	initialHarnessPanel?: HarnessPanel;
 	/** Injectable unified activity source; production creates one from local or remote transcripts. */
 	activity?: AgentActivityIndex;
 
@@ -312,6 +314,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			getSnapshot: () => this.#harnessPort?.current() ?? null,
 			requestRender: this.#requestRender,
 			renderTabs: () => this.#sectionTabs(),
+			initialPanel: deps.initialHarnessPanel,
 		});
 		this.#messages = new AgentHubMessagesView({
 			registry: this.#registry,

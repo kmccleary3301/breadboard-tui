@@ -37,15 +37,16 @@ const LOCK_COMMANDS = [
 ] as const;
 
 const NO_HOST_IMPLEMENTATION: Readonly<Record<string, true>> = {
-	team: true,
 	spawn: true,
 	wait: true,
 	bus: true,
 	longrun: true,
 	checkpoint: true,
-	prompts: true,
-	evidence: true,
 };
+
+function isStaticPanelCommand(name: string): name is "team" | "prompts" | "evidence" {
+	return name === "team" || name === "prompts" || name === "evidence";
+}
 
 function record(value: unknown): PublicData | undefined {
 	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as PublicData) : undefined;
@@ -127,7 +128,7 @@ export function materializeHarnessCommands(
 	const lock = snapshot.lock ?? {};
 	const specs: HarnessCommandSpec[] = [{ name: "harness", source: "harness", enabled: true }];
 	for (const [name, source] of LOCK_COMMANDS) {
-		const enabledByLock = lockFieldPresent(lock, source);
+		const enabledByLock = isStaticPanelCommand(name) || lockFieldPresent(lock, source);
 		const hostAvailable = NO_HOST_IMPLEMENTATION[name] !== true;
 		const enabled = enabledByLock && hostAvailable;
 		const reason = enabled ? undefined : !enabledByLock ? noHostReason(source, name) : "no host implementation";
@@ -193,9 +194,11 @@ export function harnessCommandsAsSlashCommands(
 		const command: SlashCommand = {
 			name: spec.name,
 			description:
-				spec.name === "harness" && header
-					? `${header} · ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`
-					: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
+				isStaticPanelCommand(spec.name)
+					? "[Harness] Static harness panel"
+					: spec.name === "harness" && header
+						? `${header} · ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`
+						: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
 			allowArgs: true,
 		};
 		if (snapshot && ["mode", "model", "role", "skills"].includes(spec.name)) {
@@ -216,7 +219,7 @@ function harnessUse(runtime: TuiSlashCommandRuntime, target: string): Promise<bo
 	return runtime.ctx.startHarnessSession(target);
 }
 
-async function harnessList(runtime: TuiSlashCommandRuntime): Promise<boolean> {
+async function harnessList(runtime: TuiSlashCommandRuntime, directory?: string): Promise<boolean> {
 	const snapshot = runtime.ctx.harnessPort?.current() ?? null;
 	const listChoices = runtime.ctx.harnessPort?.listHarnessChoices;
 	if (!listChoices) {
@@ -224,7 +227,7 @@ async function harnessList(runtime: TuiSlashCommandRuntime): Promise<boolean> {
 		return true;
 	}
 	try {
-		const choices = await listChoices();
+		const choices = directory === undefined ? await listChoices() : await listChoices(directory);
 		if (choices.length === 0) {
 			runtime.ctx.showStatus("No BreadBoard harnesses available");
 			return true;
@@ -410,15 +413,16 @@ async function executeDynamicCommand(
 ): Promise<boolean> {
 	const port = runtime.ctx.harnessPort;
 	if (parsed.name === "plan" || parsed.name === "todo") return false;
+	if (isStaticPanelCommand(parsed.name)) {
+		runtime.ctx.showAgentHub({ initialSection: "harness", initialHarnessPanel: parsed.name });
+		return true;
+	}
 	if (
-		parsed.name === "team" ||
 		parsed.name === "spawn" ||
 		parsed.name === "wait" ||
 		parsed.name === "bus" ||
 		parsed.name === "longrun" ||
-		parsed.name === "checkpoint" ||
-		parsed.name === "prompts" ||
-		parsed.name === "evidence"
+		parsed.name === "checkpoint"
 	) {
 		runtime.ctx.showStatus(`/${parsed.name} unavailable: no host implementation`);
 		return true;
@@ -491,7 +495,7 @@ export async function executeHarnessSlashCommand(
 			);
 			return true;
 		}
-		if (verb === "list") return harnessList(runtime);
+		if (verb === "list") return harnessList(runtime, rest || undefined);
 		if (verb === "use") {
 			if (!rest) {
 				runtime.ctx.showStatus("Usage: /harness use <name|path>");
@@ -534,7 +538,7 @@ export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
 		description: "Inspect and switch the active BreadBoard harness",
 		allowArgs: true,
 		subcommands: [
-			{ name: "list", description: "List available harnesses" },
+			{ name: "list", description: "List available harnesses", usage: "[directory]" },
 			{ name: "use", description: "Start a new session on a harness", usage: "<name|path>" },
 			{ name: "explain", description: "Show field provenance", usage: "[field]" },
 			{ name: "diff", description: "Compare harness locks", usage: "<a> <b>" },
