@@ -138,8 +138,34 @@ describe("WelcomeComponent harness identity", () => {
 		expect(plain).toContain("Harness codex-e4 (build, g3) · team 2 · native tools · responses API ·");
 		expect(plain).toContain("plan→build · /harness");
 	});
+	it("renders only name, known session fields, and hint when the lock is null", () => {
+		// Catches lock consumers that fabricate team or posture values when no lock exists.
+		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
+		welcome.setHarness({ ...harnessSnapshot, lock: null });
+
+		const plain = welcome.render(220).map(stripAnsi).join("\n");
+
+		expect(plain).toContain("Harness codex-e4 (build, g3)");
+		expect(plain).toContain("/harness");
+		expect(plain).not.toContain("team 2");
+		expect(plain).not.toContain("native tools");
+	});
+
+	it("omits null mode and generation without empty punctuation", () => {
+		// Catches placeholder mode/generation text and dangling separators in partial snapshots.
+		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
+		welcome.setHarness({ ...harnessSnapshot, mode: null, generation: null });
+
+		const plain = welcome.render(220).map(stripAnsi).join("\n");
+
+		expect(plain).toContain("Harness codex-e4");
+		expect(plain).toContain("team 2");
+		expect(plain).toContain("native tools");
+		expect(plain).not.toContain("(build, g3)");
+	});
 
 	it("omits the harness identity line when no snapshot is active", () => {
+		// Catches stale identity surviving after the harness port clears its current snapshot.
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
 		welcome.setHarness(null);
 
