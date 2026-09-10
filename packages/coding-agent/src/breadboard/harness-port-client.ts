@@ -153,13 +153,13 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 	const now = options.now ?? Date.now;
 	const refresh = async (_reason: HarnessRefreshReason): Promise<HarnessSnapshot | null> => {
 		const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
-		const [harness, explanation, lock, session] = await Promise.all([
-			options.client.getHarness(options.harnessId),
-			options.client.explainHarness(options.harnessId),
-			options.client.getHarnessLock(lockPathForHarness(options.harnessId)),
+		const { id: harnessId, result: harness } = await resolveHarnessResult(options.client, options.harnessId);
+		const [explanation, lock, session] = await Promise.all([
+			options.client.explainHarness(harnessId),
+			options.client.getHarnessLock(lockPathForHarness(harnessId)),
 			options.client.getSession(sessionId),
 		]);
-		const next = parseSnapshot(harness, explanation, lock, session, options.harnessId, now);
+		const next = parseSnapshot(harness, explanation, lock, session, harnessId, now);
 		if (snapshotIdentity(next) !== snapshotIdentity(current)) {
 			current = next;
 			for (const listener of listeners) listener(next);
@@ -177,6 +177,22 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 	};
 }
 
+async function resolveHarnessResult(
+	client: BreadboardClient,
+	requested: string,
+): Promise<{ readonly id: string; readonly result: PublicResult }> {
+	try {
+		return { id: requested, result: await client.getHarness(requested) };
+	} catch (error) {
+		if (requested !== "daily_driver" || !(error instanceof Error) || !error.message.includes("path is unavailable")) {
+			throw error;
+		}
+		const initialized = publicData(await client.createHarness("."), "harness.init");
+		const initializedPath = requiredString(initialized.path, "initialized harness path");
+		return { id: initializedPath, result: await client.getHarness(initializedPath) };
+	}
+}
+
 function choiceFromPath(path: string): HarnessChoice {
 	const name =
 		path
@@ -188,19 +204,10 @@ function choiceFromPath(path: string): HarnessChoice {
 
 /** Resolve a CLI or palette harness reference to the engine id and display name. */
 export async function resolveHarness(client: BreadboardClient, requested: string): Promise<ResolvedHarness> {
-	let data: PublicData;
-	try {
-		data = publicData(await client.getHarness(requested), "harness.get");
-	} catch (error) {
-		if (requested !== "daily_driver" || !(error instanceof Error) || !error.message.includes("path is unavailable")) {
-			throw error;
-		}
-		const initialized = publicData(await client.createHarness("."), "harness.init");
-		const initializedPath = requiredString(initialized.path, "initialized harness path");
-		data = publicData(await client.getHarness(initializedPath), "harness.get");
-	}
+	const { id: resolvedId, result } = await resolveHarnessResult(client, requested);
+	const data = publicData(result, "harness.get");
 	const harness = isRecord(data.harness) ? data.harness : data;
-	const id = typeof harness.path === "string" && harness.path.trim() ? harness.path : requested;
+	const id = typeof harness.path === "string" && harness.path.trim() ? harness.path : resolvedId;
 	const definition =
 		(isRecord(data.definition) && data.definition) || (isRecord(harness.definition) && harness.definition) || harness;
 	return { id, name: harnessName(definition, requested) };
