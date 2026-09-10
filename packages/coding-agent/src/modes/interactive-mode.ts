@@ -870,7 +870,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#observerUiSyncTimer?: NodeJS.Timeout;
 	#observerUiSyncNeedsTodoReconcile = false;
-	#harnessRefreshTimer?: NodeJS.Timeout;
 	#agentRegistryUnsubscribe?: () => void;
 	#agentRegistrySubscriptionTarget?: AgentRegistry;
 	#mcpStatusOrder: string[] = [];
@@ -902,10 +901,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
 		this.settings = session.settings;
-		const sessionId = this.sessionManager.getSessionId();
 		this.harnessPort =
-			harnessClient && harnessId && sessionId
-				? createHarnessPort({ client: harnessClient, sessionId, harnessId })
+			harnessClient && harnessId
+				? createHarnessPort({
+						client: harnessClient,
+						sessionId: () => this.sessionManager.getSessionId(),
+						harnessId,
+					})
 				: undefined;
 		const preferences = {
 			quiet: settings.get("startup.quiet"),
@@ -1200,12 +1202,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			} catch (error) {
 				logger.warn("BreadBoard harness snapshot unavailable", { error: String(error) });
 			}
-			this.#harnessRefreshTimer = setInterval(() => {
-				void this.harnessPort?.refresh("generation-change").catch(error => {
-					logger.warn("BreadBoard harness refresh failed", { error: String(error) });
-				});
-			}, 1_000);
-			this.#harnessRefreshTimer.unref?.();
 		}
 		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
 
@@ -1417,6 +1413,11 @@ export class InteractiveMode implements InteractiveModeContext {
 				}
 				if (event.type === "config_warnings_changed") {
 					this.#syncConfigWarningHeader();
+				}
+				if (event.type === "agent_end" && this.harnessPort) {
+					void this.harnessPort.refresh("turn-boundary").catch(error => {
+						logger.warn("BreadBoard harness refresh failed at turn boundary", { error: String(error) });
+					});
 				}
 				void this.#handleGoalSessionEvent(event);
 			}),
@@ -4822,14 +4823,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#appearanceRefreshRequest = undefined;
 		// Last chance to refresh the startup status placeholder for the next launch.
 		this.#persistComposerStatus();
-		if (this.#harnessRefreshTimer) {
-			clearInterval(this.#harnessRefreshTimer);
-			this.#harnessRefreshTimer = undefined;
-		}
-		if (this.loadingAnimation) {
-			this.#stopLoadingAnimation(false);
-		}
-		this.#cleanupMicAnimation();
 		// Stop the shared tool-spinner ticker: a live block missed by per-component
 		// stopAnimation would otherwise keep an 80ms interval pinning the process.
 		stopSharedSpinnerTicker();

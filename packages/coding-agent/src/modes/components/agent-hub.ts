@@ -75,6 +75,8 @@ import {
 	treeMetadataIndent,
 } from "./agent-hub-renderer";
 import { AgentTranscriptViewer } from "./agent-transcript-viewer";
+import { HarnessView } from "./agent-hub/harness-view";
+import type { HarnessPort } from "../../breadboard/harness-port";
 import { AgentHubMessagesView, type AgentHubRemote } from "./agent-hub/messages-view";
 import {
 	bottomBorder,
@@ -160,6 +162,8 @@ export interface AgentHubDeps {
 	proseOnlyThinking?: () => boolean;
 	/** Keys toggling tool output expansion (app.tools.expand). */
 	expandKeys?: KeyId[];
+	/** BreadBoard harness snapshot for the read-only harness hub section. */
+	harnessPort?: HarnessPort;
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
 	/** Current main session file; used to seed parked historical subagents after restart. */
@@ -205,6 +209,8 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#activitySyncStamp = new Map<string, string>();
 
 	#messages: AgentHubMessagesView;
+	#harness: HarnessView;
+	#harnessPort: HarnessPort | undefined;
 	// Table state
 	#rows: AgentRef[] = [];
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
@@ -301,6 +307,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#proseOnlyThinking = deps.proseOnlyThinking;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
+		this.#harnessPort = deps.harnessPort;
+		this.#harness = new HarnessView({
+			getSnapshot: () => this.#harnessPort?.current() ?? null,
+			requestRender: this.#requestRender,
+			renderTabs: () => this.#sectionTabs(),
+		});
 		this.#messages = new AgentHubMessagesView({
 			registry: this.#registry,
 			irc: this.#irc,
@@ -313,6 +325,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		});
 
 		this.#unsubscribers.push(this.#registry.onChange(() => this.#scheduleDataChange()));
+		if (this.#harnessPort) {
+			this.#unsubscribers.push(this.#harnessPort.subscribe(() => this.#requestRender()));
+		}
 		this.#unsubscribers.push(this.#observers.onChange(() => this.#scheduleDataChange()));
 		if (!this.#remote) {
 			this.#unsubscribers.push(
@@ -384,7 +399,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 				? this.#renderActivityTable(width, termHeight)
 				: this.#section === "messages"
 					? this.#messages.render(width, termHeight, this.#hitRows)
-					: this.#renderTable(width, termHeight)
+					: this.#section === "harness"
+						? this.#harness.render(width, termHeight)
+						: this.#renderTable(width, termHeight)
 		).map(line => clampHubLine(line, width));
 		if (frame.length <= termHeight) return frame;
 
@@ -433,8 +450,13 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			this.#switchSection("messages");
 			return;
 		}
+		if (keyData === "4") {
+			this.#switchSection("harness");
+			return;
+		}
 		if (this.#section === "activity") this.#handleActivityInput(keyData);
 		else if (this.#section === "messages") this.#messages.handleInput(keyData);
+		else if (this.#section === "harness") this.#harness.handleInput(keyData);
 		else this.#handleTableInput(keyData);
 	}
 
@@ -703,7 +725,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			this.#section === section
 				? theme.bg("selectedBg", theme.bold(theme.fg("accent", ` ${label} `)))
 				: theme.fg("muted", ` ${label} `);
-		return `${tab("agents", "1 Agents")}${theme.fg("dim", theme.sep.dot)}${tab("activity", "2 Activity")}${theme.fg("dim", theme.sep.dot)}${tab("messages", "3 Messages")}`;
+		return `${tab("agents", "1 Agents")}${theme.fg("dim", theme.sep.dot)}${tab("activity", "2 Activity")}${theme.fg("dim", theme.sep.dot)}${tab("messages", "3 Messages")}${theme.fg("dim", theme.sep.dot)}${tab("harness", "4 Harness")}`;
 	}
 
 	#renderActivityTable(width: number, termHeight: number): string[] {

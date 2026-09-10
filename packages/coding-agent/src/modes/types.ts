@@ -2,6 +2,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, Message, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Component, Container, EditorTheme, Loader, Spacer, Text, TUI } from "@oh-my-pi/pi-tui";
+import type { HarnessPort } from "../breadboard/harness-port";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import type { KeybindingsManager } from "../config/keybindings";
@@ -108,7 +109,7 @@ export interface RenderSessionContextOptions {
 export interface AgentHubOpenOptions {
 	requireContent?: boolean;
 	armCloseTap?: boolean;
-	initialSection?: "agents" | "activity" | "messages";
+	initialSection?: "agents" | "activity" | "messages" | "harness";
 }
 
 export interface InteractiveModeContext {
@@ -136,6 +137,7 @@ export interface InteractiveModeContext {
 	syncEditorSpelling(): void;
 
 	// Session access
+	readonly harnessPort: HarnessPort | undefined;
 	session: AgentSession;
 	sessionManager: SessionManager;
 	/** The current session display name / title. */

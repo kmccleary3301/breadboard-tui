@@ -2677,6 +2677,7 @@ export class SelectorController {
 			isBuiltInTool: name => this.ctx.session.hasBuiltInTool(name),
 			getMessageRenderer: type => this.ctx.session.extensionRunner?.getMessageRenderer(type),
 			cwd: this.ctx.sessionManager.getCwd(),
+			harnessPort: this.ctx.harnessPort,
 			hideThinkingBlock: () => this.ctx.effectiveHideThinkingBlock,
 			proseOnlyThinking: () => this.ctx.proseOnlyThinking,
 			focusAgent: id => this.ctx.focusAgentSession(id),

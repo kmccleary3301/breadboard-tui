@@ -3,9 +3,12 @@
  * BreadBoard settings tab, status segment and welcome identity (bb-ewnk.5).
  *
  * A BreadBoard session is pinned to one effective harness lock; "switching" means starting a new
- * session on another harness. The snapshot is loaded once per session open and once per generation
- * change (`bb-2j1u.22/proposal.md` §2.1-2.5, performance guardrail §5). It never runs on the frame
+ * session open and once per generation change (`bb-2j1u.22/proposal.md` §2.1-2.5, performance guardrail §5). It never runs on the frame
  * path: renderers read `current()` synchronously and re-render from `subscribe` notifications.
+ *
+ * The SDK AgentSession event union exposes `agent_end` but no effective-lock or
+ * generation-change event, so `turn-boundary` is the documented fallback refresh
+ * reason until that public event exists.
  */
 
 export interface HarnessProvenance {
@@ -34,7 +37,7 @@ export interface HarnessSnapshot {
 	readonly loadedAt: number;
 }
 
-export type HarnessRefreshReason = "session-open" | "generation-change" | "manual";
+export type HarnessRefreshReason = "session-open" | "generation-change" | "turn-boundary" | "manual";
 
 export interface HarnessPort {
 	/** Last loaded snapshot; `null` before the first successful load or when no harness is bound. */

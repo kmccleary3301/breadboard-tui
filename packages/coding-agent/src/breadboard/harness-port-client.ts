@@ -15,7 +15,7 @@ type HarnessChoice = {
 
 export interface CreateHarnessPortOptions {
 	readonly client: BreadboardClient;
-	readonly sessionId: string;
+	readonly sessionId: string | (() => string);
 	/** Harness source path/id accepted by the public harness operations. */
 	readonly harnessId: string;
 	readonly now?: () => number;
@@ -137,11 +137,12 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 	const listeners = new Set<(snapshot: HarnessSnapshot | null) => void>();
 	const now = options.now ?? Date.now;
 	const refresh = async (_reason: HarnessRefreshReason): Promise<HarnessSnapshot | null> => {
+		const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
 		const [harness, explanation, lock, session] = await Promise.all([
 			options.client.getHarness(options.harnessId),
 			options.client.explainHarness(options.harnessId),
 			options.client.getHarnessLock(lockPathForHarness(options.harnessId)),
-			options.client.getSession(options.sessionId),
+			options.client.getSession(sessionId),
 		]);
 		const next = parseSnapshot(harness, explanation, lock, session, options.harnessId, now);
 		if (snapshotIdentity(next) !== snapshotIdentity(current)) {
