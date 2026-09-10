@@ -1,7 +1,7 @@
 import type { PublicResult } from "@breadboard/sdk";
-import type { BreadboardClient, SessionSummary } from "@breadboard/sdk/engine";
+import { ApiError, type BreadboardClient, type SessionSummary } from "@breadboard/sdk/engine";
 import { describe, expect, test } from "bun:test";
-import { createHarnessPort, listHarnessChoices } from "../../src/breadboard/harness-port-client";
+import { createHarnessPort, listHarnessChoices, resolveHarnessId } from "../../src/breadboard/harness-port-client";
 
 const envelope = (data: Readonly<Record<string, unknown>>): PublicResult => ({
 	schema_version: "bb.cli.result.v1",
@@ -155,4 +155,36 @@ test("listHarnessChoices parses public harness references", async () => {
 		{ id: "daily_driver.v1.yaml", name: "daily_driver.v1", path: "daily_driver.v1.yaml" },
 		{ id: "codex.yaml", name: "codex", path: "codex.yaml" },
 	]);
+});
+
+test("resolves bare harness names through the engine-resolvable v2 path", async () => {
+	const calls: string[] = [];
+	const client = {
+		getHarness: async (id: string) => {
+			calls.push(id);
+			if (id !== "agent_configs/v2/codex.yaml") throw new ApiError("path_unavailable: path is unavailable", 404, {});
+			return envelope({ path: id, definition });
+		},
+	} as BreadboardClient;
+
+	await expect(resolveHarnessId(client, "codex")).resolves.toBe("agent_configs/v2/codex.yaml");
+	expect(calls).toEqual(["agent_configs/v2/codex.yaml"]);
+});
+
+test("surfaces a named harness error with the SDK error code", async () => {
+	const client = {
+		getHarness: async () => {
+			throw new ApiError("path_unavailable: path is unavailable", 404, {
+				error: { error_code: "path_unavailable", message: "path is unavailable" },
+			});
+		},
+	} as unknown as BreadboardClient;
+
+	await expect(resolveHarnessId(client, "missing")).rejects.toMatchObject({
+		name: "HarnessResolutionError",
+		code: "harness_unavailable",
+		sdkCode: "path_unavailable",
+		status: 404,
+	});
+	await expect(resolveHarnessId(client, "missing")).rejects.toThrow("BreadBoard harness unavailable");
 });

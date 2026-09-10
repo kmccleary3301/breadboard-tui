@@ -1,4 +1,4 @@
-import type { BreadboardClient, SessionSummary } from "@breadboard/sdk/engine";
+import { ApiError, type BreadboardClient, type SessionSummary } from "@breadboard/sdk/engine";
 import type { PublicResult } from "@breadboard/sdk";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { HarnessPort, HarnessProvenance, HarnessRefreshReason, HarnessSnapshot } from "./harness-port";
@@ -17,6 +17,22 @@ type HarnessChoice = {
 	readonly name: string;
 	readonly path: string;
 };
+
+export class HarnessResolutionError extends Error {
+	readonly code = "harness_unavailable";
+
+	constructor(
+		readonly requested: string,
+		readonly operation: string,
+		readonly status: number | undefined,
+		readonly sdkCode: string | undefined,
+		message: string,
+		cause?: unknown,
+	) {
+		super(`BreadBoard harness unavailable: ${message}`, { cause });
+		this.name = "HarnessResolutionError";
+	}
+}
 
 export interface CreateHarnessPortOptions {
 	readonly client: BreadboardClient;
@@ -220,16 +236,53 @@ async function resolveHarnessResult(
 	client: BreadboardClient,
 	requested: string,
 ): Promise<{ readonly id: string; readonly result: PublicResult }> {
-	try {
-		return { id: requested, result: await client.getHarness(requested) };
-	} catch (error) {
-		if (requested !== "daily_driver" || !(error instanceof Error) || !error.message.includes("path is unavailable")) {
-			throw error;
+	const candidates =
+		requested.includes("/") || /\.(?:yaml|yml|json)$/u.test(requested)
+			? [requested]
+			: [`agent_configs/v2/${requested}.yaml`, `agent_configs/${requested}.yaml`, `${requested}.yaml`, requested];
+	let lastError: unknown;
+	for (const candidate of candidates) {
+		try {
+			return { id: candidate, result: await client.getHarness(candidate) };
+		} catch (error) {
+			lastError = error;
+			if (!(error instanceof ApiError) || error.status !== 404) throw error;
 		}
-		const initialized = publicData(await client.createHarness("."), "harness.init");
-		const initializedPath = requiredString(initialized.path, "initialized harness path");
-		return { id: initializedPath, result: await client.getHarness(initializedPath) };
 	}
+	if (requested === "daily_driver") {
+		try {
+			const initialized = publicData(await client.createHarness("."), "harness.init");
+			const initializedPath = requiredString(initialized.path, "initialized harness path");
+			return { id: initializedPath, result: await client.getHarness(initializedPath) };
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	const apiError = lastError instanceof ApiError ? lastError : undefined;
+	const body = apiError?.body;
+	const errorBody =
+		typeof body === "object" && body !== null && !Array.isArray(body) && "error" in body ? body.error : undefined;
+	const sdkCode =
+		typeof errorBody === "object" && errorBody !== null && !Array.isArray(errorBody) && "error_code" in errorBody
+			? typeof errorBody.error_code === "string"
+				? errorBody.error_code
+				: undefined
+			: undefined;
+	const message =
+		typeof errorBody === "object" && errorBody !== null && !Array.isArray(errorBody) && "message" in errorBody
+			? typeof errorBody.message === "string"
+				? errorBody.message
+				: (apiError?.message ?? String(lastError))
+			: (apiError?.message ?? String(lastError));
+	const wrapped = new HarnessResolutionError(requested, "harness.get", apiError?.status, sdkCode, message, lastError);
+	logger.error("BreadBoard harness resolution failed", {
+		requested,
+		operation: wrapped.operation,
+		status: wrapped.status ?? null,
+		sdkCode: wrapped.sdkCode ?? null,
+		error: wrapped.message,
+	});
+	throw wrapped;
 }
 
 function choiceFromPath(path: string): HarnessChoice {
