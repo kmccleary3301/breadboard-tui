@@ -29,7 +29,35 @@ function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
 		: undefined;
 }
 
+function effectiveValue(
+	lock: Readonly<Record<string, unknown>>,
+	path: string,
+): { readonly found: boolean; readonly value: unknown } {
+	const entries = lock.effective_values;
+	if (Array.isArray(entries)) {
+		for (const entry of entries) {
+			const object = record(entry);
+			if (object?.path !== path) continue;
+			return { found: true, value: object.visibility === "redacted" ? undefined : object.value };
+		}
+	}
+	return { found: false, value: undefined };
+}
+
+function effectivePathPresent(lock: Readonly<Record<string, unknown>>, path: string): boolean {
+	const entries = lock.effective_values;
+	return (
+		Array.isArray(entries) &&
+		entries.some(entry => {
+			const object = record(entry);
+			return object?.path === path || (typeof object?.path === "string" && object.path.startsWith(`${path}.`));
+		})
+	);
+}
+
 function valueAt(lock: Readonly<Record<string, unknown>>, path: string): unknown {
+	const projected = effectiveValue(lock, path);
+	if (projected.found) return projected.value;
 	let value: unknown = lock;
 	for (const part of path.split(".")) {
 		const current = record(value);
@@ -37,6 +65,12 @@ function valueAt(lock: Readonly<Record<string, unknown>>, path: string): unknown
 		value = current[part];
 	}
 	return value;
+}
+
+function strings(value: unknown): readonly string[] {
+	if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+	if (typeof value === "string") return [value];
+	return [];
 }
 
 function settingValue(settings: Settings, key: string): unknown {
@@ -53,12 +87,6 @@ export function readHarnessPaletteSettings(settings: Settings): HarnessPaletteSe
 		paletteHeader: typeof paletteHeader === "boolean" ? paletteHeader : true,
 		unsupportedCommands: unsupportedCommands === "hide" ? "hide" : "dim",
 	};
-}
-
-function strings(value: unknown): readonly string[] {
-	if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
-	if (typeof value === "string") return [value];
-	return [];
 }
 
 function commandNames(value: unknown): ReadonlySet<string> {
@@ -82,10 +110,11 @@ function unsupportedReasons(lock: Readonly<Record<string, unknown>>): ReadonlyMa
 
 function lockFieldPresent(lock: Readonly<Record<string, unknown>>, path: string): boolean {
 	const value = valueAt(lock, path);
-	if (value === undefined || value === null) return false;
+	const present = value !== undefined && value !== null ? true : effectivePathPresent(lock, path);
+	if (!present) return false;
 	if (path === "long_running" || path === "multi_agent") {
-		const object = record(value);
-		return object?.enabled !== false;
+		const enabled = valueAt(lock, `${path}.enabled`);
+		return enabled !== false;
 	}
 	return Array.isArray(value) ? value.length > 0 : true;
 }
@@ -129,16 +158,23 @@ export function harnessPaletteHeader(
 	settings: HarnessPaletteSettings,
 ): string | undefined {
 	if (!settings.paletteHeader || !snapshot) return undefined;
-	return `Harness · ${snapshot.name}`;
+	const details = [`Harness: ${snapshot.name}`];
+	if (snapshot.mode) details.push(snapshot.mode);
+	if (snapshot.generation) details.push(`generation ${snapshot.generation}`);
+	return details.join(" · ");
 }
 
 export function harnessCommandsAsSlashCommands(
 	snapshot: HarnessSnapshot | null,
 	settings: HarnessPaletteSettings,
 ): readonly SlashCommand[] {
+	const header = harnessPaletteHeader(snapshot, settings);
 	return materializeHarnessCommands(snapshot, settings).map(spec => ({
 		name: spec.name,
-		description: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
+		description:
+			spec.name === "harness" && header
+				? `${header} · ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`
+				: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
 		allowArgs: true,
 	}));
 }
@@ -154,9 +190,6 @@ function harnessUse(runtime: TuiSlashCommandRuntime, target: string): Promise<bo
 		runtime.ctx.showStatus(
 			`Started a new BreadBoard session on harness ${target}; previous session remains resumable.`,
 		);
-		void runtime.ctx.harnessPort?.refresh("harness-use").catch(error => {
-			runtime.ctx.showStatus(`Harness snapshot refresh failed: ${String(error)}`);
-		});
 		return true;
 	});
 }

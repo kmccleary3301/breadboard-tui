@@ -42,6 +42,7 @@ import {
 	parseSelectedBreadboardConfig,
 	resolveBreadboardRunConfig,
 } from "./lifecycle/run-config";
+import { resolveHarnessId } from "./harness-port-client";
 import type { ProviderAuthPort } from "./provider-auth-port";
 import { createBreadboardProviderFreeModel } from "./provider-free-model";
 import {
@@ -103,6 +104,16 @@ async function resolveEffectiveBreadboardRunConfig(
 		isBreadboardProduct: IS_BREADBOARD_PRODUCT,
 	});
 }
+
+function configuredHarnessId(activeSettings: Settings): string {
+	const raw = activeSettings.getRaw("breadboard");
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return "daily_driver";
+	const harness = (raw as Record<string, unknown>).harness;
+	if (typeof harness !== "object" || harness === null || Array.isArray(harness)) return "daily_driver";
+	const configured = (harness as Record<string, unknown>).default;
+	return typeof configured === "string" && configured.trim() ? configured : "daily_driver";
+}
+
 
 export function resolveNativeSurfaceEngineSelection(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
@@ -917,10 +928,13 @@ export async function prepareBreadboardRuntime(
 		authority.selectedModel ?? exactModelRoute(parsed.model),
 		activeSettings.getModelRole("default"),
 	);
+	const requestedHarnessId = IS_BREADBOARD_PRODUCT
+		? (parsed.harness ?? configuredHarnessId(activeSettings))
+		: config.sessionConfigPath;
 	const target = resolveBreadboardSessionTarget(
 		parsed,
 		sessionManager,
-		config.sessionConfigPath,
+		requestedHarnessId,
 		workspacePath,
 		IS_BREADBOARD_PRODUCT,
 		startupModelOverride,
@@ -930,7 +944,7 @@ export async function prepareBreadboardRuntime(
 		sessionBinding === undefined
 			? undefined
 			: createBreadboardSessionTarget(
-					config.sessionConfigPath,
+					requestedHarnessId,
 					workspacePath,
 					IS_BREADBOARD_PRODUCT,
 					startupModelOverride,
@@ -957,11 +971,20 @@ export async function prepareBreadboardRuntime(
 			throw new BreadboardLifecycleStartupError(connected.result);
 		}
 		const enginePort = connected.port;
+		let resolvedHarnessId = requestedHarnessId;
+		let resolvedSessionTarget = sessionTarget;
+		if (sessionTarget.kind === "create" && requestedHarnessId && enginePort.harnessClient) {
+			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, requestedHarnessId);
+			resolvedSessionTarget = {
+				kind: "create",
+				request: { ...sessionTarget.request, configPath: resolvedHarnessId },
+			};
+		}
 		const runtime = await prepareConnectedBreadboardRuntime({
 			engine: enginePort,
-			harnessId: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+			harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			modelCatalogConfigPath: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
-			sessionTarget,
+			sessionTarget: resolvedSessionTarget,
 			terminalResumeTarget,
 			emitAgentEvent: async (event, idempotencyKey) => {
 				await emitAgentEvent(event, idempotencyKey);

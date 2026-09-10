@@ -170,6 +170,13 @@ function choiceFromPath(path: string): HarnessChoice {
 	return { id: path, name, path };
 }
 
+/** Resolve a CLI or palette harness name to the engine's source path. */
+export async function resolveHarnessId(client: BreadboardClient, requested: string): Promise<string> {
+	const data = publicData(await client.getHarness(requested), "harness.get");
+	const harness = isRecord(data.harness) ? data.harness : data;
+	return typeof harness.path === "string" && harness.path.trim() ? harness.path : requested;
+}
+
 export async function listHarnessChoices(
 	client: BreadboardClient,
 	_directory?: string,

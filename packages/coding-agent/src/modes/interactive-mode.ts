@@ -56,7 +56,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { reset as resetCapabilities } from "../capability";
 import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
-import { createHarnessPort } from "../breadboard/harness-port-client";
+import { createHarnessPort, resolveHarnessId } from "../breadboard/harness-port-client";
 import type { HarnessPort } from "../breadboard/harness-port";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
@@ -121,6 +121,10 @@ import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { formatDuration } from "../slash-commands/helpers/format";
+import {
+	harnessCommandsAsSlashCommands,
+	readHarnessPaletteSettings,
+} from "../slash-commands/harness";
 import { STTController, type SttState } from "../stt";
 import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
@@ -590,6 +594,22 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 	];
 }
 
+const HARNESS_PALETTE_BASE_NAMES = [
+	"harness",
+	"mode",
+	"role",
+	"team",
+	"spawn",
+	"wait",
+	"bus",
+	"longrun",
+	"checkpoint",
+	"prompts",
+	"evidence",
+	"ps",
+	"clean",
+] as const;
+
 const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
 
 export class InteractiveMode implements InteractiveModeContext {
@@ -749,13 +769,17 @@ export class InteractiveMode implements InteractiveModeContext {
 	oauthManualInput: OAuthManualInputManager = new OAuthManualInputManager();
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
-	readonly harnessPort: HarnessPort | undefined;
+	harnessPort: HarnessPort | undefined;
+	#harnessClient?: BreadboardClient;
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
 	/** Commands (not components) queued while streaming, for the deferral hint. */
 	#pendingCommandOutputCommands = 0;
 	#pendingSlashCommands: SlashCommand[] = [];
+	/** Baseline command list before lock-derived harness entries are materialized. */
+	#staticSlashCommands: SlashCommand[] = [];
+	#harnessPaletteNames = new Set<string>();
 	/** Built-in editor autocomplete provider, before extension wrapping. */
 	#baseAutocompleteProvider: AutocompleteProvider | undefined;
 	/** Extension-registered provider factories, applied in registration order (#4919). */
@@ -901,6 +925,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
 		this.settings = session.settings;
+		this.#harnessClient = harnessClient;
 		this.harnessPort =
 			harnessClient && harnessId
 				? createHarnessPort({
@@ -1077,8 +1102,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			...cmd,
 			icon: getSlashCommandTypeIcon(cmd.icon ?? "action"),
 		}));
-		// Store pending commands for init() where file commands are loaded async
-		this.#pendingSlashCommands = [...builtinCommands, ...hookCommands, ...customCommands, ...skillCommandList];
+		// Store pending commands for init() where file commands are loaded async.
+		this.#staticSlashCommands = [...builtinCommands, ...hookCommands, ...customCommands, ...skillCommandList];
+		this.#pendingSlashCommands = [...this.#staticSlashCommands];
 
 		this.#uiHelpers = new UiHelpers(this);
 		this.#btwController = new BtwController(this);
@@ -1426,6 +1452,17 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.#handleSessionAccentInputsChanged();
 			}),
 		);
+		if (this.harnessPort) {
+			this.#eventBusUnsubscribers.push(
+				this.harnessPort.subscribe(() => {
+					this.#refreshHarnessPaletteCommands();
+					void this.refreshSlashCommandState().catch(error => {
+						logger.warn("BreadBoard harness palette refresh failed", { error: String(error) });
+					});
+					this.ui.requestRender();
+				}),
+			);
+		}
 		// Resync the welcome banner to the live model: init-time reconciliations
 		// (#reconcileModeFromSession, #enterPlanMode for plan.defaultOnStartup)
 		// can change the model before this subscription exists, so the
@@ -1441,9 +1478,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		);
 		this.#eventBusUnsubscribers.push(
 			this.session.subscribeCommandMetadataChanged(() => {
-				const retainedCommands = this.#pendingSlashCommands.filter(command => !command.name.startsWith("skill:"));
+				const retainedCommands = this.#staticSlashCommands.filter(command => !command.name.startsWith("skill:"));
 				const skillCommands = this.#rebuildSkillCommandsFromSession();
-				this.#pendingSlashCommands = [...retainedCommands, ...skillCommands];
+				this.#staticSlashCommands = [...retainedCommands, ...skillCommands];
+				this.#refreshHarnessPaletteCommands();
 			}),
 		);
 		// Set up theme file watcher
@@ -1527,6 +1565,29 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session.setTitleSystemPrompt(resolved);
 	}
 
+	#refreshHarnessPaletteCommands(): void {
+		const snapshot = this.harnessPort?.current() ?? null;
+		if (!snapshot) {
+			this.#harnessPaletteNames.clear();
+			this.#pendingSlashCommands = [...this.#staticSlashCommands];
+			return;
+		}
+		const dynamicCommands = harnessCommandsAsSlashCommands(snapshot, readHarnessPaletteSettings(this.settings)).map(
+			command => ({
+				...command,
+				icon: getSlashCommandTypeIcon("action"),
+			}),
+		);
+		const namesToReplace = new Set<string>([
+			...HARNESS_PALETTE_BASE_NAMES,
+			...this.#harnessPaletteNames,
+			...dynamicCommands.map(command => command.name),
+		]);
+		const staticCommands = this.#staticSlashCommands.filter(command => !namesToReplace.has(command.name));
+		this.#harnessPaletteNames = new Set(dynamicCommands.map(command => command.name));
+		this.#pendingSlashCommands = [...staticCommands, ...dynamicCommands];
+	}
+
 	#rebuildSkillCommandsFromSession(): SlashCommand[] {
 		const commands: SlashCommand[] = [];
 		this.skillCommands.clear();
@@ -1544,13 +1605,16 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Reload session skills and the `/skill:<name>` command list. */
 	async refreshSkillState(): Promise<void> {
 		await this.session.refreshSkills();
-		const retainedCommands = this.#pendingSlashCommands.filter(command => !command.name.startsWith("skill:"));
+		const retainedCommands = this.#staticSlashCommands.filter(command => !command.name.startsWith("skill:"));
 		const skillCommands = this.#rebuildSkillCommandsFromSession();
-		this.#pendingSlashCommands = [...retainedCommands, ...skillCommands];
+		this.#staticSlashCommands = [...retainedCommands, ...skillCommands];
+		this.#refreshHarnessPaletteCommands();
 	}
+
 
 	/** Reload slash commands and autocomplete for the provided working directory. */
 	async refreshSlashCommandState(cwd?: string, preloaded?: ReadonlyArray<FileSlashCommand>): Promise<void> {
+		this.#refreshHarnessPaletteCommands();
 		const basePath = cwd ?? this.sessionManager.getCwd();
 		// Session construction already ran slash-command discovery for this cwd;
 		// init passes that result through instead of re-walking the providers.
@@ -5742,6 +5806,37 @@ export class InteractiveMode implements InteractiveModeContext {
 	handleHandoffCommand(customInstructions?: string): Promise<void> {
 		return this.#commandController.handleHandoffCommand(customInstructions);
 	}
+	async startHarnessSession(harnessId: string): Promise<boolean> {
+		if (!this.#harnessClient || !this.harnessPort) {
+			this.showError("BreadBoard harness switching is unavailable in this session.");
+			return false;
+		}
+
+		try {
+			const resolvedHarnessPath = await resolveHarnessId(this.#harnessClient, harnessId);
+			const started = await this.#commandController.startNewSession(
+				{ configPath: resolvedHarnessPath },
+				`New BreadBoard session started on harness ${resolvedHarnessPath}`,
+			);
+			if (!started) return false;
+
+			this.harnessPort = createHarnessPort({
+				client: this.#harnessClient,
+				sessionId: () => this.sessionManager.getSessionId(),
+				harnessId: resolvedHarnessPath,
+			});
+			await this.harnessPort.refresh("harness-use");
+			this.#refreshHarnessPaletteCommands();
+			await this.refreshSlashCommandState();
+			return true;
+		} catch (error) {
+			this.showError(
+				`Failed to start BreadBoard harness session: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return false;
+		}
+	}
+
 
 	handleShakeCommand(mode: ShakeMode): Promise<void> {
 		return this.#commandController.handleShakeCommand(mode);

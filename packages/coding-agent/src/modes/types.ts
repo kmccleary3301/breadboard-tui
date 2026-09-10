@@ -153,7 +153,7 @@ export interface InteractiveModeContext {
 	/** Return the view to the main session (delegates to SessionFocusController.unfocus). */
 	unfocusSession(): Promise<void>;
 	/** Start a new BreadBoard session bound to a selected harness lock. */
-	startHarnessSession?: (harnessId: string) => Promise<boolean>;
+	startHarnessSession: (harnessId: string) => Promise<boolean>;
 	/** Clear loader, transient HUD/pending containers, streaming state, and pending tools. */
 	clearTransientSessionUi(): void;
 	settings: Settings;
