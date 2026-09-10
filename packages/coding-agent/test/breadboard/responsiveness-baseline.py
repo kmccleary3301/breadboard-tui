@@ -949,8 +949,28 @@ def _prune_root_extractions(root: Path) -> None:
     shutil.rmtree(root / "config" / "natives", ignore_errors=True)
 
 
+# Plain OMP without a model answers a submit with this frame. It is the expected
+# provider-free completion of the turn, not a product failure: the row keeps its
+# first-frame latency and the session is not rotated. The exclusion is gated on
+# the rendered status row, never on the words appearing somewhere on screen: the
+# identical frame from a product running a model, and `⬢ no-model >` quoted in
+# transcript text, still count.
+PROVIDER_FREE_REJECTION_RE = re.compile(r"\bError: No model selected\.")
+# The rendered plain-OMP status row is ` π  > ⬢ no-model > 📁 <workspace> > …`;
+# the anchor is the row's leading product glyph and separator, so a transcript
+# line that merely starts with `⬢ no-model >` is not a status row.
+PROVIDER_FREE_STATUS_ROW_RE = re.compile(r"^\s*π\s+>\s+⬢ no-model >")
+
+
+def _has_provider_free_status_row(screen: str) -> bool:
+    return any(PROVIDER_FREE_STATUS_ROW_RE.search(line) for line in screen.splitlines())
+
+
 def _error_frames(screen: str) -> int:
-    return len(ERROR_FRAME_RE.findall(screen))
+    count = len(ERROR_FRAME_RE.findall(screen))
+    if _has_provider_free_status_row(screen):
+        count -= len(PROVIDER_FREE_REJECTION_RE.findall(screen))
+    return count
 
 
 def _classify_turn_end(child: Any, result: dict[str, Any], errors_before: int) -> dict[str, Any]:
