@@ -139,6 +139,7 @@ async function modeFor(
 		"daily_driver",
 		undefined,
 		switchHarnessSession,
+		() => "engine-session-1",
 	);
 	return { mode, newSession, sessionManager, tempDir };
 }
