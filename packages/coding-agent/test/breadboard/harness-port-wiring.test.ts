@@ -63,7 +63,7 @@ describe("InteractiveMode BreadBoard harness wiring", () => {
 	let mode: InteractiveMode;
 
 	beforeAll(async () => {
-		// Pin the color mode: `fgResolved` throws under NO_COLOR/TERM=dumb (bb-ewnk.16), and init renders the editor.
+		// Pin the color mode: `fgResolved` throws under NO_COLOR/TERM=dumb (bb-ewnk.18), and init renders the editor.
 		await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 	});
 
