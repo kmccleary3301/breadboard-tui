@@ -920,6 +920,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		harnessId?: string,
 		setSessionModel?: (model: string) => Promise<void>,
 		switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>,
+		breadboardSessionId?: () => string,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -927,10 +928,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#harnessClient = harnessClient;
 		this.#switchHarnessSession = switchHarnessSession;
 		this.harnessPort =
-			harnessClient && harnessId
+			harnessClient && harnessId && breadboardSessionId
 				? createHarnessPort({
 						client: harnessClient,
-						sessionId: () => this.sessionManager.getSessionId(),
+						sessionId: breadboardSessionId,
 						harnessId,
 						setSessionModel,
 					})

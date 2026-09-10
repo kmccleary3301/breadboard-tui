@@ -178,9 +178,24 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 		const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
 		const { id: harnessId, result: harness } = await resolveHarnessResult(options.client, requestedHarnessId);
 		const [explanation, lock, session] = await Promise.all([
-			options.client.explainHarness(harnessId),
-			options.client.getHarnessLock(lockPathForHarness(harnessId)),
-			options.client.getSession(sessionId),
+			options.client.explainHarness(harnessId).catch(error => {
+				throw new Error(
+					`BreadBoard harness.explain failed: ${error instanceof Error ? error.message : String(error)}`,
+					{ cause: error },
+				);
+			}),
+			options.client.getHarnessLock(lockPathForHarness(harnessId)).catch(error => {
+				throw new Error(
+					`BreadBoard harness_lock.get failed: ${error instanceof Error ? error.message : String(error)}`,
+					{ cause: error },
+				);
+			}),
+			options.client.getSession(sessionId).catch(error => {
+				throw new Error(
+					`BreadBoard session.get failed: ${error instanceof Error ? error.message : String(error)}`,
+					{ cause: error },
+				);
+			}),
 		]);
 		const next = parseSnapshot(harness, explanation, lock, session, harnessId, now);
 		if (snapshotIdentity(next) !== snapshotIdentity(current)) {

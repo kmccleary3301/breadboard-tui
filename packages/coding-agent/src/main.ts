@@ -558,6 +558,7 @@ async function runInteractiveMode(
 		readonly harnessId?: string;
 		readonly setSessionModel?: (model: string) => Promise<void>;
 		readonly switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
+		readonly sessionId: () => string;
 	},
 ): Promise<void> {
 	let mode: InteractiveMode;
@@ -578,6 +579,7 @@ async function runInteractiveMode(
 			breadboard?.harnessId,
 			breadboard?.setSessionModel,
 			breadboard?.switchHarnessSession,
+			breadboard?.sessionId,
 		);
 		startupLease?.adopt();
 	} catch (error) {
@@ -2282,6 +2284,7 @@ export async function runRootCommand(
 					}
 				}
 				const startupLease = takeStartupComposerLease();
+				const breadboardRuntime = preparedBreadboardRuntime;
 				try {
 					stopStartupWatchdog();
 					logger.endTiming();
@@ -2305,14 +2308,15 @@ export async function runRootCommand(
 						parsedArgs.join,
 						startBackgroundModelDiscovery,
 						startupLease,
-						preparedBreadboardRuntime
+						breadboardRuntime
 							? {
-									providerAuth: preparedBreadboardRuntime.providerAuth,
-									close: preparedBreadboardRuntime.close,
-									harnessClient: preparedBreadboardRuntime.harnessClient,
-									harnessId: preparedBreadboardRuntime.harnessId,
-									setSessionModel: preparedBreadboardRuntime.setSessionModel,
-									switchHarnessSession: preparedBreadboardRuntime.switchHarnessSession,
+									providerAuth: breadboardRuntime.providerAuth,
+									close: breadboardRuntime.close,
+									harnessClient: breadboardRuntime.harnessClient,
+									harnessId: breadboardRuntime.harnessId,
+									setSessionModel: breadboardRuntime.setSessionModel,
+									switchHarnessSession: breadboardRuntime.switchHarnessSession,
+									sessionId: () => breadboardRuntime.sessionId,
 								}
 							: undefined,
 					);

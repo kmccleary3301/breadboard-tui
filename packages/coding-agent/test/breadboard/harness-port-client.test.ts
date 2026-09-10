@@ -106,6 +106,45 @@ describe("createHarnessPort", () => {
 		]);
 		expect(seen).toEqual(["Daily Driver:generation-2"]);
 	});
+	test("refreshes the session with the current engine session id", async () => {
+		const calls: string[] = [];
+		const engineSessionId = "engine-session-1";
+		const port = createHarnessPort({
+			client: clientFor(calls),
+			sessionId: () => engineSessionId,
+			harnessId: "daily_driver.v1.yaml",
+		});
+
+		await port.refresh("session-open");
+
+		expect(calls).toContain(`session:${engineSessionId}`);
+		expect(calls).not.toContain(`session:${session.session_id}`);
+	});
+	test("attributes refresh failures to the engine operation", async () => {
+		for (const operation of ["harness.explain", "harness_lock.get", "session.get"] as const) {
+			const client = clientFor([]);
+			if (operation === "harness.explain") {
+				client.explainHarness = async () => {
+					throw new Error("boom");
+				};
+			} else if (operation === "harness_lock.get") {
+				client.getHarnessLock = async () => {
+					throw new Error("boom");
+				};
+			} else {
+				client.getSession = async () => {
+					throw new Error("boom");
+				};
+			}
+			const port = createHarnessPort({
+				client,
+				sessionId: "engine-session-1",
+				harnessId: "daily_driver.v1.yaml",
+			});
+
+			await expect(port.refresh("session-open")).rejects.toThrow(`BreadBoard ${operation} failed: boom`);
+		}
+	});
 	test("hides lock and provenance when the session lock hash does not match", async () => {
 		const port = createHarnessPort({
 			client: clientFor([], { ...session, effective_lock_hash: "sha256:other" }),
