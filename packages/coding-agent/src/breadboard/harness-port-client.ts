@@ -188,7 +188,17 @@ function choiceFromPath(path: string): HarnessChoice {
 
 /** Resolve a CLI or palette harness reference to the engine id and display name. */
 export async function resolveHarness(client: BreadboardClient, requested: string): Promise<ResolvedHarness> {
-	const data = publicData(await client.getHarness(requested), "harness.get");
+	let data: PublicData;
+	try {
+		data = publicData(await client.getHarness(requested), "harness.get");
+	} catch (error) {
+		if (requested !== "daily_driver" || !(error instanceof Error) || !error.message.includes("path is unavailable")) {
+			throw error;
+		}
+		const initialized = publicData(await client.createHarness("."), "harness.init");
+		const initializedPath = requiredString(initialized.path, "initialized harness path");
+		data = publicData(await client.getHarness(initializedPath), "harness.get");
+	}
 	const harness = isRecord(data.harness) ? data.harness : data;
 	const id = typeof harness.path === "string" && harness.path.trim() ? harness.path : requested;
 	const definition =
