@@ -15,11 +15,14 @@ import importlib.util
 import json
 import math
 import os
+import random
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -27,7 +30,7 @@ from typing import Any, Callable, Iterable
 RUNNER_PATH = Path(__file__).with_name("installed-product-journey.py")
 FIXTURE_VERSION = "bb.responsiveness-fixtures.v1"
 RESULT_VERSION = "bb.responsiveness-baseline.v1"
-READY_PREDICATE = "status/composer row containing mock/reference (or plain OMP no-model) and the composer glyph"
+READY_PREDICATE = "status/composer row containing mock/reference (or plain OMP no-model) and the composer glyph; fixture cells additionally require the welcome panel to be gone"
 PAGE_UP = b"\x1b[5~"
 PAGE_DOWN = b"\x1b[6~"
 ESCAPE = b"\x1b"
@@ -330,7 +333,12 @@ class RootSet:
         self.temp = self.base / "temp"
         for path in (self.home, self.config, self.agent, self.workspace, self.temp):
             path.mkdir(parents=True, exist_ok=True)
-        (self.agent / "config.yml").write_text("tools:\n  approvalMode: always-ask\n", encoding="utf-8")
+        # Plain OMP checks for updates over the network at startup and inserts a
+        # banner into the transcript; the BB product never does.  Disable it so
+        # both baselines render the same idle layout without network access.
+        (self.agent / "config.yml").write_text(
+            "tools:\n  approvalMode: always-ask\nstartup:\n  checkUpdate: false\n", encoding="utf-8"
+        )
 
     def environment(self) -> dict[str, str]:
         return runner.exact_environment(self.home, self.config, self.agent, self.temp)
@@ -598,16 +606,30 @@ def _status_ready(screen: str) -> bool:
     return model_status and composer
 
 
-def _ready(screen: str) -> bool:
-    return _status_ready(screen)
+def _cell_ready(screen: str) -> bool:
+    # A resumed fixture renders its transcript; the welcome panel is the
+    # pre-resume frame and must not satisfy cell readiness.
+    return _status_ready(screen) and "Welcome!" not in screen
 
 
-def _ready_fallback(screen: str) -> bool:
-    return _status_ready(screen)
+def _wait_ready(child: Any, timeout: float = 30.0, predicate: Callable[[str], bool] = _status_ready) -> tuple[bool, str | None]:
+    return _pump_until(child, predicate, timeout)
 
 
-def _wait_ready(child: Any, timeout: float = 30.0) -> tuple[bool, str | None]:
-    return _pump_until(child, _ready_fallback, timeout)
+def _settle(child: Any, quiet: float = 0.15, limit: float = 1.5) -> bool:
+    """Pump until no output arrives for `quiet` seconds so a measured stimulus
+    cannot be credited with a frame that was already in flight."""
+    deadline = time.monotonic() + limit
+    last = child.output_reads
+    quiet_since = time.monotonic()
+    while time.monotonic() < deadline:
+        child.pump(0.02)
+        if child.output_reads != last:
+            last = child.output_reads
+            quiet_since = time.monotonic()
+        elif time.monotonic() - quiet_since >= quiet:
+            return True
+    return False
 
 
 def _pump_until(child: Any, predicate: Callable[[str], bool], timeout: float, read_before: int | None = None) -> tuple[bool, str | None]:
@@ -625,6 +647,19 @@ def _tail(screen: str, rows: int = 10) -> str:
     return "\n".join(screen.splitlines()[-rows:])
 
 
+def _composer_line(screen: str) -> str:
+    # Both products draw the compact editor as a `╰─ <text>` row; it is the
+    # last such row on screen.  Transcript echoes of the same marker sit above.
+    for line in reversed(screen.splitlines()):
+        if line.lstrip().startswith("╰─"):
+            return line
+    return ""
+
+
+def _composer_has(screen: str, marker: str) -> bool:
+    return marker in _composer_line(screen)
+
+
 def _measurement(
     child: Any,
     action: str,
@@ -632,13 +667,17 @@ def _measurement(
     predicate: Callable[[str, str], bool],
     timeout: float = 1.0,
     precondition: Callable[[str], bool] | None = None,
+    settle: bool = True,
 ) -> dict[str, Any]:
+    settled = _settle(child) if settle else False
     before = child.screen.text()
+    recovered = _recover_overlay(child)
+    if recovered:
+        before = child.screen.text()
     if precondition is not None:
-        for _ in range(2):
-            if not precondition(before):
-                break
-            _reset_escape(child)
+        if precondition(before):
+            _reset_composer(child)
+            _pump_until(child, lambda text: not precondition(text), 1.0)
             before = child.screen.text()
         if precondition(before):
             return {
@@ -651,7 +690,10 @@ def _measurement(
                 "alive": _process_alive(int(child.pid)),
                 "exitCode": child.exit_status,
                 "screenHash": _screen_hash(child),
+                "screenTail": _tail(child.screen.text(), 6),
             }
+        settled = (_settle(child) and settled) if settle else False
+        before = child.screen.text()
     reads_before = child.output_reads
     t0 = time.monotonic()
     try:
@@ -683,6 +725,8 @@ def _measurement(
         "latencyMs": (t1 - t0) * 1000 if t1 is not None else None,
         "t0Monotonic": t0,
         "t1Monotonic": t1,
+        "settledBeforeSend": settled,
+        "recoveredOverlay": recovered,
         "readsBefore": reads_before,
         "readsAfter": child.output_reads,
         "alive": _process_alive(int(child.pid)),
@@ -691,27 +735,69 @@ def _measurement(
     }
     if not observed:
         result["reason"] = "timeout-or-exit"
+        result["screenTail"] = _tail(child.screen.text(), 6)
     return result
 
 
-def _reset_escape(child: Any) -> None:
-    # Escape dismisses the palette once; Backspace then removes its slash
-    # trigger so the next sample starts from the same empty composer.
+OVERLAY_FOOTER_TOKENS = ("enter rewind", "esc cancel")
+
+
+def _overlay_visible(screen: str) -> bool:
+    # The transcript rewind selector (double Escape on an empty composer) and
+    # the session tree render a footer with these hints; the slash palette
+    # does not. Any such overlay swallows composer input until dismissed.
+    return all(token in screen for token in OVERLAY_FOOTER_TOKENS)
+
+
+def _recover_overlay(child: Any) -> bool:
+    """Dismiss a stray full-screen overlay with exactly one Escape and wait for
+    it to leave; returns whether a recovery happened so the sample records it."""
+    if not _overlay_visible(child.screen.text()):
+        return False
     child.send(ESCAPE)
-    child.pump(0.15)
-    child.send(BACKSPACE)
-    child.pump(0.15)
+    _pump_until(child, lambda text: not _overlay_visible(text), 1.0)
+    _settle(child, quiet=0.3)
+    return True
 
-def _composer_ready(child: Any, marker: str) -> bool:
-    return marker in _tail(child.screen.text())
 
+def _reset_composer(child: Any) -> None:
+    """Return to an empty composer without a blind Escape: Escape is only sent
+    while the slash palette is open (the editor consumes it there); leftover
+    composer text is removed with Backspace. Two bare Escapes on an empty
+    composer within 500 ms open the rewind selector (input-controller.ts:455-475),
+    so a blind Escape is never sent."""
+    if _menu_residue(child.screen.text()):
+        child.send(ESCAPE)
+        _pump_until(child, lambda text: not _menu_residue(text), 1.0)
+    for _ in range(3):
+        line = _composer_line(child.screen.text())
+        text = line.lstrip()[2:].strip() if line else ""
+        if not text:
+            break
+        for _ in range(len(text)):
+            child.send(BACKSPACE)
+        _pump_until(child, lambda screen: not _composer_line(screen).lstrip()[2:].strip(), 1.0)
+    child.pump(0.05)
+
+
+def _reset_escape(child: Any) -> None:
+    _reset_composer(child)
 
 def _prepare_composer(child: Any, marker: str = "~") -> None:
     # A single printable character is the same input path as the key sample.
-    child.send(marker.encode("ascii"))
-    ok, _ = _pump_until(child, lambda text: marker in _tail(text), 1.0)
-    if not ok:
-        raise RuntimeError(f"composer did not accept setup marker {marker!r}")
+    # One recovery attempt dismisses a stray overlay and clears leftover
+    # composer text before the setup is declared failed.
+    for attempt in range(2):
+        _recover_overlay(child)
+        _reset_composer(child)
+        _settle(child)
+        child.send(marker.encode("ascii"))
+        ok, _ = _pump_until(child, lambda text: _composer_has(text, marker), 1.0)
+        if ok:
+            return
+        if attempt == 0:
+            _settle(child, quiet=0.3)
+    raise RuntimeError(f"composer did not accept setup marker {marker!r}: {_tail(child.screen.text(), 4)!r}")
 
 
 def _menu_visible(before: str, after: str) -> bool:
@@ -725,17 +811,30 @@ def _menu_residue(screen: str) -> bool:
     return "\n❯ " in screen and "╰─ /" in screen
 
 
-def _feedback_visible(screen: str) -> bool:
-    return any(token in screen for token in ("Working", "working", "No provider", "unavailable", "error"))
+def _turn_in_flight(screen: str) -> bool:
+    # An in-flight turn shows the working indicator with its Escape hint; a
+    # provider-free rejection renders an error block instead and is not
+    # cancellable, so `cancel` is only measurable where a turn actually runs.
+    return any(token in screen for token in ("Working", "working", "[esc]"))
+
+
+def _unknown(child: Any, action: str, reason: str) -> dict[str, Any]:
+    return {
+        "action": action,
+        "status": "UNKNOWN",
+        "latencyMs": None,
+        "reason": reason,
+        "alive": _process_alive(int(child.pid)),
+        "exitCode": child.exit_status,
+        "screenHash": _screen_hash(child),
+    }
 
 
 def _action_precondition(action: str, marker: str) -> Callable[[str], bool]:
     if action == "key":
-        return lambda screen: marker in _tail(screen)
-    if action in {"menu", "scroll"}:
+        return lambda screen: _composer_has(screen, marker) or _menu_residue(screen)
+    if action in {"menu", "scroll", "submit", "cancel"}:
         return _menu_residue
-    if action in {"submit", "cancel"}:
-        return lambda screen: _menu_residue(screen) or _feedback_visible(screen)
     raise ValueError(f"unknown action: {action}")
 
 
@@ -746,7 +845,7 @@ def _action_sample(child: Any, action: str, marker: str = "~") -> dict[str, Any]
             child,
             action,
             marker.encode("ascii"),
-            lambda before, after: marker in _tail(after) and after != before,
+            lambda before, after: after != before and _composer_has(after, marker),
             precondition=precondition,
         )
         if result["status"] == "valid":
@@ -757,42 +856,117 @@ def _action_sample(child: Any, action: str, marker: str = "~") -> dict[str, Any]
         _reset_escape(child)
         return result
     if action == "scroll":
-        result = _measurement(child, action, PAGE_UP, lambda before, after: after != before, precondition=precondition)
-        child.send(PAGE_DOWN)
-        child.pump(0.1)
+        # Both products leave transcript paging to the terminal's native
+        # scrollback, so PageUp on the composer changes nothing.  The in-app
+        # navigation stimulus is a page move inside the open slash palette.
+        if _menu_residue(child.screen.text()):
+            _reset_escape(child)
+        _settle(child)
+        child.send(b"/")
+        opened, _ = _pump_until(child, _menu_residue, 1.0)
+        if not opened:
+            _reset_escape(child)
+            return _unknown(child, action, "palette-not-visible")
+        result = _measurement(
+            child,
+            action,
+            PAGE_DOWN,
+            lambda before, after: after != before and _menu_residue(after),
+        )
+        _reset_escape(child)
         return result
     if action == "submit":
+        if _menu_residue(child.screen.text()):
+            _reset_escape(child)
         _prepare_composer(child, marker)
+        errors_before = _error_frames(child.screen.text())
+        # Endpoint: the first frame reflecting the submit, i.e. the composer no
+        # longer holds the marker (echo and feedback render from that frame).
         result = _measurement(
             child,
             action,
             ENTER,
-            lambda old, after: after != old and (marker not in _tail(after) or _feedback_visible(after)),
-            precondition=precondition,
+            lambda old, after: after != old and not _composer_has(after, marker),
         )
+        # The turn must then run to completion without an error frame: a turn
+        # that ends in "Error:" is a product failure, not a responsiveness row.
+        _pump_until(child, lambda text: not _turn_in_flight(text), 3.0)
+        _settle(child, limit=3.0)
         _reset_escape(child)
-        return result
+        return _classify_turn_end(child, result, errors_before)
     if action == "cancel":
+        if _menu_residue(child.screen.text()):
+            _reset_escape(child)
+        if "no-model" in child.screen.text():
+            # Without a provider-free model nothing streams: a submit is
+            # rejected with an error frame that would masquerade as cancel
+            # feedback.  Plain OMP has no mock catalog, so cancel is unavailable.
+            return _unknown(child, action, "no-provider-free-model")
         _prepare_composer(child, marker)
+        errors_before = _error_frames(child.screen.text())
         submit_before = child.output_reads
         child.send(ENTER)
-        feedback, _ = _pump_until(child, _feedback_visible, 1.0, submit_before)
-        if not feedback:
+        in_flight, _ = _pump_until(child, _turn_in_flight, 1.0, submit_before)
+        if not in_flight:
+            _settle(child, limit=3.0)
             _reset_escape(child)
-            return {
-                "action": action,
-                "status": "UNKNOWN",
-                "latencyMs": None,
-                "reason": "post-submit-state-not-visible",
-                "alive": _process_alive(int(child.pid)),
-                "exitCode": child.exit_status,
-                "screenHash": _screen_hash(child),
-            }
-        result = _measurement(child, action, ESCAPE, lambda before, after: after != before, precondition=precondition)
-        _reset_escape(child)
-        return result
+            return _classify_turn_end(child, _unknown(child, action, "no-turn-in-flight"), errors_before)
+        # No settle here: the working indicator animates, and the turn may end
+        # on its own; Escape must land while the indicator is still on screen.
+        if not _turn_in_flight(child.screen.text()):
+            _settle(child, limit=3.0)
+            _reset_escape(child)
+            return _classify_turn_end(child, _unknown(child, action, "turn-finished-before-cancel"), errors_before)
+        result = _measurement(
+            child,
+            action,
+            ESCAPE,
+            lambda before, after: after != before and not _turn_in_flight(after),
+            settle=False,
+        )
+        # The measured Escape already cleared the turn. A cancelled pending
+        # submission restores its text to the composer; remove it with
+        # Backspace only, never a second Escape (double-Escape window). A
+        # user-interrupt renders no label; an "Error:" frame means the turn
+        # failed on its own and the Escape measured the failure, not the cancel.
+        _settle(child, limit=3.0)
+        _reset_composer(child)
+        return _classify_turn_end(child, result, errors_before)
     raise ValueError(f"unknown action: {action}")
 
+
+ERROR_FRAME_RE = re.compile(r"\bError: ")
+TURN_ERROR_REASON = "turn-ended-with-error"
+MAX_SESSION_ROTATIONS = 16
+
+
+def _prune_root_extractions(root: Path) -> None:
+    # The native addon is re-extracted into every fresh config root (~160 MB);
+    # it is reproducible from the product, not evidence, so retired roots drop it.
+    shutil.rmtree(root / "config" / "natives", ignore_errors=True)
+
+
+def _error_frames(screen: str) -> int:
+    return len(ERROR_FRAME_RE.findall(screen))
+
+
+def _classify_turn_end(child: Any, result: dict[str, Any], errors_before: int) -> dict[str, Any]:
+    """A submit or cancel row counts only when its turn ended without an error
+    frame. New "Error:" text is a product failure recorded verbatim; the row is
+    invalid and the caller rotates the session."""
+    screen = child.screen.text()
+    if _error_frames(screen) <= errors_before:
+        return result
+    lines = [line.strip() for line in screen.splitlines() if ERROR_FRAME_RE.search(line)]
+    failed = dict(result)
+    if failed.get("latencyMs") is not None:
+        failed["measuredMs"] = failed["latencyMs"]
+    failed["latencyMs"] = None
+    failed["status"] = "UNKNOWN"
+    failed["reason"] = TURN_ERROR_REASON
+    failed["turnError"] = lines[-1][:200] if lines else None
+    failed["screenTail"] = _tail(screen, 6)
+    return failed
 
 
 def _summary(values: list[float]) -> dict[str, float | None]:
@@ -806,22 +980,29 @@ def _summary(values: list[float]) -> dict[str, float | None]:
 
 def _cell_summary(samples: list[dict[str, Any]], blocks: int) -> dict[str, Any]:
     valid = [float(row["latencyMs"]) for row in samples if row.get("status") == "valid" and row.get("latencyMs") is not None]
-    block_size = math.ceil(len(samples) / blocks) if blocks else len(samples)
     block_rows: list[dict[str, Any]] = []
-    for block in range(blocks):
-        block_samples = samples[block * block_size : (block + 1) * block_size]
+    for block in range(1, blocks + 1):
+        block_samples = [row for row in samples if row.get("block") == block]
         block_values = [float(row["latencyMs"]) for row in block_samples if row.get("status") == "valid" and row.get("latencyMs") is not None]
-        block_rows.append({"block": block + 1, "sampleCount": len(block_samples), "invalid": len(block_samples) - len(block_values), **_summary(block_values)})
+        block_rows.append({"block": block, "sampleCount": len(block_samples), "valid": len(block_values), "invalid": len(block_samples) - len(block_values), **_summary(block_values)})
     overall = _summary(valid)
+    overall_p50 = overall["p50Ms"]
+    block_medians_within = None
+    if isinstance(overall_p50, (int, float)) and overall_p50 > 0 and all(isinstance(row["p50Ms"], (int, float)) for row in block_rows):
+        block_medians_within = all(abs(float(row["p50Ms"]) - overall_p50) <= 0.20 * overall_p50 for row in block_rows)
     return {
         "samples": samples,
         "sampleCount": len(samples),
         "valid": len(valid),
         "invalid": len(samples) - len(valid),
         "invalidRate": (len(samples) - len(valid)) / len(samples) if samples else 1.0,
+        "timeouts": sum(1 for row in samples if row.get("reason") == "timeout-or-exit"),
+        "invalidReasons": sorted({str(row.get("reason")) for row in samples if row.get("status") != "valid"}),
         **overall,
         "blocks": block_rows,
         "blockInvalidOver10Percent": any(row["invalid"] > row["sampleCount"] * 0.10 for row in block_rows if row["sampleCount"]),
+        "blockMinValid": min((row["valid"] for row in block_rows), default=0),
+        "blockMediansWithin20Percent": block_medians_within,
     }
 
 
@@ -910,18 +1091,32 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
         fixture = _fixture_session(fixtures_base, scale)
         for columns, rows in geometries:
             cell_key = f"{scale}/{columns}x{rows}"
-            root = _new_root_set(roots_base, args.product, f"cell-{scale}-{columns}x{rows}")
+            label = f"cell-{scale}-{columns}x{rows}"
+            root = _new_root_set(roots_base, args.product, label)
             child: Any | None = None
             descendants: list[dict[str, Any]] = []
             active_fixture = fixture
-            cell: dict[str, Any] = {"scale": scale, "geometry": f"{columns}x{rows}", "fixture": str(fixture), "actions": {}}
-            try:
+            cell: dict[str, Any] = {
+                "scale": scale,
+                "geometry": f"{columns}x{rows}",
+                "fixture": str(fixture),
+                "actions": {},
+                "sessionFailures": [],
+                "rotations": [],
+            }
+
+            def open_child(current_root: RootSet) -> tuple[Any, list[dict[str, Any]], Path, bool, float | None]:
+                bound = fixture
                 if args.product == "bb":
-                    active_fixture = _prepare_bb_cell_fixture(binary, root, rows, columns, fixture)
-                    cell["fixture"] = str(active_fixture)
-                child = _start_child(binary, root, rows, columns, active_fixture)
-                descendants = _process_descendants(int(child.pid))
-                ready, ready_at = _wait_ready(child, 60.0)
+                    bound = _prepare_bb_cell_fixture(binary, current_root, rows, columns, fixture)
+                started = _start_child(binary, current_root, rows, columns, bound)
+                started_descendants = _process_descendants(int(started.pid))
+                ready, ready_at = _wait_ready(started, 60.0, _cell_ready)
+                return started, started_descendants, bound, ready, ready_at
+
+            try:
+                child, descendants, active_fixture, ready, ready_at = open_child(root)
+                cell["fixture"] = str(active_fixture)
                 cell["ready"] = ready
                 cell["readyOutputAt"] = ready_at
                 cell["initialScreenHash"] = _screen_hash(child)
@@ -930,13 +1125,70 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                     for action in actions:
                         cell["actions"][action] = {"warmups": [], "samples": [], "error": "usable-composer-timeout-or-exit"}
                 else:
+                    per_block = args.samples // args.blocks
+                    order_seed = int(hashlib.sha256(f"{args.product}/{cell_key}".encode("utf-8")).hexdigest()[:8], 16)
+                    rng = random.Random(order_seed)
+                    cell["orderSeed"] = order_seed
+                    samples: dict[str, list[dict[str, Any]]] = {action: [] for action in actions}
+
+                    def take(action: str, **tags: Any) -> dict[str, Any]:
+                        # A turn that ends in an error frame is a product failure: the
+                        # row is recorded invalid, the failure is logged with the
+                        # session's age, and the cell continues in a fresh bound session
+                        # so later rows measure a live product, not a dead stream.
+                        nonlocal child, descendants, root, active_fixture
+                        row = {**tags, **_action_sample(child, action)}
+                        if row.get("reason") != TURN_ERROR_REASON:
+                            return row
+                        cell["sessionFailures"].append(
+                            {
+                                **tags,
+                                "action": action,
+                                "turnError": row.get("turnError"),
+                                "sessionRoot": str(root.base),
+                                "sessionRows": sum(len(rows_) for rows_ in samples.values()),
+                                "at": time.time(),
+                            }
+                        )
+                        if len(cell["rotations"]) >= MAX_SESSION_ROTATIONS:
+                            raise RuntimeError(f"session failures exceeded {MAX_SESSION_ROTATIONS} rotations: {row.get('turnError')}")
+                        cell["rotations"].append(_cleanup_receipt(child, descendants, root.base))
+                        _prune_root_extractions(root.base)
+                        root = _new_root_set(roots_base, args.product, f"{label}-r{len(cell['rotations'])}")
+                        child, descendants, active_fixture, rotated_ready, rotated_ready_at = open_child(root)
+                        cell["rotations"][-1]["replacementRoot"] = str(root.base)
+                        cell["rotations"][-1]["replacementReady"] = rotated_ready
+                        cell["rotations"][-1]["replacementReadyOutputAt"] = rotated_ready_at
+                        if not rotated_ready:
+                            raise RuntimeError("replacement session never reached a usable composer")
+                        return row
+
+                    warmups = {action: [take(action, warmup=True) for _ in range(args.warmup)] for action in actions}
+                    # Contract: 60 valid rows per cell in three blocks of 20; every
+                    # attempt is retained and invalid attempts are counted against the
+                    # 10% invalid-rate rule. An invalid attempt is retried inside its
+                    # block (bounded) unless the action is structurally unavailable.
+                    retry_cap = per_block + max(4, per_block // 2)
+                    for block in range(1, args.blocks + 1):
+                        order = [action for action in actions for _ in range(per_block)]
+                        rng.shuffle(order)
+                        for action in order:
+                            samples[action].append(take(action, block=block))
+                        while True:
+                            deficits = [
+                                action
+                                for action in actions
+                                if sum(1 for row in samples[action] if row["block"] == block and row.get("status") == "valid") < per_block
+                                and sum(1 for row in samples[action] if row["block"] == block) < retry_cap
+                                and not any(str(row.get("reason", "")).startswith("no-provider") for row in samples[action] if row["block"] == block)
+                            ]
+                            if not deficits:
+                                break
+                            rng.shuffle(deficits)
+                            for action in deficits:
+                                samples[action].append(take(action, block=block, retry=True))
                     for action in actions:
-                        warmups = [_action_sample(child, action) for _ in range(args.warmup)]
-                        samples: list[dict[str, Any]] = []
-                        for _block in range(args.blocks):
-                            for _sample in range(args.samples // args.blocks):
-                                samples.append(_action_sample(child, action))
-                        cell["actions"][action] = {"warmups": warmups, **_cell_summary(samples, args.blocks)}
+                        cell["actions"][action] = {"warmups": warmups[action], **_cell_summary(samples[action], args.blocks)}
             except Exception as error:
                 cell["ready"] = False
                 cell["error"] = str(error)
@@ -945,6 +1197,7 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                     cell["cleanup"] = _cleanup_receipt(child, descendants, root.base)
                 elif args.product == "bb":
                     cell["cleanup"] = _cleanup_root_orphans(root.base)
+                _prune_root_extractions(root.base)
             cells[cell_key] = cell
     return {
         "product": args.product,
@@ -959,84 +1212,323 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _resource_sample(root_pid: int) -> dict[str, Any]:
-    descendants = _process_descendants(root_pid)
-    pids = [root_pid] + [int(row["pid"]) for row in descendants]
+def _cputime_seconds(value: str) -> float | None:
+    """Parse the `ps -o time=` accumulated CPU field: `[[dd-]hh:]mm:ss.cc`."""
+    text = value.strip()
+    days = 0
+    if "-" in text:
+        day_text, text = text.split("-", 1)
+        if not day_text.isdigit():
+            return None
+        days = int(day_text)
+    try:
+        numbers = [float(part) for part in text.split(":")]
+    except ValueError:
+        return None
+    if not 1 <= len(numbers) <= 3:
+        return None
+    while len(numbers) < 3:
+        numbers.insert(0, 0.0)
+    hours, minutes, seconds = numbers
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def _resource_sample(pids: list[int]) -> dict[str, Any]:
+    """One `/bin/ps` call for every owned pid: RSS plus cumulative CPU seconds."""
+    command = ["/bin/ps", "-o", "pid=,ppid=,rss=,time=", "-p", ",".join(str(pid) for pid in pids)]
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     rows: list[dict[str, Any]] = []
     total_rss = 0
-    for pid in pids:
-        command = ["/bin/ps", "-o", "pid=,ppid=,rss=,%cpu=,etime=", "-p", str(pid)]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
-        parsed = completed.stdout.strip().split()
-        row: dict[str, Any] = {"pid": pid, "argv": command, "exitCode": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr}
-        if len(parsed) >= 5 and parsed[0].isdigit():
-            try:
-                row.update({"ppid": int(parsed[1]), "rssKb": int(parsed[2]), "cpuPercent": float(parsed[3]), "etime": parsed[4]})
-                total_rss += int(parsed[2])
-            except ValueError:
-                pass
-        rows.append(row)
-    return {"rootPid": root_pid, "descendantCount": len(descendants), "rows": rows, "totalRssKb": total_rss}
+    for line in completed.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 4 or not fields[0].isdigit() or not fields[1].isdigit() or not fields[2].isdigit():
+            continue
+        rows.append({"pid": int(fields[0]), "ppid": int(fields[1]), "rssKb": int(fields[2]), "cpuSeconds": _cputime_seconds(fields[3])})
+        total_rss += int(fields[2])
+    return {"rows": rows, "totalRssKb": total_rss, "exitCode": completed.returncode}
+
+
+class _LibProcProbe:
+    """In-process macOS `libproc` reader: `proc_pid_rusage(RUSAGE_INFO_V2)`
+    for cumulative CPU and resident size, `proc_listchildpids` for descendants.
+    Microseconds per sample instead of a `/bin/ps` fork, which is what keeps
+    the observer under the contract's 1% overhead. CPU units are calibrated
+    against `resource.getrusage` for this process before use."""
+
+    RUSAGE_INFO_V2 = 2
+
+    def __init__(self) -> None:
+        import ctypes
+
+        self._ctypes = ctypes
+        self._lib = ctypes.CDLL("/usr/lib/libproc.dylib")
+        self._lib.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+        self._lib.proc_pid_rusage.restype = ctypes.c_int
+        self._lib.proc_listchildpids.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+        self._lib.proc_listchildpids.restype = ctypes.c_int
+        system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+
+        class Timebase(ctypes.Structure):
+            _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+        timebase = Timebase()
+        system.mach_timebase_info(ctypes.byref(timebase))
+        self._seconds_per_tick = (timebase.numer / timebase.denom) / 1e9
+        self._buffer = ctypes.create_string_buffer(512)
+        self.calibration = self._calibrate()
+
+    def _calibrate(self) -> dict[str, Any]:
+        import resource
+
+        row = self.read(os.getpid())
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        truth = usage.ru_utime + usage.ru_stime
+        probe = row["cpuSeconds"] if row else None
+        ratio = (probe / truth) if probe is not None and truth > 0 else None
+        if ratio is None or not 0.9 <= ratio <= 1.1:
+            raise RuntimeError(f"libproc CPU calibration failed: probe={probe} rusage={truth} ratio={ratio}")
+        return {"probeCpuSeconds": probe, "rusageCpuSeconds": truth, "ratio": ratio, "secondsPerTick": self._seconds_per_tick}
+
+    def read(self, pid: int) -> dict[str, Any] | None:
+        ctypes = self._ctypes
+        ctypes.memset(self._buffer, 0, 512)
+        if self._lib.proc_pid_rusage(pid, self.RUSAGE_INFO_V2, self._buffer) != 0:
+            return None
+        raw = self._buffer.raw
+        user = int.from_bytes(raw[16:24], "little")
+        system = int.from_bytes(raw[24:32], "little")
+        resident = int.from_bytes(raw[64:72], "little")
+        return {"pid": pid, "cpuSeconds": (user + system) * self._seconds_per_tick, "rssKb": resident // 1024}
+
+    def children(self, pid: int) -> list[int]:
+        ctypes = self._ctypes
+        size = 4096 * ctypes.sizeof(ctypes.c_int)
+        buffer = (ctypes.c_int * 4096)()
+        count = self._lib.proc_listchildpids(pid, buffer, size)
+        return [int(buffer[index]) for index in range(max(0, count)) if buffer[index] > 0]
+
+    def descendants(self, root_pid: int) -> list[int]:
+        found: list[int] = []
+        frontier = [root_pid]
+        while frontier:
+            parent = frontier.pop()
+            for child in self.children(parent):
+                if child not in found and child != root_pid:
+                    found.append(child)
+                    frontier.append(child)
+        return found
+
+    def sample(self, pids: list[int]) -> dict[str, Any]:
+        rows = [row for row in (self.read(pid) for pid in pids) if row is not None]
+        return {"rows": rows, "totalRssKb": sum(int(row["rssKb"]) for row in rows), "exitCode": 0}
+
+
+class _ResourceObserver:
+    """Samples the root process and its descendants once per second on a
+    background thread so a blocking action sample cannot open a gap. Interval
+    CPU is the delta of cumulative CPU seconds over the actual wall interval,
+    summed over pids present in both samples; a pid that exits between samples
+    drops its last partial interval. Descendants are rediscovered every 5 s.
+    Backend: calibrated libproc when available, otherwise `/bin/ps`."""
+
+    def __init__(self, root_pid: int, started: float, phase_of: Callable[[float], str]) -> None:
+        self.root_pid = root_pid
+        self.started = started
+        self.phase_of = phase_of
+        self.samples: list[dict[str, Any]] = []
+        self.observer_seconds = 0.0
+        self.descendants: list[dict[str, Any]] = []
+        self.backend = "ps"
+        self.calibration: dict[str, Any] | None = None
+        self.backend_error: str | None = None
+        self._probe: _LibProcProbe | None = None
+        try:
+            self._probe = _LibProcProbe()
+            self.backend = "libproc"
+            self.calibration = self._probe.calibration
+        except (OSError, AttributeError, RuntimeError) as error:
+            self.backend_error = str(error)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="resource-observer", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=15.0)
+
+    def _discover(self) -> list[int]:
+        if self._probe is not None:
+            pids = self._probe.descendants(self.root_pid)
+            self.descendants = [{"pid": pid} for pid in pids]
+        else:
+            self.descendants = _process_descendants(self.root_pid)
+        return [self.root_pid] + [int(row["pid"]) for row in self.descendants]
+
+    def _sample(self, pids: list[int]) -> dict[str, Any]:
+        if self._probe is not None:
+            return self._probe.sample(pids)
+        return _resource_sample(pids)
+
+    def _run(self) -> None:
+        previous: dict[int, float] = {}
+        previous_at: float | None = None
+        next_sample = time.monotonic()
+        next_discovery = next_sample
+        pids = [self.root_pid]
+        while not self._stop.is_set():
+            now = time.monotonic()
+            if now >= next_discovery:
+                pids = self._discover()
+                self.observer_seconds += time.monotonic() - now
+                next_discovery = now + 5.0
+            sampled_at = time.monotonic()
+            sample = self._sample(pids)
+            after = time.monotonic()
+            self.observer_seconds += after - sampled_at
+            current = {int(row["pid"]): float(row["cpuSeconds"]) for row in sample["rows"] if row.get("cpuSeconds") is not None}
+            cpu_percent: float | None = None
+            if previous_at is not None and sampled_at > previous_at:
+                shared = [pid for pid in current if pid in previous]
+                cpu_percent = sum(current[pid] - previous[pid] for pid in shared) / (sampled_at - previous_at) * 100.0
+            self.samples.append({
+                "elapsedSeconds": sampled_at - self.started,
+                "intervalSeconds": (sampled_at - previous_at) if previous_at is not None else None,
+                "phase": self.phase_of(sampled_at - self.started),
+                "cpuPercent": cpu_percent,
+                "totalRssKb": sample["totalRssKb"],
+                "processCount": len(sample["rows"]),
+                "descendantCount": len(self.descendants),
+                "rows": sample["rows"],
+            })
+            previous, previous_at = current, sampled_at
+            next_sample += 1.0
+            if next_sample < after:
+                next_sample = after
+            self._stop.wait(max(0.0, next_sample - time.monotonic()))
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def _minute_rows(samples: list[dict[str, Any]], duration: float, phase_of: Callable[[float], str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for minute in range(int(math.ceil(duration / 60.0))):
+        window = [row for row in samples if minute * 60.0 <= float(row["elapsedSeconds"]) < (minute + 1) * 60.0]
+        cpu = [float(row["cpuPercent"]) for row in window if row.get("cpuPercent") is not None]
+        rss = [float(row["totalRssKb"]) for row in window if row.get("totalRssKb") is not None]
+        rows.append({
+            "minute": minute + 1,
+            "phase": phase_of(minute * 60.0),
+            "sampleCount": len(window),
+            "cpuMedianPercent": _median(cpu),
+            "rssMedianKb": _median(rss),
+            "maxIntervalSeconds": max((float(row["intervalSeconds"]) for row in window if row.get("intervalSeconds") is not None), default=None),
+        })
+    return rows
 
 
 def run_soak(args: argparse.Namespace) -> dict[str, Any]:
+    """Contract bb-2j1u.6 resource run: warmup, active mix and idle tail split
+    1/6, 4/6, 1/6 of `--minutes` (5/20/5 at the default 30), one action per
+    second across the five local action classes during warmup and active, no
+    input during the idle tail, one resource sample per second."""
     if args.minutes <= 0:
         raise ValueError("minutes must be positive")
     binary = Path(args.binary).resolve()
     root = _new_root_set(Path(args.roots).resolve(), args.product, "soak")
     fixture = _fixture_session(Path(args.fixtures).resolve(), "adverse")
     active_fixture = fixture
+    duration = args.minutes * 60.0
+    warmup_end = duration / 6.0
+    active_end = duration * 5.0 / 6.0
+
+    def phase_of(elapsed: float) -> str:
+        if elapsed < warmup_end:
+            return "warmup"
+        if elapsed < active_end:
+            return "active"
+        return "idle"
+
     descendants: list[dict[str, Any]] = []
     started = time.monotonic()
     actions: list[dict[str, Any]] = []
-    resources: list[dict[str, Any]] = []
     ready = False
     cleanup: dict[str, Any] | None = None
+    child: Any | None = None
+    observer: _ResourceObserver | None = None
+    error: str | None = None
     try:
         if args.product == "bb":
             active_fixture = _prepare_bb_cell_fixture(binary, root, 36, 120, fixture)
         child = _start_child(binary, root, 36, 120, active_fixture)
+        observer = _ResourceObserver(int(child.pid), started, phase_of)
+        observer.start()
         descendants = _process_descendants(int(child.pid))
-        ready, _ = _wait_ready(child, 60.0)
+        ready, _ = _wait_ready(child, 60.0, _cell_ready)
         if not ready:
             actions.append({"action": "ready", "status": "UNKNOWN", "reason": "usable-composer-timeout-or-exit"})
         else:
-            duration = args.minutes * 60.0
             next_action = time.monotonic()
-            next_resource = next_action
             action_index = 0
             while time.monotonic() - started < duration and child.exit_status is None:
                 now = time.monotonic()
-                if now >= next_action:
+                phase = phase_of(now - started)
+                if phase != "idle" and now >= next_action:
                     action_name = ACTION_NAMES[action_index % len(ACTION_NAMES)]
-                    actions.append(_action_sample(child, action_name))
+                    actions.append({"phase": phase, "elapsedSeconds": now - started, **_action_sample(child, action_name)})
                     action_index += 1
-                    next_action += 1.0
-                if now >= next_resource:
-                    resources.append({"elapsedSeconds": now - started, **_resource_sample(int(child.pid))})
-                    next_resource += 10.0
+                    next_action = max(next_action + 1.0, time.monotonic())
                 child.pump(0.005)
                 time.sleep(0.01)
-            resources.append({"elapsedSeconds": time.monotonic() - started, **_resource_sample(int(child.pid))})
+    except Exception as failure:
+        error = str(failure)
     finally:
+        if observer is not None:
+            observer.stop()
         if child is not None:
             cleanup = _cleanup_receipt(child, descendants, root.base)
         elif args.product == "bb":
             cleanup = _cleanup_root_orphans(root.base)
-    rss_values = [int(row["totalRssKb"]) for row in resources if row.get("totalRssKb") is not None]
+    finished = time.monotonic()
+    samples = observer.samples if observer is not None else []
+    minute_rows = _minute_rows(samples, duration, phase_of)
+    rss_values = [int(row["totalRssKb"]) for row in samples if row.get("totalRssKb") is not None]
+    intervals = [float(row["intervalSeconds"]) for row in samples if row.get("intervalSeconds") is not None]
     return {
         "product": args.product,
         "binary": str(binary),
         "fixture": str(active_fixture),
         "ready": ready,
-        "durationSeconds": time.monotonic() - started,
+        "error": error,
+        "durationSeconds": finished - started,
+        "plannedSeconds": duration,
+        "phases": {"warmupEndSeconds": warmup_end, "activeEndSeconds": active_end, "idleEndSeconds": duration},
+        "workload": "adverse fixture; key/edit, menu, scroll, submit, cancel round-robin at one action per second",
         "actions": actions,
-        "resources": resources,
+        "actionCount": len(actions),
+        "actionInvalid": sum(1 for row in actions if row.get("status") != "valid"),
+        "resources": samples,
+        "minutes": minute_rows,
+        "sampleCount": len(samples),
+        "maxIntervalSeconds": max(intervals, default=None),
+        "gapsOver2Seconds": sum(1 for value in intervals if value > 2.0),
+        "observerSeconds": observer.observer_seconds if observer is not None else None,
+        "observerOverheadRatio": (observer.observer_seconds / (finished - started)) if observer is not None and finished > started else None,
+        "observerBackend": observer.backend if observer is not None else None,
+        "observerCalibration": observer.calibration if observer is not None else None,
+        "observerBackendError": observer.backend_error if observer is not None else None,
         "startRssKb": rss_values[0] if rss_values else None,
         "endRssKb": rss_values[-1] if rss_values else None,
         "maxRssKb": max(rss_values) if rss_values else None,
         "descendantCountStart": len(descendants),
-        "descendantCountEnd": resources[-1]["descendantCount"] if resources else None,
+        "descendantCountEnd": samples[-1]["descendantCount"] if samples else None,
         "exitCode": child.exit_status if child is not None else None,
         "cleanup": cleanup,
     }
@@ -1056,64 +1548,272 @@ def _product_section(data: dict[str, Any], key: str) -> dict[str, Any]:
     return data
 
 
-def _gate(value: float | None, threshold: float, *, maximum: bool = False) -> str:
-    if value is None:
+RELATIVE_LIMIT = 1.5
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _gate(value: Any, threshold: float) -> str:
+    if not _is_number(value):
         return "UNKNOWN"
-    return "pass" if (value <= threshold if not maximum else value <= threshold) else "fail"
+    return "pass" if float(value) <= threshold else "fail"
+
+
+def _ratio(numerator: Any, denominator: Any) -> float | None:
+    if _is_number(numerator) and _is_number(denominator) and float(denominator) > 0:
+        return float(numerator) / float(denominator)
+    return None
+
+
+def _combine(gates: Iterable[str]) -> str:
+    values = list(gates)
+    if any(value == "fail" for value in values):
+        return "fail"
+    if any(value != "pass" for value in values):
+        return "UNKNOWN"
+    return "pass"
+
+
+def _cell_validity(action: dict[str, Any], samples_required: int, block_min_valid: int) -> dict[str, Any]:
+    """Contract bb-2j1u.6: a timing cell counts only with the full valid row
+    count, at least 18 valid rows per block, block medians within 20% of the
+    overall median, no more than 10% invalid rows and no unresolved timeout."""
+    reasons: list[str] = []
+    if action.get("error"):
+        reasons.append(f"cell-error:{action['error']}")
+    if action.get("valid") != samples_required:
+        reasons.append(f"valid-rows:{action.get('valid')}/{samples_required}")
+    if (action.get("blockMinValid") or 0) < block_min_valid:
+        reasons.append(f"block-min-valid:{action.get('blockMinValid')}<{block_min_valid}")
+    if action.get("blockMediansWithin20Percent") is not True:
+        reasons.append("block-medians-outside-20-percent")
+    if action.get("invalidRate", 1.0) > 0.10:
+        reasons.append(f"invalid-rate:{action.get('invalidRate')}")
+    # A timeout is unresolved only when its block never reached the valid target;
+    # retried-and-satisfied timeouts still count against the invalid rate above.
+    if action.get("timeouts") and (action.get("blockMinValid") or 0) < block_min_valid:
+        reasons.append(f"unresolved-timeouts:{action.get('timeouts')}")
+    unavailable = [reason for reason in action.get("invalidReasons", []) if str(reason).startswith("no-")]
+    return {"status": "pass" if not reasons else "UNKNOWN", "reasons": reasons, "unavailable": unavailable}
+
+
+def _runs_over(values: list[float | None], threshold: float, consecutive: int) -> bool:
+    run = 0
+    for value in values:
+        run = run + 1 if _is_number(value) and float(value) > threshold else 0
+        if run >= consecutive:
+            return True
+    return False
+
+
+def _slope_per_minute(points: list[tuple[float, float]]) -> float | None:
+    if len(points) < 2:
+        return None
+    n = float(len(points))
+    mean_x = sum(x for x, _ in points) / n
+    mean_y = sum(y for _, y in points) / n
+    denominator = sum((x - mean_x) ** 2 for x, _ in points)
+    if denominator == 0:
+        return None
+    return sum((x - mean_x) * (y - mean_y) for x, y in points) / denominator
+
+
+def _resource_gates(soak: dict[str, Any]) -> dict[str, Any]:
+    """Contract bb-2j1u.6 resource gates on one soak result. Idle tail mean
+    CPU <=15% of one core with no >100% interval lasting more than five
+    samples; active p95 <=200% with no >300% interval lasting ten samples;
+    combined RSS <=2 GiB in the final minute, max minute median minus
+    minute-5 median <=256 MiB, active RSS slope <=4 MiB/minute; every owned
+    process gone after cleanup; observer overhead <1% of wall time; any
+    sample gap over two seconds is UNKNOWN."""
+    samples = soak.get("resources") or []
+    minutes = soak.get("minutes") or []
+    if not samples or not minutes:
+        return {"status": "UNKNOWN", "reasons": ["no-resource-samples"]}
+    idle_cpu = [row.get("cpuPercent") for row in samples if row.get("phase") == "idle"]
+    active_cpu = [row.get("cpuPercent") for row in samples if row.get("phase") == "active"]
+    idle_values = [float(value) for value in idle_cpu if _is_number(value)]
+    active_values = sorted(float(value) for value in active_cpu if _is_number(value))
+    idle_mean = sum(idle_values) / len(idle_values) if idle_values else None
+    active_p95 = active_values[max(1, math.ceil(0.95 * len(active_values))) - 1] if active_values else None
+    rss_medians = [(int(row["minute"]), float(row["rssMedianKb"])) for row in minutes if _is_number(row.get("rssMedianKb"))]
+    by_minute = dict(rss_medians)
+    final_minute = max(by_minute) if by_minute else None
+    final_rss = by_minute.get(final_minute) if final_minute is not None else None
+    minute5 = by_minute.get(5)
+    growth_kb = (max(by_minute.values()) - minute5) if by_minute and minute5 is not None else None
+    active_points = [(float(minute), rss / 1024.0) for minute, rss in rss_medians if any(row["minute"] == minute and row["phase"] == "active" for row in minutes)]
+    slope = _slope_per_minute(active_points)
+    cleanup = soak.get("cleanup") or {}
+    gates = {
+        "idleMeanCpu": _gate(idle_mean, 15.0),
+        "idleNoSpikeRun": "UNKNOWN" if not idle_values else ("fail" if _runs_over(idle_cpu, 100.0, 6) else "pass"),
+        "activeP95Cpu": _gate(active_p95, 200.0),
+        "activeNoSpikeRun": "UNKNOWN" if not active_values else ("fail" if _runs_over(active_cpu, 300.0, 10) else "pass"),
+        "finalRss": _gate(final_rss, 2.0 * 1024 * 1024),
+        "rssGrowth": _gate(growth_kb, 256.0 * 1024),
+        "activeRssSlope": _gate(slope, 4.0),
+        "cleanup": "UNKNOWN" if not cleanup else ("pass" if cleanup.get("gone") or cleanup.get("rootProcessesGone") else "fail"),
+        "observerOverhead": _gate(soak.get("observerOverheadRatio"), 0.01),
+        "sampleGaps": "UNKNOWN" if soak.get("gapsOver2Seconds") is None else ("pass" if soak.get("gapsOver2Seconds") == 0 else "UNKNOWN"),
+        "completed": "pass" if soak.get("ready") and not soak.get("error") and soak.get("exitCode") in (None, 0) and float(soak.get("durationSeconds") or 0) >= float(soak.get("plannedSeconds") or 1) else "UNKNOWN",
+    }
+    return {
+        "status": _combine(gates.values()),
+        "gates": gates,
+        "idleMeanCpuPercent": idle_mean,
+        "activeP95CpuPercent": active_p95,
+        "finalMinuteRssKb": final_rss,
+        "minute5RssKb": minute5,
+        "rssGrowthKb": growth_kb,
+        "activeRssSlopeMiBPerMinute": slope,
+        "sampleCount": len(samples),
+        "maxIntervalSeconds": soak.get("maxIntervalSeconds"),
+        "observerOverheadRatio": soak.get("observerOverheadRatio"),
+        "actionCount": soak.get("actionCount"),
+        "actionInvalid": soak.get("actionInvalid"),
+    }
+
+
+def _startup_class(rows: dict[str, Any]) -> dict[str, Any]:
+    launches = rows.get("launches") or []
+    invalid = sum(1 for row in launches if not row.get("ready") or row.get("latencyMs") is None)
+    cleanup_failures = sum(1 for row in launches if row.get("cleanup") and not row["cleanup"].get("gone"))
+    return {
+        "requested": rows.get("requested"),
+        "launches": len(launches),
+        "invalid": invalid,
+        "cleanupFailures": cleanup_failures,
+        "p50Ms": rows.get("p50Ms"),
+        "p95Ms": rows.get("p95Ms"),
+        "maxMs": rows.get("maxMs"),
+        "validity": "pass" if launches and invalid <= 2 and cleanup_failures == 0 else "UNKNOWN",
+    }
 
 
 def summarize_results(bb_path: Path, omp_path: Path, out_path: Path) -> None:
+    """Gate the BB candidate against the plain-OMP baseline per the bb-2j1u.6
+    resolution: per cell BB p95 <= 1.5x OMP p95 and BB max <= 1.5x OMP max,
+    BB startup p95 <= 1.5x OMP startup p95, absolute backstops (BB p95 <= 250
+    ms everyday/complex, <= 400 ms adverse; startup cold p95 <= 2,500 ms / max
+    <= 4,000 ms, warm p95 <= 1,000 ms / max <= 2,000 ms), resource gates
+    unchanged. A cell whose OMP baseline is structurally unavailable (for
+    example cancel without a provider-free model) keeps its absolute gates and
+    reports the relative gate UNKNOWN with the reason."""
     bb = _read_result(bb_path)
     omp = _read_result(omp_path)
-    bb_cells = _product_section(bb, "cells").get("cells", {})
-    omp_cells = _product_section(omp, "cells").get("cells", {})
-    cell_keys = sorted(set(bb_cells) | set(omp_cells))
+    bb_cells_section = _product_section(bb, "cells")
+    omp_cells_section = _product_section(omp, "cells")
+    bb_cells = bb_cells_section.get("cells", {}) if isinstance(bb_cells_section, dict) else {}
+    omp_cells = omp_cells_section.get("cells", {}) if isinstance(omp_cells_section, dict) else {}
+    samples_required = int(bb_cells_section.get("samples") or 60)
+    block_min_valid = 18 if samples_required == 60 else max(1, math.ceil(samples_required * 0.30))
     cell_output: dict[str, Any] = {}
-    for key in cell_keys:
+    cell_statuses: list[str] = []
+    for key in sorted(set(bb_cells) | set(omp_cells)):
         scale = key.split("/", 1)[0]
-        p95_limit = 150.0 if scale == "adverse" else 100.0
-        max_limit = 400.0 if scale == "adverse" else 250.0
-        candidate_data: dict[str, Any] = {}
-        for product, cells in (("bb", bb_cells), ("omp", omp_cells)):
-            cell = cells.get(key, {}) if isinstance(cells, dict) else {}
-            candidate_data[product] = {
-                "p95Ms": cell.get("p95Ms"),
-                "maxMs": cell.get("maxMs"),
-                "valid": cell.get("valid"),
-                "invalid": cell.get("invalid"),
-                "gates": {
-                    "p95": _gate(cell.get("p95Ms"), p95_limit),
-                    "max": _gate(cell.get("maxMs"), max_limit),
-                    "invalidRate": "pass" if cell.get("invalidRate", 1.0) <= 0.10 else "UNKNOWN",
-                    "blockInvalidOver10Percent": "UNKNOWN" if cell.get("blockInvalidOver10Percent") is None else ("fail" if cell.get("blockInvalidOver10Percent") else "pass"),
-                },
+        backstop_p95 = 400.0 if scale == "adverse" else 250.0
+        bb_cell = bb_cells.get(key, {}) if isinstance(bb_cells, dict) else {}
+        omp_cell = omp_cells.get(key, {}) if isinstance(omp_cells, dict) else {}
+        actions_output: dict[str, Any] = {}
+        for action in ACTION_NAMES:
+            bb_action = (bb_cell.get("actions") or {}).get(action, {})
+            omp_action = (omp_cell.get("actions") or {}).get(action, {})
+            bb_validity = _cell_validity(bb_action, samples_required, block_min_valid)
+            omp_validity = _cell_validity(omp_action, samples_required, block_min_valid)
+            p95_ratio = _ratio(bb_action.get("p95Ms"), omp_action.get("p95Ms"))
+            max_ratio = _ratio(bb_action.get("maxMs"), omp_action.get("maxMs"))
+            relative_p95 = _gate(p95_ratio, RELATIVE_LIMIT) if omp_validity["status"] == "pass" else "UNKNOWN"
+            relative_max = _gate(max_ratio, RELATIVE_LIMIT) if omp_validity["status"] == "pass" else "UNKNOWN"
+            gates = {
+                "bbValidity": bb_validity["status"],
+                "ompValidity": omp_validity["status"],
+                "relativeP95": relative_p95,
+                "relativeMax": relative_max,
+                "absoluteP95": _gate(bb_action.get("p95Ms"), backstop_p95) if bb_validity["status"] == "pass" else "UNKNOWN",
             }
-        bb_p95, omp_p95 = candidate_data["bb"]["p95Ms"], candidate_data["omp"]["p95Ms"]
-        bb_max, omp_max = candidate_data["bb"]["maxMs"], candidate_data["omp"]["maxMs"]
-        candidate_data["ratios"] = {
-            "p95BbOverOmp": bb_p95 / omp_p95 if isinstance(bb_p95, (int, float)) and isinstance(omp_p95, (int, float)) and omp_p95 else None,
-            "maxBbOverOmp": bb_max / omp_max if isinstance(bb_max, (int, float)) and isinstance(omp_max, (int, float)) and omp_max else None,
+            status = _combine(gates.values())
+            row = {
+                "bb": {"p50Ms": bb_action.get("p50Ms"), "p95Ms": bb_action.get("p95Ms"), "maxMs": bb_action.get("maxMs"), "valid": bb_action.get("valid"), "invalid": bb_action.get("invalid"), "validity": bb_validity},
+                "omp": {"p50Ms": omp_action.get("p50Ms"), "p95Ms": omp_action.get("p95Ms"), "maxMs": omp_action.get("maxMs"), "valid": omp_action.get("valid"), "invalid": omp_action.get("invalid"), "validity": omp_validity},
+                "ratios": {"p95BbOverOmp": p95_ratio, "maxBbOverOmp": max_ratio},
+                "thresholds": {"relative": RELATIVE_LIMIT, "bbP95BackstopMs": backstop_p95},
+                "gates": gates,
+                "status": status,
+            }
+            if omp_validity["unavailable"] and omp_validity["status"] != "pass":
+                row["note"] = f"omp-baseline-unavailable:{','.join(omp_validity['unavailable'])}"
+            actions_output[action] = row
+            cell_statuses.append(status)
+        cell_output[key] = {
+            "bbReady": bb_cell.get("ready"),
+            "ompReady": omp_cell.get("ready"),
+            "bbCleanup": (bb_cell.get("cleanup") or {}).get("gone", (bb_cell.get("cleanup") or {}).get("rootProcessesGone")),
+            "ompCleanup": (omp_cell.get("cleanup") or {}).get("gone", (omp_cell.get("cleanup") or {}).get("rootProcessesGone")),
+            # Product failures observed while sampling: turns that ended in an
+            # error frame and the fresh-session rotations they forced. These are
+            # findings, not gate inputs; they are reported alongside the numbers.
+            "bbSessionFailures": len(bb_cell.get("sessionFailures") or []),
+            "ompSessionFailures": len(omp_cell.get("sessionFailures") or []),
+            "bbRotations": len(bb_cell.get("rotations") or []),
+            "ompRotations": len(omp_cell.get("rotations") or []),
+            "actions": actions_output,
+            "status": _combine(row["status"] for row in actions_output.values()),
         }
-        candidate_data["thresholds"] = {"p95Ms": p95_limit, "maxMs": max_limit}
-        cell_output[key] = candidate_data
 
+    bb_start = _product_section(bb, "startup")
+    omp_start = _product_section(omp, "startup")
     startup: dict[str, Any] = {}
     for kind, p95_limit, max_limit in (("cold", 2500.0, 4000.0), ("warm", 1000.0, 2000.0)):
-        bb_kind, omp_kind = bb_start.get(kind, {}), omp_start.get(kind, {})
-        startup[kind] = {
-            "bb": {"p95Ms": bb_kind.get("p95Ms"), "maxMs": bb_kind.get("maxMs"), "gates": {"p95": _gate(bb_kind.get("p95Ms"), p95_limit), "max": _gate(bb_kind.get("maxMs"), max_limit)}},
-            "omp": {"p95Ms": omp_kind.get("p95Ms"), "maxMs": omp_kind.get("maxMs"), "gates": {"p95": _gate(omp_kind.get("p95Ms"), p95_limit), "max": _gate(omp_kind.get("maxMs"), max_limit)}},
-            "p95BbOverOmp": (bb_kind.get("p95Ms") / omp_kind.get("p95Ms") if isinstance(bb_kind.get("p95Ms"), (int, float)) and isinstance(omp_kind.get("p95Ms"), (int, float)) and omp_kind.get("p95Ms") else None),
+        bb_kind = _startup_class(bb_start.get(kind, {}) if isinstance(bb_start, dict) else {})
+        omp_kind = _startup_class(omp_start.get(kind, {}) if isinstance(omp_start, dict) else {})
+        ratio = _ratio(bb_kind["p95Ms"], omp_kind["p95Ms"])
+        gates = {
+            "bbValidity": bb_kind["validity"],
+            "ompValidity": omp_kind["validity"],
+            "relativeP95": _gate(ratio, RELATIVE_LIMIT) if omp_kind["validity"] == "pass" else "UNKNOWN",
+            "absoluteP95": _gate(bb_kind["p95Ms"], p95_limit) if bb_kind["validity"] == "pass" else "UNKNOWN",
+            "absoluteMax": _gate(bb_kind["maxMs"], max_limit) if bb_kind["validity"] == "pass" else "UNKNOWN",
         }
+        startup[kind] = {
+            "bb": bb_kind,
+            "omp": omp_kind,
+            "p95BbOverOmp": ratio,
+            "thresholds": {"relative": RELATIVE_LIMIT, "bbP95Ms": p95_limit, "bbMaxMs": max_limit},
+            "gates": gates,
+            "status": _combine(gates.values()),
+        }
+
+    bb_soak = _product_section(bb, "soak")
+    omp_soak = _product_section(omp, "soak")
+    resource = {
+        "bb": _resource_gates(bb_soak if isinstance(bb_soak, dict) and bb_soak is not bb else {}),
+        "omp": _resource_gates(omp_soak if isinstance(omp_soak, dict) and omp_soak is not omp else {}),
+    }
+    overall = _combine([*cell_statuses, *(row["status"] for row in startup.values()), resource["bb"]["status"]])
     output = {
         "schemaVersion": RESULT_VERSION,
-        "contract": "bb-2j1u.6",
+        "contract": "bb-2j1u.6 (resolution 2026-09-09: PTY frame-written endpoint, relative-to-OMP gates)",
+        "inputs": {"bb": str(bb_path), "omp": str(omp_path)},
+        "samplesRequired": samples_required,
+        "blockMinValid": block_min_valid,
         "cells": cell_output,
         "startup": startup,
-        "resource": {"bb": _product_section(bb, "soak").get("maxRssKb"), "omp": _product_section(omp, "soak").get("maxRssKb")},
+        "resource": resource,
+        "counts": {
+            "cellActions": len(cell_statuses),
+            "pass": cell_statuses.count("pass"),
+            "fail": cell_statuses.count("fail"),
+            "unknown": cell_statuses.count("UNKNOWN"),
+        },
+        "status": overall,
         "gates": {
-            "localFeedback": {"everydayComplexP95Ms": 100, "adverseP95Ms": 150, "everydayComplexMaxMs": 250, "adverseMaxMs": 400},
+            "relative": {"cellP95": RELATIVE_LIMIT, "cellMax": RELATIVE_LIMIT, "startupP95": RELATIVE_LIMIT},
+            "backstop": {"everydayComplexP95Ms": 250, "adverseP95Ms": 400},
             "startup": {"coldP95Ms": 2500, "coldMaxMs": 4000, "warmP95Ms": 1000, "warmMaxMs": 2000},
+            "resource": {"idleMeanCpuPercent": 15, "activeP95CpuPercent": 200, "finalRssGiB": 2, "growthMiB": 256, "activeSlopeMiBPerMinute": 4},
         },
     }
     write_json(out_path, output)
