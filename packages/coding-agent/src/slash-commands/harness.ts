@@ -201,13 +201,15 @@ async function harnessList(runtime: TuiSlashCommandRuntime): Promise<boolean> {
 			return true;
 		}
 		const activeId = snapshot?.harnessId;
+		const activeChoice = choices.find(
+			choice =>
+				choice.id === activeId ||
+				choice.path === activeId ||
+				(typeof activeId === "string" && activeId.endsWith(`/${choice.path}`)),
+		);
+		const rows = choices.map(choice => `${choice === activeChoice ? "*" : " "} ${choice.name} (${choice.path})`);
 		runtime.ctx.showStatus(
-			choices
-				.map(
-					choice =>
-						`${choice.id === activeId || choice.path === activeId ? "*" : " "} ${choice.name} (${choice.path})`,
-				)
-				.join("\n"),
+			`${activeChoice ? `Active harness: ${activeChoice.name} (${activeChoice.path})\n` : ""}${rows.join("\n")}`,
 		);
 	} catch (error) {
 		const detail = error instanceof Error ? error.message : String(error);
