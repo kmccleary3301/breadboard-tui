@@ -6,9 +6,12 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
+import type { HarnessSnapshot } from "../../breadboard/harness-port";
+import { isRecord } from "@oh-my-pi/pi-utils";
 import { paintAnsi } from "../../modes/theme/color";
 import type { ColorMode } from "../../modes/theme/schema";
 import { theme } from "../../modes/theme/theme";
+import { sanitizeStatusText } from "../../modes/shared";
 import {
 	ACTIVE_PRODUCT_IDENTITY,
 	type GradientPalette,
@@ -186,8 +189,13 @@ export class WelcomeComponent implements Component {
 		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
 		private readonly appearance?: ProductAppearance,
 		private reduceMotion?: boolean,
+		private harness?: HarnessSnapshot | null,
 	) {
 		this.#tips = getWelcomeTips(identity);
+	}
+	setHarness(harness: HarnessSnapshot | null | undefined): void {
+		this.harness = harness ?? null;
+		this.invalidate();
 	}
 	get tip(): string | undefined {
 		this.#nagRoll ??= Math.random();
@@ -399,12 +407,25 @@ export class WelcomeComponent implements Component {
 		while (lspLines.length < WELCOME_LSP_SLOTS) {
 			lspLines.push("");
 		}
-
-		// Right column
+		
+		// Right column hints
 		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
 		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
+		// BreadBoard's identity line is intentionally a single compact row. Lock
+		// fields are optional because older harness definitions may omit them.
+		const lock = this.harness?.lock;
+		const teamSize =
+			isRecord(lock) && typeof lock.max_concurrent_agents === "number"
+				? String(lock.max_concurrent_agents)
+				: "—";
+		const posture =
+			isRecord(lock) && typeof lock.compute_posture === "string" ? lock.compute_posture : this.harness?.mode ?? "unknown";
+		const harnessLine = this.harness
+			? ` ${theme.fg("accent", this.harness.name)} ${theme.fg("dim", "·")} ${theme.fg("muted", "/harness")} ${theme.fg("dim", "·")} ${theme.fg("muted", `team ${teamSize}`)} ${theme.fg("dim", "·")} ${theme.fg("muted", posture)}`
+			: "";
 		const rightLines = [
 			` ${theme.bold(theme.fg("accent", "Get started"))}`,
+			harnessLine,
 			` ${loginHint}`,
 			` ${modelHint}`,
 			` ${theme.fg("dim", "!")}${theme.fg("muted", " to run bash")}`,

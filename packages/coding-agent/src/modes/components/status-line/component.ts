@@ -16,6 +16,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { adjustHsv, formatNumber, getProjectDir, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils";
+import type { HarnessSnapshot } from "../../../breadboard/harness-port";
 import { settings } from "../../../config/settings";
 import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../../../product-identity";
 import type { AgentSession } from "../../../session/agent-session";
@@ -443,6 +444,7 @@ export class StatusLineComponent implements Component {
 	 */
 	#vibeWorkerTokenRate: (() => number | null) | null = null;
 	#collabStatus: CollabStatus | null = null;
+	#harness: HarnessSnapshot | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -741,6 +743,10 @@ export class StatusLineComponent implements Component {
 
 	setCollabStatus(status: CollabStatus | null): void {
 		this.#collabStatus = status;
+	}
+	setHarness(harness: HarnessSnapshot | null | undefined): void {
+		this.#harness = harness ?? null;
+		this.invalidate();
 	}
 
 	/** Set the callback that presents detected Codex reset celebrations, or clear it with `undefined`. */
@@ -1856,6 +1862,7 @@ export class StatusLineComponent implements Component {
 			focusedAgentId: this.#focusedAgentId,
 			sessionAccent: sessionAccentEnabled,
 			previewTitle,
+			harness: this.#harness,
 			identityMark:
 				this.identity.id === OMP_PRODUCT_IDENTITY.id
 					? theme.icon.omp

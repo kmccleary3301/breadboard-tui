@@ -25,7 +25,9 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import type { HarnessSnapshot } from "../../breadboard/harness-port";
 import type { ShapeTarget } from "@oh-my-pi/snapcompact";
+import { isRecord } from "@oh-my-pi/pi-utils";
 import {
 	getDefault,
 	getType,
@@ -558,6 +560,8 @@ export interface SettingsRuntimeContext {
 	imageBudget?: ImageBudget;
 	/** Schedules a re-render after async preview work completes. */
 	requestRender?: () => void;
+	/** Effective BreadBoard harness lock used by read-only policy rows. */
+	harness?: HarnessSnapshot | null;
 	/** Live status renderer for composer-shape previews (the session's status line). */
 	composerPreviewStatus?: ComposerPreviewStatusSource;
 }
@@ -636,6 +640,14 @@ export class SettingsSelectorComponent implements Component {
 
 		// Initialize with first tab
 		this.#switchToTab("appearance");
+	}
+	/** Update the lock-derived policy row when the active harness changes. */
+	setHarness(harness: HarnessSnapshot | null | undefined): void {
+		this.context.harness = harness ?? null;
+		if (this.#currentTabId === "breadboard") {
+			this.#refreshCurrentTabItems(getSettingsForTab("breadboard"));
+		}
+		this.invalidate();
 	}
 
 	invalidate(): void {
@@ -991,7 +1003,16 @@ export class SettingsSelectorComponent implements Component {
 			warning: def.warning,
 			changed: this.#isChanged(def, currentValue),
 		};
-
+		if (def.readonly) {
+			return {
+				...item,
+				// Provider metadata rows expose availability only, never the
+				// configured endpoint or credential value.
+				currentValue:
+					currentValue === undefined || currentValue === null || currentValue === "" ? "not configured" : "configured",
+				changed: false,
+			};
+		}
 		switch (def.type) {
 			case "boolean":
 				return { ...item, currentValue: currentValue ? "true" : "false", values: ["true", "false"] };
@@ -1033,6 +1054,11 @@ export class SettingsSelectorComponent implements Component {
 	 * Get the current value for a setting.
 	 */
 	#getCurrentValue(def: SettingDef): unknown {
+		if (def.path === "breadboard.harness.max_concurrent_agents") {
+			const lock = this.context.harness?.lock;
+			const limit = isRecord(lock) ? lock.max_concurrent_agents : undefined;
+			return typeof limit === "number" && Number.isFinite(limit) ? limit : undefined;
+		}
 		return settings.get(def.path);
 	}
 

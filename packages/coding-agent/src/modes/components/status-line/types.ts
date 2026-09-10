@@ -5,6 +5,7 @@ import type {
 	StatusLineSegmentId,
 	StatusLineSeparatorStyle,
 } from "../../../config/settings-schema";
+import type { HarnessSnapshot } from "../../../breadboard/harness-port";
 import type { AgentSession } from "../../../session/agent-session";
 import type { ActiveRepoContext } from "../../../utils/active-repo-context";
 import type { LoopLimitRuntime } from "../../loop-limit";
@@ -73,6 +74,8 @@ export interface SegmentContext {
 	identityMark?: string;
 	/** Replace dynamic values with ellipses while preserving each segment's icon, color, and static text. */
 	startupPlaceholder?: boolean;
+	/** Active BreadBoard harness identity, when this session is running on BreadBoard. */
+	harness?: HarnessSnapshot | null;
 	activeRepo: ActiveRepoContext | null;
 	width: number;
 	options: StatusLineSegmentOptions;

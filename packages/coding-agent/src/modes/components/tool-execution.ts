@@ -35,6 +35,7 @@ import { isFramedBlockComponent, markFramedBlockComponent, renderStatusLine, Wid
 import { convertImageToPng } from "../../utils/image-loading";
 import { sanitizeWithOptionalSixelPassthrough } from "../../utils/sixel";
 import { renderDiff } from "./diff";
+import { getBreadBoardToolLabel, getBreadBoardToolRenderer } from "./breadboard-tool-renderers";
 import { type AnimationFrame, trimBlankEdges } from "./transcript-container";
 
 /** Resolves the canonical renderer key while retaining the provider's wire name in message history. */
@@ -366,8 +367,10 @@ export class ToolExecutionComponent extends Container {
 	) {
 		super();
 		this.#toolName = toolName;
-		this.#toolLabel = tool?.label ?? toolName;
-		this.#renderer = options.useBuiltInRenderer === false ? undefined : toolRenderers[toolName];
+		const breadBoardRenderer = getBreadBoardToolRenderer(toolName);
+		this.#toolLabel = tool?.label ?? getBreadBoardToolLabel(toolName) ?? toolName;
+		this.#renderer =
+			options.useBuiltInRenderer === false ? undefined : (toolRenderers[toolName] ?? breadBoardRenderer);
 		this.#showImages = options.showImages ?? true;
 		this.#tool = tool;
 		this.#ui = ui;

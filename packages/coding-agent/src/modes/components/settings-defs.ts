@@ -47,6 +47,8 @@ interface BaseSettingDef {
 	 * enums, submenus, and text inputs.
 	 */
 	condition?: () => boolean;
+	/** Render an informational value without an editor or mutation callback. */
+	readonly?: boolean;
 }
 
 export interface BooleanSettingDef extends BaseSettingDef {
@@ -180,6 +182,7 @@ function pathToSettingDef(path: SettingPath): SettingDef | null {
 		tab: ui.tab,
 		group: ui.group,
 		condition,
+		readonly: ui.readonly,
 	};
 
 	if (schemaType === "boolean") {

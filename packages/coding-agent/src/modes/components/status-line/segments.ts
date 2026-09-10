@@ -2,7 +2,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { SPINNER_ADVANCE_MS, TERMINAL } from "@oh-my-pi/pi-tui";
-import { formatDuration, formatNumber, getProjectDir, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
+import { formatDuration, formatNumber, getProjectDir, isRecord, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
 import { type Theme, type ThemeColor, theme } from "../../../modes/theme/theme";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../../tools/render-utils";
 import { fileHyperlink } from "../../../tui/hyperlink";
@@ -10,7 +10,6 @@ import { getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./context-thresholds";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
-
 export type { SegmentContext } from "./types";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -860,6 +859,43 @@ const usageSegment: StatusLineSegment = {
 		return { content, visible: true };
 	},
 };
+const harnessSegment: StatusLineSegment = {
+	id: "harness",
+	render(ctx) {
+		const harness = ctx.harness;
+		if (!harness) return { content: "", visible: false };
+		const name = truncateToWidth(sanitizeStatusText(harness.name), TRUNCATE_LENGTHS.SHORT);
+		const mode = truncateToWidth(sanitizeStatusText(harness.mode ?? "unknown"), TRUNCATE_LENGTHS.SHORT);
+		const generation = sanitizeStatusText(harness.generation ?? "—");
+		return {
+			content: theme.fg("accent", `${name} · ${mode} · g${generation}`),
+			visible: true,
+		};
+	},
+};
+
+const longrunSegment: StatusLineSegment = {
+	id: "longrun",
+	render(ctx) {
+		const lock = ctx.harness?.lock;
+		if (!lock || !isRecord(lock.long_running) || lock.long_running.enabled !== true) {
+			return { content: "", visible: false };
+		}
+		const budget = isRecord(lock.long_running.budgets) ? lock.long_running.budgets : lock.long_running;
+		const caps: string[] = [];
+		for (const [key, label] of [
+			["wall_ms", "wall"],
+			["episodes", "episodes"],
+			["tokens", "tokens"],
+			["cost_usd", "cost"],
+		] as const) {
+			const value = budget[key];
+			if (typeof value === "number" && Number.isFinite(value)) caps.push(`${label} ${value}`);
+		}
+		return { content: theme.fg("muted", `longrun${caps.length ? ` · ${caps.join(" · ")}` : ""}`), visible: true };
+	},
+};
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Segment Registry
@@ -891,6 +927,8 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	session_name: sessionNameSegment,
 	usage: usageSegment,
 	collab: collabSegment,
+	harness: harnessSegment,
+	longrun: longrunSegment,
 };
 
 export function renderSegment(id: StatusLineSegmentId, ctx: SegmentContext): RenderedSegment {

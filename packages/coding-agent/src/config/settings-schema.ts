@@ -164,7 +164,8 @@ export type SettingTab =
 	| "shell"
 	| "tools"
 	| "tasks"
-	| "providers";
+	| "providers"
+	| "breadboard";
 
 /** Tab display metadata - icon is resolved via theme.symbol() */
 export type TabMetadata = { label: string; icon: `tab.${string}` };
@@ -181,6 +182,7 @@ export const SETTING_TABS: SettingTab[] = [
 	"tools",
 	"tasks",
 	"providers",
+	"breadboard",
 ];
 
 /** Tab display metadata - icon is a symbol key from theme.ts (tab.*) */
@@ -195,6 +197,7 @@ export const TAB_METADATA: Record<SettingTab, { label: string; icon: `tab.${stri
 	tools: { label: "Tools", icon: "tab.tools" },
 	tasks: { label: "Tasks", icon: "tab.tasks" },
 	providers: { label: "Providers", icon: "tab.providers" },
+	breadboard: { label: "BreadBoard", icon: "tab.breadboard" },
 };
 
 /**
@@ -235,6 +238,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	],
 	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
 	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
+	breadboard: ["Harness", "Engine", "Providers", "Subagents", "Long-run"],
 };
 
 /** Status line segment identifiers */
@@ -263,7 +267,9 @@ export type StatusLineSegmentId =
 	| "cache_hit"
 	| "session_name"
 	| "usage"
-	| "collab";
+	| "collab"
+	| "harness"
+	| "longrun";
 
 /** Submenu choice metadata. */
 export type SubmenuOption<V extends string = string> = {
@@ -286,6 +292,8 @@ interface UiBase {
 	warning?: string;
 	/** Condition function name - setting only shown when true */
 	condition?: string;
+	/** Render a value for information only; it cannot be changed from the settings UI. */
+	readonly?: boolean;
 }
 
 interface UiBoolean extends UiBase {}
@@ -483,8 +491,156 @@ export const SETTINGS_SCHEMA = {
 	// host. Hidden from the UI; populate via env vars or hand-edited config.yml.
 	// Env (`OMP_AUTH_BROKER_URL` / `OMP_AUTH_BROKER_TOKEN`) takes precedence so
 	// per-machine overrides remain trivial.
-	"auth.broker.url": { type: "string", default: undefined },
-	"auth.broker.token": { type: "string", default: undefined, credential: true },
+	"auth.broker.url": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Providers",
+			label: "Broker URL",
+			description: "Whether an authentication broker endpoint is configured; the endpoint is never shown here",
+			readonly: true,
+		},
+	},
+	"auth.broker.token": {
+		type: "string",
+		default: undefined,
+		credential: true,
+		ui: {
+			tab: "breadboard",
+			group: "Providers",
+			label: "Broker token",
+			description: "Whether an authentication broker token is configured; secrets never render",
+			readonly: true,
+		},
+	},
+	"breadboard.engineMode": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Engine",
+			label: "Engine mode",
+			description: "BreadBoard lifecycle mode used when no command-line override is provided",
+			options: [
+				{ value: "local-owned", label: "Local (owned)" },
+				{ value: "local-external", label: "Local (external)" },
+				{ value: "remote", label: "Remote" },
+				{ value: "off", label: "Off" },
+			],
+		},
+	},
+	"breadboard.baseUrl": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Engine",
+			label: "Engine endpoint",
+			description: "Endpoint used by local-external and remote modes",
+		},
+	},
+	"breadboard.startupTimeoutMs": {
+		type: "number",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Engine",
+			label: "Startup timeout",
+			description: "Maximum time to wait for an owned engine to become ready",
+			options: [
+				{ value: "10000", label: "10 seconds" },
+				{ value: "30000", label: "30 seconds" },
+				{ value: "60000", label: "1 minute" },
+				{ value: "120000", label: "2 minutes" },
+			],
+		},
+	},
+	"breadboard.requestTimeoutMs": {
+		type: "number",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Engine",
+			label: "Request timeout",
+			description: "Maximum time to wait for an engine request",
+			options: [
+				{ value: "5000", label: "5 seconds" },
+				{ value: "10000", label: "10 seconds" },
+				{ value: "30000", label: "30 seconds" },
+				{ value: "60000", label: "1 minute" },
+			],
+		},
+	},
+	"breadboard.ownerExitPolicy": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Engine",
+			label: "Engine cleanup",
+			description: "Whether an owned engine remains after this process exits",
+			options: [
+				{ value: "attached", label: "Stop with OMP" },
+				{ value: "detached", label: "Keep running" },
+			],
+		},
+	},
+	"breadboard.sessionConfigPath": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Harness",
+			label: "Session config path",
+			description: "Path to the session configuration used by the selected harness",
+		},
+	},
+	"breadboard.harness.default": {
+		type: "string",
+		default: "daily_driver",
+		ui: {
+			tab: "breadboard",
+			group: "Harness",
+			label: "Default harness",
+			description: "Harness name or definition path selected when --harness is omitted",
+		},
+	},
+	"breadboard.harness.paletteHeader": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "breadboard",
+			group: "Harness",
+			label: "Palette header",
+			description: "Show the active harness identity in the command palette",
+		},
+	},
+	"breadboard.harness.unsupportedCommands": {
+		type: "string",
+		default: "dim",
+		ui: {
+			tab: "breadboard",
+			group: "Harness",
+			label: "Unsupported commands",
+			description: "How commands unavailable to the active harness appear in the palette",
+			options: [
+				{ value: "dim", label: "Dim" },
+				{ value: "hide", label: "Hide" },
+			],
+		},
+	},
+	"breadboard.harness.max_concurrent_agents": {
+		type: "number",
+		default: undefined,
+		ui: {
+			tab: "breadboard",
+			group: "Subagents",
+			label: "Harness max concurrent agents",
+			description: "Effective lock limit for concurrent agents (read-only)",
+			readonly: true,
+		},
+	},
 
 	autoResume: {
 		type: "boolean",
@@ -5084,10 +5240,10 @@ export const SETTINGS_SCHEMA = {
 		type: "number",
 		default: 32,
 		ui: {
-			tab: "tasks",
+			tab: "breadboard",
 			group: "Subagents",
-			label: "Max Concurrent Tasks",
-			description: "Maximum number of subagents running concurrently",
+			label: "BreadBoard concurrent agents",
+			description: "BreadBoard product policy for the maximum number of subagents running concurrently",
 			options: [
 				{ value: "0", label: "Unlimited" },
 				{ value: "1", label: "1 task" },
@@ -5117,10 +5273,10 @@ export const SETTINGS_SCHEMA = {
 		type: "number",
 		default: 2,
 		ui: {
-			tab: "tasks",
+			tab: "breadboard",
 			group: "Subagents",
-			label: "Max Task Recursion",
-			description: "How many levels deep subagents can spawn their own subagents",
+			label: "BreadBoard recursion depth",
+			description: "BreadBoard product policy for how many levels deep subagents may spawn",
 			options: [
 				{ value: "-1", label: "Unlimited" },
 				{ value: "0", label: "None" },
@@ -5135,11 +5291,11 @@ export const SETTINGS_SCHEMA = {
 		type: "number",
 		default: 0,
 		ui: {
-			tab: "tasks",
+			tab: "breadboard",
 			group: "Subagents",
-			label: "Max Subagent Runtime",
+			label: "BreadBoard runtime limit",
 			description:
-				"Hard wall-clock limit per subagent (ms). 0 disables it. Defense-in-depth against provider-side stream hangs that escape the inference-layer watchdog; triggers a normal subagent abort with a 'timed out' reason.",
+				"BreadBoard product policy for each subagent's hard wall-clock limit (ms); 0 disables the limit.",
 			options: [
 				{ value: "0", label: "Unlimited", description: "Default" },
 				{ value: "300000", label: "5 minutes" },
