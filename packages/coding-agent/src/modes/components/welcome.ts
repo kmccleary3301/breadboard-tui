@@ -6,8 +6,8 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import type { HarnessSnapshot } from "../../breadboard/harness-port";
 import { isRecord } from "@oh-my-pi/pi-utils";
+import type { HarnessSnapshot } from "../../breadboard/harness-port";
 import { paintAnsi } from "../../modes/theme/color";
 import type { ColorMode } from "../../modes/theme/schema";
 import { theme } from "../../modes/theme/theme";
@@ -407,23 +407,27 @@ export class WelcomeComponent implements Component {
 		while (lspLines.length < WELCOME_LSP_SLOTS) {
 			lspLines.push("");
 		}
-		
+
 		// Right column hints
 		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
 		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
 		// BreadBoard's identity line is intentionally a single compact row.
 		const lock = this.harness?.lock;
 		const teamSize =
-			isRecord(lock) && typeof lock.max_concurrent_agents === "number"
-				? String(lock.max_concurrent_agents)
-				: "—";
+			isRecord(lock) && typeof lock.max_concurrent_agents === "number" ? String(lock.max_concurrent_agents) : "—";
 		const posture = isRecord(lock) && typeof lock.compute_posture === "string" ? lock.compute_posture : "unknown";
-		const harnessLine = this.harness
-			? ` ${theme.fg(
-					"muted",
-					`Harness ${sanitizeStatusText(this.harness.name)} (${sanitizeStatusText(this.harness.mode ?? "unknown")}, g${sanitizeStatusText(this.harness.generation ?? "unknown")}) · team ${teamSize} · ${sanitizeStatusText(posture)} · /harness`,
-				)}`
+		const harnessName = this.harness ? sanitizeStatusText(this.harness.name) : "";
+		const harnessMode = this.harness ? sanitizeStatusText(this.harness.mode ?? "unknown") : "";
+		const harnessGeneration = this.harness ? sanitizeStatusText(this.harness.generation ?? "unknown") : "";
+		const harnessIdentity = this.harness
+			? [
+					`Harness ${harnessName} (${harnessMode}, g${harnessGeneration})`,
+					`team ${teamSize}`,
+					sanitizeStatusText(posture),
+					"/harness",
+				].join(" · ")
 			: "";
+		const harnessLine = this.harness ? ` ${theme.fg("muted", harnessIdentity)}` : "";
 		const rightLines = [
 			` ${theme.bold(theme.fg("accent", "Get started"))}`,
 			harnessLine,

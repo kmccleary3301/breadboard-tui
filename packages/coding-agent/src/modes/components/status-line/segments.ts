@@ -2,7 +2,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { SPINNER_ADVANCE_MS, TERMINAL } from "@oh-my-pi/pi-tui";
-import { formatDuration, formatNumber, getProjectDir, isRecord, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
+import {
+	formatDuration,
+	formatNumber,
+	getProjectDir,
+	isRecord,
+	pathIsWithin,
+	relativePathWithinRoot,
+} from "@oh-my-pi/pi-utils";
 import { type Theme, type ThemeColor, theme } from "../../../modes/theme/theme";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../../tools/render-utils";
 import { fileHyperlink } from "../../../tui/hyperlink";
@@ -892,10 +899,12 @@ const longrunSegment: StatusLineSegment = {
 			const value = budget[key];
 			if (typeof value === "number" && Number.isFinite(value)) caps.push(`${label} ${value}`);
 		}
-		return { content: theme.fg("muted", `longrun${caps.length ? ` · ${caps.join(" · ")}` : ""}`), visible: true };
+		return {
+			content: theme.fg("muted", `longrun${caps.length ? ` · ${caps.join(" · ")}` : ""}`),
+			visible: true,
+		};
 	},
 };
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Segment Registry

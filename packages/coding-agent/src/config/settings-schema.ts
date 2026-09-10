@@ -5294,8 +5294,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "breadboard",
 			group: "Subagents",
 			label: "BreadBoard runtime limit",
-			description:
-				"BreadBoard product policy for each subagent's hard wall-clock limit (ms); 0 disables the limit.",
+			description: "BreadBoard product policy for each subagent's hard wall-clock limit (ms); 0 disables the limit.",
 			options: [
 				{ value: "0", label: "Unlimited", description: "Default" },
 				{ value: "300000", label: "5 minutes" },

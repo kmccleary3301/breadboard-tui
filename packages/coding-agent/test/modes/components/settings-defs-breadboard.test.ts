@@ -36,13 +36,20 @@ describe("BreadBoard settings definitions", () => {
 		const definitions = getSettingsForTab("breadboard");
 		for (const path of BREADBOARD_PATHS) {
 			expect(Object.hasOwn(SETTINGS_SCHEMA, path), `schema path ${path}`).toBe(true);
-			expect(definitions.some(definition => definition.path === path), `settings row ${path}`).toBe(true);
+			expect(
+				definitions.some(definition => definition.path === path),
+				`settings row ${path}`,
+			).toBe(true);
 		}
 	});
 
 	it("keeps provider metadata and the harness concurrency limit read-only", () => {
 		const definitions = getSettingsForTab("breadboard");
-		for (const path of ["auth.broker.url", "auth.broker.token", "breadboard.harness.max_concurrent_agents"] as const) {
+		for (const path of [
+			"auth.broker.url",
+			"auth.broker.token",
+			"breadboard.harness.max_concurrent_agents",
+		] as const) {
 			const definition = definitions.find(item => item.path === path);
 			expect(definition, `missing read-only row ${path}`).toBeDefined();
 			expect(definition?.readonly, `row ${path} must be read-only`).toBe(true);

@@ -124,6 +124,7 @@ describe("WelcomeComponent", () => {
 		expect(plain).toContain("Recent sessions");
 	});
 });
+
 const harnessSnapshot: HarnessSnapshot = {
 	harnessId: "codex-e4",
 	name: "codex-e4",
@@ -154,7 +155,6 @@ describe("WelcomeComponent harness identity", () => {
 		expect(plain).not.toContain("Harness ");
 	});
 });
-
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const hasRow = (lines: string[], row: string): boolean => lines.some(l => l.includes(row.trimEnd()));
