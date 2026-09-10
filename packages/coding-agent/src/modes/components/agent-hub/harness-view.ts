@@ -26,11 +26,13 @@ const PANELS: readonly HarnessPanel[] = [
 
 type RecordValue = Readonly<Record<string, unknown>>;
 
-type HarnessField = {
+export type HarnessField = {
 	readonly label: string;
 	readonly path: string;
 	readonly value: unknown;
 };
+
+export type HarnessPanelFields = Readonly<Record<HarnessPanel, readonly HarnessField[]>>;
 
 function isRecord(value: unknown): value is RecordValue {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,8 +52,48 @@ function effectiveRows(lock: RecordValue, prefixes: readonly string[]): readonly
 	return fields;
 }
 
+const PANEL_PREFIXES: Readonly<Record<HarnessPanel, readonly string[]>> = {
+	overview: ["schema_version", "version"],
+	team: ["multi_agent"],
+	tools: ["tools", "provider_tools"],
+	prompts: ["prompts"],
+	compute: ["completion", "loop", "features", "concurrency", "providers", "modes"],
+	longrun: ["long_running"],
+	trust: ["workspace"],
+	evidence: [],
+};
+
+function projectedPanelFields(lock: RecordValue): HarnessPanelFields {
+	return {
+		overview: effectiveRows(lock, PANEL_PREFIXES.overview),
+		team: effectiveRows(lock, PANEL_PREFIXES.team),
+		tools: effectiveRows(lock, PANEL_PREFIXES.tools),
+		prompts: effectiveRows(lock, PANEL_PREFIXES.prompts),
+		compute: effectiveRows(lock, PANEL_PREFIXES.compute),
+		longrun: effectiveRows(lock, PANEL_PREFIXES.longrun),
+		trust: effectiveRows(lock, PANEL_PREFIXES.trust),
+		evidence: effectiveRows(lock, PANEL_PREFIXES.evidence),
+	};
+}
+
+/** All visible effective lock leaves, with each canonical prefix owned by one panel. */
+export function projectHarnessEffectiveRowsByPanel(lock: RecordValue): HarnessPanelFields {
+	return projectedPanelFields(lock);
+}
+
+/** All visible effective lock leaves projected once into their owning panel. */
+export function projectHarnessEffectiveRows(lock: RecordValue): readonly HarnessField[] {
+	const panels = projectedPanelFields(lock);
+	return PANELS.flatMap(panel => panels[panel]);
+}
+
+function panelEffectiveRows(lock: RecordValue, panel: HarnessPanel): readonly HarnessField[] {
+	return effectiveRows(lock, PANEL_PREFIXES[panel]);
+}
+
 function effectiveValue(lock: RecordValue, path: string): unknown {
-	return effectiveRows(lock, [path])[0]?.value;
+	const entry = effectiveRows(lock, [path]).find(field => field.path === path);
+	return entry?.value;
 }
 
 function firstField(fields: readonly HarnessField[], path: string, label: string): HarnessField | undefined {
@@ -96,7 +138,7 @@ function provenanceSuffix(snapshot: HarnessSnapshot, path: string): string {
 }
 
 function availableFields(fields: readonly HarnessField[]): readonly HarnessField[] {
-	return fields.filter(field => field.value !== undefined && field.value !== null);
+	return fields.filter(field => field.value !== undefined);
 }
 
 function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly HarnessField[] {
@@ -110,11 +152,12 @@ function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly H
 				{ label: "Lock hash", path: "lock_hash", value: snapshot.lockHash },
 				{ label: "Generation", path: "generation", value: snapshot.generation },
 				{ label: "Mode", path: "mode", value: snapshot.mode },
+				...panelEffectiveRows(lock, panel),
 				...modeFields(lock),
 			];
 			break;
 		case "team": {
-			const teamFields = effectiveRows(lock, ["multi_agent.team_config.team"]);
+			const teamFields = panelEffectiveRows(lock, panel);
 			const teamSize = firstField(
 				teamFields,
 				"multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
@@ -124,38 +167,27 @@ function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly H
 			break;
 		}
 		case "tools":
-			fields = effectiveRows(lock, ["tools", "provider_tools"]);
+			fields = panelEffectiveRows(lock, panel);
 			break;
 		case "prompts":
-			fields = effectiveRows(lock, ["prompts"]);
+			fields = panelEffectiveRows(lock, panel);
 			break;
-		case "compute": {
-			const computeFields = [
-				...effectiveRows(lock, [
-					"providers.default_model",
-					"provider_tools.use_native",
-					"provider_tools.api_variant",
-					"modes",
-				]),
-			];
-			const apiVariant = firstField(computeFields, "provider_tools.api_variant", "API variant");
-			const nativeTools = firstField(computeFields, "provider_tools.use_native", "Native tools");
-			const defaultModel = firstField(computeFields, "providers.default_model", "Default model");
-			const modes = firstField(computeFields, "modes", "Modes");
-			fields = [apiVariant, nativeTools, defaultModel, modes].filter(
-				(field): field is HarnessField => field !== undefined,
-			);
+		case "compute":
+			fields = panelEffectiveRows(lock, panel).map(field => {
+				const label =
+					field.path === "providers.default_model"
+						? "Default model"
+						: field.path === "modes"
+							? "Modes"
+							: field.label;
+				return { ...field, label };
+			});
 			break;
-		}
 		case "longrun":
-			fields = effectiveRows(lock, ["long_running"]);
+			fields = panelEffectiveRows(lock, panel);
 			break;
 		case "trust":
-			fields = effectiveRows(lock, [
-				"workspace.sandbox",
-				"workspace.mirror",
-				"multi_agent.team_config.team.coordination",
-			]);
+			fields = panelEffectiveRows(lock, panel);
 			break;
 		case "evidence":
 			fields = [

@@ -87,6 +87,9 @@ export interface BreadboardEnginePort {
 		request: FirstParameter<BreadboardClient["compareResearch"]>,
 	): Promise<{ readonly resultJson: string; readonly exitCode: number }>;
 	setSessionModel(sessionId: string, model: string): Promise<void>;
+	setSessionMode(sessionId: string, mode: string): Promise<void>;
+	setSessionRole(sessionId: string, role: string, model?: string): Promise<void>;
+	setSessionSkills(sessionId: string, skills: readonly string[]): Promise<void>;
 	getProviderAuthStatus(): Promise<ProviderAuthStatusResponse>;
 	readonly modelRoles: ModelRolePort;
 	attachProviderAuth(request: ProviderAuthAttachRequest): Promise<ProviderAuthAttachResponse>;
@@ -217,6 +220,31 @@ interface BreadboardSessionCreatePayload {
 	readonly max_steps?: BreadboardCreateSessionRequest["maxSteps"];
 	readonly permission_mode?: BreadboardCreateSessionRequest["permissionMode"];
 	readonly stream?: BreadboardCreateSessionRequest["stream"];
+}
+export type BreadboardSessionControl =
+	| { readonly command: "set_model"; readonly model: string }
+	| { readonly command: "set_mode"; readonly mode: string }
+	| { readonly command: "set_role"; readonly role: string; readonly model?: string }
+	| { readonly command: "set_skills"; readonly selected: readonly string[] };
+
+export function buildBreadboardSessionControlRequest(control: BreadboardSessionControl): {
+	readonly command: string;
+	readonly payload: Readonly<Record<string, unknown>>;
+} {
+	switch (control.command) {
+		case "set_model":
+			return { command: control.command, payload: { model: control.model } };
+		case "set_mode":
+			return { command: control.command, payload: { mode: control.mode } };
+		case "set_role":
+			return {
+				command: control.command,
+				payload:
+					control.model === undefined ? { role: control.role } : { role: control.role, model: control.model },
+			};
+		case "set_skills":
+			return { command: control.command, payload: { selected: [...control.selected] } };
+	}
 }
 
 export function buildBreadboardSessionCreatePayload(
@@ -413,12 +441,44 @@ function createConnectedPort(
 		},
 		setSessionModel: async (sessionId, model) => {
 			assertOperational();
-			const response = await controlClient.postCommand(sessionId, {
-				command: "set_model",
-				payload: { model },
-			});
+			const response = await controlClient.postCommand(
+				sessionId,
+				buildBreadboardSessionControlRequest({ command: "set_model", model }),
+			);
 			if (response.detail?.status !== "ok" || response.detail.model !== model) {
 				throw new Error("BreadBoard engine returned an invalid model-selection receipt");
+			}
+		},
+		setSessionMode: async (sessionId, mode) => {
+			assertOperational();
+			const response = await controlClient.postCommand(
+				sessionId,
+				buildBreadboardSessionControlRequest({ command: "set_mode", mode }),
+			);
+			if (response.detail?.status !== "ok" || response.detail.mode !== mode) {
+				throw new Error("BreadBoard engine returned an invalid mode-selection receipt");
+			}
+		},
+		setSessionRole: async (sessionId, role, model) => {
+			assertOperational();
+			const response = await controlClient.postCommand(
+				sessionId,
+				buildBreadboardSessionControlRequest(
+					model === undefined ? { command: "set_role", role } : { command: "set_role", role, model },
+				),
+			);
+			if (response.detail?.status !== "ok" || response.detail.role !== role) {
+				throw new Error("BreadBoard engine returned an invalid role-selection receipt");
+			}
+		},
+		setSessionSkills: async (sessionId, skills) => {
+			assertOperational();
+			const response = await controlClient.postCommand(
+				sessionId,
+				buildBreadboardSessionControlRequest({ command: "set_skills", selected: skills }),
+			);
+			if (response.detail?.status !== "ok") {
+				throw new Error("BreadBoard engine returned an invalid skills-selection receipt");
 			}
 		},
 		getProviderAuthStatus: async () => {
