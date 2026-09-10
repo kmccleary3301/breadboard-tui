@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { SPINNER_ADVANCE_MS, TERMINAL } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber, getProjectDir, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
-import { longRunEnabled } from "../../../breadboard/harness-lock-view";
+import { longRunBudgets } from "../../../breadboard/harness-lock-view";
 import { type Theme, type ThemeColor, theme } from "../../../modes/theme/theme";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../../tools/render-utils";
 import { fileHyperlink } from "../../../tui/hyperlink";
@@ -884,13 +884,13 @@ const harnessSegment: StatusLineSegment = {
 const longrunSegment: StatusLineSegment = {
 	id: "longrun",
 	render(ctx) {
-		if (longRunEnabled(ctx.harness?.lock ?? null) !== true) {
-			return { content: "", visible: false };
-		}
-		return {
-			content: theme.fg("muted", "longrun"),
-			visible: true,
-		};
+		const budgets = longRunBudgets(ctx.harness?.lock ?? null);
+		if (!budgets) return { content: "", visible: false };
+		const caps: string[] = [];
+		if (budgets.totalCostUsd !== undefined) caps.push(`$${budgets.totalCostUsd.toFixed(2)}`);
+		if (budgets.totalTokens !== undefined) caps.push(`${formatNumber(budgets.totalTokens)} tok`);
+		const label = caps.length > 0 ? `longrun ≤ ${caps.join(" · ")}` : "longrun";
+		return { content: theme.fg("muted", label), visible: true };
 	},
 };
 

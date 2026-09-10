@@ -99,6 +99,31 @@ export function longRunEnabled(lock: Lock): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined;
 }
 
+export interface LongRunBudgets {
+	readonly totalCostUsd?: number;
+	readonly totalTokens?: number;
+}
+
+function positiveCap(lock: Lock, path: string): number | undefined {
+	const value = lockValue(lock, path)?.value;
+	return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/**
+ * Long-run caps the engine controller actually enforces
+ * (`breadboard_engine/longrun/controller.py` reads `budgets.total_tokens` and
+ * `budgets.total_cost_usd`; zero means uncapped). Present only when the
+ * controller is enabled. `wall_clock_s`/`total_episodes` rows exist in the lock
+ * but are not read by the controller, so they are not shown.
+ */
+export function longRunBudgets(lock: Lock): LongRunBudgets | undefined {
+	if (longRunEnabled(lock) !== true) return undefined;
+	return {
+		totalCostUsd: positiveCap(lock, "long_running.budgets.total_cost_usd"),
+		totalTokens: positiveCap(lock, "long_running.budgets.total_tokens"),
+	};
+}
+
 export function modeNames(lock: Lock): readonly string[] {
 	const value = lockValue(lock, "modes")?.value;
 	if (!Array.isArray(value)) return [];

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { EFFECTIVE_LOCK_FIXTURE } from "../modes/components/effective-lock-fixture";
-import { lockValue, longRunEnabled, posture, teamSize } from "@oh-my-pi/pi-coding-agent/breadboard/harness-lock-view";
+import {
+	lockValue,
+	longRunBudgets,
+	longRunEnabled,
+	posture,
+	teamSize,
+} from "@oh-my-pi/pi-coding-agent/breadboard/harness-lock-view";
 
 type Lock = Parameters<typeof lockValue>[0];
 
@@ -79,5 +85,19 @@ describe("harness lock projection", () => {
 			),
 		).toEqual(["prompted tools"]);
 		expect(posture(null)).toEqual([]);
+	});
+
+	it("exposes long-run caps only when enabled and only for enforced, positive leaves", () => {
+		const caps = (enabled: boolean, cost: number, tokens: number) =>
+			lockWith([
+				row("long_running.enabled", "boolean", enabled),
+				row("long_running.budgets.total_cost_usd", "number", cost),
+				row("long_running.budgets.total_tokens", "number", tokens),
+				row("long_running.budgets.wall_clock_s", "number", 3600),
+			]);
+		expect(longRunBudgets(caps(false, 5, 100))).toBeUndefined();
+		expect(longRunBudgets(caps(true, 5, 100))).toEqual({ totalCostUsd: 5, totalTokens: 100 });
+		expect(longRunBudgets(caps(true, 0, 0))).toEqual({});
+		expect(longRunBudgets(EFFECTIVE_LOCK_FIXTURE)).toBeUndefined();
 	});
 });
