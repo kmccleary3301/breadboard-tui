@@ -36,36 +36,36 @@ function isRecord(value: unknown): value is RecordValue {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function effectiveValue(lock: RecordValue, path: string): unknown {
+function effectiveRows(lock: RecordValue, prefixes: readonly string[]): readonly HarnessField[] {
 	const entries = lock.effective_values;
-	if (Array.isArray(entries)) {
-		for (const entry of entries) {
-			if (!isRecord(entry) || entry.path !== path) continue;
-			if (entry.visibility === "redacted") return REDACTED_DISPLAY;
-			return entry.value;
-		}
+	if (!Array.isArray(entries)) return [];
+	const fields: HarnessField[] = [];
+	for (const entry of entries) {
+		if (!isRecord(entry) || typeof entry.path !== "string") continue;
+		const path = entry.path;
+		if (entry.visibility === "redacted" || entry.value_kind === "secret-ref") continue;
+		if (!prefixes.some(prefix => path === prefix || path.startsWith(`${prefix}.`))) continue;
+		fields.push({ label: path, path, value: entry.value });
 	}
-	return undefined;
+	return fields;
 }
 
-function valueAt(lock: RecordValue, path: string): unknown {
-	const projected = effectiveValue(lock, path);
-	if (projected !== undefined) return projected;
-	let value: unknown = lock;
-	for (const part of path.split(".")) {
-		if (!isRecord(value)) return undefined;
-		value = value[part];
-	}
-	if (isRecord(value) && value.visibility === "redacted") return REDACTED_DISPLAY;
-	return value;
+function effectiveValue(lock: RecordValue, path: string): unknown {
+	return effectiveRows(lock, [path])[0]?.value;
 }
 
-function firstValue(lock: RecordValue, paths: readonly string[]): { readonly path: string; readonly value: unknown } {
-	for (const path of paths) {
-		const value = valueAt(lock, path);
-		if (value !== undefined && value !== null) return { path, value };
-	}
-	return { path: paths[0] ?? "", value: undefined };
+function firstField(fields: readonly HarnessField[], path: string, label: string): HarnessField | undefined {
+	const field = fields.find(candidate => candidate.path === path);
+	return field ? { ...field, label } : undefined;
+}
+
+function modeFields(lock: RecordValue): readonly HarnessField[] {
+	const modes = effectiveValue(lock, "modes");
+	if (!Array.isArray(modes)) return [];
+	return modes.flatMap((mode, index) => {
+		if (!isRecord(mode) || typeof mode.name !== "string" || mode.name.trim().length === 0) return [];
+		return [{ label: `Mode ${index + 1}`, path: "modes", value: mode.name }];
+	});
 }
 
 function safeText(value: string): string {
@@ -95,27 +95,6 @@ function provenanceSuffix(snapshot: HarnessSnapshot, path: string): string {
 	return `  ${theme.fg("dim", `(${location})`)}`;
 }
 
-function modeFields(lock: RecordValue): readonly HarnessField[] {
-	const modes = valueAt(lock, "modes");
-	if (Array.isArray(modes)) {
-		return modes.flatMap((mode, index) => {
-			if (!isRecord(mode) || typeof mode.name !== "string" || mode.name.trim().length === 0) return [];
-			return [{ label: `Mode ${index + 1}`, path: `modes.${index}.name`, value: mode.name }];
-		});
-	}
-	const entries = lock.effective_values;
-	if (!Array.isArray(entries)) return [];
-	return entries
-		.flatMap(entry => {
-			if (!isRecord(entry) || typeof entry.path !== "string" || !/^modes\.\d+\.name$/u.test(entry.path)) return [];
-			if (entry.visibility === "redacted" || typeof entry.value !== "string" || entry.value.trim().length === 0) return [];
-			const index = Number(entry.path.split(".")[1]);
-			return [{ label: `Mode ${index + 1}`, path: entry.path, value: entry.value, index }];
-		})
-		.sort((left, right) => left.index - right.index)
-		.map(({ index: _index, ...field }) => field);
-}
-
 function availableFields(fields: readonly HarnessField[]): readonly HarnessField[] {
 	return fields.filter(field => field.value !== undefined && field.value !== null);
 }
@@ -134,55 +113,55 @@ function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly H
 				...modeFields(lock),
 			];
 			break;
-		case "team":
-			fields = [
-				{
-					label: "Team size",
-					path: "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
-					value: valueAt(lock, "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents"),
-				},
-			];
+		case "team": {
+			const teamFields = effectiveRows(lock, ["multi_agent.team_config.team"]);
+			const teamSize = firstField(
+				teamFields,
+				"multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
+				"Team size",
+			);
+			fields = teamSize ? [teamSize, ...teamFields.filter(field => field !== teamSize)] : teamFields;
 			break;
+		}
 		case "tools":
-			{
-				const packs = firstValue(lock, ["tool_packs", "tools.packs"]);
-				const bindings = firstValue(lock, ["bindings", "tools.bindings"]);
-				const hidden = firstValue(lock, ["why_hidden", "tools.why_hidden", "tools.why-hidden"]);
-				fields = [
-					{ label: "Packs", path: packs.path, value: packs.value },
-					{ label: "Bindings", path: bindings.path, value: bindings.value },
-					{ label: "Why hidden", path: hidden.path, value: hidden.value },
-				];
-			}
+			fields = effectiveRows(lock, ["tools", "provider_tools"]);
 			break;
 		case "prompts":
-			fields = [{ label: "Prompts", path: "prompts", value: valueAt(lock, "prompts") }];
+			fields = effectiveRows(lock, ["prompts"]);
 			break;
-		case "compute":
-			fields = [
-				{ label: "API variant", path: "provider_tools.api_variant", value: valueAt(lock, "provider_tools.api_variant") },
-				{ label: "Native tools", path: "provider_tools.use_native", value: valueAt(lock, "provider_tools.use_native") },
+		case "compute": {
+			const computeFields = [
+				...effectiveRows(lock, [
+					"providers.default_model",
+					"provider_tools.use_native",
+					"provider_tools.api_variant",
+					"modes",
+				]),
 			];
+			const apiVariant = firstField(computeFields, "provider_tools.api_variant", "API variant");
+			const nativeTools = firstField(computeFields, "provider_tools.use_native", "Native tools");
+			const defaultModel = firstField(computeFields, "providers.default_model", "Default model");
+			const modes = firstField(computeFields, "modes", "Modes");
+			fields = [apiVariant, nativeTools, defaultModel, modes].filter(
+				(field): field is HarnessField => field !== undefined,
+			);
 			break;
+		}
 		case "longrun":
-			fields = [{ label: "Enabled", path: "long_running.enabled", value: valueAt(lock, "long_running.enabled") }];
+			fields = effectiveRows(lock, ["long_running"]);
 			break;
 		case "trust":
-			fields = [{ label: "Trust", path: "trust", value: valueAt(lock, "trust") }];
+			fields = effectiveRows(lock, [
+				"workspace.sandbox",
+				"workspace.mirror",
+				"multi_agent.team_config.team.coordination",
+			]);
 			break;
 		case "evidence":
-			{
-				const extendsChain = firstValue(lock, ["extends", "extends_chain"]);
-				const checkpoints = firstValue(lock, ["checkpoint_paths", "checkpoints", "checkpoint"]);
-				const evidence = firstValue(lock, ["evidence_paths", "evidence"]);
-				fields = [
-					{ label: "Lock hash", path: "lock_hash", value: snapshot.lockHash },
-					{ label: "Generation", path: "generation", value: snapshot.generation },
-					{ label: "Extends", path: extendsChain.path, value: extendsChain.value },
-					{ label: "Checkpoint paths", path: checkpoints.path, value: checkpoints.value },
-					{ label: "Evidence paths", path: evidence.path, value: evidence.value },
-				];
-			}
+			fields = [
+				{ label: "Lock hash", path: "lock_hash", value: snapshot.lockHash },
+				{ label: "Generation", path: "generation", value: snapshot.generation },
+			];
 			break;
 	}
 	return availableFields(fields);
@@ -203,8 +182,14 @@ export class HarnessView {
 			body.push(theme.fg("accent", `Harness panel ${panelIndex}/${PANELS.length}: ${this.#panel}`), "");
 			for (const field of panelFields(snapshot, this.#panel)) {
 				body.push(
-					`${theme.bold(safeText(field.label))}: ${displayValue(field.value)}${provenanceSuffix(snapshot, field.path)}`,
+					`${theme.bold(field.label)}: ${displayValue(field.value)}${provenanceSuffix(snapshot, field.path)}`,
 				);
+			}
+			if (
+				this.#panel === "trust" &&
+				effectiveRows(snapshot.lock ?? {}, ["permissions", "guardrails"]).length === 0
+			) {
+				body.push(theme.fg("muted", "No permissions.* or guardrails.* rows in the effective lock."));
 			}
 			if (this.#panel === "longrun" || this.#panel === "trust") {
 				body.push("", theme.fg("dim", "Read-only configuration view."));

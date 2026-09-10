@@ -114,7 +114,6 @@ function configuredHarnessId(activeSettings: Settings): string {
 	return typeof configured === "string" && configured.trim() ? configured : "daily_driver";
 }
 
-
 export function resolveNativeSurfaceEngineSelection(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
 	activeSettings: Settings,
@@ -355,7 +354,7 @@ export class BreadboardModelAuthorityError extends Error {
 	}
 }
 
-export function formatBreadboardStartupError(error: unknown): string | undefined {
+export function formatBreadboardStartupError(error: unknown): string {
 	const connectionError = formatBreadboardConnectionError(error);
 	if (connectionError !== undefined) return connectionError;
 	if (error instanceof BreadboardSessionTransitionError) {
@@ -364,7 +363,28 @@ export function formatBreadboardStartupError(error: unknown): string | undefined
 	if (error instanceof BreadboardModelAuthorityError) {
 		return `BreadBoard model authority error [${error.code}]: ${error.message}`;
 	}
-	return undefined;
+	const object =
+		typeof error === "object" && error !== null
+			? (error as { readonly code?: unknown; readonly message?: unknown; readonly cause?: unknown })
+			: undefined;
+	const message =
+		error instanceof Error && error.message
+			? error.message
+			: typeof object?.message === "string" && object.message
+				? object.message
+				: String(error);
+	const code =
+		error instanceof Error &&
+		"code" in error &&
+		typeof (error as Error & { readonly code?: unknown }).code === "string"
+			? (error as Error & { readonly code: string }).code
+			: typeof object?.code === "string"
+				? object.code
+				: undefined;
+	const cause = error instanceof Error ? error.cause : object?.cause;
+	const causeText =
+		cause === undefined ? "" : ` (cause: ${cause instanceof Error && cause.message ? cause.message : String(cause)})`;
+	return `BreadBoard startup error${code ? ` [${code}]` : ""}: ${message}${causeText}`;
 }
 
 const BREADBOARD_MODEL_PROVIDER_ALIASES: Readonly<Record<string, string>> = {

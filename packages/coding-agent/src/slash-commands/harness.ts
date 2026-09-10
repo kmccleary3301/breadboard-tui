@@ -12,14 +12,14 @@ export interface HarnessPaletteSettings {
 
 const LOCK_COMMANDS = [
 	["mode", "modes"],
-	["role", "roles"],
-	["team", "team"],
-	["spawn", "multi_agent"],
-	["wait", "long_running"],
-	["bus", "multi_agent"],
-	["longrun", "long_running"],
-	["checkpoint", "checkpoint"],
-	["prompts", "prompts"],
+	["role", "providers.models"],
+	["team", "multi_agent.enabled"],
+	["spawn", "multi_agent.enabled"],
+	["wait", "multi_agent.enabled"],
+	["bus", "multi_agent.enabled"],
+	["longrun", "long_running.enabled"],
+	["checkpoint", "multi_agent.enabled"],
+	["prompts", "prompts.*"],
 	["evidence", "evidence"],
 ] as const;
 
@@ -34,11 +34,11 @@ function effectiveValue(
 	path: string,
 ): { readonly found: boolean; readonly value: unknown } {
 	const entries = lock.effective_values;
-	if (Array.isArray(entries)) {
-		for (const entry of entries) {
-			const object = record(entry);
-			if (object?.path !== path) continue;
-			return { found: true, value: object.visibility === "redacted" ? undefined : object.value };
+	if (!Array.isArray(entries)) return { found: false, value: undefined };
+	for (const entry of entries) {
+		const object = record(entry);
+		if (object?.path === path && object.visibility !== "redacted" && object.value_kind !== "secret-ref") {
+			return { found: true, value: object.value };
 		}
 	}
 	return { found: false, value: undefined };
@@ -46,19 +46,20 @@ function effectiveValue(
 
 function effectivePathPresent(lock: Readonly<Record<string, unknown>>, path: string): boolean {
 	const entries = lock.effective_values;
-	return (
-		Array.isArray(entries) &&
-		entries.some(entry => {
-			const object = record(entry);
-			return object?.path === path || (typeof object?.path === "string" && object.path.startsWith(`${path}.`));
-		})
-	);
+	if (!Array.isArray(entries)) return false;
+	const prefix = path.endsWith(".*") ? path.slice(0, -2) : path;
+	return entries.some(entry => {
+		const object = record(entry);
+		if (object?.visibility === "redacted" || object?.value_kind === "secret-ref") return false;
+		if (typeof object?.path !== "string") return false;
+		return path.endsWith(".*")
+			? object.path.startsWith(`${prefix}.`)
+			: object.path === path || object.path.startsWith(`${prefix}.`);
+	});
 }
 
-function valueAt(lock: Readonly<Record<string, unknown>>, path: string): unknown {
-	const projected = effectiveValue(lock, path);
-	if (projected.found) return projected.value;
-	let value: unknown = lock;
+function rawValueAt(root: Readonly<Record<string, unknown>>, path: string): unknown {
+	let value: unknown = root;
 	for (const part of path.split(".")) {
 		const current = record(value);
 		if (!current) return undefined;
@@ -75,7 +76,7 @@ function strings(value: unknown): readonly string[] {
 
 function settingValue(settings: Settings, key: string): unknown {
 	const root = record(settings.getRaw("breadboard"));
-	return root ? valueAt(root, key) : undefined;
+	return root ? rawValueAt(root, key) : undefined;
 }
 
 export function readHarnessPaletteSettings(settings: Settings): HarnessPaletteSettings {
@@ -98,7 +99,7 @@ function commandNames(value: unknown): ReadonlySet<string> {
 }
 
 function unsupportedReasons(lock: Readonly<Record<string, unknown>>): ReadonlyMap<string, string> {
-	const raw = valueAt(lock, "unsupported_commands") ?? valueAt(lock, "unsupportedCommands");
+	const raw = rawValueAt(lock, "unsupported_commands") ?? rawValueAt(lock, "unsupportedCommands");
 	const object = record(raw);
 	const reasons = new Map<string, string>();
 	if (!object) return reasons;
@@ -109,14 +110,13 @@ function unsupportedReasons(lock: Readonly<Record<string, unknown>>): ReadonlyMa
 }
 
 function lockFieldPresent(lock: Readonly<Record<string, unknown>>, path: string): boolean {
-	const value = valueAt(lock, path);
-	const present = value !== undefined && value !== null ? true : effectivePathPresent(lock, path);
-	if (!present) return false;
-	if (path === "long_running" || path === "multi_agent") {
-		const enabled = valueAt(lock, `${path}.enabled`);
-		return enabled !== false;
-	}
-	return Array.isArray(value) ? value.length > 0 : true;
+	if (path === "evidence") return true;
+	if (path === "prompts.*") return effectivePathPresent(lock, path);
+	const entry = effectiveValue(lock, path);
+	if (!entry.found) return false;
+	if (path === "multi_agent.enabled" || path === "long_running.enabled") return entry.value === true;
+	if (path === "modes") return Array.isArray(entry.value) && entry.value.length > 0;
+	return entry.value !== undefined && entry.value !== null;
 }
 
 export function materializeHarnessCommands(
@@ -134,8 +134,8 @@ export function materializeHarnessCommands(
 		if (enabled || settings.unsupportedCommands === "dim") specs.push({ name, source, enabled, reason });
 	}
 	const hostNames = new Set([
-		...commandNames(valueAt(lock, "host_commands")),
-		...commandNames(valueAt(lock, "terminal_sessions")),
+		...commandNames(rawValueAt(lock, "host_commands")),
+		...commandNames(rawValueAt(lock, "terminal_sessions")),
 	]);
 	for (const name of [...hostNames].sort()) {
 		if (!name) continue;
@@ -187,6 +187,35 @@ function harnessUse(runtime: TuiSlashCommandRuntime, target: string): Promise<bo
 	return runtime.ctx.startHarnessSession(target);
 }
 
+async function harnessList(runtime: TuiSlashCommandRuntime): Promise<boolean> {
+	const snapshot = runtime.ctx.harnessPort?.current() ?? null;
+	const listChoices = runtime.ctx.harnessPort?.listHarnessChoices;
+	if (!listChoices) {
+		runtime.ctx.showStatus("Harness listing is unavailable: no BreadBoard control-plane client");
+		return true;
+	}
+	try {
+		const choices = await listChoices(runtime.ctx.sessionManager.getCwd());
+		if (choices.length === 0) {
+			runtime.ctx.showStatus("No BreadBoard harnesses available");
+			return true;
+		}
+		const activeId = snapshot?.harnessId;
+		runtime.ctx.showStatus(
+			choices
+				.map(
+					choice =>
+						`${choice.id === activeId || choice.path === activeId ? "*" : " "} ${choice.name} (${choice.path})`,
+				)
+				.join("\n"),
+		);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		runtime.ctx.showStatus(`Unable to list BreadBoard harnesses: ${detail}`);
+	}
+	return true;
+}
+
 export async function executeHarnessSlashCommand(
 	text: string,
 	runtime: TuiSlashCommandRuntime,
@@ -198,7 +227,7 @@ export async function executeHarnessSlashCommand(
 	const specs = materializeHarnessCommands(snapshot, settings);
 	if (parsed.name === "harness") {
 		const { verb, rest } = parseSubcommand(parsed.args);
-		if (!verb || verb === "list") {
+		if (!verb) {
 			runtime.ctx.showStatus(
 				snapshot
 					? `Active harness: ${snapshot.name} (${snapshot.harnessId})`
@@ -206,6 +235,7 @@ export async function executeHarnessSlashCommand(
 			);
 			return true;
 		}
+		if (verb === "list") return harnessList(runtime);
 		if (verb === "use") {
 			if (!rest) {
 				runtime.ctx.showStatus("Usage: /harness use <name|path>");

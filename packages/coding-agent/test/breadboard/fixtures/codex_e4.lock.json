@@ -1,0 +1,1119 @@
+{
+  "effective_values": [
+    {
+      "env_gate_ids": [],
+      "path": "completion.allow_content_only_completion",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.confidence_threshold",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 0.6,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.natural_finish.idle_turn_limit",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.natural_finish.no_tool_turns_threshold",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 2,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.primary",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "hybrid",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.provider_signals",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.text_sentinels",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "TASK COMPLETE",
+        "ALL TESTS PASSED",
+        "IMPLEMENTATION COMPLETE",
+        ">>>>>> END RESPONSE"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.tool_finish",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "mark_task_complete",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "concurrency.at_most_one_of",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "shell_command"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "concurrency.groups",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        {
+          "match_tools": [
+            "read_file",
+            "list_dir",
+            "glob",
+            "grep"
+          ],
+          "max_parallel": 4,
+          "name": "fs_reads"
+        },
+        {
+          "barrier_after": "apply_unified_patch",
+          "match_tools": [
+            "apply_unified_patch",
+            "apply_search_replace",
+            "write",
+            "run_shell"
+          ],
+          "max_parallel": 1,
+          "name": "edits_and_bash"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "concurrency.nonblocking_tools",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "read_file",
+        "list_dir",
+        "glob",
+        "grep",
+        "apply_search_replace"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "features.plan",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "features.todos.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "features.todos.reset_streak_on_todo",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "features.todos.strict",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.budgets.total_cost_usd",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 0.0,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.budgets.total_episodes",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 0,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.budgets.total_tokens",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 0,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.budgets.wall_clock_s",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 0,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.controller",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "longrun_v1",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.episode.max_steps_override",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": null,
+      "value_kind": "null",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.queue.backend",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "todo_store",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.recovery.no_progress_signature_repeats",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 0,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.reset_policy",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "fresh",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.resume.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.resume.state_path",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "meta/longrun_state.json",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.reviewer.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.reviewer.mode",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "read_only",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "long_running.verification.tiers",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        {
+          "commands": [
+            "pytest -q tests/test_longrun_controller.py"
+          ],
+          "hard_fail": false,
+          "name": "smoke",
+          "timeout_seconds": 120
+        },
+        {
+          "commands": [
+            "pytest -q"
+          ],
+          "hard_fail": true,
+          "name": "full",
+          "timeout_seconds": 1200
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "loop.plan_turn_limit",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "loop.sequence",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        {
+          "if": "features.plan",
+          "then": {
+            "mode": "plan"
+          }
+        },
+        {
+          "mode": "build"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "loop.turn_strategy.allow_multiple_per_turn",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "loop.turn_strategy.flow",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "assistant_continuation",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "loop.turn_strategy.relay",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "tool_role",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "modes",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        {
+          "name": "plan",
+          "prompt": "@pack(base).plan",
+          "tools_disabled": [],
+          "tools_enabled": [
+            "read_file",
+            "list_dir",
+            "glob",
+            "grep"
+          ]
+        },
+        {
+          "name": "build",
+          "prompt": "@pack(base).builder",
+          "tools_disabled": [],
+          "tools_enabled": [
+            "*"
+          ]
+        },
+        {
+          "name": "compact",
+          "prompt": "@pack(base).compact",
+          "tools_enabled": []
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.event_log_path",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "misc/multi_agent_runs/codex_cli_subagent_event_log.jsonl",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.main.config_ref",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "agent_configs/codex_0-107-0_e4_3-6-2026.yaml",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.main.entrypoint",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.main.role",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "main",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.readonly-worker.capabilities.allow_spawn",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.readonly-worker.capabilities.read_only",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.readonly-worker.config_ref",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "agent_configs/misc/codex_subagent_readonly.yaml",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.readonly-worker.entrypoint",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.agents.readonly-worker.role",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "readonly-worker",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.bus.model_visible_topics",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "tool_result"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.bus.retention.max_age_seconds",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 86400,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.bus.retention.max_events",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 2000,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.intervention.require_supervisor_escalate",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.intervention.support_claim_limited_actions",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "checkpoint",
+        "terminate"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.legacy_completion_sources",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "text_sentinel",
+        "tool_call",
+        "provider_finish"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.mission_owner_role",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "supervisor",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.preserve_legacy_wake_conditions",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.review.allowed_reviewer_roles",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "supervisor",
+        "system"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.review.no_progress_action",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "checkpoint",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.coordination.review.retryable_failure_action",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "retry",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.id",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "codex_cli_collab",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.orchestration.join_policy.default",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "block_until_complete",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.orchestration.scheduler.kind",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "deterministic_event_loop",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 2,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.orchestration.spawn_protocol.async.ack_fields",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "receiver_thread_ids"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.orchestration.spawn_protocol.async.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.orchestration.spawn_protocol.tool_name",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "spawn_agent",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.topology.edges",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        {
+          "from": "main",
+          "mode": [
+            "sync",
+            "async"
+          ],
+          "to": "readonly-worker"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.version",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.workspace.sharing.default",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "shared_workspace",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.team_config.team.workspace.sharing.write_lock",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "advisory_only",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.builder",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.compact",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.plan",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.system",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.tools_catalog_full",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.tools_catalog_short",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.tool_prompt_mode",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "none",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.tool_prompt_synthesis.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.api_variant",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "responses",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.suppress_prompts",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.use_native",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.default_model",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "openai/gpt-5.1-codex-mini",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.models",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        {
+          "adapter": "openai",
+          "id": "openai/gpt-5.1-codex-mini",
+          "params": {
+            "temperature": 0.2,
+            "top_p": 0.9
+          }
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.routing.disable_native_tools_on_probe_failure",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.routing.disable_stream_on_probe_failure",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "schema_version",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "bb.agent_config_surface.v2",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.aliases.bash",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "run_shell",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.aliases.edit",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "apply_search_replace",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.aliases.list",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "list_dir",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.aliases.patch",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "apply_unified_patch",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.aliases.read",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "read_file",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.dialects.preference.by_model.openai/*.order",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "aider_search_replace",
+        "unified_diff",
+        "bash_block"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.dialects.preference.by_model.openrouter/openai/*.order",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "aider_search_replace",
+        "unified_diff",
+        "bash_block"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.dialects.preference.default",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "aider_search_replace",
+        "unified_diff",
+        "bash_block"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.dialects.selection.by_model.openai/*",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "aider_search_replace",
+        "unified_diff"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.dialects.selection.by_model.openrouter/openai/*",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "aider_search_replace",
+        "unified_diff"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.mark_task_complete",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.registry.include",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "shell_command",
+        "apply_patch",
+        "update_plan"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.registry.paths",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": [
+        "../implementations/tools/defs"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "version",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": 2,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.mirror.enabled",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.mirror.mode",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "development",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.mirror.path",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "./agent_ws",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.root",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "./agent_ws",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.sandbox.driver",
+      "source_layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "value": "process",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    }
+  ],
+  "env_gates": [],
+  "graph_hash": "sha256:1723a1b320efc813e0b97a60c4228a84342a2d6fc4714b32dbe3bf8beb13a119",
+  "graph_id": "agent_config:codex_0-107-0_e4_3-6-2026",
+  "merge_policy": {
+    "conflict_resolution": "highest-precedence",
+    "policy_id": "precedence_order_deep_merge",
+    "strategy": "deep-merge"
+  },
+  "migrations": [
+    {
+      "applied": true,
+      "from_version": "agent-config-yaml",
+      "migration_id": "agent-config-yaml-to-effective-config-graph-v1",
+      "to_version": "bb.effective_config_graph.v1"
+    }
+  ],
+  "schema_version": "bb.effective_config_graph.v1",
+  "source_layers": [
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:a3490899627576b694390d8f187fb1002e6337aa4972852e0f8260e716ac0261",
+      "layer_id": "agent-config:0000:codex_0-107-0_e4_3-6-2026.yaml",
+      "model_visible": true,
+      "precedence": 0,
+      "scope": "agent",
+      "source_kind": "project",
+      "source_ref": "v2/codex_0-107-0_e4_3-6-2026.yaml"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:1b3dd697043a7f613c691a3721a450251626685b3e97ac3ad3d35ea62758a31e",
+      "layer_id": "harness-resource:0000",
+      "model_visible": true,
+      "precedence": 10,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": "v2/codex_0-107-0_e4_3-6-2026.yaml::../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md"
+    }
+  ],
+  "visibility": {
+    "host_only_paths": [],
+    "model_visible_paths": [
+      "completion.allow_content_only_completion",
+      "completion.confidence_threshold",
+      "completion.natural_finish.idle_turn_limit",
+      "completion.natural_finish.no_tool_turns_threshold",
+      "completion.primary",
+      "completion.provider_signals",
+      "completion.text_sentinels",
+      "completion.tool_finish",
+      "concurrency.at_most_one_of",
+      "concurrency.groups",
+      "concurrency.nonblocking_tools",
+      "features.plan",
+      "features.todos.enabled",
+      "features.todos.reset_streak_on_todo",
+      "features.todos.strict",
+      "long_running.budgets.total_cost_usd",
+      "long_running.budgets.total_episodes",
+      "long_running.budgets.total_tokens",
+      "long_running.budgets.wall_clock_s",
+      "long_running.controller",
+      "long_running.enabled",
+      "long_running.episode.max_steps_override",
+      "long_running.queue.backend",
+      "long_running.recovery.no_progress_signature_repeats",
+      "long_running.reset_policy",
+      "long_running.resume.enabled",
+      "long_running.resume.state_path",
+      "long_running.reviewer.enabled",
+      "long_running.reviewer.mode",
+      "long_running.verification.tiers",
+      "loop.plan_turn_limit",
+      "loop.sequence",
+      "loop.turn_strategy.allow_multiple_per_turn",
+      "loop.turn_strategy.flow",
+      "loop.turn_strategy.relay",
+      "modes",
+      "multi_agent.enabled",
+      "multi_agent.event_log_path",
+      "multi_agent.team_config.team.agents.main.config_ref",
+      "multi_agent.team_config.team.agents.main.entrypoint",
+      "multi_agent.team_config.team.agents.main.role",
+      "multi_agent.team_config.team.agents.readonly-worker.capabilities.allow_spawn",
+      "multi_agent.team_config.team.agents.readonly-worker.capabilities.read_only",
+      "multi_agent.team_config.team.agents.readonly-worker.config_ref",
+      "multi_agent.team_config.team.agents.readonly-worker.entrypoint",
+      "multi_agent.team_config.team.agents.readonly-worker.role",
+      "multi_agent.team_config.team.bus.model_visible_topics",
+      "multi_agent.team_config.team.bus.retention.max_age_seconds",
+      "multi_agent.team_config.team.bus.retention.max_events",
+      "multi_agent.team_config.team.coordination.intervention.require_supervisor_escalate",
+      "multi_agent.team_config.team.coordination.intervention.support_claim_limited_actions",
+      "multi_agent.team_config.team.coordination.legacy_completion_sources",
+      "multi_agent.team_config.team.coordination.mission_owner_role",
+      "multi_agent.team_config.team.coordination.preserve_legacy_wake_conditions",
+      "multi_agent.team_config.team.coordination.review.allowed_reviewer_roles",
+      "multi_agent.team_config.team.coordination.review.no_progress_action",
+      "multi_agent.team_config.team.coordination.review.retryable_failure_action",
+      "multi_agent.team_config.team.id",
+      "multi_agent.team_config.team.orchestration.join_policy.default",
+      "multi_agent.team_config.team.orchestration.scheduler.kind",
+      "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents",
+      "multi_agent.team_config.team.orchestration.spawn_protocol.async.ack_fields",
+      "multi_agent.team_config.team.orchestration.spawn_protocol.async.enabled",
+      "multi_agent.team_config.team.orchestration.spawn_protocol.tool_name",
+      "multi_agent.team_config.team.topology.edges",
+      "multi_agent.team_config.team.version",
+      "multi_agent.team_config.team.workspace.sharing.default",
+      "multi_agent.team_config.team.workspace.sharing.write_lock",
+      "prompts.packs.base.builder",
+      "prompts.packs.base.compact",
+      "prompts.packs.base.plan",
+      "prompts.packs.base.system",
+      "prompts.packs.base.tools_catalog_full",
+      "prompts.packs.base.tools_catalog_short",
+      "prompts.tool_prompt_mode",
+      "prompts.tool_prompt_synthesis.enabled",
+      "provider_tools.api_variant",
+      "provider_tools.suppress_prompts",
+      "provider_tools.use_native",
+      "providers.default_model",
+      "providers.models",
+      "providers.routing.disable_native_tools_on_probe_failure",
+      "providers.routing.disable_stream_on_probe_failure",
+      "schema_version",
+      "tools.aliases.bash",
+      "tools.aliases.edit",
+      "tools.aliases.list",
+      "tools.aliases.patch",
+      "tools.aliases.read",
+      "tools.dialects.preference.by_model.openai/*.order",
+      "tools.dialects.preference.by_model.openrouter/openai/*.order",
+      "tools.dialects.preference.default",
+      "tools.dialects.selection.by_model.openai/*",
+      "tools.dialects.selection.by_model.openrouter/openai/*",
+      "tools.mark_task_complete",
+      "tools.registry.include",
+      "tools.registry.paths",
+      "version",
+      "workspace.mirror.enabled",
+      "workspace.mirror.mode",
+      "workspace.mirror.path",
+      "workspace.root",
+      "workspace.sandbox.driver"
+    ],
+    "redacted_paths": []
+  }
+}

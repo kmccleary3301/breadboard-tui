@@ -55,4 +55,8 @@ export interface HarnessPort {
 	refresh(reason: HarnessRefreshReason): Promise<HarnessSnapshot | null>;
 	/** Notified after every `refresh` that changed the snapshot; returns the unsubscribe function. */
 	subscribe(listener: (snapshot: HarnessSnapshot | null) => void): () => void;
+	/** List harness definitions through the same control-plane client used for this snapshot. */
+	readonly listHarnessChoices?: (
+		directory?: string,
+	) => Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]>;
 }

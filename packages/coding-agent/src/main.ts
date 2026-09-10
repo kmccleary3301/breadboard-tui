@@ -2119,7 +2119,9 @@ export async function runRootCommand(
 						stopThemeWatcher();
 						return;
 					}
-					const message = formatBreadboardStartupError(error) ?? "BreadBoard lifecycle failed unexpectedly.";
+					const message =
+						formatBreadboardStartupError(error) ??
+						`BreadBoard lifecycle failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`;
 					process.stderr.write(`${message}\n`);
 					process.exitCode = 1;
 					stopStartupWatchdog();

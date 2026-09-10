@@ -40,11 +40,7 @@ const failure = (message: string): PublicResult => ({
 	data: {},
 });
 
-function clientFor(
-	calls: string[],
-	validation = result({}),
-	lock = result({ graph_hash: "sha256:daily-lock" }),
-) {
+function clientFor(calls: string[], validation = result({}), lock = result({ graph_hash: "sha256:daily-lock" })) {
 	return {
 		getHarness: async (id: string) => {
 			calls.push(`get:${id}`);
@@ -147,7 +143,9 @@ describe("/harness use", () => {
 				"lock:agent_configs/daily_driver.v1.yaml",
 			]);
 			expect(newSession).not.toHaveBeenCalled();
-			expect(transcript(mode)).toContain("Harness daily_driver validated and locked with lock hash sha256:daily-lock");
+			expect(transcript(mode)).toContain(
+				"Harness daily_driver validated and locked with lock hash sha256:daily-lock",
+			);
 			expect(transcript(mode)).toContain("Current session stays pinned to its lock");
 			expect(transcript(mode)).toContain("bb --harness daily_driver");
 		} finally {
@@ -204,4 +202,39 @@ test("/harness use --here explains why an in-process switch is rejected", async 
 	expect(harness.showStatus).toHaveBeenCalledWith(
 		"A BreadBoard session is pinned to its engine session and lock; an in-process harness switch is not possible.",
 	);
+});
+test("/harness list prints names and paths and marks the active harness", async () => {
+	const showStatus = vi.fn();
+	const listHarnessChoices = vi.fn(async (directory?: string) => {
+		expect(directory).toBe("/project");
+		return [
+			{ id: "daily_driver.v1.yaml", name: "daily_driver.v1", path: "daily_driver.v1.yaml" },
+			{ id: "codex.yaml", name: "codex", path: "codex.yaml" },
+		];
+	});
+	const runtime = {
+		ctx: {
+			settings: Settings.isolated(),
+			harnessPort: {
+				current: () =>
+					({
+						harnessId: "daily_driver.v1.yaml",
+						name: "Daily Driver",
+						lockHash: null,
+						generation: null,
+						mode: null,
+						lock: null,
+						provenance: {},
+						loadedAt: 1,
+					}) as const,
+				listHarnessChoices,
+			},
+			sessionManager: { getCwd: () => "/project" },
+			showStatus,
+		},
+	};
+
+	expect(await executeHarnessSlashCommand("/harness list", runtime as never)).toBe(true);
+	expect(listHarnessChoices).toHaveBeenCalledWith("/project");
+	expect(showStatus).toHaveBeenCalledWith("* daily_driver.v1 (daily_driver.v1.yaml)\n  codex (codex.yaml)");
 });

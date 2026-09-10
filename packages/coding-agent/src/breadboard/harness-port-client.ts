@@ -18,7 +18,6 @@ type HarnessChoice = {
 	readonly path: string;
 };
 
-
 export interface CreateHarnessPortOptions {
 	readonly client: BreadboardClient;
 	readonly sessionId: string | (() => string);
@@ -174,6 +173,7 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		listHarnessChoices: (directory?: string) => listHarnessChoices(options.client, directory),
 	};
 }
 
@@ -192,9 +192,7 @@ export async function resolveHarness(client: BreadboardClient, requested: string
 	const harness = isRecord(data.harness) ? data.harness : data;
 	const id = typeof harness.path === "string" && harness.path.trim() ? harness.path : requested;
 	const definition =
-		(isRecord(data.definition) && data.definition) ||
-		(isRecord(harness.definition) && harness.definition) ||
-		harness;
+		(isRecord(data.definition) && data.definition) || (isRecord(harness.definition) && harness.definition) || harness;
 	return { id, name: harnessName(definition, requested) };
 }
 
