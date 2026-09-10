@@ -863,37 +863,21 @@ describe("E4AgentStreamBridge", () => {
 		}
 	});
 
-	test("does not restore ownership when a retry receipt names an already adopted terminal turn", async () => {
+	test("commits an observed terminal only after the aborted admission's late ownership persists", async () => {
 		const submission = Promise.withResolvers<SubmitReceipt>();
-		const lateRetry = Promise.withResolvers<SubmitReceipt>();
 		const submitStarted = Promise.withResolvers<void>();
 		const terminalCommitted = Promise.withResolvers<void>();
-		const lateRetryStarted = Promise.withResolvers<void>();
 		const ownershipStarted = Promise.withResolvers<void>();
 		const persistOwnership = Promise.withResolvers<void>();
 		const ownershipCalls: string[] = [];
 		const ownershipSnapshots: string[][] = [];
-		let attempts = 0;
 		let firstInput: StructuredSubmit | undefined;
-		let lateRetryInput: StructuredSubmit | undefined;
 		const session: OpenedSession = {
 			...openedSession([], []),
 			async submit(input) {
-				firstInput ??= input as StructuredSubmit;
-				attempts += 1;
-				if (attempts === 1) {
-					submitStarted.resolve();
-					return submission.promise;
-				}
-				if (attempts === 3) {
-					lateRetryInput = input as StructuredSubmit;
-					lateRetryStarted.resolve();
-					return lateRetry.promise;
-				}
-				return {
-					...receipt,
-					clientMessageId: (input as StructuredSubmit).clientMessageId as ClientMessageId,
-				};
+				firstInput = input as StructuredSubmit;
+				submitStarted.resolve();
+				return submission.promise;
 			},
 			async cancel(): Promise<CancellationReceipt> {
 				return {} as CancellationReceipt;
@@ -945,27 +929,103 @@ describe("E4AgentStreamBridge", () => {
 			expect(prematureCommit).toBeFalse();
 			persistOwnership.resolve();
 			await terminalCommitted.promise;
-
-			const retryResult = await (await startBridgeStream(bridge, model, context)).result();
-			expect(retryResult.stopReason).toBe("error");
-			expect(retryResult.errorMessage).toContain("already in the transcript");
 			expect(ownershipCalls).toEqual([String(receipt.turnId)]);
 			expect(ownershipSnapshots.at(-1)).toEqual([String(receipt.turnId)]);
-
-			const lateAbort = new AbortController();
-			const lateStream = await startBridgeStream(bridge, model, context, { signal: lateAbort.signal });
-			await lateRetryStarted.promise;
-			lateAbort.abort();
-			expect((await lateStream.result()).stopReason).toBe("aborted");
-			if (!lateRetryInput) throw new Error("late retry submission missing");
-			lateRetry.resolve({
-				...receipt,
-				clientMessageId: lateRetryInput.clientMessageId as ClientMessageId,
-			});
-			await Bun.sleep(0);
-			expect(ownershipCalls).toEqual([String(receipt.turnId)]);
 		} finally {
 			persistOwnership.resolve();
+			await bridge.close();
+		}
+	});
+
+	test("submits an identical prompt after an aborted admission landed as a new turn", async () => {
+		// Regression for bb-ewnk.14: after an aborted admission whose late receipt landed on a turn that
+		// completed and was adopted, resubmitting the same short prompt must start a new turn, not be
+		// rejected as "already observed" for the rest of the session.
+		const submission = Promise.withResolvers<SubmitReceipt>();
+		const submitStarted = Promise.withResolvers<void>();
+		const firstTerminalCommitted = Promise.withResolvers<void>();
+		const secondTurnAdmitted = Promise.withResolvers<void>();
+		const secondStarted = wireEvent(4, "turn_start", {}, "turn-2");
+		if (secondStarted.inputId === null || secondStarted.turnId === null)
+			throw new Error("fixture correlation missing");
+		const admitted = new Map<string, SubmitReceipt>();
+		const submitted: StructuredSubmit[] = [];
+		const ownershipCalls: string[] = [];
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async submit(input) {
+				const structured = input as StructuredSubmit;
+				submitted.push(structured);
+				const clientMessageId = String(structured.clientMessageId);
+				if (submitted.length === 1) {
+					submitStarted.resolve();
+					const first = await submission.promise;
+					admitted.set(clientMessageId, first);
+					return first;
+				}
+				// The engine deduplicates by clientMessageId and otherwise admits a new turn.
+				const existing = admitted.get(clientMessageId);
+				if (existing) return { ...existing, disposition: "deduplicated" };
+				const second: SubmitReceipt = {
+					clientMessageId: structured.clientMessageId as ClientMessageId,
+					inputId: secondStarted.inputId as SubmitReceipt["inputId"],
+					turnId: secondStarted.turnId as SubmitReceipt["turnId"],
+					disposition: "started",
+					originalDisposition: "started",
+				};
+				admitted.set(clientMessageId, second);
+				secondTurnAdmitted.resolve();
+				return second;
+			},
+			async cancel(): Promise<CancellationReceipt> {
+				return {} as CancellationReceipt;
+			},
+			async *events(request) {
+				const aborted = new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+				await submitStarted.promise;
+				yield started;
+				yield wireEvent(3, "turn_completed", {});
+				await Promise.race([secondTurnAdmitted.promise, aborted]);
+				if (request?.signal?.aborted) return;
+				yield secondStarted;
+				yield wireEvent(5, "turn_completed", {}, "turn-2");
+				await aborted;
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned(owned) {
+				ownershipCalls.push(owned.turnId);
+			},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted(cursor) {
+				if (cursor.sequence === 3) firstTerminalCommitted.resolve();
+			},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const controller = new AbortController();
+
+		try {
+			const firstStream = await startBridgeStream(bridge, model, context, { signal: controller.signal });
+			await submitStarted.promise;
+			controller.abort();
+			expect((await firstStream.result()).stopReason).toBe("aborted");
+			submission.resolve({
+				...receipt,
+				clientMessageId: submitted[0]?.clientMessageId as ClientMessageId,
+			});
+			await firstTerminalCommitted.promise;
+
+			const secondResult = await (await startBridgeStream(bridge, model, context)).result();
+			expect(secondResult.stopReason).toBe("stop");
+			expect(submitted).toHaveLength(2);
+			expect(submitted[1]?.clientMessageId).not.toBe(submitted[0]?.clientMessageId);
+			expect(ownershipCalls).toEqual([String(receipt.turnId), String(secondStarted.turnId)]);
+		} finally {
 			await bridge.close();
 		}
 	});

@@ -241,7 +241,6 @@ export class E4AgentStreamBridge {
 	readonly #sinks = new Map<string, TurnSink>();
 	readonly #adoptedTerminalTurnIds = new Set<string>();
 	readonly #ownedSubmissions = new Map<string, E4OwnedSubmission>();
-	readonly #observedSubmitAttempts = new Map<string, PendingSubmit>();
 	readonly #submittingSinks = new Set<TurnSink>();
 	readonly #submissionsInFlight = new Set<Promise<void>>();
 	readonly #lateSubmissionRecoveries = new Set<Promise<void>>();
@@ -332,7 +331,6 @@ export class E4AgentStreamBridge {
 		await Promise.all(this.#eventApplicationsInFlight);
 		this.#sinks.clear();
 		this.#adoptedTerminalTurnIds.clear();
-		this.#observedSubmitAttempts.clear();
 		this.#submittingSinks.clear();
 		let projectionFailure: unknown;
 		try {
@@ -466,14 +464,12 @@ export class E4AgentStreamBridge {
 		}
 		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
 			attempt.turnId = receipt.turnId;
-			this.#rememberObservedSubmit(attempt);
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			return;
 		}
 		await this.#recordOwnedSubmission(receipt);
 		attempt.turnId = receipt.turnId;
 		if (this.#adoptedTerminalTurnIds.has(turnKey)) {
-			this.#rememberObservedSubmit(attempt);
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			return;
 		}
@@ -634,20 +630,20 @@ export class E4AgentStreamBridge {
 			if (this.#pendingSubmit?.recoveringAfterAbort) {
 				throw new Error("BreadBoard previous submission cancellation is still resolving");
 			}
-			attempt = this.#pendingSubmit ??
-				this.#observedSubmitAttempts.get(canonicalDigest) ?? {
-					canonicalDigest,
-					input: { ...input, clientMessageId: crypto.randomUUID() },
-					recoveringAfterAbort: false,
-					turnId: undefined,
-				};
+			// Only an unresolved attempt is retried under its clientMessageId. Any other submit,
+			// including a prompt identical to an earlier one, is a new logical submission.
+			attempt = this.#pendingSubmit ?? {
+				canonicalDigest,
+				input: { ...input, clientMessageId: crypto.randomUUID() },
+				recoveringAfterAbort: false,
+				turnId: undefined,
+			};
 			const receipt = await this.#submitAttempt(attempt, sink, signal);
 			if (!receipt) return;
 			attempt.turnId = receipt.turnId;
 			const turnKey = String(receipt.turnId);
 			const observedSink = this.#sinks.get(turnKey);
 			if (observedSink?.adopted || this.#adoptedTerminalTurnIds.has(turnKey)) {
-				this.#rememberObservedSubmit(attempt);
 				if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 				this.#failSink(
 					sink,
@@ -1199,20 +1195,9 @@ export class E4AgentStreamBridge {
 		sink.stream?.push({ type: "start", partial: assistantMessage(sink.model, "", "stop") });
 	}
 
-	#rememberObservedSubmit(attempt: PendingSubmit): void {
-		this.#observedSubmitAttempts.delete(attempt.canonicalDigest);
-		this.#observedSubmitAttempts.set(attempt.canonicalDigest, attempt);
-		while (this.#observedSubmitAttempts.size > 16) {
-			const oldest = this.#observedSubmitAttempts.keys().next().value;
-			if (oldest === undefined) break;
-			this.#observedSubmitAttempts.delete(oldest);
-		}
-	}
-
 	#settlePendingSubmit(sink: TurnSink): void {
 		const attempt = this.#pendingSubmit;
 		if (!attempt || sink.turnId === undefined || attempt.turnId !== sink.turnId) return;
-		this.#rememberObservedSubmit(attempt);
 		this.#pendingSubmit = undefined;
 	}
 
