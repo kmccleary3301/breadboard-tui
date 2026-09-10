@@ -68,6 +68,11 @@ describe("harness lock projection", () => {
 		expect(
 			teamSize(lockWith([row("multi_agent.enabled", "boolean", true), row(sizePath, "number", -1)])),
 		).toBeUndefined();
+		// The engine compiler rejects non-positive team limits (server_compiler.py validate_team_limit).
+		expect(
+			teamSize(lockWith([row("multi_agent.enabled", "boolean", true), row(sizePath, "number", 0)])),
+		).toBeUndefined();
+		expect(teamSize(lockWith([row("multi_agent.enabled", "boolean", true), row(sizePath, "number", 1)]))).toBe(1);
 		expect(
 			teamSize(lockWith([row("multi_agent.enabled", "boolean", true), row(sizePath, "string", "2")])),
 		).toBeUndefined();

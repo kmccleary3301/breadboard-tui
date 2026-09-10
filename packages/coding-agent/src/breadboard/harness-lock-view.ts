@@ -86,11 +86,15 @@ export function lockValue(lock: Lock, path: string): EffectiveLockValueResult | 
 	return { value: row.value, visibility: row.visibility };
 }
 
-/** Effective team size, gated by the canonical multi-agent enable flag. */
+/**
+ * Effective team size, gated by the canonical multi-agent enable flag. The engine
+ * compiler rejects non-positive limits (`server_compiler.py` validate_team_limit),
+ * so zero is treated as absent rather than displayed.
+ */
 export function teamSize(lock: Lock): number | undefined {
 	if (lockValue(lock, "multi_agent.enabled")?.value !== true) return undefined;
 	const value = lockValue(lock, "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents")?.value;
-	return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /** Whether the canonical long-running controller is enabled. */
