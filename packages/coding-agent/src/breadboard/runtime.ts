@@ -736,7 +736,7 @@ export async function prepareConnectedBreadboardRuntime(
 			}
 			return confirmed;
 		};
-		bridge = (options.createBridge ?? (bridgeOptions => new E4AgentStreamBridge(bridgeOptions)))({
+		const bridgeOptions: E4AgentStreamBridgeOptions = {
 			session: opened,
 			durableCursor: durableBridgeCursor(bridgeBinding),
 			projectionReceiptEventIds,
@@ -748,7 +748,24 @@ export async function prepareConnectedBreadboardRuntime(
 			modelPolicy: { kind: "fixed", model },
 			requestPermission: options.requestPermission,
 			selectModel,
-		});
+		};
+		if (options.createBridge) {
+			bridge = options.createBridge(bridgeOptions);
+		} else {
+			const e4Bridge = new E4AgentStreamBridge(bridgeOptions);
+			bridge = {
+				stream: e4Bridge.stream,
+				start: () => e4Bridge.start(),
+				close: async () => {
+					const result = await e4Bridge.close();
+					if (result.kind === "unresolved_cleanup") {
+						logger.warn("BreadBoard E4 bridge close left cleanup unresolved", { reason: result.reason });
+					}
+				},
+			};
+		}
+		const runtimeBridge = bridge;
+		if (!runtimeBridge) throw new Error("BreadBoard runtime bridge was not created");
 		throwIfLifecycleFailed();
 		cancelCleanup = (options.registerCleanup ?? (cleanup => postmortem.register("breadboard-runtime", cleanup)))(
 			closePreparedRuntime,
@@ -782,14 +799,14 @@ export async function prepareConnectedBreadboardRuntime(
 			}
 			if (runtimeStarted) return;
 			throwIfLifecycleFailed();
-			bridge!.start();
+			runtimeBridge.start();
 			runtimeStarted = true;
 		};
 		return {
 			harnessClient: options.engine.harnessClient,
 			harnessId: options.harnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			setSessionModel: model => options.engine.setSessionModel(opened!.sessionId, model),
-			stream: bridge.stream,
+			stream: runtimeBridge.stream,
 			sessionId: initialBinding.sessionId,
 			providerAuth: options.engine.providerAuth,
 			models: catalogModels,

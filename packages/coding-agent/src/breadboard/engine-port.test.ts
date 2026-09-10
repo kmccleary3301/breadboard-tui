@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { decodeLoggedSessionEvent } from "@breadboard/sdk/session";
 import {
 	buildBreadboardSessionCreatePayload,
+	closeOpenedSession,
 	connectCanonicalBreadboardEnginePort,
 	createCanonicalEventFetch,
 	createLifecycleMonitor,
 } from "./engine-port";
 import { lifecycleFailure, lifecycleState } from "./lifecycle/lifecycle-state";
 import type { BreadboardRunConfig } from "./lifecycle/run-config";
+import type { OpenedSession } from "./session-port";
 
 const offConfig = {
 	mode: "off",
@@ -103,6 +105,59 @@ describe("createLifecycleMonitor", () => {
 		monitor.stateChanged(lifecycleState("local-owned", "ready"));
 		expect(monitor.signal.authorityDiscontinuity()?.previous).toEqual(authority);
 		expect(monitor.signal.failure()?.state.name).toBe("identity-changed");
+	});
+	test("returns unresolved cleanup for bounded teardown failures", async () => {
+		const pending = <T>(): Promise<T> => new Promise<T>(() => {});
+		const makeSession = (operation: "snapshot" | "cancel" | "close"): OpenedSession =>
+			({
+				sessionId: "session-1",
+				snapshot: async () =>
+					operation === "snapshot"
+						? pending()
+						: ({ activeTurnId: operation === "cancel" ? "turn-1" : null } as never),
+				submit: async () => pending(),
+				cancel: async () => (operation === "cancel" ? pending() : ({} as never)),
+				respondPermission: async () => ({}) as never,
+				async *events() {},
+				close: async () => {
+					if (operation === "close") await pending();
+				},
+			}) as unknown as OpenedSession;
+
+		for (const operation of ["snapshot", "cancel", "close"] as const) {
+			const startedAt = performance.now();
+			const outcome = await closeOpenedSession(makeSession(operation), 50);
+			expect(outcome.kind).toBe("unresolved_cleanup");
+			expect(performance.now() - startedAt).toBeLessThan(300);
+		}
+	});
+	test("reuses one cancellation key after an accepted cancellation", async () => {
+		const cancellations: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		let snapshots = 0;
+		const session: OpenedSession = {
+			sessionId: "session-1" as OpenedSession["sessionId"],
+			async snapshot() {
+				snapshots += 1;
+				return { activeTurnId: snapshots < 3 ? "turn-1" : null } as never;
+			},
+			async submit() {
+				throw new Error("submit not expected");
+			},
+			async cancel(request) {
+				cancellations.push(request);
+				return {} as never;
+			},
+			async respondPermission() {
+				return {} as never;
+			},
+			async *events() {},
+			async close() {},
+		};
+
+		expect(await closeOpenedSession(session, 1_000)).toEqual({ kind: "closed" });
+		expect(cancellations).toHaveLength(1);
+		expect(cancellations[0]).toMatchObject({ turnId: "turn-1", reason: "user_requested" });
+		expect(cancellations[0]?.cancellationRequestKey).toEqual(expect.any(String));
 	});
 });
 

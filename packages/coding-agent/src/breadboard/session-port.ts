@@ -30,6 +30,10 @@ export type {
 	TurnId,
 };
 
+export function breadboardCancellationRequestKey(sessionId: SessionId | string, turnId: TurnId | string): string {
+	return `breadboard:${String(sessionId)}:${String(turnId)}`;
+}
+
 /**
  * Product session creation keeps the generated canonical contract at the
  * adapter boundary while allowing the packaged backend profile to be selected

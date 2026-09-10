@@ -15,6 +15,7 @@ import {
 	LifecycleE4ClientError,
 	type LifecycleEngineBinding,
 } from "@breadboard/sdk/lifecycle";
+import { breadboardCancellationRequestKey } from "../session-port";
 import { DarwinVerifiedSpawnError, darwinProcessStartToken, spawnDarwinVerified } from "./darwin-verified-spawn";
 import {
 	EngineRuntimeBundleError,
@@ -163,6 +164,30 @@ const STARTUP_TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000, 4_000] as cons
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
 // Reserve the global process-cleanup deadline for governed hard-signal authorization and authority retirement.
 const LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS = 2_000;
+// F04a measured 5.456451s from cancellation admission to the terminal envelope; allow ~3.7x.
+const DRAIN_TURN_ACTIVE_TIMEOUT_MS = 2_000;
+const DRAIN_TURN_ACTIVE_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
+const BEST_EFFORT_SESSION_REQUEST_TIMEOUT_MS = 2_000;
+const REQUEST_DEADLINE_EXCEEDED = Symbol("request deadline exceeded");
+
+async function raceWithRequestDeadline<T>(
+	operation: Promise<T>,
+	deadline: number,
+): Promise<T | typeof REQUEST_DEADLINE_EXCEEDED> {
+	const remaining = deadline - Date.now();
+	if (remaining <= 0) return REQUEST_DEADLINE_EXCEEDED;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			operation,
+			new Promise<typeof REQUEST_DEADLINE_EXCEEDED>(resolve => {
+				timer = setTimeout(() => resolve(REQUEST_DEADLINE_EXCEEDED), remaining);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 const BASE64URL_ALPHABET = Buffer.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "ascii");
 
@@ -1028,6 +1053,8 @@ abstract class ModeStrategy {
 	readonly createClient: NonNullable<LifecycleSupervisorDependencies["createClient"]>;
 	readonly stateChanged: (state: LifecycleState) => void;
 	readonly abortController = new AbortController();
+	readonly cancellationRequestKeys = new Map<string, string>();
+	readonly acceptedCancellationKeys = new Set<string>();
 
 	constructor(
 		readonly config: BreadboardRunConfig,
@@ -2308,6 +2335,91 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		);
 	}
 
+	async #bestEffortFetch(
+		context: ReadyContext,
+		input: Parameters<typeof fetch>[0],
+		init: Parameters<typeof fetch>[1],
+		deadline: number,
+	): Promise<Response | typeof REQUEST_DEADLINE_EXCEEDED> {
+		if (this.abortController.signal.aborted) return REQUEST_DEADLINE_EXCEEDED;
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) return REQUEST_DEADLINE_EXCEEDED;
+		const controller = new AbortController();
+		const resolveLifecycleAbort = (): void => {
+			controller.abort();
+			resolveAbort(REQUEST_DEADLINE_EXCEEDED);
+		};
+		let resolveAbort!: (value: typeof REQUEST_DEADLINE_EXCEEDED) => void;
+		const lifecycleAbort = new Promise<typeof REQUEST_DEADLINE_EXCEEDED>(resolve => {
+			resolveAbort = resolve;
+			this.abortController.signal.addEventListener("abort", resolveLifecycleAbort, { once: true });
+		});
+		const timer = setTimeout(() => {
+			controller.abort();
+			resolveAbort(REQUEST_DEADLINE_EXCEEDED);
+		}, remaining);
+		try {
+			return await Promise.race([
+				context.requestFetch(input, { ...init, signal: controller.signal }),
+				lifecycleAbort,
+			]);
+		} finally {
+			clearTimeout(timer);
+			this.abortController.signal.removeEventListener("abort", resolveLifecycleAbort);
+		}
+	}
+
+	async #cancelActiveSessionsBestEffort(context: ReadyContext): Promise<void> {
+		const deadline = Date.now() + Math.min(this.config.requestTimeoutMs, BEST_EFFORT_SESSION_REQUEST_TIMEOUT_MS);
+		try {
+			const response = await this.#bestEffortFetch(
+				context,
+				new URL("/v1/internal/sessions", context.binding.endpoint),
+				{ method: "GET" },
+				deadline,
+			);
+			if (response === REQUEST_DEADLINE_EXCEEDED || !response.ok) return;
+			const payload = await raceWithRequestDeadline(response.json(), deadline);
+			if (payload === REQUEST_DEADLINE_EXCEEDED || !Array.isArray(payload)) return;
+			for (const session of payload) {
+				if (session === null || typeof session !== "object") continue;
+				const sessionId =
+					"session_id" in session && typeof session.session_id === "string" ? session.session_id : undefined;
+				const turnId =
+					"active_turn_id" in session && typeof session.active_turn_id === "string"
+						? session.active_turn_id
+						: undefined;
+				if (!sessionId || !turnId) continue;
+				const cancellationKeyId = `${sessionId}:${turnId}`;
+				if (this.acceptedCancellationKeys.has(cancellationKeyId)) continue;
+				const cancellationRequestKey =
+					this.cancellationRequestKeys.get(cancellationKeyId) ??
+					(() => {
+						const created = breadboardCancellationRequestKey(sessionId, turnId);
+						this.cancellationRequestKeys.set(cancellationKeyId, created);
+						return created;
+					})();
+				const cancellation = await this.#bestEffortFetch(
+					context,
+					new URL(
+						`/v1/internal/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/cancel`,
+						context.binding.endpoint,
+					),
+					{
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ cancellation_request_key: cancellationRequestKey, reason: "user_requested" }),
+					},
+					deadline,
+				);
+				if (cancellation === REQUEST_DEADLINE_EXCEEDED) return;
+				if (cancellation.ok) this.acceptedCancellationKeys.add(cancellationKeyId);
+			}
+		} catch {
+			// Session cancellation is best effort; lifecycle drain and hard-stop remain authoritative.
+		}
+	}
+
 	async #detachRequesterBestEffort(context: ReadyContext): Promise<void> {
 		this.stopLeaseRenewal();
 		try {
@@ -2416,6 +2528,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		const ownerCredentialText = credentialText(ownerCredential);
 		let control = context.process ?? (await this.#process.controlFor(record.pid, record.osProcessStartToken));
 		this.transition("draining");
+		await this.#cancelActiveSessionsBestEffort(context);
 		let drainGeneration: number | undefined;
 		let hardDecisionRecorded = false;
 		const refreshedRegistration = await context.client.renewClient({
@@ -2462,74 +2575,113 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			if (controlAttempt.phase !== "begin-pending") {
 				drainGeneration = controlAttempt.drainGeneration;
 			} else {
-				for (let requesterAttempt = 0; requesterAttempt < 2; requesterAttempt++) {
-					const requesterSecret = await this.#store.readControlAttemptSecret(controlAttempt);
-					let drain: Awaited<ReturnType<BoundLifecycleE4Client["beginControlDrain"]>>;
-					try {
+				const drainTurnActiveDeadline = this.clock.now() + DRAIN_TURN_ACTIVE_TIMEOUT_MS;
+				let drainTurnActiveAttempt = 0;
+				requesterAttempts: for (let requesterAttempt = 0; requesterAttempt < 2; requesterAttempt++) {
+					while (true) {
+						const requesterSecret = await this.#store.readControlAttemptSecret(controlAttempt);
+						let drain: Awaited<ReturnType<BoundLifecycleE4Client["beginControlDrain"]>> | undefined;
 						try {
-							const drainAuthority = await this.#retryAmbiguousControlRequest(signal =>
-								this.#withRevalidatedAuthority(context, client =>
-									client.beginControlDrain({
-										ownerGeneration,
-										controlRequestId,
-										ownerCredential: ownerCredentialText,
-										registrationId: controlAttempt.registrationId,
-										requesterRegistrationGeneration: controlAttempt.requesterRegistrationGeneration,
-										requesterClientInstanceId: controlAttempt.requesterClientInstanceId,
-										registrationCredential: credentialText(requesterSecret.requesterRegistrationCredential),
-										expectedAdmissionEpoch: controlAttempt.expectedAdmissionEpoch,
-										signal,
-									}),
-								),
-							);
-							if (drainAuthority.kind === "invalid") {
-								return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
-							}
-							drain = drainAuthority.value;
-						} catch (error) {
-							if (
-								requesterAttempt === 0 &&
-								error instanceof LifecycleE4ClientError &&
-								error.failure.kind === "registration-expired"
-							) {
-								const expiredAttempt = controlAttempt;
-								const replacementRequestId = this.makeCredential();
-								controlAttempt = await this.#store.withExclusiveLock(record.normalizedEndpoint, () =>
-									this.#store.replaceExpiredBeginControlAttempt(
-										record.normalizedEndpoint,
-										record,
-										expiredAttempt,
-										restart ? "restart" : "stop",
-										replacementRequestId,
-										currentRequester,
+							try {
+								const drainAuthority = await this.#retryAmbiguousControlRequest(signal =>
+									this.#withRevalidatedAuthority(context, client =>
+										client.beginControlDrain({
+											ownerGeneration,
+											controlRequestId,
+											ownerCredential: ownerCredentialText,
+											registrationId: controlAttempt.registrationId,
+											requesterRegistrationGeneration: controlAttempt.requesterRegistrationGeneration,
+											requesterClientInstanceId: controlAttempt.requesterClientInstanceId,
+											registrationCredential: credentialText(
+												requesterSecret.requesterRegistrationCredential,
+											),
+											expectedAdmissionEpoch: controlAttempt.expectedAdmissionEpoch,
+											signal,
+										}),
 									),
 								);
-								controlRequestId = controlAttempt.controlRequestId;
-								if (controlAttempt.phase !== "begin-pending") {
-									drainGeneration = controlAttempt.drainGeneration;
-									break;
+								if (drainAuthority.kind === "invalid") {
+									return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
 								}
-								continue;
+								drain = drainAuthority.value;
+							} catch (error) {
+								if (
+									requesterAttempt === 0 &&
+									error instanceof LifecycleE4ClientError &&
+									error.failure.kind === "registration-expired"
+								) {
+									const expiredAttempt = controlAttempt;
+									const replacementRequestId = this.makeCredential();
+									controlAttempt = await this.#store.withExclusiveLock(record.normalizedEndpoint, () =>
+										this.#store.replaceExpiredBeginControlAttempt(
+											record.normalizedEndpoint,
+											record,
+											expiredAttempt,
+											restart ? "restart" : "stop",
+											replacementRequestId,
+											currentRequester,
+										),
+									);
+									controlRequestId = controlAttempt.controlRequestId;
+									if (controlAttempt.phase !== "begin-pending") {
+										drainGeneration = controlAttempt.drainGeneration;
+										break requesterAttempts;
+									}
+									continue requesterAttempts;
+								}
+								if (error instanceof LifecycleE4ClientError && error.failure.kind === "drain-conflict") {
+									if (this.abortController.signal.aborted) {
+										await clearControlAttempt();
+										await this.#detachRequesterBestEffort(context);
+										return lifecycleFailure("local-owned", "request-aborted", "request_aborted");
+									}
+									if (error.failure.code === "drain_turn_active") {
+										const remaining = drainTurnActiveDeadline - this.clock.now();
+										if (remaining > 0) {
+											const delay =
+												DRAIN_TURN_ACTIVE_RETRY_DELAYS_MS[
+													Math.min(drainTurnActiveAttempt, DRAIN_TURN_ACTIVE_RETRY_DELAYS_MS.length - 1)
+												] ?? 4_000;
+											await this.clock.sleep(Math.min(delay, remaining));
+											if (this.abortController.signal.aborted) {
+												await clearControlAttempt();
+												await this.#detachRequesterBestEffort(context);
+												return lifecycleFailure("local-owned", "request-aborted", "request_aborted");
+											}
+											if (this.clock.now() < drainTurnActiveDeadline) {
+												drainTurnActiveAttempt++;
+												continue;
+											}
+										}
+										this.stateChanged(
+											lifecycleState(
+												"local-owned",
+												"draining",
+												requesterAttempt,
+												"drain_turn_active_timeout",
+											),
+										);
+									}
+									await clearControlAttempt();
+									await this.#detachRequesterBestEffort(context);
+									return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
+								}
+								throw error;
 							}
-							if (error instanceof LifecycleE4ClientError && error.failure.kind === "drain-conflict") {
-								await clearControlAttempt();
-								await this.#detachRequesterBestEffort(context);
-								return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
-							}
-							throw error;
+						} finally {
+							requesterSecret.requesterRegistrationCredential.fill(0);
 						}
-					} finally {
-						requesterSecret.requesterRegistrationCredential.fill(0);
+						if (!drain) continue;
+						drainGeneration = drain.drainGeneration;
+						controlAttempt = await this.#store.withExclusiveLock(record.normalizedEndpoint, () =>
+							this.#store.markControlAttemptDraining(
+								record.normalizedEndpoint,
+								controlAttempt,
+								drain.drainGeneration,
+							),
+						);
+						break requesterAttempts;
 					}
-					drainGeneration = drain.drainGeneration;
-					controlAttempt = await this.#store.withExclusiveLock(record.normalizedEndpoint, () =>
-						this.#store.markControlAttemptDraining(
-							record.normalizedEndpoint,
-							controlAttempt,
-							drain.drainGeneration,
-						),
-					);
-					break;
 				}
 			}
 			if (drainGeneration === undefined) throw new Error("durable control drain generation is unavailable");

@@ -1029,6 +1029,50 @@ describe("E4AgentStreamBridge", () => {
 			await bridge.close();
 		}
 	});
+	test("bounds retry admission while the aborted submission never settles", async () => {
+		const submission = new Promise<SubmitReceipt>(() => {});
+		const submitStarted = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async submit() {
+				submitStarted.resolve();
+				return submission;
+			},
+			async *events(request) {
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const abort = new AbortController();
+		try {
+			const first = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			await submitStarted.promise;
+			abort.abort();
+			expect((await first.result()).stopReason).toBe("aborted");
+			const startedAt = performance.now();
+			const second = await startBridgeStream(bridge, model, context);
+			const result = await Promise.race([
+				second.result(),
+				Bun.sleep(3_000).then(() => {
+					throw new Error("retry admission remained blocked");
+				}),
+			]);
+			expect(performance.now() - startedAt).toBeLessThan(2_800);
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toBe("BreadBoard previous submission remains unresolved after cancellation");
+		} finally {
+			await bridge.close();
+		}
+	});
 
 	test("aborts a pending admission without holding session close until the submit request times out", async () => {
 		const submission = Promise.withResolvers<SubmitReceipt>();
@@ -1131,7 +1175,7 @@ describe("E4AgentStreamBridge", () => {
 		expect(cancellationTurnIds).toEqual([String(receipt.turnId)]);
 	});
 
-	test("waits for started late ownership persistence before closing", async () => {
+	test("returns unresolved cleanup when late ownership persistence never settles", async () => {
 		const submission = Promise.withResolvers<SubmitReceipt>();
 		const submitStarted = Promise.withResolvers<void>();
 		const ownershipStarted = Promise.withResolvers<void>();
@@ -1169,29 +1213,34 @@ describe("E4AgentStreamBridge", () => {
 		});
 		const controller = new AbortController();
 
-		const stream = await startBridgeStream(bridge, model, context, { signal: controller.signal });
-		await submitStarted.promise;
-		controller.abort();
-		expect((await stream.result()).stopReason).toBe("aborted");
-		if (!submitted) throw new Error("submission missing");
-		submission.resolve({
-			...receipt,
-			clientMessageId: submitted.clientMessageId as ClientMessageId,
-		});
-		await ownershipStarted.promise;
+		try {
+			const stream = await startBridgeStream(bridge, model, context, { signal: controller.signal });
+			await submitStarted.promise;
+			controller.abort();
+			expect((await stream.result()).stopReason).toBe("aborted");
+			if (!submitted) throw new Error("submission missing");
+			submission.resolve({
+				...receipt,
+				clientMessageId: submitted.clientMessageId as ClientMessageId,
+			});
+			await ownershipStarted.promise;
 
-		const close = bridge.close();
-		expect(
-			await Promise.race([close.then(() => "closed" as const), Bun.sleep(10).then(() => "blocked" as const)]),
-		).toBe("blocked");
-		persistOwnership.resolve();
-		await close;
+			const closeOutcome = await bridge.close();
+			expect(closeOutcome.kind).toBe("unresolved_cleanup");
+			if (closeOutcome.kind === "unresolved_cleanup") {
+				expect(closeOutcome.reason).toContain("submission ownership cleanup timed out");
+			}
+		} finally {
+			persistOwnership.resolve();
+			await bridge.close();
+		}
 	});
 
 	test("does not advance the cursor when ownership persistence fails during admission", async () => {
 		const ownershipStarted = Promise.withResolvers<void>();
 		const persistOwnership = Promise.withResolvers<void>();
 		const commits: number[] = [];
+
 		const session: OpenedSession = {
 			...openedSession([], []),
 			async submit(input) {
@@ -1236,6 +1285,202 @@ describe("E4AgentStreamBridge", () => {
 			persistOwnership.resolve();
 			await bridge.close();
 		}
+	});
+	test("returns unresolved cleanup when active-turn snapshot fails", async () => {
+		const bridge = new E4AgentStreamBridge({
+			session: {
+				...openedSession([], []),
+				async snapshot() {
+					throw new Error("snapshot unavailable");
+				},
+			},
+			submissionOwned: async () => {},
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const closeOutcome = await bridge.close();
+
+		expect(closeOutcome).toEqual({
+			kind: "unresolved_cleanup",
+			reason: "active-turn snapshot failed: snapshot unavailable",
+		});
+	});
+
+	test("returns unresolved cleanup when SDK session close hangs", async () => {
+		const bridge = new E4AgentStreamBridge({
+			session: {
+				...openedSession([], []),
+				async snapshot() {
+					return { activeTurnId: null } as never;
+				},
+				async close() {
+					await new Promise<void>(() => {});
+				},
+			},
+			submissionOwned: async () => {},
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const closeOutcome = await bridge.close();
+
+		expect(closeOutcome.kind).toBe("unresolved_cleanup");
+		if (closeOutcome.kind === "unresolved_cleanup") {
+			expect(closeOutcome.reason).toContain("SDK session close timed out");
+		}
+	});
+	test("reuses one cancellation key while waiting for a delayed terminal", async () => {
+		const cancellations: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		let snapshots = 0;
+		const bridge = new E4AgentStreamBridge({
+			session: {
+				...openedSession([], []),
+				async snapshot() {
+					snapshots += 1;
+					return { activeTurnId: snapshots === 1 ? "turn-1" : null } as never;
+				},
+				async cancel(request) {
+					cancellations.push(request);
+					return {} as CancellationReceipt;
+				},
+			},
+			submissionOwned: async () => {},
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const closeOutcome = await bridge.close();
+
+		expect(closeOutcome).toEqual({ kind: "closed" });
+		expect(cancellations).toHaveLength(1);
+		expect(cancellations[0]).toMatchObject({ turnId: "turn-1", reason: "user_requested" });
+		expect(cancellations[0]?.cancellationRequestKey).toEqual(expect.any(String));
+	});
+	test("rejects an allow response that reaches the boundary during teardown", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const response = Promise.withResolvers<PermissionDecisionReceipt>();
+		const responseStarted = Promise.withResolvers<void>();
+		const bridge = new E4AgentStreamBridge({
+			session: {
+				...openedSession([], []),
+				async snapshot() {
+					return { activeTurnId: null } as never;
+				},
+				async respondPermission(request) {
+					responded.push(request);
+					responseStarted.resolve();
+					return response.promise;
+				},
+				async cancel(request) {
+					cancelled.push(request);
+					return {} as CancellationReceipt;
+				},
+				async *events(request) {
+					yield started;
+					yield wireEvent(3, "permission_request", {
+						request_id: "permission-1",
+						tool: "edit",
+						kind: "write",
+						summary: "Update the requested file",
+						default_scope: null,
+						rewindable: true,
+					});
+					await new Promise<void>(resolve =>
+						request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+					);
+				},
+			},
+			submissionOwned: async () => {},
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async () => "allow",
+		});
+		const respondedAllow = {
+			requestId: "permission-1" as PermissionDecisionReceipt["requestId"],
+			decision: "allow" as const,
+		};
+
+		const stream = await startBridgeStream(bridge, model, context);
+		await responseStarted.promise;
+		const closing = bridge.close();
+		response.resolve(respondedAllow);
+		const closeOutcome = await closing;
+
+		expect(closeOutcome.kind).toBe("unresolved_cleanup");
+		expect(responded).toEqual([respondedAllow]);
+		expect(cancelled).toEqual([]);
+		expect((await stream.result()).stopReason).toBe("aborted");
+	});
+
+	test("waits for an in-flight deny before issuing cancellation", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const response = Promise.withResolvers<PermissionDecisionReceipt>();
+		const responseStarted = Promise.withResolvers<void>();
+		const bridge = new E4AgentStreamBridge({
+			session: {
+				...openedSession([], []),
+				async snapshot() {
+					return { activeTurnId: null } as never;
+				},
+				async respondPermission(request) {
+					responded.push(request);
+					responseStarted.resolve();
+					return response.promise;
+				},
+				async cancel(request) {
+					cancelled.push(request);
+					return {} as CancellationReceipt;
+				},
+				async *events(request) {
+					yield started;
+					yield wireEvent(3, "permission_request", {
+						request_id: "permission-1",
+						tool: "edit",
+						kind: "write",
+						summary: "Update the requested file",
+						default_scope: null,
+						rewindable: true,
+					});
+					await new Promise<void>(resolve =>
+						request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+					);
+				},
+			},
+			submissionOwned: async () => {},
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async () => "deny",
+		});
+		const respondedDeny = {
+			requestId: "permission-1" as PermissionDecisionReceipt["requestId"],
+			decision: "deny" as const,
+		};
+
+		const stream = await startBridgeStream(bridge, model, context);
+		await responseStarted.promise;
+		const closing = bridge.close();
+		await Promise.resolve();
+		expect(cancelled).toEqual([]);
+		response.resolve(respondedDeny);
+		const closeOutcome = await closing;
+
+		expect(closeOutcome.kind).toBe("closed");
+		expect(responded).toEqual([respondedDeny]);
+		expect(cancelled).toHaveLength(1);
+		expect((await stream.result()).stopReason).toBe("aborted");
 	});
 
 	test("retains ambiguous ownership after an aborted submit later rejects", async () => {
@@ -1482,7 +1727,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(firstResult.errorMessage).not.toContain("sensitive backend detail");
 			expect(secondResult.stopReason).toBe("stop");
 			expect(secondResult.content).toEqual([{ type: "text", text: "healthy" }]);
-			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "timeout" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "timeout" }]);
 			await bridge.close();
 			expect(ownershipSnapshots.at(-1)).toEqual([String(secondReceipt.turnId)]);
 		} finally {
@@ -1658,7 +1903,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(laterResult.errorMessage).toBe("BreadBoard runtime error [runtime_failure]: [redacted]");
 			expect(laterResult.responseId).toBe("breadboard:e4:event-4");
 			expect(submissionCount).toBe(2);
-			expect(cancelled).toEqual([
+			expect(cancelled).toMatchObject([
 				{ turnId: receipt.turnId, reason: "timeout" },
 				{ turnId: secondReceipt.turnId, reason: "timeout" },
 			]);
@@ -1798,7 +2043,7 @@ describe("E4AgentStreamBridge", () => {
 				expect(result.stopReason).toBe("error");
 				expect(result.content).toEqual([{ type: "text", text: "partial" }]);
 				expect(result.errorMessage).toBe(runtimeFamily.expectedMessage);
-				expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "timeout" }]);
+				expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "timeout" }]);
 			} finally {
 				await bridge.close();
 			}
@@ -2650,7 +2895,7 @@ describe("E4AgentStreamBridge", () => {
 		pendingSubmissions[2]?.reject(new Error("submit rejected during close"));
 		await allCancellationsObserved.promise;
 		expect(sdkCloseCount).toBe(0);
-		expect(cancelled).toEqual([
+		expect(cancelled).toMatchObject([
 			{ turnId: receipt.turnId, reason: "user_requested" },
 			{ turnId: secondReceipt.turnId, reason: "user_requested" },
 		]);
@@ -2816,7 +3061,7 @@ describe("E4AgentStreamBridge", () => {
 				pendingSubmit.resolve(receipt);
 				await submitSettled.promise;
 				await drainMicrotasks();
-				expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "timeout" }]);
+				expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "timeout" }]);
 			} finally {
 				pendingSubmit.resolve(receipt);
 				await submitSettled.promise;
@@ -2874,7 +3119,7 @@ describe("E4AgentStreamBridge", () => {
 
 				expect(result.stopReason).toBe("error");
 				expect(result.errorMessage).toBe(observerExit.expectedMessage);
-				expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "timeout" }]);
+				expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "timeout" }]);
 			} finally {
 				await bridge.close();
 			}
@@ -2981,11 +3226,260 @@ describe("E4AgentStreamBridge", () => {
 			await close;
 			await submitSettled.promise;
 			await drainMicrotasks();
-			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "timeout" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			pendingSubmit.resolve(receipt);
 			await submitSettled.promise;
 			await drainMicrotasks();
+			await bridge.close();
+		}
+	});
+
+	test("finishes an aborted stream when the engine never emits a cancellation terminal", async () => {
+		const cancellationObserved = Promise.withResolvers<void>();
+		const partialObserved = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async cancel(): Promise<CancellationReceipt> {
+				cancellationObserved.resolve();
+				return {} as CancellationReceipt;
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "assistant.message.delta", { text: "partial output" });
+				partialObserved.resolve();
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const abort = new AbortController();
+		try {
+			const stream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			await partialObserved.promise;
+			const startedAt = performance.now();
+			abort.abort();
+			await cancellationObserved.promise;
+			const result = await stream.result();
+			expect(performance.now() - startedAt).toBeLessThan(4_500);
+			expect(result.stopReason).toBe("aborted");
+			expect(result.errorMessage).toBe("BreadBoard turn cancel timed out");
+		} finally {
+			await bridge.close();
+		}
+	});
+
+	test("finishes an aborted stream from the engine cancellation terminal", async () => {
+		const cancellationObserved = Promise.withResolvers<void>();
+		const partialObserved = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async cancel(): Promise<CancellationReceipt> {
+				cancellationObserved.resolve();
+				return {} as CancellationReceipt;
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "assistant.message.delta", { text: "partial output" });
+				partialObserved.resolve();
+				await cancellationObserved.promise;
+				yield wireEvent(4, "turn_cancelled", { reason: "user_requested" });
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const abort = new AbortController();
+		try {
+			const stream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			const startedAt = performance.now();
+			abort.abort();
+			const result = await stream.result();
+			expect(performance.now() - startedAt).toBeLessThan(1_000);
+			expect(result.stopReason).toBe("aborted");
+		} finally {
+			await bridge.close();
+		}
+	});
+
+	test("denies a pending permission request when the owning stream aborts", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const permissionObserved = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async cancel(request) {
+				cancelled.push(request);
+				return {} as CancellationReceipt;
+			},
+			async respondPermission(request) {
+				responded.push(request);
+				return {
+					requestId: request.requestId as PermissionDecisionReceipt["requestId"],
+					decision: request.decision,
+				};
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "assistant.message.delta", { text: "partial output" });
+				yield wireEvent(4, "permission_request", {
+					request_id: "permission-1",
+					tool: "edit",
+					kind: "write",
+					summary: "Update the requested file",
+					default_scope: null,
+					rewindable: true,
+				});
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async (_request, signal) => {
+				permissionObserved.resolve();
+				return new Promise<"allow">(resolve =>
+					signal.addEventListener("abort", () => resolve("allow"), { once: true }),
+				);
+			},
+		});
+		const abort = new AbortController();
+		try {
+			const stream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			await permissionObserved.promise;
+			abort.abort();
+			const result = await stream.result();
+			expect(result.stopReason).toBe("aborted");
+			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
+		} finally {
+			await bridge.close();
+		}
+	});
+
+	test("denies a pending permission request before closing the SDK session", async () => {
+		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
+		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const permission = permissionSession(responded, cancelled);
+		const permissionHandlerStarted = Promise.withResolvers<void>();
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: permission.session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async (_request, signal) => {
+				permissionHandlerStarted.resolve();
+				return new Promise<"allow">(resolve =>
+					signal.addEventListener("abort", () => resolve("allow"), { once: true }),
+				);
+			},
+		});
+		try {
+			const stream = await startBridgeStream(bridge, model, context);
+			await permissionHandlerStarted.promise;
+			await bridge.close();
+			expect((await stream.result()).stopReason).toBe("aborted");
+			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
+		} finally {
+			await bridge.close();
+		}
+	});
+	test("serializes concurrent abort and close permission teardown", async () => {
+		const order: string[] = [];
+		const permissionHandlerStarted = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async cancel() {
+				order.push("cancel");
+				return {} as CancellationReceipt;
+			},
+			async respondPermission(request) {
+				order.push(request.decision);
+				return { requestId: request.requestId as PermissionDecisionReceipt["requestId"], decision: "deny" };
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "permission_request", {
+					request_id: "permission-1",
+					tool: "edit",
+					kind: "write",
+					summary: "Update the requested file",
+					default_scope: null,
+					rewindable: true,
+				});
+				if (request?.signal?.aborted) return;
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+			async close() {
+				order.push("close");
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async (_request, signal) => {
+				permissionHandlerStarted.resolve();
+				if (signal.aborted) return "allow";
+				return await new Promise<"allow">(resolve =>
+					signal.addEventListener("abort", () => resolve("allow"), { once: true }),
+				);
+			},
+		});
+		const abort = new AbortController();
+		try {
+			const stream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			await permissionHandlerStarted.promise;
+			const closing = bridge.close();
+			abort.abort();
+			await Promise.race([
+				closing,
+				Bun.sleep(1_000).then(() => {
+					throw new Error("close blocked");
+				}),
+			]);
+			await Promise.race([
+				stream.result(),
+				Bun.sleep(1_000).then(() => {
+					throw new Error("stream blocked");
+				}),
+			]);
+			expect(order).toEqual(["deny", "cancel", "close"]);
+		} finally {
 			await bridge.close();
 		}
 	});
@@ -3057,7 +3551,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.stopReason).toBe("aborted");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
-			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
 		}
@@ -3093,7 +3587,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(result.errorMessage).toBe("permission UI failed");
 			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
-			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
 		}
@@ -3124,7 +3618,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(result.errorMessage).toContain("permission UI");
 			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
-			expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
+			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
 		}
@@ -3588,7 +4082,7 @@ describe("E4AgentStreamBridge", () => {
 		const firstStream = await startBridgeStream(bridge, model, context);
 		expect((await firstStream.result()).stopReason).toBe("aborted");
 		await terminalProcessed.promise;
-		expect(cancelled).toEqual([{ turnId: receipt.turnId, reason: "user_requested" }]);
+		expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		expect(responded).toEqual([{ requestId: "permission-after-tool", decision: "deny" }]);
 		expect(commits).toEqual([{ eventId: "event-2", sequence: 2 }]);
 		expect(releasedKeys).toEqual([]);
@@ -3667,5 +4161,60 @@ describe("E4AgentStreamBridge", () => {
 		]);
 		expect(lifecycle).toEqual(["commit:2", "prompt", "respond", "commit:3", "commit:4"]);
 		await bridge.close();
+	});
+	test("waits for aborted admission recovery before admitting the next logical turn", async () => {
+		const submitted: SubmitInput[] = [];
+		const firstAdmissionStarted = Promise.withResolvers<void>();
+		const firstAdmission = Promise.withResolvers<SubmitReceipt>();
+		const secondSubmitted = Promise.withResolvers<void>();
+		const secondReceipt: SubmitReceipt = {
+			...receipt,
+			clientMessageId: "client-message-2" as ClientMessageId,
+			inputId: "input-2" as SubmitReceipt["inputId"],
+			turnId: "turn-2" as SubmitReceipt["turnId"],
+		};
+		const session: OpenedSession = {
+			...openedSession([], submitted),
+			async submit(input) {
+				submitted.push(input);
+				if (submitted.length === 1) {
+					firstAdmissionStarted.resolve();
+					return firstAdmission.promise;
+				}
+				secondSubmitted.resolve();
+				return secondReceipt;
+			},
+			async cancel() {
+				return {} as CancellationReceipt;
+			},
+			async *events() {
+				await firstAdmissionStarted.promise;
+				await secondSubmitted.promise;
+				yield wireEvent(4, "turn_start", {}, "turn-2");
+				yield wireEvent(5, "turn_completed", {}, "turn-2");
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			session,
+			async emitAgentEvent() {},
+			releaseAgentEvent() {},
+			async submissionOwned() {},
+			async projectionCommitted() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const abort = new AbortController();
+		const firstStream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+		await firstAdmissionStarted.promise;
+		abort.abort();
+		expect((await firstStream.result()).stopReason).toBe("aborted");
+
+		const secondStreamPromise = startBridgeStream(bridge, model, context);
+		expect(submitted).toHaveLength(1);
+		firstAdmission.resolve(receipt);
+		await secondSubmitted.promise;
+		expect(submitted).toHaveLength(2);
+		const secondStream = await secondStreamPromise;
+		await bridge.close();
+		expect((await secondStream.result()).stopReason).toBe("aborted");
 	});
 });

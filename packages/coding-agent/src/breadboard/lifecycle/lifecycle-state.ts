@@ -415,6 +415,7 @@ export type LifecycleReason =
 	| "request_aborted"
 	| "restart_budget_exhausted"
 	| "drain_denied"
+	| "drain_turn_active_timeout"
 	| "drain_recovery_failed"
 	| "process_identity_unavailable"
 	| "process_control_failed"

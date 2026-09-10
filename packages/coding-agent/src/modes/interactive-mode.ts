@@ -5004,7 +5004,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** Shared `shutdown()`/`restart()` teardown: dispose the session and hand the terminal back. */
 	async #teardown(): Promise<void> {
-		await this.#liveCommandController.stop();
+		await logger.time("InteractiveMode.teardown.liveCommandController.stop", () => this.#liveCommandController.stop());
 
 		this.#btwController.dispose();
 		this.#omfgController.dispose();
@@ -5028,11 +5028,13 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.showStatus("Still closing… (flushing memory backend / network)");
 		}, STILL_CLOSING_DELAY_MS);
 		try {
-			if (this.#signalTeardown) {
-				await this.#signalTeardown();
-			} else {
-				await this.session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
-			}
+			await logger.time("InteractiveMode.teardown.sessionTeardown", async () => {
+				if (this.#signalTeardown) {
+					await this.#signalTeardown();
+				} else {
+					await this.session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
+				}
+			});
 		} finally {
 			clearTimeout(stillClosingTimer);
 		}

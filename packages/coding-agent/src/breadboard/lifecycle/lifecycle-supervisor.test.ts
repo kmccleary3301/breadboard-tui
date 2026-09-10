@@ -2542,6 +2542,207 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls).not.toContain("rollback");
 		expect(process.events).toEqual([]);
 	});
+	test("bounds a hanging best-effort session listing before beginning control drain", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		process.exitOnNextWait();
+		const calls: string[] = [];
+		const config = { ...resolved("local-owned"), requestTimeoutMs: 100 };
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = Object.assign(async () => new Promise<Response>(() => {}), {
+			preconnect() {},
+		}) as typeof fetch;
+		try {
+			const supervisor = new LifecycleSupervisor(config, {
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: process.adapter,
+				createClient: () => ({
+					handshake: async () => {
+						const current = process.current();
+						return boundClient(bindingFor(current.pid, current.launchId), calls);
+					},
+				}),
+			});
+			expect((await supervisor.connect()).kind).toBe("ready");
+			const outcome = await Promise.race([
+				supervisor.stop({ consumerClosed: true }),
+				Bun.sleep(500).then(() => "blocked" as const),
+			]);
+			expect(outcome).not.toBe("blocked");
+			expect(calls).toContain("begin-drain");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+	test("reuses an accepted cancellation key for duplicate active-session rows", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const cancellationRequests: Array<Record<string, unknown>> = [];
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+				const url = String(input);
+				if (url.endsWith("/v1/internal/sessions")) {
+					return new Response(
+						JSON.stringify([
+							{ session_id: "session-1", active_turn_id: "turn-1" },
+							{ session_id: "session-1", active_turn_id: "turn-1" },
+						]),
+						{ status: 200 },
+					);
+				}
+				if (url.endsWith("/turns/turn-1/cancel")) {
+					if (typeof init?.body === "string")
+						cancellationRequests.push(JSON.parse(init.body) as Record<string, unknown>);
+					return new Response("{}", { status: 200 });
+				}
+				return new Response("{}", { status: 200 });
+			},
+			{ preconnect() {} },
+		) as typeof fetch;
+		try {
+			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: process.adapter,
+				createClient: clientFactory(process, calls),
+			});
+			expect((await supervisor.connect()).kind).toBe("ready");
+			process.exitOnNextWait();
+			expect((await supervisor.stop({ consumerClosed: true })).kind).toBe("stopped");
+			expect(cancellationRequests).toHaveLength(1);
+			expect(cancellationRequests[0]?.cancellation_request_key).toEqual(expect.any(String));
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("retries an active-turn drain conflict until the terminal envelope settles", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const sleeps: number[] = [];
+		let now = 0;
+		let drainAttempts = 0;
+		const drainTurnActive = new LifecycleE4ClientError({
+			kind: "drain-conflict",
+			status: 409,
+			code: "drain_turn_active",
+			correlation: {},
+			body: "[redacted]",
+		});
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => now,
+				sleep: async milliseconds => {
+					sleeps.push(milliseconds);
+					now += milliseconds;
+				},
+			},
+			createClient: () => ({
+				handshake: async () => {
+					const current = process.current();
+					const base = boundClient(bindingFor(current.pid, current.launchId), calls);
+					return {
+						...base,
+						beginControlDrain: async input => {
+							drainAttempts++;
+							if (drainAttempts <= 2) throw drainTurnActive;
+							return {
+								result: "draining",
+								controlRequestId: input.controlRequestId,
+								drainGeneration: 2,
+							} as never;
+						},
+					};
+				},
+			}),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		process.exitOnNextWait();
+		const result = await supervisor.stop({ consumerClosed: true });
+		expect(result.kind).toBe("stopped");
+		expect(drainAttempts).toBe(3);
+		expect(sleeps).toEqual([100, 250]);
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+
+	test("times out an active-turn drain conflict with a visible timeout notice", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const states: LifecycleState[] = [];
+		let now = 0;
+		let drainAttempts = 0;
+		const drainTurnActive = new LifecycleE4ClientError({
+			kind: "drain-conflict",
+			status: 409,
+			code: "drain_turn_active",
+			correlation: {},
+			body: "[redacted]",
+		});
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => now,
+				sleep: async milliseconds => {
+					now += milliseconds;
+				},
+			},
+			stateChanged: state => states.push(state),
+			createClient: () => ({
+				handshake: async () => {
+					const current = process.current();
+					const base = boundClient(bindingFor(current.pid, current.launchId), calls);
+					return {
+						...base,
+						beginControlDrain: async () => {
+							drainAttempts++;
+							throw drainTurnActive;
+						},
+					};
+				},
+			}),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const result = await supervisor.stop({ consumerClosed: true });
+		expect(result).toMatchObject({ kind: "failure", state: { reason: "drain_denied" } });
+		expect(drainAttempts).toBeGreaterThan(2);
+		expect(states).toContainEqual(expect.objectContaining({ reason: "drain_turn_active_timeout" }));
+		expect(calls).toContain("detach-client");
+		expect(await store.readCurrent("http://127.0.0.1:7777")).not.toBeNull();
+	});
+
+	test("keeps non-active drain conflicts on the immediate denial path", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const drainClientsActive = new LifecycleE4ClientError({
+			kind: "drain-conflict",
+			status: 409,
+			code: "drain_clients_active",
+			correlation: {},
+			body: "[redacted]",
+		});
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls, { drainError: drainClientsActive }),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const result = await supervisor.stop({ consumerClosed: true });
+		expect(result).toMatchObject({ kind: "failure", state: { reason: "drain_denied" } });
+		expect(calls.filter(call => call === "begin-drain")).toHaveLength(1);
+		expect(calls).toContain("detach-client");
+	});
 
 	test("retires only after exact graceful process death without rollback or hard-signal outcome", async () => {
 		const store = await temporaryStore();

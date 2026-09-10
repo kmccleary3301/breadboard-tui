@@ -196,6 +196,8 @@ export class InputController {
 	#focusedPasteListenerInstalled = false;
 	#btwBranchListenerInstalled = false;
 	#btwCopyListenerInstalled = false;
+	#globalSlashListenerInstalled = false;
+	#globalSlashInput = "";
 	#expandToolsListenerInstalled = false;
 
 	/** Return the last full editor snapshot delivered by its change contract. */
@@ -259,7 +261,38 @@ export class InputController {
 		const unsubscribe = tinyTitleClient.onProgress(update);
 	}
 
+	#handleGlobalSlashCommandInput(data: string): { consume: true } | undefined {
+		if (this.ctx.ui.getFocused() === this.ctx.editor || this.ctx.ui.hasOverlay()) {
+			this.#globalSlashInput = "";
+			return undefined;
+		}
+		for (const character of data) {
+			if (character === "\r" || character === "\n") {
+				const command = this.#globalSlashInput;
+				this.#globalSlashInput = "";
+				if (command === "/exit" || command === "/quit") {
+					this.ctx.editor.setText("");
+					void this.ctx.shutdown();
+					return { consume: true };
+				}
+				continue;
+			}
+			if (character === "\x1b" || character < " " || character > "~") {
+				this.#globalSlashInput = "";
+				continue;
+			}
+			if (this.#globalSlashInput === "") {
+				if (character === "/") this.#globalSlashInput = character;
+				continue;
+			}
+			this.#globalSlashInput += character;
+			if (this.#globalSlashInput.length > 64) this.#globalSlashInput = "";
+		}
+		return undefined;
+	}
+
 	#abortStreamingTurn(): void {
+
 		void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 	}
 
@@ -332,6 +365,10 @@ export class InputController {
 				this.toggleToolOutputExpansion();
 				return { consume: true };
 			});
+		}
+		if (!this.#globalSlashListenerInstalled) {
+			this.#globalSlashListenerInstalled = true;
+			this.ctx.ui.addInputListener(data => this.#handleGlobalSlashCommandInput(data));
 		}
 		this.ctx.editor.onEscape = () => {
 			// `/mcp test` advertises Esc until each owner's post-settlement grace expires.

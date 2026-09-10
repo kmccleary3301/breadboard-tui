@@ -100,6 +100,7 @@ async function createContext() {
 	const prompt = vi.fn(async () => {});
 	const retry = vi.fn(async () => true);
 	const abort = vi.fn(async () => {});
+	const shutdown = vi.fn(async () => {});
 	const session = {
 		isStreaming: false,
 		isCompacting: false,
@@ -235,6 +236,7 @@ async function createContext() {
 		handleBtwCopyKey,
 		showError,
 		showStatus: vi.fn(),
+		shutdown,
 	} as unknown as InteractiveModeContext;
 
 	return {
@@ -269,6 +271,7 @@ async function createContext() {
 			hasActiveBtw,
 			handlesBtwBranchKey,
 			handleBtwCopyKey,
+			shutdown,
 			canCopyBtw,
 			showError,
 		},
@@ -298,6 +301,19 @@ describe("InputController keybinding setup", () => {
 		expect(spies.showModelSelector).toHaveBeenNthCalledWith(2);
 		expect(spies.resetDisplayAfterAppearanceRefresh).toHaveBeenCalledTimes(1);
 	});
+	it("routes exit commands globally when a non-editor dialog owns focus", async () => {
+		const { InputController, ctx, spies, setFocused } = await createContext();
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		setFocused({});
+
+		const result = dispatchInput(registeredInputListeners(spies.addInputListener), "/exit\r");
+
+		expect(result).toEqual({ consume: true });
+		expect(spies.shutdown).toHaveBeenCalledTimes(1);
+	});
+
 
 	it("registers the tool activity visibility action", async () => {
 		const { InputController, ctx, editor, spies } = await createContext();

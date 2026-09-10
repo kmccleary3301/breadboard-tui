@@ -258,4 +258,38 @@ describe("createSessionTeardown", () => {
 
 		expect(received).toEqual([postmortem.Reason.SIGTERM]);
 	});
+	it("does not dispose while the runtime teardown barrier is still pending", async () => {
+		const order: string[] = [];
+		const release = Promise.withResolvers<void>();
+		const teardown = createSessionTeardown({
+			getDraftText: () => "",
+			beginDispose: () => {
+				order.push("beginDispose");
+			},
+			saveDraft: async () => {
+				order.push("saveDraft");
+			},
+			beforeDispose: async () => {
+				order.push("beforeDispose:start");
+				await release.promise;
+				order.push("beforeDispose:done");
+			},
+			disposeSession: async () => {
+				order.push("disposeSession");
+			},
+		});
+
+		const running = teardown();
+		await Promise.resolve();
+		expect(order).toEqual(["beginDispose", "saveDraft", "beforeDispose:start"]);
+		release.resolve();
+		await running;
+		expect(order).toEqual([
+			"beginDispose",
+			"saveDraft",
+			"beforeDispose:start",
+			"beforeDispose:done",
+			"disposeSession",
+		]);
+	});
 });

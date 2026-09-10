@@ -74,18 +74,18 @@ export function createSessionTeardown(deps: SessionTeardownDeps): SessionTeardow
 		const draftText = deps.getDraftText();
 		deps.beginDispose();
 		try {
-			await deps.saveDraft(draftText);
+			await logger.time("SessionTeardown.saveDraft", deps.saveDraft, draftText);
 		} catch (err) {
 			logger.warn("Failed to save session draft during teardown", { error: String(err) });
 		}
 		let beforeDisposeError: unknown;
 		try {
-			await deps.beforeDispose?.();
+			await logger.time("SessionTeardown.beforeDispose", () => deps.beforeDispose?.());
 		} catch (error) {
 			beforeDisposeError = error;
 		}
 		try {
-			await deps.disposeSession(reason);
+			await logger.time("SessionTeardown.disposeSession", deps.disposeSession, reason);
 		} catch (error) {
 			if (beforeDisposeError !== undefined) {
 				throw new AggregateError([beforeDisposeError, error], "Pre-dispose barrier and session disposal failed");

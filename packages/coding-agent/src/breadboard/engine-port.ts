@@ -17,7 +17,12 @@ import type { BreadboardRunConfig } from "./lifecycle/run-config";
 import { createBreadboardModelRolePort, type ModelRolePort } from "./model-role-port";
 import { createBreadboardProviderAuthPort } from "./provider-auth-adapter";
 import type { ProviderAuthPort } from "./provider-auth-port";
-import type { BreadboardCreateSessionRequest, OpenedSession, OpenSession } from "./session-port";
+import {
+	breadboardCancellationRequestKey,
+	type BreadboardCreateSessionRequest,
+	type OpenedSession,
+	type OpenSession,
+} from "./session-port";
 
 type AsyncResult<Operation> = Operation extends (...args: never[]) => Promise<infer Result> ? Result : never;
 type FirstParameter<Operation> = Operation extends (input: infer Input, ...args: never[]) => Promise<unknown>
@@ -38,6 +43,95 @@ type BreadboardEngineReadyHandle = Pick<
 
 export type BreadboardLifecycleFailureResult = Extract<LifecycleResult, { readonly kind: "failure" }>;
 export type BreadboardEngineConnectionFailure = Exclude<LifecycleResult, { readonly kind: "ready" }>;
+
+const ACTIVE_TURN_CLOSE_TIMEOUT_MS = 3_000;
+const CLOSE_DEADLINE_EXCEEDED = Symbol("session close deadline exceeded");
+
+export type BreadboardSessionCloseResult =
+	| { readonly kind: "closed" }
+	| { readonly kind: "unresolved_cleanup"; readonly reason: string };
+
+async function raceWithCloseDeadline<T>(
+	operation: Promise<T>,
+	deadline: number,
+): Promise<T | typeof CLOSE_DEADLINE_EXCEEDED> {
+	const remaining = deadline - Date.now();
+	if (remaining <= 0) return CLOSE_DEADLINE_EXCEEDED;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			operation,
+			new Promise<typeof CLOSE_DEADLINE_EXCEEDED>(resolve => {
+				timer = setTimeout(() => resolve(CLOSE_DEADLINE_EXCEEDED), remaining);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+export async function closeOpenedSession(
+	session: OpenedSession,
+	timeoutMs = ACTIVE_TURN_CLOSE_TIMEOUT_MS,
+): Promise<BreadboardSessionCloseResult> {
+	const deadline = Date.now() + timeoutMs;
+	const cancellationRequests = new Map<string, { readonly key: string; accepted: boolean }>();
+	const reasons: string[] = [];
+	while (Date.now() < deadline) {
+		let activeTurnId: string | null;
+		try {
+			const snapshot = await raceWithCloseDeadline(session.snapshot(), deadline);
+			if (snapshot === CLOSE_DEADLINE_EXCEEDED) {
+				reasons.push("BreadBoard session snapshot timed out during close");
+				break;
+			}
+			activeTurnId = String(snapshot.activeTurnId);
+			if (snapshot.activeTurnId === null) activeTurnId = null;
+		} catch (error) {
+			reasons.push(
+				`BreadBoard session snapshot failed during close: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			break;
+		}
+		if (activeTurnId === null) break;
+		const request = cancellationRequests.get(activeTurnId) ?? {
+			key: breadboardCancellationRequestKey(session.sessionId, activeTurnId),
+			accepted: false,
+		};
+		cancellationRequests.set(activeTurnId, request);
+		if (!request.accepted) {
+			try {
+				const cancellation = await raceWithCloseDeadline(
+					session.cancel({
+						turnId: activeTurnId,
+						cancellationRequestKey: request.key,
+						reason: "user_requested",
+					}),
+					deadline,
+				);
+				if (cancellation === CLOSE_DEADLINE_EXCEEDED) {
+					reasons.push("BreadBoard session cancellation timed out during close");
+					break;
+				}
+				request.accepted = true;
+			} catch (error) {
+				reasons.push(
+					`BreadBoard session cancellation failed during close: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) break;
+		await new Promise<void>(resolve => setTimeout(resolve, Math.min(100, remaining)));
+	}
+	try {
+		const closed = await raceWithCloseDeadline(session.close(), deadline);
+		if (closed === CLOSE_DEADLINE_EXCEEDED) reasons.push("BreadBoard session close timed out");
+	} catch (error) {
+		reasons.push(`BreadBoard session close failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	return reasons.length === 0 ? { kind: "closed" } : { kind: "unresolved_cleanup", reason: reasons.join("; ") };
+}
 
 export interface BreadboardEngineAuthorityIdentity {
 	readonly mode: LifecycleReadyHandle["mode"];
@@ -351,7 +445,8 @@ function createConnectedPort(
 			let sessionError: unknown;
 			for (const session of sessions) {
 				try {
-					await session.close();
+					const outcome = await closeOpenedSession(session);
+					if (outcome.kind === "unresolved_cleanup") sessionError ??= new Error(outcome.reason);
 				} catch (error) {
 					sessionError ??= error;
 				}
