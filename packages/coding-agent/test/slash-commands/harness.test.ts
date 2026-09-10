@@ -162,7 +162,7 @@ describe("/harness use", () => {
 		try {
 			expect(await executeHarnessSlashCommand("/harness use daily_driver", { ctx: mode })).toBe(true);
 			expect(calls.slice(0, 3)).toEqual([
-				"get:daily_driver",
+				"get:agent_configs/v2/daily_driver.yaml",
 				"validate:agent_configs/daily_driver.v1.yaml",
 				"lock:agent_configs/daily_driver.v1.yaml",
 			]);
@@ -221,7 +221,10 @@ describe("/harness use", () => {
 
 		try {
 			expect(await mode.startHarnessSession("daily_driver")).toBe(false);
-			expect(calls).toEqual(["get:daily_driver", "validate:agent_configs/daily_driver.v1.yaml"]);
+			expect(calls).toEqual([
+				"get:agent_configs/v2/daily_driver.yaml",
+				"validate:agent_configs/daily_driver.v1.yaml",
+			]);
 			expect(newSession).not.toHaveBeenCalled();
 			expect(transcript(mode)).toContain("Harness definition has no supported modes");
 		} finally {
@@ -239,7 +242,7 @@ describe("/harness use", () => {
 		try {
 			expect(await mode.startHarnessSession("daily_driver")).toBe(false);
 			expect(calls).toEqual([
-				"get:daily_driver",
+				"get:agent_configs/v2/daily_driver.yaml",
 				"validate:agent_configs/daily_driver.v1.yaml",
 				"lock:agent_configs/daily_driver.v1.yaml",
 			]);
@@ -456,11 +459,11 @@ describe("/harness control-plane operations", () => {
 			},
 		} as const;
 		const client = {
-			getHarness: async (id: string) => result({ path: `${id}.yaml` }),
+			getHarness: async (id: string) => result({ path: id }),
 			validateHarness: async () => result({}),
 			explainHarness: async () => result({ fields: [] }),
 			lockHarness: async () => result({}),
-			getHarnessLock: async (id: string) => result({ lock: id.startsWith("left") ? locks.left : locks.right }),
+			getHarnessLock: async (id: string) => result({ lock: id.includes("/left") ? locks.left : locks.right }),
 		} satisfies Pick<
 			BreadboardClient,
 			"getHarness" | "validateHarness" | "explainHarness" | "lockHarness" | "getHarnessLock"
@@ -471,5 +474,41 @@ describe("/harness control-plane operations", () => {
 		expect(control.showStatus).toHaveBeenCalledWith(
 			"Harness diff:\nAdded: added: true\nRemoved: removed: old\nChanged: changed: before -> after",
 		);
+	});
+	test("resolves bare names through engine paths before harness diff locks", async () => {
+		const harnessCalls: string[] = [];
+		const lockCalls: string[] = [];
+		const client = {
+			getHarness: async (id: string) => {
+				harnessCalls.push(id);
+				return result({ path: id });
+			},
+			validateHarness: async () => result({}),
+			explainHarness: async () => result({ fields: [] }),
+			lockHarness: async () => result({}),
+			getHarnessLock: async (id: string) => {
+				lockCalls.push(id);
+				return result({ lock: { effective_values: [] } });
+			},
+		} satisfies Pick<
+			BreadboardClient,
+			"getHarness" | "validateHarness" | "explainHarness" | "lockHarness" | "getHarnessLock"
+		>;
+		const control = controlRuntime(client);
+
+		await executeHarnessSlashCommand(
+			"/harness diff daily_driver codex_0-107-0_e4_3-6-2026",
+			control.runtime as never,
+		);
+
+		expect(harnessCalls).toEqual([
+			"agent_configs/v2/daily_driver.yaml",
+			"agent_configs/v2/codex_0-107-0_e4_3-6-2026.yaml",
+		]);
+		expect(lockCalls).toEqual([
+			"agent_configs/v2/daily_driver.yaml",
+			"agent_configs/v2/codex_0-107-0_e4_3-6-2026.yaml",
+		]);
+		expect(control.showStatus).toHaveBeenCalledWith("Harness diff:\nAdded: none\nRemoved: none\nChanged: none");
 	});
 });

@@ -2,6 +2,7 @@ import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
 import type { PublicResult } from "@breadboard/sdk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { HarnessCommandSpec, HarnessSnapshot } from "../breadboard/harness-port";
+import { resolveHarnessId } from "../breadboard/harness-port-client";
 import type { Settings } from "../config/settings";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
 import { parseSlashCommand, parseSubcommand } from "./helpers/parse";
@@ -264,11 +265,6 @@ function resultData(result: PublicResult, operation: string): PublicData {
 
 function resultString(data: PublicData, key: string): string | undefined {
 	return typeof data[key] === "string" && data[key].length > 0 ? data[key] : undefined;
-}
-
-async function resolveHarnessId(client: HarnessControlClient, requested: string): Promise<string> {
-	const data = resultData(await client.getHarness(requested), "harness.get");
-	return resultString(data, "path") ?? requested;
 }
 
 function lockRows(data: PublicData, operation: string): readonly PublicData[] {

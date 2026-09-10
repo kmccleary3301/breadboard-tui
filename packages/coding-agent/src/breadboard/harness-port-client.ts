@@ -233,7 +233,7 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 }
 
 async function resolveHarnessResult(
-	client: BreadboardClient,
+	client: Pick<BreadboardClient, "getHarness"> & Partial<Pick<BreadboardClient, "createHarness">>,
 	requested: string,
 ): Promise<{ readonly id: string; readonly result: PublicResult }> {
 	const candidates =
@@ -249,7 +249,7 @@ async function resolveHarnessResult(
 			if (!(error instanceof ApiError) || error.status !== 404) throw error;
 		}
 	}
-	if (requested === "daily_driver") {
+	if (requested === "daily_driver" && client.createHarness !== undefined) {
 		try {
 			const initialized = publicData(await client.createHarness("."), "harness.init");
 			const initializedPath = requiredString(initialized.path, "initialized harness path");
@@ -295,18 +295,25 @@ function choiceFromPath(path: string): HarnessChoice {
 }
 
 /** Resolve a CLI or palette harness reference to the engine id and display name. */
-export async function resolveHarness(client: BreadboardClient, requested: string): Promise<ResolvedHarness> {
+export async function resolveHarness(
+	client: Pick<BreadboardClient, "getHarness"> & Partial<Pick<BreadboardClient, "createHarness">>,
+	requested: string,
+): Promise<ResolvedHarness> {
 	const { id: resolvedId, result } = await resolveHarnessResult(client, requested);
 	const data = publicData(result, "harness.get");
 	const harness = isRecord(data.harness) ? data.harness : data;
-	const id = typeof harness.path === "string" && harness.path.trim() ? harness.path : resolvedId;
+	const responsePath = typeof harness.path === "string" && harness.path.trim() ? harness.path : undefined;
+	const id = responsePath ?? resolvedId;
 	const definition =
 		(isRecord(data.definition) && data.definition) || (isRecord(harness.definition) && harness.definition) || harness;
 	return { id, name: harnessName(definition, requested) };
 }
 
 /** Resolve a CLI or palette harness name to the engine's source path. */
-export async function resolveHarnessId(client: BreadboardClient, requested: string): Promise<string> {
+export async function resolveHarnessId(
+	client: Pick<BreadboardClient, "getHarness"> & Partial<Pick<BreadboardClient, "createHarness">>,
+	requested: string,
+): Promise<string> {
 	return (await resolveHarness(client, requested)).id;
 }
 
