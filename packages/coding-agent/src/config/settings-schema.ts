@@ -238,7 +238,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	],
 	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
 	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
-	breadboard: ["Harness", "Engine", "Providers", "Subagents", "Long-run"],
+	breadboard: ["Harness", "Engine", "Providers", "Subagents"],
 };
 
 /** Status line segment identifiers */

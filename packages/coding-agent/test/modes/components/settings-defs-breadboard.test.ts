@@ -26,10 +26,13 @@ const BREADBOARD_PATHS = [
 ] as const satisfies readonly SettingPath[];
 
 describe("BreadBoard settings definitions", () => {
-	it("exposes the eleventh tab with all declared groups", () => {
+	it("exposes the eleventh tab and every declared group has at least one row", () => {
 		expect(SETTING_TABS).toHaveLength(11);
 		expect(SETTING_TABS.at(-1)).toBe("breadboard");
-		expect(TAB_GROUPS.breadboard).toEqual(["Harness", "Engine", "Providers", "Subagents", "Long-run"]);
+		const groupsWithRows = new Set(getSettingsForTab("breadboard").map(definition => definition.group));
+		for (const group of TAB_GROUPS.breadboard) {
+			expect(groupsWithRows.has(group), `empty group ${group}`).toBe(true);
+		}
 	});
 
 	it("resolves each BreadBoard row to an existing schema path", () => {
