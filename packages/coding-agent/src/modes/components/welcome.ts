@@ -411,17 +411,18 @@ export class WelcomeComponent implements Component {
 		// Right column hints
 		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
 		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
-		// BreadBoard's identity line is intentionally a single compact row. Lock
-		// fields are optional because older harness definitions may omit them.
+		// BreadBoard's identity line is intentionally a single compact row.
 		const lock = this.harness?.lock;
 		const teamSize =
 			isRecord(lock) && typeof lock.max_concurrent_agents === "number"
 				? String(lock.max_concurrent_agents)
 				: "—";
-		const posture =
-			isRecord(lock) && typeof lock.compute_posture === "string" ? lock.compute_posture : this.harness?.mode ?? "unknown";
+		const posture = isRecord(lock) && typeof lock.compute_posture === "string" ? lock.compute_posture : "unknown";
 		const harnessLine = this.harness
-			? ` ${theme.fg("accent", this.harness.name)} ${theme.fg("dim", "·")} ${theme.fg("muted", "/harness")} ${theme.fg("dim", "·")} ${theme.fg("muted", `team ${teamSize}`)} ${theme.fg("dim", "·")} ${theme.fg("muted", posture)}`
+			? ` ${theme.fg(
+					"muted",
+					`Harness ${sanitizeStatusText(this.harness.name)} (${sanitizeStatusText(this.harness.mode ?? "unknown")}, g${sanitizeStatusText(this.harness.generation ?? "unknown")}) · team ${teamSize} · ${sanitizeStatusText(posture)} · /harness`,
+				)}`
 			: "";
 		const rightLines = [
 			` ${theme.bold(theme.fg("accent", "Get started"))}`,

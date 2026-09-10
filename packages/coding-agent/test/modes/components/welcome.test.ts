@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { HarnessSnapshot } from "@oh-my-pi/pi-coding-agent/breadboard/harness-port";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
 import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
@@ -123,6 +124,37 @@ describe("WelcomeComponent", () => {
 		expect(plain).toContain("Recent sessions");
 	});
 });
+const harnessSnapshot: HarnessSnapshot = {
+	harnessId: "codex-e4",
+	name: "codex-e4",
+	lockHash: null,
+	generation: "3",
+	mode: "build",
+	lock: { max_concurrent_agents: 4, compute_posture: "native tools" },
+	provenance: {},
+	loadedAt: 0,
+};
+
+describe("WelcomeComponent harness identity", () => {
+	it("renders the harness identity, team posture, and /harness hint", () => {
+		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
+		welcome.setHarness(harnessSnapshot);
+
+		const plain = welcome.render(140).map(stripAnsi).join("\n");
+
+		expect(plain).toContain("Harness codex-e4 (build, g3) · team 4 · native tools · /harness");
+	});
+
+	it("omits the harness identity line when no snapshot is active", () => {
+		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
+		welcome.setHarness(null);
+
+		const plain = welcome.render(140).map(stripAnsi).join("\n");
+		expect(plain).not.toContain("/harness");
+		expect(plain).not.toContain("Harness ");
+	});
+});
+
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const hasRow = (lines: string[], row: string): boolean => lines.some(l => l.includes(row.trimEnd()));
