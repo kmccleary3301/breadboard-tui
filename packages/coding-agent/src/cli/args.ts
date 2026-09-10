@@ -29,6 +29,8 @@ export interface Args {
 	profile?: string;
 	engineMode?: string;
 	engineUrl?: string;
+	/** Harness name or definition path for the initial BreadBoard session. */
+	harness?: string;
 	alias?: string;
 	allowHome?: boolean;
 	provider?: string;

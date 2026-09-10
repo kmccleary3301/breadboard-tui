@@ -24,6 +24,7 @@ export const launchHelp = {
 		"engine-url": Flags.string({
 			description: `Exact ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine endpoint URL`,
 		}),
+		harness: Flags.string({ description: "BreadBoard harness name or definition path" }),
 		model: Flags.string({
 			description: 'Model to use (fuzzy match: "opus", "gpt-5.2", or "openai/gpt-5.2")',
 		}),
