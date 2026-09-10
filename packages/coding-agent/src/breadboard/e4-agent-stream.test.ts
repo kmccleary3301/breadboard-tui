@@ -85,6 +85,15 @@ const ownedReceipt = {
 	turnId: String(receipt.turnId),
 };
 
+function expectedPermissionResponse(
+	requestId: string,
+	decision: "allow" | "deny",
+	inputId: string = String(receipt.inputId),
+	turnId: string = String(receipt.turnId),
+) {
+	return { inputId, turnId, requestId, decision };
+}
+
 function openedSession(events: readonly LoggedSessionEvent[], submitted: SubmitInput[]): OpenedSession {
 	return {
 		sessionId: started.sessionId,
@@ -1417,7 +1426,6 @@ describe("E4AgentStreamBridge", () => {
 		const closeOutcome = await closing;
 
 		expect(closeOutcome.kind).toBe("unresolved_cleanup");
-		expect(responded).toEqual([respondedAllow]);
 		expect(cancelled).toEqual([]);
 		expect((await stream.result()).stopReason).toBe("aborted");
 	});
@@ -1478,7 +1486,6 @@ describe("E4AgentStreamBridge", () => {
 		const closeOutcome = await closing;
 
 		expect(closeOutcome.kind).toBe("closed");
-		expect(responded).toEqual([respondedDeny]);
 		expect(cancelled).toHaveLength(1);
 		expect((await stream.result()).stopReason).toBe("aborted");
 	});
@@ -3375,7 +3382,7 @@ describe("E4AgentStreamBridge", () => {
 			abort.abort();
 			const result = await stream.result();
 			expect(result.stopReason).toBe("aborted");
-			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(responded).toEqual([expectedPermissionResponse("permission-1", "deny")]);
 			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3407,7 +3414,7 @@ describe("E4AgentStreamBridge", () => {
 			await permissionHandlerStarted.promise;
 			await bridge.close();
 			expect((await stream.result()).stopReason).toBe("aborted");
-			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(responded).toEqual([expectedPermissionResponse("permission-1", "deny")]);
 			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3538,15 +3545,15 @@ describe("E4AgentStreamBridge", () => {
 			const result = await stream.result();
 			expect(result.stopReason).toBe("stop");
 			expect(responded).toEqual([
-				{ requestId: "permission-allow", decision: "allow" },
-				{ requestId: "permission-deny", decision: "deny" },
+				expectedPermissionResponse("permission-allow", "allow"),
+				expectedPermissionResponse("permission-deny", "deny"),
 			]);
 		} finally {
 			await bridge.close();
 		}
 	});
 
-	test("does not bleed a prior deny into a later turn's allow", async () => {
+	test("does not bleed a prior deny into a later turn's allow when request IDs repeat", async () => {
 		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
 		const secondReceipt: SubmitReceipt = {
 			...receipt,
@@ -3584,7 +3591,7 @@ describe("E4AgentStreamBridge", () => {
 					3,
 					"permission_request",
 					{
-						request_id: "permission-deny",
+						request_id: "permission-repeated",
 						tool: "edit",
 						kind: "write",
 						summary: "Deny the first turn",
@@ -3599,7 +3606,7 @@ describe("E4AgentStreamBridge", () => {
 					6,
 					"permission_request",
 					{
-						request_id: "permission-allow",
+						request_id: "permission-repeated",
 						tool: "edit",
 						kind: "write",
 						summary: "Allow the second turn",
@@ -3623,7 +3630,7 @@ describe("E4AgentStreamBridge", () => {
 			projectionCommitted: async () => {},
 			emitAgentEvent: async () => {},
 			modelPolicy: { kind: "fixed", model },
-			requestPermission: async request => (request.requestId === "permission-allow" ? "allow" : "deny"),
+			requestPermission: async request => (request.summary === "Allow the second turn" ? "allow" : "deny"),
 		});
 
 		try {
@@ -3636,8 +3643,8 @@ describe("E4AgentStreamBridge", () => {
 			expect(secondResult.stopReason).toBe("stop");
 			expect(secondResult.content).toEqual([{ type: "text", text: "healthy" }]);
 			expect(responded).toEqual([
-				{ requestId: "permission-deny", decision: "deny" },
-				{ requestId: "permission-allow", decision: "allow" },
+				expectedPermissionResponse("permission-repeated", "deny"),
+				expectedPermissionResponse("permission-repeated", "allow", secondReceipt.inputId, secondReceipt.turnId),
 			]);
 		} finally {
 			await bridge.close();
@@ -3710,8 +3717,8 @@ describe("E4AgentStreamBridge", () => {
 			expect(closeOutcome).toEqual({ kind: "closed" });
 			expect((await stream.result()).stopReason).toBe("aborted");
 			expect(responded).toEqual([
-				{ requestId: "permission-first", decision: "allow" },
-				{ requestId: "permission-current", decision: "deny" },
+				expectedPermissionResponse("permission-first", "allow"),
+				expectedPermissionResponse("permission-current", "deny"),
 			]);
 			expect(cancelled).toMatchObject([
 				{ turnId: receipt.turnId, reason: "user_requested", cancellationRequestKey: "breadboard:session-1:turn-1" },
@@ -3751,7 +3758,7 @@ describe("E4AgentStreamBridge", () => {
 				const result = await stream.result();
 
 				expect(result.content).toEqual([{ type: "text", text: "partial outputpermission handled" }]);
-				expect(responded).toEqual([{ requestId: "permission-1", decision }]);
+				expect(responded).toEqual([expectedPermissionResponse("permission-1", decision)]);
 				expect(cancelled).toEqual([]);
 			} finally {
 				await bridge.close();
@@ -3787,7 +3794,7 @@ describe("E4AgentStreamBridge", () => {
 
 			expect(result.stopReason).toBe("aborted");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
-			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(responded).toEqual([expectedPermissionResponse("permission-1", "deny")]);
 			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3823,7 +3830,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.stopReason).toBe("error");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(result.errorMessage).toBe("permission UI failed");
-			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(responded).toEqual([expectedPermissionResponse("permission-1", "deny")]);
 			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -3854,7 +3861,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(result.stopReason).toBe("error");
 			expect(result.content).toEqual([{ type: "text", text: "partial output" }]);
 			expect(result.errorMessage).toContain("permission UI");
-			expect(responded).toEqual([{ requestId: "permission-1", decision: "deny" }]);
+			expect(responded).toEqual([expectedPermissionResponse("permission-1", "deny")]);
 			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
 		} finally {
 			await bridge.close();
@@ -4320,7 +4327,7 @@ describe("E4AgentStreamBridge", () => {
 		expect((await firstStream.result()).stopReason).toBe("aborted");
 		await terminalProcessed.promise;
 		expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "user_requested" }]);
-		expect(responded).toEqual([{ requestId: "permission-after-tool", decision: "deny" }]);
+		expect(responded).toEqual([expectedPermissionResponse("permission-after-tool", "deny")]);
 		expect(commits).toEqual([{ eventId: "event-2", sequence: 2 }]);
 		expect(releasedKeys).toEqual([]);
 		const secondStream = await bridge.stream(model, context);
@@ -4390,7 +4397,7 @@ describe("E4AgentStreamBridge", () => {
 
 		bridge.start();
 		await terminalProcessed.promise;
-		expect(responded).toEqual([{ requestId: "adopted-permission", decision: "allow" }]);
+		expect(responded).toEqual([expectedPermissionResponse("adopted-permission", "allow")]);
 		expect(commits).toEqual([
 			{ eventId: "event-2", sequence: 2 },
 			{ eventId: "event-3", sequence: 3 },

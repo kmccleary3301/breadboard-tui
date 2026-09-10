@@ -50,10 +50,32 @@ export type E4CloseResult =
 	| { readonly kind: "unresolved_cleanup"; readonly reason: string };
 
 type PermissionTeardownState = "idle" | "responding" | "denying" | "cancelled" | "closed";
+type PermissionOwner = {
+	readonly inputId: string;
+	readonly turnId: string;
+	readonly requestId: string;
+	readonly source?: string;
+	readonly taskSessionId?: string;
+};
 type PermissionResponseState = {
 	readonly decision: Exclude<E4PermissionDecision, "cancel">;
 	readonly response: Promise<PermissionDecisionReceipt>;
 };
+
+const permissionOwnerKey = (owner: PermissionOwner): string =>
+	JSON.stringify([owner.inputId, owner.turnId, owner.requestId]);
+
+function permissionOwnerFromEvent(
+	event: Extract<LoggedSessionEvent, { readonly kind: "permission_requested" }>,
+): PermissionOwner {
+	return {
+		inputId: String(event.inputId),
+		turnId: String(event.turnId),
+		requestId: String(event.payload.requestId),
+		...(event.payload.source === null ? {} : { source: event.payload.source }),
+		...(event.payload.taskSessionId === null ? {} : { taskSessionId: event.payload.taskSessionId }),
+	};
+}
 
 async function raceWithCloseDeadline<T>(
 	operation: Promise<T>,
@@ -201,7 +223,7 @@ interface TurnSink {
 	readonly stream: AssistantMessageEventStream | undefined;
 	readonly adopted: boolean;
 	readonly permissionAbort: AbortController;
-	permissionRequestId: string | undefined;
+	permissionOwner: PermissionOwner | undefined;
 	permissionResponses?: Map<string, PermissionResponseState>;
 	permissionTeardown: Promise<boolean> | undefined;
 	permissionTeardownState: PermissionTeardownState;
@@ -211,6 +233,7 @@ interface TurnSink {
 	readonly pendingProjectionKeys: string[];
 	readonly streamedToolCallsByCallId: Map<string, StreamedToolCallState>;
 	turnId: TurnId | undefined;
+	inputId: string | undefined;
 	cancellationRequestKey: string | undefined;
 	cancelRequested: boolean;
 	text: string;
@@ -472,7 +495,7 @@ export class E4AgentStreamBridge {
 			stream,
 			adopted: !stream,
 			permissionAbort: new AbortController(),
-			permissionRequestId: undefined,
+			permissionOwner: undefined,
 			permissionTeardown: undefined,
 			permissionTeardownState: "idle",
 			toolCallsByCallId: new Map(),
@@ -480,6 +503,7 @@ export class E4AgentStreamBridge {
 			projectedToolResultIds: new Set(),
 			streamedToolCallsByCallId: new Map(),
 			pendingProjectionKeys: [],
+			inputId: undefined,
 			turnId: undefined,
 			cancellationRequestKey: undefined,
 			cancelRequested: false,
@@ -823,6 +847,7 @@ export class E4AgentStreamBridge {
 			ownershipNotificationPending = true;
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			sink.turnId = receipt.turnId;
+			sink.inputId = receipt.inputId;
 			sink.cancellationRequestKey = this.#ensureCancellationRequest(receipt.turnId).key;
 			const failure = this.#currentObserveFailure();
 			if (failure) {
@@ -838,11 +863,12 @@ export class E4AgentStreamBridge {
 			}
 			this.#sinks.set(turnKey, sink);
 			const cancel = () => {
+				const owner = sink.permissionOwner;
 				sink.permissionAbort.abort();
 				const cancellation =
-					sink.permissionRequestId === undefined
+					owner === undefined
 						? this.#trackCancellation(sink, "user_requested")
-						: this.#denyPermissionAndCancel(sink, sink.permissionRequestId);
+						: this.#denyPermissionAndCancel(sink, owner);
 				void cancellation;
 				void this.#finishAbortedSink(sink);
 			};
@@ -944,11 +970,15 @@ export class E4AgentStreamBridge {
 		if (ownership && ownership.inputId !== String(event.inputId)) {
 			throw new Error(`BreadBoard owned turn ${turnKey} changed input correlation`);
 		}
+		if (sink && sink.inputId !== undefined && sink.inputId !== String(event.inputId)) {
+			throw new Error(`BreadBoard owned turn ${turnKey} changed input correlation`);
+		}
 		if (!sink) {
 			const backendModel = this.#activeModel;
 			if (!backendModel) throw new Error("BreadBoard backend model attribution is not configured");
 			sink = this.#newSink(backendModel);
 			sink.turnId = event.turnId;
+			sink.inputId = event.inputId;
 			sink.cancellationRequestKey = this.#ensureCancellationRequest(event.turnId).key;
 			this.#sinks.set(turnKey, sink);
 		}
@@ -1308,8 +1338,9 @@ export class E4AgentStreamBridge {
 		sink: TurnSink,
 		event: Extract<LoggedSessionEvent, { readonly kind: "permission_requested" }>,
 	): Promise<boolean> {
-		const requestId = String(event.payload.requestId);
-		sink.permissionRequestId = requestId;
+		const owner = permissionOwnerFromEvent(event);
+		const ownerKey = permissionOwnerKey(owner);
+		sink.permissionOwner = owner;
 		try {
 			const requestPermission = this.#requestPermission;
 			if (!requestPermission) {
@@ -1318,33 +1349,35 @@ export class E4AgentStreamBridge {
 					"BreadBoard permission request requires OMP permission UI wiring",
 					"error",
 				);
-				return this.#denyPermissionAndCancel(sink, requestId);
+				return this.#denyPermissionAndCancel(sink, owner);
 			}
 			let decision: E4PermissionDecision;
 			try {
 				decision = await requestPermission(event.payload, sink.permissionAbort.signal);
 			} catch (error) {
 				this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-				return this.#denyPermissionAndCancel(sink, requestId);
+				return this.#denyPermissionAndCancel(sink, owner);
 			}
 			if (sink.terminal || sink.permissionAbort.signal.aborted || this.#closed) return false;
 			if (decision === "cancel") {
 				this.#failSinkPendingTerminal(sink, "BreadBoard permission request cancelled in OMP", "aborted");
-				return this.#denyPermissionAndCancel(sink, requestId);
+				return this.#denyPermissionAndCancel(sink, owner);
 			}
 			if (sink.permissionTeardownState !== "idle") return false;
 			sink.permissionTeardownState = "responding";
 			try {
-				const response = this.#permissionResponse(sink, requestId, decision);
-				await this.#awaitPermissionResponse(requestId, response);
+				const response = this.#permissionResponse(sink, owner, decision);
+				await this.#awaitPermissionResponse(owner, response);
 				if (this.#permissionTeardownClaimed(sink) && decision === "allow") return false;
 				return !this.#permissionTeardownClaimed(sink);
 			} catch (error) {
 				this.#failSinkPendingTerminal(sink, safeErrorMessage(error), "error");
-				return this.#denyPermissionAndCancel(sink, requestId);
+				return this.#denyPermissionAndCancel(sink, owner);
 			}
 		} finally {
-			if (sink.permissionRequestId === requestId) sink.permissionRequestId = undefined;
+			if (sink.permissionOwner !== undefined && permissionOwnerKey(sink.permissionOwner) === ownerKey) {
+				sink.permissionOwner = undefined;
+			}
 			if (sink.permissionTeardownState === "responding") sink.permissionTeardownState = "idle";
 		}
 	}
@@ -1548,29 +1581,37 @@ export class E4AgentStreamBridge {
 
 	#permissionResponse(
 		sink: TurnSink,
-		requestId: string,
+		owner: PermissionOwner,
 		decision: Exclude<E4PermissionDecision, "cancel">,
 	): PermissionResponseState {
 		const responses = (sink.permissionResponses ??= new Map());
-		const existing = responses.get(requestId);
+		const key = permissionOwnerKey(owner);
+		const existing = responses.get(key);
 		if (existing !== undefined) {
 			if (existing.decision !== decision) {
-				throw new Error(`BreadBoard permission request ${requestId} received conflicting decisions`);
+				throw new Error(`BreadBoard permission request ${owner.requestId} received conflicting decisions`);
 			}
 			return existing;
 		}
 		const state: PermissionResponseState = {
 			decision,
-			response: this.#session.respondPermission({ requestId, decision }),
+			response: this.#session.respondPermission({
+				inputId: owner.inputId,
+				turnId: owner.turnId,
+				requestId: owner.requestId,
+				decision,
+				...(owner.source === undefined ? {} : { source: owner.source }),
+				...(owner.taskSessionId === undefined ? {} : { taskSessionId: owner.taskSessionId }),
+			}),
 		};
-		responses.set(requestId, state);
+		responses.set(key, state);
 		return state;
 	}
 
-	async #awaitPermissionResponse(requestId: string, state: PermissionResponseState): Promise<void> {
+	async #awaitPermissionResponse(owner: PermissionOwner, state: PermissionResponseState): Promise<void> {
 		const receipt = await state.response;
-		if (receipt.requestId !== requestId || receipt.decision !== state.decision) {
-			throw new Error(`BreadBoard permission response correlation mismatch for ${requestId}`);
+		if (receipt.requestId !== owner.requestId || receipt.decision !== state.decision) {
+			throw new Error(`BreadBoard permission response correlation mismatch for ${owner.requestId}`);
 		}
 	}
 
@@ -1612,22 +1653,22 @@ export class E4AgentStreamBridge {
 		return this.#requestCancellation(sink.turnId, reason);
 	}
 
-	async #denyPermissionAndCancel(sink: TurnSink, requestId: string): Promise<boolean> {
+	async #denyPermissionAndCancel(sink: TurnSink, owner: PermissionOwner): Promise<boolean> {
 		const existing = sink.permissionTeardown;
 		if (existing !== undefined) return existing;
 		if (sink.permissionTeardownState === "closed" || sink.permissionTeardownState === "cancelled") return false;
 		sink.permissionTeardownState = "denying";
 		const teardown = (async (): Promise<boolean> => {
 			try {
-				const response = sink.permissionResponses?.get(requestId);
+				const response = sink.permissionResponses?.get(permissionOwnerKey(owner));
 				if (response !== undefined) {
-					await this.#awaitPermissionResponse(requestId, response);
+					await this.#awaitPermissionResponse(owner, response);
 					if (response.decision !== "deny") {
 						this.#invalidateBridge("BreadBoard permission allow crossed cancellation teardown boundary");
 						return false;
 					}
 				} else {
-					await this.#awaitPermissionResponse(requestId, this.#permissionResponse(sink, requestId, "deny"));
+					await this.#awaitPermissionResponse(owner, this.#permissionResponse(sink, owner, "deny"));
 				}
 				sink.permissionTeardownState = "cancelled";
 			} catch (error) {
@@ -1642,8 +1683,8 @@ export class E4AgentStreamBridge {
 	}
 
 	#cancelSink(sink: TurnSink, reason: "user_requested" | "timeout"): Promise<boolean> | undefined {
-		const requestId = sink.permissionRequestId;
-		if (requestId !== undefined) return this.#denyPermissionAndCancel(sink, requestId);
+		const owner = sink.permissionOwner;
+		if (owner !== undefined) return this.#denyPermissionAndCancel(sink, owner);
 		return this.#trackCancellation(sink, reason);
 	}
 

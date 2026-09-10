@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+from contextlib import contextmanager
+import hashlib
 import importlib.util
 import json
 import os
@@ -139,12 +142,12 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def request_json(endpoint: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def request_json(endpoint: str, path: str, payload: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
     data = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request(
         endpoint.rstrip("/") + path,
         data=data,
-        headers={"Content-Type": "application/json"} if data is not None else {},
+        headers={**({"Content-Type": "application/json"} if data is not None else {}), **(headers or {})},
         method="POST" if data is not None else "GET",
     )
     try:
@@ -162,24 +165,81 @@ def request_json(endpoint: str, path: str, payload: dict[str, Any] | None = None
         return {"status": None, "error": f"{type(error).__name__}: {error}"}
 
 
+@contextmanager
+def registered_permission_probe(endpoint: str, authority: dict[str, Any], workspace: Path):
+    identity = request_json(endpoint, "/v1/engine/identity")
+    if identity["status"] != 200:
+        raise RuntimeError("permission probe could not read engine identity")
+    contract = identity["body"]["session_contract"]
+    credential = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+    client_id = "permission-probe:" + os.urandom(16).hex()
+    credential_header = {"X-Breadboard-Registration-Credential": credential}
+    registration = request_json(endpoint, "/v1/engine/clients/register", {
+        "engine_instance_id": authority["engineInstanceId"],
+        "client_instance_id": client_id,
+        "workspace_id": "workspace:v1:sha256:" + hashlib.sha256(str(workspace.resolve()).encode()).hexdigest(),
+        "lifecycle_mode": "local-owned",
+        "first_slice_contract_id": contract["contract_id"],
+        "first_slice_schema_sha256": contract["schema_sha256"],
+    }, headers=credential_header)
+    if registration["status"] != 200:
+        raise RuntimeError(f"permission probe registration rejected: {registration}")
+    registered = registration["body"]
+    proof = {
+        **credential_header,
+        "X-Breadboard-Engine-Instance-Id": authority["engineInstanceId"],
+        "X-Breadboard-Engine-Boot-Id": authority["engineBootId"],
+        "X-Breadboard-Launch-Id": authority["launchId"],
+        "X-Breadboard-Registration-Id": registered["registration_id"],
+        "X-Breadboard-Registration-Generation": str(registered["registration_generation"]),
+        "X-Breadboard-Client-Instance-Id": client_id,
+    }
+    try:
+        yield proof
+    finally:
+        detached = request_json(endpoint, "/v1/engine/clients/detach", {
+            "engine_instance_id": authority["engineInstanceId"],
+            "client_instance_id": client_id,
+            "registration_id": registered["registration_id"],
+            "registration_generation": registered["registration_generation"],
+        }, headers=credential_header)
+        proof.clear()
+        credential_header.clear()
+        if detached["status"] != 200:
+            raise RuntimeError(f"permission probe detach rejected: {detached}")
+
+
 def stream_events(endpoint: str, session_id: str) -> dict[str, Any]:
     path = f"/v1/internal/sessions/{urllib.parse.quote(session_id, safe='')}/events?replay=true&limit=1000"
     request = urllib.request.Request(endpoint.rstrip("/") + path, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            raw = response.read().decode(errors="replace")
         events: list[dict[str, Any]] = []
-        for row in raw.split("\n\n"):
-            payload = "\n".join(line[5:] for line in row.splitlines() if line.startswith("data:"))
-            if not payload:
-                continue
-            try:
-                value = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(value, dict):
-                events.append(value)
-        return {"status": 200, "eventCount": len(events), "events": events}
+        head: int | None = None
+        frame: list[str] = []
+        with urllib.request.urlopen(request, timeout=5) as response:
+            for raw_line in response:
+                line = raw_line.decode().rstrip("\r\n")
+                if line.startswith("data:"):
+                    frame.append(line[5:])
+                elif not line and frame:
+                    event = json.loads("\n".join(frame))
+                    frame.clear()
+                    if event.get("type") == "stream_open":
+                        head = event["payload"]["headSequence"]
+                        if type(head) is not int or head < 0:
+                            raise RuntimeError("invalid replay watermark")
+                        if head == 0:
+                            break
+                    elif event.get("stable_cursor") is True:
+                        if head is None:
+                            raise RuntimeError("replay omitted opening watermark")
+                        if event["seq"] <= head:
+                            events.append(event)
+                        if event["seq"] >= head:
+                            break
+            else:
+                raise RuntimeError("replay ended before its declared watermark")
+        return {"status": 200, "headSequence": head, "eventCount": len(events), "events": events}
     except urllib.error.HTTPError as error:
         return {"status": error.code, "body": error.read().decode(errors="replace")}
     except Exception as error:
@@ -294,6 +354,9 @@ def durable(runner: Any, roots: dict[str, Path], endpoint: str | None) -> dict[s
         result["session"] = request_json(endpoint, f"/v1/internal/sessions/{urllib.parse.quote(session_id, safe='')}")
         result["records"] = request_json(endpoint, f"/v1/internal/sessions/{urllib.parse.quote(session_id, safe='')}/records?limit=1000")
         result["events"] = stream_events(endpoint, session_id)
+        for field in ("session", "records", "events"):
+            if result[field]["status"] != 200:
+                raise RuntimeError(f"{field} snapshot unavailable: {result[field]}")
     return result
 
 
@@ -657,26 +720,78 @@ def f02a(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint
 
 def permission_request(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint: str, authority: dict[str, Any], cancel: bool) -> dict[str, Any]:
     child.send_typed_line(SYNTHETIC_PROMPT)
-    request_id = child.wait_until(lambda: child.permission_dialog_ready(), 30, "permission dialog")
+    child.wait_until(lambda: child.permission_dialog_ready(), 30, "permission dialog")
     before = capture(runner, output, "permission-before", child, roots, endpoint)
-    session_id = (before.get("binding") or {}).get("sessionId")
-    stale = request_json(endpoint, f"/v1/internal/sessions/{session_id}/command", {"command": "respond_permission", "payload": {"requestId": "stale-permission-id", "decision": "allow"}})
-    if cancel:
-        child.send_escape()
-        runner.wait_for_terminal_state(
-            child,
-            roots["agent"],
-            1,
-            30,
-            "cancelled permission turn",
-            "cancelled",
+    binding = before["binding"]
+    session_id = binding["sessionId"]
+    submissions = binding["ownedSubmissions"]
+    if len(submissions) != 1:
+        raise RuntimeError("permission probe requires exactly one original owned turn")
+    owner = submissions[0]
+    requests = [
+        event for event in before["events"]["events"]
+        if event.get("type") == "permission_request"
+        and event.get("input_id") == owner["inputId"]
+        and event.get("turn_id") == owner["turnId"]
+    ]
+    if not requests:
+        raise RuntimeError("visible permission lacks a correlated engine event")
+    request_id = requests[-1]["payload"]["request_id"]
+    payload = {
+        "inputId": owner["inputId"], "turnId": owner["turnId"],
+        "requestId": request_id, "source": "session", "decision": "allow",
+    }
+    command_path = f"/v1/internal/sessions/{session_id}/command"
+    with registered_permission_probe(endpoint, authority, roots["workspace"]) as proof:
+        stale = request_json(endpoint, command_path, {
+            "command": "respond_permission",
+            "payload": {**payload, "requestId": "stale-permission-id"},
+        }, headers=proof)
+        stale_rejected = stale["status"] == 400 and (
+            "no permission request is active" in json.dumps(stale["body"])
+            or "permission request is not active" in json.dumps(stale["body"])
         )
+        if not stale_rejected:
+            raise RuntimeError(f"stale permission was not rejected by permission owner: {stale}")
+        if not cancel:
+            after = capture(runner, output, "stale-approval", child, roots, endpoint)
+            unchanged = before["retainedState"] == after["retainedState"]
+            return {
+                "matrix": "F03a", "requestId": request_id, "staleResponse": stale,
+                "visible": child.screen.text(), "durable": after,
+                "resource": runner.process_descendants(child.pid),
+                "verdict": "pass" if unchanged and child.permission_dialog_ready() else "fail",
+            }
+        child.send_escape()
+        runner.wait_for_terminal_state(child, roots["agent"], 1, 30, "cancelled permission turn", "cancelled")
         capture(runner, output, "permission-cancelled", child, roots, endpoint)
-        late = request_json(endpoint, f"/v1/internal/sessions/{session_id}/command", {"command": "respond_permission", "payload": {"requestId": request_id, "decision": "allow"}})
+        child.send_typed_line(SYNTHETIC_PROMPT)
+        child.wait_until(lambda: child.permission_dialog_ready(), 30, "replacement turn permission")
+        current = capture(runner, output, "repeated-permission-before", child, roots, endpoint)
+        current_requests = [
+            event for event in current["events"]["events"]
+            if event.get("type") == "permission_request"
+            and event.get("turn_id") != owner["turnId"]
+        ]
+        if not current_requests or current_requests[-1]["payload"]["request_id"] != request_id:
+            raise RuntimeError("provider-free fixture did not reproduce the repeated permission ID")
+        late = request_json(endpoint, command_path, {
+            "command": "respond_permission", "payload": payload,
+        }, headers=proof)
         after = capture(runner, output, "late-approval", child, roots, endpoint)
-        return {"matrix": "F06a", "requestId": request_id, "staleResponse": stale, "lateResponse": late, "visible": child.screen.text(), "durable": after, "resource": runner.process_descendants(child.pid), "verdict": "pass" if late.get("status") in (400, 409) else "fail"}
-    after = capture(runner, output, "stale-approval", child, roots, endpoint)
-    return {"matrix": "F03a", "requestId": request_id, "staleResponse": stale, "visible": child.screen.text(), "durable": after, "resource": runner.process_descendants(child.pid), "verdict": "pass" if stale.get("status") in (400, 409) else "fail"}
+        rejected = late["status"] == 400 and "permission response belongs to a stale turn" in json.dumps(late["body"])
+        unchanged = current["retainedState"] == after["retainedState"]
+        visible_pending = child.permission_dialog_ready()
+        terminal, approvals = runner.wait_for_terminal_state_with_permissions(
+            child, roots["agent"], 2, 60, "current-turn permission positive control", "completed",
+        )
+        return {
+            "matrix": "F06a", "requestId": request_id, "staleResponse": stale,
+            "lateResponse": late, "visible": child.screen.text(), "durable": after,
+            "resource": runner.process_descendants(child.pid),
+            "positiveControl": {"terminalState": terminal[1], "approvals": approvals},
+            "verdict": "pass" if rejected and unchanged and visible_pending else "fail",
+        }
 
 
 def f10a(
@@ -695,7 +810,7 @@ def f10a(
 
     prior_prompt = "Establish a deterministic prior turn and wait for permission."
     child.send_typed_line(prior_prompt)
-    prior_request_id = child.wait_until(
+    child.wait_until(
         lambda: child.permission_dialog_ready(),
         30,
         "F10a prior-turn permission",
@@ -715,6 +830,13 @@ def f10a(
         "cancelled",
     )
     prior = capture(runner, output, "prior-turn-denied", child, roots, endpoint)
+    prior_permissions = [
+        event for event in prior["events"]["events"]
+        if event.get("type") == "permission_request"
+    ]
+    if not prior_permissions:
+        raise RuntimeError("F10a prior permission has no engine event")
+    prior_request_id = prior_permissions[-1]["payload"]["request_id"]
     session_id = prior_binding.data.get("sessionId")
     if not isinstance(session_id, str) or not session_id:
         raise RuntimeError("F10a session binding has no session id")
@@ -907,6 +1029,39 @@ def f10a(
         and "responseBody" in stale_outcome
     )
     write_json(output / "stale-outcome.json", stale_outcome)
+    def stale_ui_failure() -> dict[str, Any] | None:
+        snapshot = runner.binding_snapshot_for_session(roots["agent"], session_id)
+        if snapshot is None:
+            return None
+        messages = [
+            row["message"] for row in snapshot.rows
+            if isinstance(row.get("message"), dict)
+        ]
+        old_indices = [
+            index for index, message in enumerate(messages)
+            if message.get("role") == "user"
+            and runner.content_text(message.get("content")) == old_prompt
+        ]
+        if not old_indices:
+            return None
+        responses = [
+            message for message in messages[old_indices[-1] + 1:]
+            if message.get("role") == "assistant"
+        ]
+        if not responses:
+            return None
+        screen = child.screen.text()
+        failure = responses[-1].get("errorMessage")
+        rejected = all(message.get("stopReason") in {"error", "aborted"} for message in responses)
+        visible = isinstance(failure, str) and bool(failure) and (
+            failure in screen or " ".join(failure.split()) in " ".join(screen.split())
+        )
+        if not rejected or not visible:
+            return None
+        return {"pass": True, "responses": responses, "screen": screen}
+
+    stale_ui = child.wait_until(stale_ui_failure, 30, "F10a visible stale-input failure without success")
+    write_json(output / "stale-ui-rejection.json", stale_ui)
     after_stale_release = capture(
         runner,
         output,
@@ -1051,6 +1206,7 @@ def f10a(
         "replacementRegistration": replacement_registration is not None,
         "typedStaleRejection": typed_stale_rejection,
         "staleReleaseUnchanged": stale_release_unchanged,
+        "noStaleUiSuccess": stale_ui["pass"],
         "positiveControl": positive_control,
     }
     return {
@@ -1164,7 +1320,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rows", type=int, default=36)
     parser.add_argument("--cols", type=int, default=120)
-    parser.add_argument("--only", action="append", choices=("F02a", "F03a", "F04a", "F10a", "bb-ewnk.15", "owned-engine-exit-after-turn"))
+    parser.add_argument("--only", action="append", choices=("F02a", "F03a", "F04a", "F06a", "F10a", "bb-ewnk.15", "owned-engine-exit-after-turn"))
     args = parser.parse_args()
     mkdir(args.base)
     mkdir(args.output)
