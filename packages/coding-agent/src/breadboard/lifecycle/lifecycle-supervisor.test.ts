@@ -1058,40 +1058,30 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			argvSha256: artifact.argvSha256,
 		});
 	});
-	test("keeps probing through packaged engine startup beyond the generic transport schedule", async () => {
+	test("keeps probing a live engine until the configured startup deadline", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();
-		const calls: string[] = [];
-		const sleeps: number[] = [];
 		let now = 0;
-		let handshakeAttempts = 0;
 		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
 			...TEST_LIFECYCLE_DEFAULTS,
 			store,
 			process: process.adapter,
 			createClient: () => ({
 				handshake: async () => {
-					handshakeAttempts++;
-					if (handshakeAttempts <= 4) throw new LifecycleE4ClientError({ kind: "timeout" });
+					if (now < 15_000) throw new LifecycleE4ClientError({ kind: "timeout" });
 					const current = process.current();
-					return boundClient(bindingFor(current.pid, current.launchId), calls);
+					return boundClient(bindingFor(current.pid, current.launchId), []);
 				},
 			}),
 			clock: {
 				now: () => now,
 				sleep: async milliseconds => {
-					sleeps.push(milliseconds);
 					now += milliseconds;
 				},
 			},
 		});
 
 		expect((await supervisor.connect()).kind).toBe("ready");
-		expect({ handshakeAttempts, sleeps, elapsed: now }).toEqual({
-			handshakeAttempts: 5,
-			sleeps: [250, 1_000, 4_000, 4_000],
-			elapsed: 9_250,
-		});
 	});
 	test("reports installed bundle digest drift as a complete-distribution failure before spawn", async () => {
 		const root = await mkdtemp(join(tmpdir(), "bb-installed-bundle-tamper-"));

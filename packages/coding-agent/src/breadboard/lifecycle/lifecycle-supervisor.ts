@@ -2086,11 +2086,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		if (ownerExitPolicy === "detached") child.unref();
 
 		let bound: BoundLifecycleE4Client | undefined;
-		for (
-			let reconnectAttempt = 0;
-			reconnectAttempt <= STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length && this.clock.now() < deadline;
-			reconnectAttempt++
-		) {
+		for (let reconnectAttempt = 0; this.clock.now() < deadline; reconnectAttempt++) {
 			this.transition("connecting", reconnectAttempt);
 			this.transition("handshaking", reconnectAttempt);
 			const handshake = this.handshake().then(
@@ -2114,9 +2110,15 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				bootstrapCredential.fill(0);
 				return mappedFailure("local-owned", raced.error, attempt);
 			}
-			if (reconnectAttempt < STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length) {
+			const delay = Math.min(
+				STARTUP_TRANSPORT_RECONNECT_DELAYS_MS[
+					Math.min(reconnectAttempt, STARTUP_TRANSPORT_RECONNECT_DELAYS_MS.length - 1)
+				] as number,
+				deadline - this.clock.now(),
+			);
+			if (delay > 0) {
 				this.transition("reconnecting", reconnectAttempt + 1);
-				await this.clock.sleep(STARTUP_TRANSPORT_RECONNECT_DELAYS_MS[reconnectAttempt] as number);
+				await this.clock.sleep(delay);
 			}
 		}
 		if (!bound) {
