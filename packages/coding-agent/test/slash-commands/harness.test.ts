@@ -237,6 +237,6 @@ test("/harness list prints names and paths and marks the active harness", async 
 	expect(await executeHarnessSlashCommand("/harness list", runtime as never)).toBe(true);
 	expect(listHarnessChoices).toHaveBeenCalledWith("/project");
 	expect(showStatus).toHaveBeenCalledWith(
-		"Active harness: daily_driver.v1 (daily_driver.v1.yaml)\n* daily_driver.v1 (daily_driver.v1.yaml)\n  codex (codex.yaml)",
+		"* Active harness: daily_driver.v1 (daily_driver.v1.yaml)\n  codex (codex.yaml)",
 	);
 });

@@ -201,16 +201,22 @@ async function harnessList(runtime: TuiSlashCommandRuntime): Promise<boolean> {
 			return true;
 		}
 		const activeId = snapshot?.harnessId;
+		const activeName = snapshot?.name;
+		const activeBasename = activeId?.split(/[\\/]/u).at(-1);
 		const activeChoice = choices.find(
 			choice =>
 				choice.id === activeId ||
 				choice.path === activeId ||
-				(typeof activeId === "string" && activeId.endsWith(`/${choice.path}`)),
+				choice.id === activeBasename ||
+				choice.path === activeBasename ||
+				choice.name === activeName,
 		);
-		const rows = choices.map(choice => `${choice === activeChoice ? "*" : " "} ${choice.name} (${choice.path})`);
-		runtime.ctx.showStatus(
-			`${activeChoice ? `Active harness: ${activeChoice.name} (${activeChoice.path})\n` : ""}${rows.join("\n")}`,
+		const rows = choices.map(choice =>
+			choice === activeChoice
+				? `* Active harness: ${choice.name} (${choice.path})`
+				: `  ${choice.name} (${choice.path})`,
 		);
+		runtime.ctx.showStatus(rows.join("\n"));
 	} catch (error) {
 		const detail = error instanceof Error ? error.message : String(error);
 		runtime.ctx.showStatus(`Unable to list BreadBoard harnesses: ${detail}`);
