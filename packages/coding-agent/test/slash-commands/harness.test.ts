@@ -140,7 +140,7 @@ describe("/harness use", () => {
 		const { mode, newSession, tempDir } = await modeFor(clientFor(calls));
 
 		try {
-			expect(await mode.startHarnessSession("daily_driver")).toBe(true);
+			expect(await executeHarnessSlashCommand("/harness use daily_driver", { ctx: mode })).toBe(true);
 			expect(calls).toEqual([
 				"get:daily_driver",
 				"validate:agent_configs/daily_driver.v1.yaml",

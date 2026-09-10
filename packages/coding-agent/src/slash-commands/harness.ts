@@ -180,12 +180,11 @@ export function harnessCommandsAsSlashCommands(
 }
 
 function harnessUse(runtime: TuiSlashCommandRuntime, target: string): Promise<boolean> {
-	const start = runtime.ctx.startHarnessSession;
-	if (!start) {
+	if (!runtime.ctx.startHarnessSession) {
 		runtime.ctx.showStatus("/harness use is unavailable: no BreadBoard session route");
 		return Promise.resolve(true);
 	}
-	return start(target);
+	return runtime.ctx.startHarnessSession(target);
 }
 
 export async function executeHarnessSlashCommand(
