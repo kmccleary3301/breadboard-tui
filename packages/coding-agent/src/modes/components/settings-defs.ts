@@ -201,8 +201,11 @@ function pathToSettingDef(path: SettingPath): SettingDef | null {
 	}
 
 	if (schemaType === "number") {
-		// Numbers without options are intentionally hidden from the UI.
-		if (!options || options === "runtime") return null;
+		// Read-only numbers can be sourced from a runtime snapshot rather than
+		// Settings, so keep them in the definitions even without edit options.
+		if (!options || options === "runtime") {
+			return ui.readonly ? { ...base, type: "text", secret: false } : null;
+		}
 		return { ...base, type: "submenu", options };
 	}
 

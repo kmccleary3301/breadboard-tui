@@ -1004,12 +1004,20 @@ export class SettingsSelectorComponent implements Component {
 			changed: this.#isChanged(def, currentValue),
 		};
 		if (def.readonly) {
+			const displayValue =
+				def.path === "breadboard.harness.max_concurrent_agents"
+					? currentValue === undefined || currentValue === null
+						? "not available"
+						: String(currentValue)
+					: currentValue === undefined || currentValue === null || currentValue === ""
+						? "not configured"
+						: "configured";
 			return {
 				...item,
 				// Provider metadata rows expose availability only, never the
-				// configured endpoint or credential value.
-				currentValue:
-					currentValue === undefined || currentValue === null || currentValue === "" ? "not configured" : "configured",
+				// configured endpoint or credential value. Harness policy rows
+				// expose the lock-derived numeric limit.
+				currentValue: displayValue,
 				changed: false,
 			};
 		}
