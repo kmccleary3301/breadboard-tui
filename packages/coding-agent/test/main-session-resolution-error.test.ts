@@ -273,6 +273,26 @@ describe("resolveBreadboardSessionTarget", () => {
 			request: { configPath, permissionMode: "configured", workspace },
 		});
 	});
+	it("pins a configured harness to its sibling lock when present", async () => {
+		const root = await fsp.mkdtemp(path.join(os.tmpdir(), "bb-harness-lock-"));
+		try {
+			const harnessPath = path.join(root, "agent_configs/v2/daily_driver.v1.yaml");
+			await fsp.mkdir(path.dirname(harnessPath), { recursive: true });
+			await fsp.writeFile(`${harnessPath.slice(0, -5)}.lock.json`, "{}");
+			expect(
+				resolveBreadboardSessionTarget({}, undefined, "agent_configs/v2/daily_driver.v1.yaml", root, true),
+			).toEqual({
+				kind: "create",
+				request: {
+					configPath: "agent_configs/v2/daily_driver.v1.lock.json",
+					permissionMode: "configured",
+					workspace: root,
+				},
+			});
+		} finally {
+			await fsp.rm(root, { recursive: true, force: true });
+		}
+	});
 
 	it("keeps native explicit-engine creation invalid without a selected config", () => {
 		let thrown: unknown;
