@@ -97,10 +97,11 @@ function runtimeFor(startHarnessSession: (harnessId: string) => Promise<boolean>
 async function modeFor(
 	client: BreadboardClient,
 	newSessionResult = true,
-	switchHarnessSession: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean> = (
-		_configPath,
-		transition,
-	) => transition(),
+	switchHarnessSession: (
+		configPath: string,
+		lockId: string,
+		transition: () => Promise<boolean>,
+	) => Promise<boolean> = (_configPath, _lockId, transition) => transition(),
 ) {
 	const tempDir = TempDir.createSync("@pi-harness-use-");
 	await Settings.init({ inMemory: true, cwd: tempDir.path() });
@@ -155,8 +156,8 @@ beforeAll(async () => {
 describe("/harness use", () => {
 	test("validates, locks, and starts a new harness-bound OMP session", async () => {
 		const calls: string[] = [];
-		const switchHarnessSession = vi.fn(async (_configPath: string, transition: () => Promise<boolean>) =>
-			transition(),
+		const switchHarnessSession = vi.fn(
+			async (_configPath: string, _lockId: string, transition: () => Promise<boolean>) => transition(),
 		);
 		const { mode, newSession, tempDir } = await modeFor(clientFor(calls), true, switchHarnessSession);
 
@@ -172,6 +173,7 @@ describe("/harness use", () => {
 			expect(calls).toContain("explain:agent_configs/daily_driver.v1.yaml");
 			expect(calls).toContain("getLock:agent_configs/daily_driver.v1.lock.json");
 			expect(switchHarnessSession).toHaveBeenCalledWith(
+				"agent_configs/daily_driver.v1.yaml",
 				"agent_configs/daily_driver.v1.lock.json",
 				expect.any(Function),
 			);
@@ -189,8 +191,8 @@ describe("/harness use", () => {
 
 	test("keeps the old OMP binding when the session transition is cancelled", async () => {
 		const calls: string[] = [];
-		const switchHarnessSession = vi.fn(async (_configPath: string, transition: () => Promise<boolean>) =>
-			transition(),
+		const switchHarnessSession = vi.fn(
+			async (_configPath: string, _lockId: string, transition: () => Promise<boolean>) => transition(),
 		);
 		const { mode, newSession, sessionManager, tempDir } = await modeFor(
 			clientFor(calls),

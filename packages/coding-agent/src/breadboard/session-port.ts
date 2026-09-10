@@ -37,6 +37,7 @@ export type {
  */
 export type BreadboardCreateSessionRequest = Omit<CreateSessionRequest, "configPath"> & {
 	readonly configPath?: string;
+	readonly lockId?: string;
 	readonly workspace: string;
 };
 

@@ -768,7 +768,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	collabGuest?: CollabGuestLink;
 	harnessPort: HarnessPort | undefined;
 	#harnessClient?: BreadboardClient;
-	#switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
+	#switchHarnessSession?: (configPath: string, lockId: string, transition: () => Promise<boolean>) => Promise<boolean>;
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
 	/** Commands (not components) queued while streaming, for the deferral hint. */
@@ -919,7 +919,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		harnessClient?: BreadboardClient,
 		harnessId?: string,
 		setSessionModel?: (model: string) => Promise<void>,
-		switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>,
+		switchHarnessSession?: (
+			configPath: string,
+			lockId: string,
+			transition: () => Promise<boolean>,
+		) => Promise<boolean>,
 		breadboardSessionId?: () => string,
 	) {
 		this.session = session;
@@ -5823,7 +5827,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				throw new Error("BreadBoard harness.lock response missing graph_hash");
 			}
 			const lockPathCandidate = lockData.path;
-			const configPath =
+			const lockId =
 				typeof lockPathCandidate === "string" && lockPathCandidate.trim()
 					? lockPathCandidate
 					: resolvedHarness.id.endsWith(".yaml")
@@ -5831,11 +5835,12 @@ export class InteractiveMode implements InteractiveModeContext {
 						: resolvedHarness.id.endsWith(".yml")
 							? `${resolvedHarness.id.slice(0, -4)}.lock.json`
 							: `${resolvedHarness.id}.lock.json`;
+			const configPath = resolvedHarness.id;
 			const parentSession = this.sessionManager.getSessionFile() ?? this.sessionManager.getSessionId();
-			const switched = await this.#switchHarnessSession(configPath, () =>
+			const switched = await this.#switchHarnessSession(configPath, lockId, () =>
 				this.session.newSession({
 					parentSession,
-					configPath,
+					configPath: lockId,
 					transition: "harnessSwitch",
 				}),
 			);

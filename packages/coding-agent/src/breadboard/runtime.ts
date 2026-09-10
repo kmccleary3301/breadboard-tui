@@ -5,6 +5,7 @@
  * assembly live here so the CLI entry point only coordinates startup.
  */
 import * as fsSync from "node:fs";
+import * as path from "node:path";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
 import type { AgentEvent, StreamFn } from "@oh-my-pi/pi-agent-core";
@@ -211,6 +212,15 @@ function exactModelRoute(selector: string | undefined): Pick<Model, "provider" |
 	if (!parsed?.provider || !parsed.id) return undefined;
 	return { provider: parsed.provider, id: parsed.id };
 }
+function siblingHarnessLockPath(harnessPath: string, workspacePath: string): string | undefined {
+	const lockPath = harnessPath.endsWith(".yaml")
+		? `${harnessPath.slice(0, -5)}.lock.json`
+		: harnessPath.endsWith(".yml")
+			? `${harnessPath.slice(0, -4)}.lock.json`
+			: undefined;
+	return lockPath !== undefined && fsSync.existsSync(path.resolve(workspacePath, lockPath)) ? lockPath : undefined;
+}
+
 function createBreadboardSessionTarget(
 	sessionConfigPath: string | undefined,
 	workspacePath: string,
@@ -225,6 +235,8 @@ function createBreadboardSessionTarget(
 			"a selected sessionConfigPath is required to create a session",
 		);
 	}
+	const lockId =
+		sessionConfigPath === undefined ? undefined : siblingHarnessLockPath(sessionConfigPath, workspacePath);
 	const hasOverrides = selectedModel !== undefined || approvalMode === "yolo";
 	return {
 		kind: "create",
@@ -232,6 +244,7 @@ function createBreadboardSessionTarget(
 			workspace: workspacePath,
 			permissionMode: "configured",
 			...(sessionConfigPath === undefined ? {} : { configPath: sessionConfigPath }),
+			...(lockId === undefined ? {} : { lockId }),
 			...(hasOverrides
 				? {
 						overrides: {
@@ -296,7 +309,11 @@ export interface PreparedBreadboardRuntime {
 	 * Prepare a new engine generation on a validated harness lock, run the OMP
 	 * session transition, then commit the new generation and binding together.
 	 */
-	readonly switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
+	readonly switchHarnessSession?: (
+		configPath: string,
+		lockId: string,
+		transition: () => Promise<boolean>,
+	) => Promise<boolean>;
 	close(): Promise<void>;
 }
 
@@ -800,7 +817,11 @@ export function createRecoverableBreadboardRuntime(
 	initial: BreadboardRuntimeGeneration,
 	reconnect: (sessionId: string, binding: BreadboardSessionBindingData) => Promise<BreadboardRuntimeGeneration>,
 	registerCleanup?: (cleanup: () => Promise<void>) => () => void,
-	prepareHarnessSwitch?: (sessionId: string, configPath: string) => Promise<BreadboardRuntimeGeneration>,
+	prepareHarnessSwitch?: (
+		sessionId: string,
+		configPath: string,
+		lockId: string,
+	) => Promise<BreadboardRuntimeGeneration>,
 ): PreparedBreadboardRuntime {
 	let current = initial;
 	let activatedStore: BreadboardSessionBindingStore | undefined;
@@ -976,11 +997,11 @@ export function createRecoverableBreadboardRuntime(
 			started = true;
 			current.runtime.start();
 		},
-		switchHarnessSession(configPath: string, transition: () => Promise<boolean>) {
+		switchHarnessSession(configPath: string, lockId: string, transition: () => Promise<boolean>) {
 			if (!prepareHarnessSwitch) {
 				return Promise.reject(new Error("BreadBoard harness switching is unavailable in this runtime"));
 			}
-			return switchSession(sessionId => prepareHarnessSwitch(sessionId, configPath), transition);
+			return switchSession(sessionId => prepareHarnessSwitch(sessionId, configPath, lockId), transition);
 		},
 		close,
 	});
@@ -1058,9 +1079,17 @@ export async function prepareBreadboardRuntime(
 			sessionTarget.kind === "create" && harnessRequestId !== undefined && !harnessRequestId.endsWith(".lock.json");
 		if (shouldResolveHarness && enginePort.harnessClient) {
 			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, harnessRequestId);
+			const lockId =
+				sessionTarget.kind === "create"
+					? (sessionTarget.request.lockId ?? siblingHarnessLockPath(resolvedHarnessId, workspacePath))
+					: undefined;
 			resolvedSessionTarget = {
 				kind: "create",
-				request: { ...sessionTarget.request, configPath: resolvedHarnessId },
+				request: {
+					...sessionTarget.request,
+					configPath: resolvedHarnessId,
+					...(lockId === undefined ? {} : { lockId }),
+				},
 			};
 		}
 		const runtime = await prepareConnectedBreadboardRuntime({
@@ -1085,21 +1114,23 @@ export async function prepareBreadboardRuntime(
 		initial,
 		(sessionId, binding) => connectGeneration({ kind: "attach", sessionId }, binding, true),
 		cleanup => postmortem.register("breadboard-recoverable-runtime", cleanup),
-		(_sessionId, configPath) =>
-			connectGeneration(
+		(_sessionId, configPath, lockId) => {
+			const request = createBreadboardSessionTarget(
+				configPath,
+				workspacePath,
+				IS_BREADBOARD_PRODUCT,
+				startupModelOverride,
+				activeSettings.get("tools.approvalMode"),
+			).request;
+			return connectGeneration(
 				{
 					kind: "create",
-					request: createBreadboardSessionTarget(
-						configPath,
-						workspacePath,
-						IS_BREADBOARD_PRODUCT,
-						startupModelOverride,
-						activeSettings.get("tools.approvalMode"),
-					).request,
+					request: { ...request, configPath, lockId },
 				},
 				undefined,
 				false,
 				configPath,
-			),
+			);
+		},
 	);
 }

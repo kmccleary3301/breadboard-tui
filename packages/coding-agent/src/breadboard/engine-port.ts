@@ -213,6 +213,7 @@ function authorityIdentity(handle: BreadboardEngineReadyHandle): BreadboardEngin
 
 interface BreadboardSessionCreatePayload {
 	readonly config_path?: string;
+	readonly lock_id?: string;
 	readonly task: string;
 	readonly overrides?: BreadboardCreateSessionRequest["overrides"];
 	readonly metadata?: BreadboardCreateSessionRequest["metadata"];
@@ -258,6 +259,7 @@ export function buildBreadboardSessionCreatePayload(
 	}
 	return {
 		...(request.configPath === undefined ? {} : { config_path: request.configPath }),
+		...(request.lockId === undefined ? {} : { lock_id: request.lockId }),
 		task: request.task ?? "",
 		...(request.overrides === undefined ? {} : { overrides: request.overrides }),
 		...(request.metadata === undefined ? {} : { metadata: request.metadata }),

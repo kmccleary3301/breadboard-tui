@@ -557,7 +557,11 @@ async function runInteractiveMode(
 		readonly harnessClient?: BreadboardClient;
 		readonly harnessId?: string;
 		readonly setSessionModel?: (model: string) => Promise<void>;
-		readonly switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
+		readonly switchHarnessSession?: (
+			configPath: string,
+			lockId: string,
+			transition: () => Promise<boolean>,
+		) => Promise<boolean>;
 		readonly sessionId: () => string;
 	},
 ): Promise<void> {
