@@ -203,14 +203,15 @@ async function harnessList(runtime: TuiSlashCommandRuntime): Promise<boolean> {
 		const activeId = snapshot?.harnessId;
 		const activeName = snapshot?.name;
 		const activeBasename = activeId?.split(/[\\/]/u).at(-1);
-		const activeChoice = choices.find(
-			choice =>
-				choice.id === activeId ||
-				choice.path === activeId ||
-				choice.id === activeBasename ||
-				choice.path === activeBasename ||
-				choice.name === activeName,
-		);
+		const activeChoice =
+			choices.find(
+				choice =>
+					choice.id === activeId ||
+					choice.path === activeId ||
+					choice.id === activeBasename ||
+					choice.path === activeBasename ||
+					choice.name === activeName,
+			) ?? (choices.length === 1 ? choices[0] : undefined);
 		const rows = choices.map(choice =>
 			choice === activeChoice
 				? `* Active harness: ${choice.name} (${choice.path})`
