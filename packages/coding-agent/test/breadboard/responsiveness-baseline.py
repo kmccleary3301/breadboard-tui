@@ -492,8 +492,11 @@ def _owned_processes(root: Path, root_pid: int) -> list[dict[str, Any]]:
     known.add(root_pid)
     owned: list[dict[str, Any]] = []
     for row in rows:
-        command_path = str(row["command"]).split(maxsplit=1)[0]
-        if int(row["pid"]) in known or root_text in command_path:
+        # The root path is a per-cell mkdtemp directory, so it never appears in
+        # the harness's own argv (which carries only the roots base); matching
+        # the whole command line catches engine children that name the root
+        # only in an argument.
+        if int(row["pid"]) in known or root_text in str(row["command"]):
             owned.append(row)
     return owned
 
@@ -1809,10 +1812,18 @@ def summarize_results(bb_path: Path, omp_path: Path, out_path: Path) -> None:
         "startup": startup,
         "resource": resource,
         "counts": {
+            # Action rows (timing gates only) and cells (timing plus session
+            # integrity). Acceptance reads `status`, never these counts.
             "cellActions": len(cell_statuses),
             "pass": cell_statuses.count("pass"),
             "fail": cell_statuses.count("fail"),
             "unknown": cell_statuses.count("UNKNOWN"),
+            "cells": {
+                "total": len(cell_output),
+                "pass": sum(1 for cell in cell_output.values() if cell["status"] == "pass"),
+                "fail": sum(1 for cell in cell_output.values() if cell["status"] == "fail"),
+                "unknown": sum(1 for cell in cell_output.values() if cell["status"] == "UNKNOWN"),
+            },
         },
         "status": overall,
         "gates": {
@@ -1880,7 +1891,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "startup":
             _write_aggregate(args.out, "startup", run_startup(args))
         elif args.command == "cells":
-            _write_aggregate(args.out, "cells", run_cells(args))
+            result = run_cells(args)
+            _write_aggregate(args.out, "cells", result)
+            incomplete = sorted(key for key, cell in result["cells"].items() if cell.get("error") or not cell.get("ready"))
+            if incomplete:
+                # Data is written; the cells are UNKNOWN for acceptance. Exit 3
+                # so a schedule driver cannot mistake this for a clean step.
+                print(f"responsiveness-baseline: incomplete cells: {', '.join(incomplete)}", file=sys.stderr)
+                return 3
         elif args.command == "soak":
             _write_aggregate(args.out, "soak", run_soak(args))
         elif args.command == "summarize":
