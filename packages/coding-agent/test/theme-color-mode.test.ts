@@ -71,6 +71,8 @@ describe("Theme capability ownership", () => {
 			const theme = createTheme(dark, { mode });
 			const rendered = [
 				theme.fg("accent", "accent"),
+				// `text` is a terminal-default token in the dark theme; the editor paints every line through it.
+				theme.fgResolved("text", "resolved"),
 				theme.bg("userMessageBg", "background"),
 				theme.customColor("#ff0000", "custom"),
 				theme.customBg("#00ff00", "custom background"),
@@ -82,7 +84,7 @@ describe("Theme capability ownership", () => {
 			expect(theme.getColorMode()).toBe(mode);
 			if (mode === "none") {
 				expect(rendered).not.toMatch(SGR);
-				expect(rendered).toBe("accent|background|custom|custom background|bold|underline|strike");
+				expect(rendered).toBe("accent|resolved|background|custom|custom background|bold|underline|strike");
 			} else {
 				expect(rendered).toMatch(SGR);
 				if (mode === "16color") expect(rendered).not.toMatch(EXTENDED_COLOR);

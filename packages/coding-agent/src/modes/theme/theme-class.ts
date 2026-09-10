@@ -324,8 +324,10 @@ export class Theme {
 
 	/** Apply a foreground, replacing terminal-default tokens with the theme's contrast-safe fallback. */
 	fgResolved(color: ThemeColor, text: string): string {
+		if (!(color in this.#fgColors)) throw new Error(`Unknown theme color: ${color}`);
 		const ansi = this.#fgColors[color];
-		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		// Color mode `none` (NO_COLOR, TERM=dumb) encodes every color as "": paint nothing, like `fg`.
+		if (!ansi) return text;
 		const resolved = ansi === "\x1b[39m" ? colorToAnsi(this.getColorHex(color), this.mode) : ansi;
 		return `${resolved}${text.replace(FOREGROUND_RESET_PATTERN, `$&${resolved}`)}\x1b[39m`;
 	}
