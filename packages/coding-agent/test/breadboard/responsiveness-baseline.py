@@ -1747,20 +1747,26 @@ def summarize_results(bb_path: Path, omp_path: Path, out_path: Path) -> None:
                 row["note"] = f"omp-baseline-unavailable:{','.join(omp_validity['unavailable'])}"
             actions_output[action] = row
             cell_statuses.append(status)
+        bb_session_failures = len(bb_cell.get("sessionFailures") or [])
+        bb_rotations = len(bb_cell.get("rotations") or [])
+        # A cell whose BB session died mid-sample (turn ended in an error frame,
+        # fresh-session rotation) cannot be accepted on its timing numbers alone:
+        # the retained valid rows describe the surviving sessions, not the
+        # product. Per review-escalation-1 the cell is UNKNOWN for acceptance
+        # and the failures route to repair; the numbers stay as description.
+        session_integrity = "UNKNOWN" if bb_session_failures or bb_rotations else "pass"
         cell_output[key] = {
             "bbReady": bb_cell.get("ready"),
             "ompReady": omp_cell.get("ready"),
             "bbCleanup": (bb_cell.get("cleanup") or {}).get("gone", (bb_cell.get("cleanup") or {}).get("rootProcessesGone")),
             "ompCleanup": (omp_cell.get("cleanup") or {}).get("gone", (omp_cell.get("cleanup") or {}).get("rootProcessesGone")),
-            # Product failures observed while sampling: turns that ended in an
-            # error frame and the fresh-session rotations they forced. These are
-            # findings, not gate inputs; they are reported alongside the numbers.
-            "bbSessionFailures": len(bb_cell.get("sessionFailures") or []),
+            "bbSessionFailures": bb_session_failures,
             "ompSessionFailures": len(omp_cell.get("sessionFailures") or []),
-            "bbRotations": len(bb_cell.get("rotations") or []),
+            "bbRotations": bb_rotations,
             "ompRotations": len(omp_cell.get("rotations") or []),
+            "gates": {"bbSessionIntegrity": session_integrity},
             "actions": actions_output,
-            "status": _combine(row["status"] for row in actions_output.values()),
+            "status": _combine([session_integrity, *(row["status"] for row in actions_output.values())]),
         }
 
     bb_start = _product_section(bb, "startup")
@@ -1792,7 +1798,7 @@ def summarize_results(bb_path: Path, omp_path: Path, out_path: Path) -> None:
         "bb": _resource_gates(bb_soak if isinstance(bb_soak, dict) and bb_soak is not bb else {}),
         "omp": _resource_gates(omp_soak if isinstance(omp_soak, dict) and omp_soak is not omp else {}),
     }
-    overall = _combine([*cell_statuses, *(row["status"] for row in startup.values()), resource["bb"]["status"]])
+    overall = _combine([*(cell["status"] for cell in cell_output.values()), *(row["status"] for row in startup.values()), resource["bb"]["status"]])
     output = {
         "schemaVersion": RESULT_VERSION,
         "contract": "bb-2j1u.6 (resolution 2026-09-09: PTY frame-written endpoint, relative-to-OMP gates)",
