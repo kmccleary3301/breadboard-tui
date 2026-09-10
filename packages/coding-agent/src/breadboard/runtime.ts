@@ -178,7 +178,8 @@ export function createBreadboardStartupForkPolicy(
 	};
 }
 
-export function rejectBreadboardSessionTransition(plan: SessionTransitionPlan): never {
+export function rejectBreadboardSessionTransition(plan: SessionTransitionPlan): void {
+	if (plan.reason === "harnessSwitch") return;
 	const operation = (() => {
 		switch (plan.reason) {
 			case "new":
@@ -283,12 +284,19 @@ export interface PreparedBreadboardRuntime {
 	readonly providerAuth: ProviderAuthPort;
 	readonly harnessClient?: BreadboardClient;
 	readonly harnessId?: string;
+	/** Apply the model control through the lifecycle-aware engine port. */
+	readonly setSessionModel?: (model: string) => Promise<void>;
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
 	readonly models: readonly Model[];
 	activate(sessionManager: BreadboardSessionBindingStore): Promise<void>;
 	start(): void;
+	/**
+	 * Prepare a new engine generation on a validated harness lock, run the OMP
+	 * session transition, then commit the new generation and binding together.
+	 */
+	readonly switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
 	close(): Promise<void>;
 }
 
@@ -763,6 +771,7 @@ export async function prepareConnectedBreadboardRuntime(
 		return {
 			harnessClient: options.engine.harnessClient,
 			harnessId: options.harnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+			setSessionModel: model => options.engine.setSessionModel(opened!.sessionId, model),
 			stream: bridge.stream,
 			sessionId: initialBinding.sessionId,
 			providerAuth: options.engine.providerAuth,
@@ -791,11 +800,13 @@ export function createRecoverableBreadboardRuntime(
 	initial: BreadboardRuntimeGeneration,
 	reconnect: (sessionId: string, binding: BreadboardSessionBindingData) => Promise<BreadboardRuntimeGeneration>,
 	registerCleanup?: (cleanup: () => Promise<void>) => () => void,
+	prepareHarnessSwitch?: (sessionId: string, configPath: string) => Promise<BreadboardRuntimeGeneration>,
 ): PreparedBreadboardRuntime {
 	let current = initial;
 	let activatedStore: BreadboardSessionBindingStore | undefined;
 	let activationPromise: Promise<void> | undefined;
 	let replacementPromise: Promise<BreadboardRuntimeGeneration> | undefined;
+	let harnessSwitchPromise: Promise<boolean> | undefined;
 	let closePromise: Promise<void> | undefined;
 	let started = false;
 	let closed = false;
@@ -839,6 +850,40 @@ export function createRecoverableBreadboardRuntime(
 		} finally {
 			if (replacementPromise === pending) replacementPromise = undefined;
 		}
+	};
+	const switchSession = (
+		prepare: (sessionId: string) => Promise<BreadboardRuntimeGeneration>,
+		transition: () => Promise<boolean>,
+	): Promise<boolean> => {
+		if (harnessSwitchPromise) return harnessSwitchPromise;
+		const expected = current;
+		const store = activatedStore;
+		if (!store) return Promise.reject(new Error("BreadBoard harness switch requires an active session binding"));
+		const pending = (async (): Promise<boolean> => {
+			const next = await prepare(expected.runtime.sessionId);
+			try {
+				if (closed) throw new Error("BreadBoard runtime closed during harness switch");
+				if (!(await transition())) {
+					await next.runtime.close();
+					return false;
+				}
+				await next.runtime.activate(store);
+				if (started) next.runtime.start();
+				current = next;
+				await retire(expected);
+				return true;
+			} catch (error) {
+				await next.runtime.close().catch(closeError => {
+					logger.warn("Prepared BreadBoard harness switch cleanup failed", { error: String(closeError) });
+				});
+				throw error;
+			}
+		})();
+		harnessSwitchPromise = pending;
+		void pending.finally(() => {
+			if (harnessSwitchPromise === pending) harnessSwitchPromise = undefined;
+		});
+		return pending;
 	};
 	const stream: StreamFn = (model, context, streamOptions) => {
 		const outer = new AssistantMessageEventStream();
@@ -900,6 +945,9 @@ export function createRecoverableBreadboardRuntime(
 		get harnessId() {
 			return current.runtime.harnessId;
 		},
+		get setSessionModel() {
+			return current.runtime.setSessionModel;
+		},
 		get providerAuth() {
 			return current.runtime.providerAuth;
 		},
@@ -927,6 +975,12 @@ export function createRecoverableBreadboardRuntime(
 			if (!activatedStore) throw new Error("BreadBoard runtime cannot start before AgentSession activation");
 			started = true;
 			current.runtime.start();
+		},
+		switchHarnessSession(configPath: string, transition: () => Promise<boolean>) {
+			if (!prepareHarnessSwitch) {
+				return Promise.reject(new Error("BreadBoard harness switching is unavailable in this runtime"));
+			}
+			return switchSession(sessionId => prepareHarnessSwitch(sessionId, configPath), transition);
 		},
 		close,
 	});
@@ -981,6 +1035,7 @@ export async function prepareBreadboardRuntime(
 		sessionTarget: OpenSession,
 		binding: BreadboardSessionBindingData | undefined,
 		allowTerminalSnapshotRecovery = false,
+		harnessRequestId = requestedHarnessId,
 	): Promise<BreadboardRuntimeGeneration> => {
 		const connected = await connectCanonicalBreadboardEnginePort(config, {
 			onLateSessionCloseError: () => {
@@ -997,10 +1052,12 @@ export async function prepareBreadboardRuntime(
 			throw new BreadboardLifecycleStartupError(connected.result);
 		}
 		const enginePort = connected.port;
-		let resolvedHarnessId = requestedHarnessId;
+		let resolvedHarnessId = harnessRequestId;
 		let resolvedSessionTarget = sessionTarget;
-		if (sessionTarget.kind === "create" && requestedHarnessId && enginePort.harnessClient) {
-			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, requestedHarnessId);
+		const shouldResolveHarness =
+			sessionTarget.kind === "create" && harnessRequestId !== undefined && !harnessRequestId.endsWith(".lock.json");
+		if (shouldResolveHarness && enginePort.harnessClient) {
+			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, harnessRequestId);
 			resolvedSessionTarget = {
 				kind: "create",
 				request: { ...sessionTarget.request, configPath: resolvedHarnessId },
@@ -1011,7 +1068,7 @@ export async function prepareBreadboardRuntime(
 			harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			modelCatalogConfigPath: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			sessionTarget: resolvedSessionTarget,
-			terminalResumeTarget,
+			terminalResumeTarget: harnessRequestId === requestedHarnessId ? terminalResumeTarget : undefined,
 			emitAgentEvent: async (event, idempotencyKey) => {
 				await emitAgentEvent(event, idempotencyKey);
 			},
@@ -1028,5 +1085,21 @@ export async function prepareBreadboardRuntime(
 		initial,
 		(sessionId, binding) => connectGeneration({ kind: "attach", sessionId }, binding, true),
 		cleanup => postmortem.register("breadboard-recoverable-runtime", cleanup),
+		(_sessionId, configPath) =>
+			connectGeneration(
+				{
+					kind: "create",
+					request: createBreadboardSessionTarget(
+						configPath,
+						workspacePath,
+						IS_BREADBOARD_PRODUCT,
+						startupModelOverride,
+						activeSettings.get("tools.approvalMode"),
+					).request,
+				},
+				undefined,
+				false,
+				configPath,
+			),
 	);
 }

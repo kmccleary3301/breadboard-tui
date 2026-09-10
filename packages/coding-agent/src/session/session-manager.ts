@@ -1123,6 +1123,7 @@ export class SessionManager {
 			timestamp,
 			cwd: this.#cwd,
 			parentSession: options?.parentSession,
+			configPath: options?.configPath,
 			providerPromptCacheKey: options?.providerPromptCacheKey,
 		};
 		const workspace = normalizeSessionWorkspace({

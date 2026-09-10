@@ -1,3 +1,5 @@
+import type { BreadboardClient } from "@breadboard/sdk/engine";
+
 /**
  * Harness exposure contract shared by the harness hub and lock-derived palette (bb-ewnk.4) and the
  * BreadBoard settings tab, status segment and welcome identity (bb-ewnk.5).
@@ -25,6 +27,8 @@ export interface HarnessSnapshot {
 	readonly name: string;
 	/** Effective lock hash bound to the session (`effective_lock_hash`), when reported. */
 	readonly lockHash: string | null;
+	/** Identity verified by comparing the loaded lock graph hash to `lockHash`. */
+	readonly verifiedIdentity?: { readonly harnessId: string; readonly lockHash: string } | null;
 	/** Session `generation_id`, when known. */
 	readonly generation: string | null;
 	/** Active mode name from the lock's `modes[]` and the session's current mode, when known. */
@@ -55,8 +59,24 @@ export interface HarnessPort {
 	refresh(reason: HarnessRefreshReason): Promise<HarnessSnapshot | null>;
 	/** Notified after every `refresh` that changed the snapshot; returns the unsubscribe function. */
 	subscribe(listener: (snapshot: HarnessSnapshot | null) => void): () => void;
-	/** List harness definitions through the same control-plane client used for this snapshot. */
-	readonly listHarnessChoices?: (
-		directory?: string,
-	) => Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]>;
+	/** Update the source identity used by the next snapshot refresh. */
+	readonly setHarnessId?: (harnessId: string) => void;
+	/** Apply a live engine mode override to the bound session. */
+	readonly setSessionMode?: (mode: string) => Promise<void>;
+	/** Apply a live engine role override to the bound session. */
+	readonly setSessionRole?: (role: string, model?: string) => Promise<void>;
+	/** Apply a live engine model override to the bound session. */
+	readonly setSessionModel?: (model: string) => Promise<void>;
+	readonly controlClient?: Pick<
+		BreadboardClient,
+		"getHarness" | "validateHarness" | "explainHarness" | "lockHarness" | "getHarnessLock"
+	>;
+	readonly setSessionSkills?: (skills: readonly string[]) => Promise<void>;
+	/**
+	 * List harness definitions from the current BreadBoard engine workspace.
+	 * The public control-plane operation does not accept a directory argument.
+	 */
+	readonly listHarnessChoices?: () => Promise<
+		readonly { readonly id: string; readonly name: string; readonly path: string }[]
+	>;
 }

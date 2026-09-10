@@ -551,10 +551,14 @@ async function runInteractiveMode(
 	joinLink?: string,
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
-	providerAuthPort?: ProviderAuthPort,
-	beforeSessionDispose?: () => Promise<void>,
-	harnessClient?: BreadboardClient,
-	harnessId?: string,
+	breadboard?: {
+		readonly providerAuth: ProviderAuthPort;
+		readonly close: () => Promise<void>;
+		readonly harnessClient?: BreadboardClient;
+		readonly harnessId?: string;
+		readonly setSessionModel?: (model: string) => Promise<void>;
+		readonly switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
+	},
 ): Promise<void> {
 	let mode: InteractiveMode;
 	try {
@@ -567,11 +571,13 @@ async function runInteractiveMode(
 			mcpManager,
 			eventBus,
 			startupLease?.composer,
-			providerAuthPort,
+			breadboard?.providerAuth,
 			subagentEventBus,
-			beforeSessionDispose,
-			harnessClient,
-			harnessId,
+			breadboard?.close,
+			breadboard?.harnessClient,
+			breadboard?.harnessId,
+			breadboard?.setSessionModel,
+			breadboard?.switchHarnessSession,
 		);
 		startupLease?.adopt();
 	} catch (error) {
@@ -621,7 +627,7 @@ async function runInteractiveMode(
 	}
 
 	if (setupWizard && setupScenes.length > 0) {
-		await setupWizard.runSetupWizard(mode, setupScenes, { providerAuthPort });
+		await setupWizard.runSetupWizard(mode, setupScenes, { providerAuthPort: breadboard?.providerAuth });
 	}
 
 	// Consume failures immediately, but defer any banner until the transcript is stable.
@@ -2299,10 +2305,16 @@ export async function runRootCommand(
 						parsedArgs.join,
 						startBackgroundModelDiscovery,
 						startupLease,
-						preparedBreadboardRuntime?.providerAuth,
-						preparedBreadboardRuntime?.close,
-						preparedBreadboardRuntime?.harnessClient,
-						preparedBreadboardRuntime?.harnessId,
+						preparedBreadboardRuntime
+							? {
+									providerAuth: preparedBreadboardRuntime.providerAuth,
+									close: preparedBreadboardRuntime.close,
+									harnessClient: preparedBreadboardRuntime.harnessClient,
+									harnessId: preparedBreadboardRuntime.harnessId,
+									setSessionModel: preparedBreadboardRuntime.setSessionModel,
+									switchHarnessSession: preparedBreadboardRuntime.switchHarnessSession,
+								}
+							: undefined,
 					);
 				} finally {
 					startupLease?.dispose();

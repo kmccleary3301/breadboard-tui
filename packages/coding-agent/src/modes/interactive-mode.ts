@@ -56,11 +56,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { reset as resetCapabilities } from "../capability";
 import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
-import {
-	createHarnessPort,
-	requireHarnessResultData,
-	resolveHarness,
-} from "../breadboard/harness-port-client";
+import { createHarnessPort, requireHarnessResultData, resolveHarness } from "../breadboard/harness-port-client";
 import type { HarnessPort } from "../breadboard/harness-port";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
@@ -125,10 +121,7 @@ import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { formatDuration } from "../slash-commands/helpers/format";
-import {
-	harnessCommandsAsSlashCommands,
-	readHarnessPaletteSettings,
-} from "../slash-commands/harness";
+import { harnessCommandsAsSlashCommands, readHarnessPaletteSettings } from "../slash-commands/harness";
 import { STTController, type SttState } from "../stt";
 import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
@@ -775,7 +768,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	collabGuest?: CollabGuestLink;
 	harnessPort: HarnessPort | undefined;
 	#harnessClient?: BreadboardClient;
-
+	#switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>;
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
 	/** Commands (not components) queued while streaming, for the deferral hint. */
@@ -925,17 +918,21 @@ export class InteractiveMode implements InteractiveModeContext {
 		private readonly beforeSessionDispose?: () => Promise<void>,
 		harnessClient?: BreadboardClient,
 		harnessId?: string,
+		setSessionModel?: (model: string) => Promise<void>,
+		switchHarnessSession?: (configPath: string, transition: () => Promise<boolean>) => Promise<boolean>,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
 		this.settings = session.settings;
 		this.#harnessClient = harnessClient;
+		this.#switchHarnessSession = switchHarnessSession;
 		this.harnessPort =
 			harnessClient && harnessId
 				? createHarnessPort({
 						client: harnessClient,
 						sessionId: () => this.sessionManager.getSessionId(),
 						harnessId,
+						setSessionModel,
 					})
 				: undefined;
 		const preferences = {
@@ -1614,7 +1611,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#staticSlashCommands = [...retainedCommands, ...skillCommands];
 		this.#refreshHarnessPaletteCommands();
 	}
-
 
 	/** Reload slash commands and autocomplete for the provided working directory. */
 	async refreshSlashCommandState(cwd?: string, preloaded?: ReadonlyArray<FileSlashCommand>): Promise<void> {
@@ -5811,33 +5807,47 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#commandController.handleHandoffCommand(customInstructions);
 	}
 	async startHarnessSession(harnessId: string): Promise<boolean> {
-		if (!this.#harnessClient || !this.harnessPort) {
+		if (!this.#harnessClient || !this.harnessPort || !this.#switchHarnessSession) {
 			this.showError("BreadBoard harness switching is unavailable in this session.");
 			return false;
 		}
 
 		try {
 			const resolvedHarness = await resolveHarness(this.#harnessClient, harnessId);
-			requireHarnessResultData(
-				await this.#harnessClient.validateHarness(resolvedHarness.id),
-				"harness.validate",
-			);
+			requireHarnessResultData(await this.#harnessClient.validateHarness(resolvedHarness.id), "harness.validate");
 			const lockResult = await this.#harnessClient.lockHarness(resolvedHarness.id);
 			const lockData = requireHarnessResultData(lockResult, "harness.lock");
 			const lockHashCandidate = lockData.graph_hash ?? lockResult.hashes.graph;
 			if (typeof lockHashCandidate !== "string" || !lockHashCandidate.trim()) {
 				throw new Error("BreadBoard harness.lock response missing graph_hash");
 			}
-			this.showStatus(
-				`Harness ${resolvedHarness.name} validated and locked with lock hash ${lockHashCandidate}. Current session stays pinned to its lock. Relaunch with: bb --harness ${resolvedHarness.name}`,
+			const lockPathCandidate = lockData.path;
+			const configPath =
+				typeof lockPathCandidate === "string" && lockPathCandidate.trim()
+					? lockPathCandidate
+					: resolvedHarness.id.endsWith(".yaml")
+						? `${resolvedHarness.id.slice(0, -5)}.lock.json`
+						: resolvedHarness.id.endsWith(".yml")
+							? `${resolvedHarness.id.slice(0, -4)}.lock.json`
+							: `${resolvedHarness.id}.lock.json`;
+			const parentSession = this.sessionManager.getSessionFile() ?? this.sessionManager.getSessionId();
+			const switched = await this.#switchHarnessSession(configPath, () =>
+				this.session.newSession({
+					parentSession,
+					configPath,
+					transition: "harnessSwitch",
+				}),
 			);
+			if (!switched) return false;
+			this.harnessPort.setHarnessId?.(resolvedHarness.id);
+			await this.harnessPort.refresh("harness-use");
+			this.showStatus(`Harness ${resolvedHarness.name} is now active with lock hash ${lockHashCandidate}.`);
 			return true;
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
 	}
-
 
 	handleShakeCommand(mode: ShakeMode): Promise<void> {
 		return this.#commandController.handleShakeCommand(mode);

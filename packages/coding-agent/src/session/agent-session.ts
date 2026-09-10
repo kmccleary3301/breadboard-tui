@@ -388,6 +388,7 @@ const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 
 export type SessionTransitionPlan =
 	| { readonly reason: "new" }
+	| { readonly reason: "harnessSwitch" }
 	| { readonly reason: "resume"; readonly targetSessionFile: string }
 	| { readonly reason: "fork" }
 	| { readonly reason: "handoff" }
@@ -7796,7 +7797,7 @@ export class AgentSession {
 				return false;
 			}
 		}
-		await this.#sessionTransitionGuard?.({ reason: "new" });
+		await this.#sessionTransitionGuard?.({ reason: options?.transition ?? "new" });
 
 		this.#disconnectFromAgent();
 		let advisorRecordersDetached = false;

@@ -23,6 +23,8 @@ export interface CreateHarnessPortOptions {
 	readonly sessionId: string | (() => string);
 	/** Harness source path/id accepted by the public harness operations. */
 	readonly harnessId: string;
+	/** Engine-port model control, preserving lifecycle checks around set_model. */
+	readonly setSessionModel?: (model: string) => Promise<void>;
 	readonly now?: () => number;
 }
 
@@ -121,15 +123,18 @@ function parseSnapshot(
 	const lockData = dataRecord(lockResult, "harness_lock.get", "lock");
 	const harnessId = parseHarnessId(harnessData, harnessFallback);
 	const lockHash = nullableString(session.effective_lock_hash, "session effective_lock_hash");
+	const lockGraphHash = nullableString(lockData.graph_hash, "harness lock graph_hash");
+	const verifiedIdentity = lockHash !== null && lockGraphHash === lockHash ? { harnessId, lockHash } : null;
 	const generation = nullableString(session.generation_id, "session generation_id");
 	return Object.freeze({
 		harnessId,
 		name: harnessName(harnessData, harnessId),
 		lockHash,
+		verifiedIdentity,
 		generation,
 		mode: nullableString(session.mode, "session mode"),
-		lock: lockData,
-		provenance: parseProvenance(explainData, lockData),
+		lock: verifiedIdentity === null ? null : lockData,
+		provenance: verifiedIdentity === null ? {} : parseProvenance(explainData, lockData),
 		loadedAt: now(),
 	});
 }
@@ -140,6 +145,7 @@ function snapshotIdentity(snapshot: HarnessSnapshot | null): string {
 		harnessId: snapshot.harnessId,
 		name: snapshot.name,
 		lockHash: snapshot.lockHash,
+		verifiedIdentity: snapshot.verifiedIdentity,
 		generation: snapshot.generation,
 		mode: snapshot.mode,
 		lock: snapshot.lock,
@@ -149,11 +155,12 @@ function snapshotIdentity(snapshot: HarnessSnapshot | null): string {
 
 export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPort {
 	let current: HarnessSnapshot | null = null;
+	let requestedHarnessId = options.harnessId;
 	const listeners = new Set<(snapshot: HarnessSnapshot | null) => void>();
 	const now = options.now ?? Date.now;
 	const refresh = async (_reason: HarnessRefreshReason): Promise<HarnessSnapshot | null> => {
 		const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
-		const { id: harnessId, result: harness } = await resolveHarnessResult(options.client, options.harnessId);
+		const { id: harnessId, result: harness } = await resolveHarnessResult(options.client, requestedHarnessId);
 		const [explanation, lock, session] = await Promise.all([
 			options.client.explainHarness(harnessId),
 			options.client.getHarnessLock(lockPathForHarness(harnessId)),
@@ -167,13 +174,45 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 		return current;
 	};
 	return {
+		controlClient: options.client,
 		current: () => current,
 		refresh,
 		subscribe(listener) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
-		listHarnessChoices: (directory?: string) => listHarnessChoices(options.client, directory),
+		setHarnessId(harnessId) {
+			requestedHarnessId = harnessId;
+		},
+		setSessionMode: async mode => {
+			const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
+			const response = await options.client.postCommand(sessionId, { command: "set_mode", payload: { mode } });
+			if (response.detail?.status !== "ok" || response.detail.mode !== mode) {
+				throw new Error("BreadBoard engine returned an invalid mode-selection receipt");
+			}
+		},
+		setSessionRole: async (role, model) => {
+			const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
+			const response = await options.client.postCommand(sessionId, {
+				command: "set_role",
+				payload: model === undefined ? { role } : { role, model },
+			});
+			if (response.detail?.status !== "ok" || response.detail.role !== role) {
+				throw new Error("BreadBoard engine returned an invalid role-selection receipt");
+			}
+		},
+		setSessionSkills: async skills => {
+			const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
+			const response = await options.client.postCommand(sessionId, {
+				command: "set_skills",
+				payload: { selected: [...skills] },
+			});
+			if (response.detail?.status !== "ok") {
+				throw new Error("BreadBoard engine returned an invalid skills-selection receipt");
+			}
+		},
+		setSessionModel: options.setSessionModel,
+		listHarnessChoices: () => listHarnessChoices(options.client),
 	};
 }
 
@@ -218,10 +257,7 @@ export async function resolveHarnessId(client: BreadboardClient, requested: stri
 	return (await resolveHarness(client, requested)).id;
 }
 
-export async function listHarnessChoices(
-	client: BreadboardClient,
-	_directory?: string,
-): Promise<readonly HarnessChoice[]> {
+export async function listHarnessChoices(client: BreadboardClient): Promise<readonly HarnessChoice[]> {
 	try {
 		const result = await client.listHarness();
 		const data = publicData(result, "harness.list");

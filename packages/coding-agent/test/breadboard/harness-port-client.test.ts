@@ -92,6 +92,7 @@ describe("createHarnessPort", () => {
 			harnessId: "daily_driver.v1.yaml",
 			name: "Daily Driver",
 			lockHash: "sha256:lock",
+			verifiedIdentity: { harnessId: "daily_driver.v1.yaml", lockHash: "sha256:lock" },
 			generation: "generation-2",
 			mode: "coding",
 			loadedAt: 42,
@@ -104,6 +105,19 @@ describe("createHarnessPort", () => {
 			"session:session-1",
 		]);
 		expect(seen).toEqual(["Daily Driver:generation-2"]);
+	});
+	test("hides lock and provenance when the session lock hash does not match", async () => {
+		const port = createHarnessPort({
+			client: clientFor([], { ...session, effective_lock_hash: "sha256:other" }),
+			sessionId: "session-1",
+			harnessId: "daily_driver.v1.yaml",
+		});
+
+		const snapshot = await port.refresh("session-open");
+
+		expect(snapshot?.verifiedIdentity).toBeNull();
+		expect(snapshot?.lock).toBeNull();
+		expect(snapshot?.provenance).toEqual({});
 	});
 
 	test("does not notify when a refresh returns the same effective snapshot", async () => {
