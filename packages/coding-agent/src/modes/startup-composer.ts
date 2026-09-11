@@ -108,7 +108,7 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 		status: cached.status,
 	});
 	if (modelSelector) {
-		composer.setStatusComponent(new Text(` ${APP_NAME}  · ${modelSelector} · connecting`, 0, 0));
+		composer.setStatusComponent(new Text(` ${APP_NAME}  > ${modelSelector} > connecting`, 0, 0));
 	}
 	composer.captureStartupSubmissions();
 	try {

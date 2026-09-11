@@ -535,7 +535,7 @@ describe("Composer prepaint", () => {
 			cache: false,
 		});
 		await terminal.waitForRender(() =>
-			terminal.getViewport().some(row => Bun.stripANSI(row).includes("mock/reference · connecting")),
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("mock/reference > connecting")),
 		);
 		expect(terminal.startOptions?.deferInput).not.toBeTrue();
 		expect(
@@ -543,7 +543,7 @@ describe("Composer prepaint", () => {
 				.getViewport()
 				.map(row => Bun.stripANSI(row))
 				.join("\n"),
-		).toContain("mock/reference · connecting");
+		).toContain("mock/reference > connecting");
 	});
 
 	it("preferences feed applies quiet mode", async () => {
