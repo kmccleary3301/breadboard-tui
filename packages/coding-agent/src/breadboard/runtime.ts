@@ -1093,29 +1093,46 @@ export async function prepareBreadboardRuntime(
 		const enginePort = connected.port;
 		let resolvedHarnessId = harnessRequestId;
 		let resolvedSessionTarget = sessionTarget;
+		const usesDefaultTerminalResume = harnessRequestId === requestedHarnessId;
+		let resolvedTerminalResumeTarget = usesDefaultTerminalResume ? terminalResumeTarget : undefined;
 		const shouldResolveHarness =
-			sessionTarget.kind === "create" && harnessRequestId !== undefined && !harnessRequestId.endsWith(".lock.json");
+			harnessRequestId !== undefined &&
+			!harnessRequestId.endsWith(".lock.json") &&
+			(sessionTarget.kind === "create" || resolvedTerminalResumeTarget !== undefined);
 		if (shouldResolveHarness && enginePort.harnessClient) {
 			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, harnessRequestId);
 			const lockId =
 				sessionTarget.kind === "create"
 					? (sessionTarget.request.lockId ?? siblingHarnessLockPath(resolvedHarnessId, workspacePath))
-					: undefined;
-			resolvedSessionTarget = {
-				kind: "create",
-				request: {
-					...sessionTarget.request,
-					configPath: resolvedHarnessId,
-					...(lockId === undefined ? {} : { lockId }),
-				},
-			};
+					: (resolvedTerminalResumeTarget?.request.lockId ??
+						siblingHarnessLockPath(resolvedHarnessId, workspacePath));
+			if (sessionTarget.kind === "create") {
+				resolvedSessionTarget = {
+					kind: "create",
+					request: {
+						...sessionTarget.request,
+						configPath: resolvedHarnessId,
+						lockId,
+					},
+				};
+			}
+			if (resolvedTerminalResumeTarget) {
+				resolvedTerminalResumeTarget = {
+					kind: "create",
+					request: {
+						...resolvedTerminalResumeTarget.request,
+						configPath: resolvedHarnessId,
+						lockId,
+					},
+				};
+			}
 		}
 		const runtime = await prepareConnectedBreadboardRuntime({
 			engine: enginePort,
 			harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			modelCatalogConfigPath: resolvedHarnessId ?? config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			sessionTarget: resolvedSessionTarget,
-			terminalResumeTarget: harnessRequestId === requestedHarnessId ? terminalResumeTarget : undefined,
+			terminalResumeTarget: resolvedTerminalResumeTarget,
 			emitAgentEvent: async (event, idempotencyKey) => {
 				await emitAgentEvent(event, idempotencyKey);
 			},
