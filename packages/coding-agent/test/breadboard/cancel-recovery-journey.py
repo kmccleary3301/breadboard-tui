@@ -224,7 +224,7 @@ def stream_events(endpoint: str, session_id: str) -> dict[str, Any]:
                 elif not line and frame:
                     event = json.loads("\n".join(frame))
                     frame.clear()
-                    if event.get("type") == "stream_open":
+                    if event.get("type") == "stream.open":
                         head = event["payload"]["headSequence"]
                         if type(head) is not int or head < 0:
                             raise RuntimeError("invalid replay watermark")

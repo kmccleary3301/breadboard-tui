@@ -542,8 +542,10 @@ class HeldSessionMutationProxy:
             upstream.close()
             raise _ProxyRejected(503, "proxy_stopped")
         held = held_request
+        connected = False
         try:
             upstream.connect()
+            connected = True
             upstream.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
             for name, value in self._request_headers(handler.headers):
                 upstream.putheader(name, value)
@@ -567,7 +569,9 @@ class HeldSessionMutationProxy:
                 ).encode("utf-8")
                 self._record_outcome(rejected.status, body, credential)
             raise
-        except (http.client.HTTPException, OSError, ValueError):
+        except (http.client.HTTPException, OSError, ValueError) as error:
+            if not connected and isinstance(error, OSError):
+                raise
             if held:
                 credential = handler.headers.get(
                     "X-Breadboard-Registration-Credential"

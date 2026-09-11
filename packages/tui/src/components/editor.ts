@@ -641,6 +641,9 @@ export class Editor implements Component, Focusable {
 	}
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
+		if (this.#autocompleteProvider !== provider) {
+			this.#cancelAutocomplete();
+		}
 		this.#autocompleteProvider = provider;
 	}
 
@@ -1540,8 +1543,11 @@ export class Editor implements Component, Focusable {
 					const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
 					const currentTextBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
 					if (!this.#autocompletePrefixMatchesCursorText(currentTextBeforeCursor, selected)) {
-						// Autocomplete is stale - cancel and fall through to normal submission
+						// Autocomplete is stale - cancel and fall through, except a stale
+						// namespace selection must not submit the namespace.
+						const staleNamespace = this.#selectedCompletionIsSkillNamespace();
 						this.#cancelAutocomplete();
+						if (staleNamespace) return;
 					} else {
 						if (selected && this.#autocompleteProvider) {
 							const shouldChainSlashCommandAutocomplete = this.#isSlashCommandNameAutocompleteSelection();
@@ -3340,6 +3346,8 @@ export class Editor implements Component, Focusable {
 	 *   engages for command-shaped selections: absolute-path completions (`/tmp/fo`
 	 *   via the no-command-match fall-through) share the leading-slash prefix shape
 	 *   but must use the live-suffix path rule so the apply slice stays anchored.
+	 *   A changed normal token must also retain the selected canonical value in the
+	 *   provider's current synchronous slash candidates.
 	 * - Mid-prompt skill branch re-anchors when the popup item is a skill and the
 	 *   current text still ends in a matching trailing slash token, preventing a
 	 *   stale selection from replacing a newer skill prefix.
@@ -3373,7 +3381,11 @@ export class Editor implements Component, Focusable {
 			const currentLeadingStart = findLeadingSlashCommandStart(currentTextBeforeCursor);
 			if (currentLeadingStart !== null) {
 				const token = currentTextBeforeCursor.slice(currentLeadingStart);
-				if (!token.includes(" ") && !token.slice(1).includes("/")) return true;
+				if (!token.includes(" ") && !token.slice(1).includes("/")) {
+					const currentCandidates = this.#autocompleteProvider?.trySyncSlashCompletion?.(currentTextBeforeCursor);
+					if (!item || !currentCandidates?.items.some(candidate => candidate.value === item.value)) return false;
+					return true;
+				}
 			}
 			return false;
 		}

@@ -70,6 +70,78 @@ describe("Editor async autocomplete scheduling", () => {
 		await updated;
 		expect(editor.isShowingAutocomplete()).toBeTrue();
 	});
+	it("uses the current provider after a visible command's alias changes", async () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(
+			new CombinedAutocompleteProvider([{ name: "harness", aliases: ["team"] }], "/tmp"),
+		);
+		const submissions: string[] = [];
+		editor.onSubmit = text => submissions.push(text);
+		editor.handleInput("/te");
+		await untilAutocompleteShown(editor);
+
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "team" }], "/tmp"));
+		editor.handleInput("\r");
+
+		expect(submissions).toEqual(["/team"]);
+		expect(editor.getText()).toBe("");
+	});
+
+	it("does not apply a replaced provider's late command suggestions", async () => {
+		const requested = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		class DelayedCommands extends CombinedAutocompleteProvider {
+			override async getSuggestions(...args: Parameters<CombinedAutocompleteProvider["getSuggestions"]>) {
+				const suggestions = await super.getSuggestions(...args);
+				requested.resolve();
+				await release.promise;
+				return suggestions;
+			}
+		}
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(new DelayedCommands([{ name: "harness", aliases: ["team"] }], "/tmp"));
+		const submissions: string[] = [];
+		editor.onSubmit = text => submissions.push(text);
+		editor.handleInput("/te");
+		await requested.promise;
+
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "team" }], "/tmp"));
+		release.resolve();
+		await Bun.sleep(0);
+		editor.handleInput("\r");
+
+		expect(submissions).toEqual(["/team"]);
+		expect(editor.getText()).toBe("");
+	});
+});
+
+describe("Editor slash autocomplete acceptance", () => {
+	it("submits the current command instead of a stale slash selection", async () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(
+			new CombinedAutocompleteProvider(
+				[
+					{ name: "harness", description: "Harness" },
+					{ name: "team", description: "Team" },
+				],
+				"/tmp",
+			),
+		);
+		const submissions: string[] = [];
+		editor.onSubmit = text => {
+			submissions.push(text);
+		};
+
+		editor.handleInput("/");
+		await untilAutocompleteShown(editor);
+		for (const character of "team") editor.handleInput(character);
+		expect(editor.isShowingAutocomplete()).toBeTrue();
+
+		editor.handleInput("\r");
+
+		expect(submissions).toEqual(["/team"]);
+		expect(editor.getText()).toBe("");
+	});
 });
 
 class HashActionProvider implements AutocompleteProvider {
@@ -452,6 +524,42 @@ describe("Editor Enter handler sync slash completion", () => {
 
 		editor.handleInput("\r");
 		expect(submitted?.trimEnd()).toBe("/skill:security-scan");
+	});
+
+	it("expands a still-matching skill namespace prefix without submitting", async () => {
+		const editor = createSkillEditor();
+		let submitted: string | undefined;
+		editor.onSubmit = text => {
+			submitted = text;
+		};
+
+		editor.handleInput("/");
+		await untilAutocompleteShown(editor);
+		editor.handleInput("s");
+		editor.handleInput("k");
+		editor.handleInput("\r");
+
+		expect(submitted).toBeUndefined();
+		expect(editor.getText()).toBe("/skill:");
+		expect(editor.isShowingAutocomplete()).toBeFalse();
+	});
+
+	it("cancels a stale skill namespace selection without submitting it", async () => {
+		const editor = createSkillEditor();
+		let submitted: string | undefined;
+		editor.onSubmit = text => {
+			submitted = text;
+		};
+
+		editor.handleInput("/");
+		await untilAutocompleteShown(editor);
+		editor.handleInput("z");
+		editor.handleInput("z");
+		editor.handleInput("\r");
+
+		expect(submitted).toBeUndefined();
+		expect(editor.getText()).toBe("/zz");
+		expect(editor.isShowingAutocomplete()).toBeFalse();
 	});
 
 	it("accepts a bare mid-prompt skill slash with Tab without replacing prose", async () => {
