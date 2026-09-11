@@ -872,7 +872,14 @@ const harnessSegment: StatusLineSegment = {
 		}
 		if (harness.generation !== null) {
 			const generation = sanitizeStatusText(harness.generation);
-			if (generation.length > 0) parts.push(`g${generation}`);
+			if (generation.length > 0) {
+				const shortGen = generation.startsWith("sha256:")
+					? generation.slice(7, 15)
+					: generation.length > 8
+						? generation.slice(0, 8)
+						: generation;
+				parts.push(`g${shortGen}`);
+			}
 		}
 		return {
 			content: theme.fg("accent", parts.join(" · ")),

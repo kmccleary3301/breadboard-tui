@@ -23,6 +23,19 @@ describe("harness status segment", () => {
 		expect(Bun.stripANSI(rendered.content)).toBe("codex-e4 · build · g3");
 	});
 
+	it("shortens sha256 generation hashes to prevent status line overflow", () => {
+		const context = createGallerySegmentContext();
+		context.harness = {
+			...snapshot,
+			generation: "sha256:1c756e4ff8ae7dee8dd96e37ba759dce661054245e387cd3dcba357b78dbd5af",
+		};
+
+		const rendered = renderSegment("harness", context);
+
+		expect(rendered.visible).toBe(true);
+		expect(Bun.stripANSI(rendered.content)).toBe("codex-e4 · build · g1c756e4f");
+	});
+
 	it("omits unavailable mode and generation members without placeholders", () => {
 		// Catches fabricated identity placeholders when nullable snapshot fields are absent.
 		const context = createGallerySegmentContext();

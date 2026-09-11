@@ -475,6 +475,7 @@ export function resolveBreadboardCatalogModels(
 			"BreadBoard model catalog widened beyond configured models.",
 		);
 	}
+	const hasAvailable = catalog.models.some(entry => entry.available);
 	const models = new Map<string, Model>();
 	for (const entry of catalog.models) {
 		if (entry.source !== "configured" || entry.discovery !== "configured_only") {
@@ -483,7 +484,7 @@ export function resolveBreadboardCatalogModels(
 				"BreadBoard model catalog contains a non-configured model.",
 			);
 		}
-		if (!entry.available) continue;
+		if (!entry.available && hasAvailable) continue;
 		const selector = entry.id.trim();
 		if (!selector || selector !== entry.id || models.has(selector)) {
 			throw new BreadboardModelAuthorityError(
@@ -1112,7 +1113,7 @@ export async function prepareBreadboardRuntime(
 		const runtime = await prepareConnectedBreadboardRuntime({
 			engine: enginePort,
 			harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
-			modelCatalogConfigPath: config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+			modelCatalogConfigPath: resolvedHarnessId ?? config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			sessionTarget: resolvedSessionTarget,
 			terminalResumeTarget: harnessRequestId === requestedHarnessId ? terminalResumeTarget : undefined,
 			emitAgentEvent: async (event, idempotencyKey) => {
