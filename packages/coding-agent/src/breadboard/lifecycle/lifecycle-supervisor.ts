@@ -190,7 +190,7 @@ class EngineArtifactValidationError extends Error {}
 class ProcessIdentityValidationError extends Error {}
 
 const TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000] as const;
-const STARTUP_TRANSPORT_RECONNECT_DELAYS_MS = [250, 1_000, 4_000, 4_000] as const;
+const STARTUP_TRANSPORT_RECONNECT_DELAYS_MS = [25, 50, 100, 200, 250] as const;
 const RESTART_DELAYS_MS = [250, 1_000, 4_000] as const;
 // Reserve the global process-cleanup deadline for governed hard-signal authorization and authority retirement.
 const LOCAL_OWNED_GRACEFUL_EXIT_WAIT_MS = 2_000;
@@ -303,6 +303,9 @@ export function lifecycleChildEnvironment(
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+		// The owned desktop engine executes sessions locally. Starting a private Ray
+		// cluster here delays every launch and duplicates the local server contract.
+		RAY_SCE_LOCAL_MODE: "1",
 		RAY_BACKEND_LOG_LEVEL: "error",
 		RAY_LOG_TO_DRIVER: "0",
 		RAY_LOGGER_LEVEL: "error",

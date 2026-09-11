@@ -128,13 +128,22 @@ const SCRATCH_ROOTS: readonly string[] = (() => {
 	return [...roots];
 })();
 
+let cachedProjectDir: string | undefined;
+let cachedProjectDirClassification: { scratch: boolean; relative: string | null } | undefined;
+
 function classifyProjectDir(pwd: string): { scratch: boolean; relative: string | null } {
+	if (pwd === cachedProjectDir && cachedProjectDirClassification) return cachedProjectDirClassification;
+
+	let classification: { scratch: boolean; relative: string | null } = { scratch: false, relative: null };
 	for (const root of SCRATCH_ROOTS) {
 		if (pathIsWithin(root, pwd)) {
-			return { scratch: true, relative: relativePathWithinRoot(root, pwd) };
+			classification = { scratch: true, relative: relativePathWithinRoot(root, pwd) };
+			break;
 		}
 	}
-	return { scratch: false, relative: null };
+	cachedProjectDir = pwd;
+	cachedProjectDirClassification = classification;
+	return classification;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

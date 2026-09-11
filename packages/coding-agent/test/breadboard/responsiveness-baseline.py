@@ -423,6 +423,10 @@ def _prepare_bb_cell_fixture(
                 break
         if bound is None:
             raise RuntimeError(f"BB did not persist a durable bound session for {fixture_path.stem}")
+        # Binding is persisted when submission starts, before the engine cursor
+        # reaches the mock turn's settled boundary. Wait for render quiet so the
+        # fixture snapshots the durable cursor that resume will actually verify.
+        _settle(child, quiet=0.5, limit=10.0)
         child.send(b"/exit")
         child.send(ENTER)
         quit_deadline = time.monotonic() + 5.0

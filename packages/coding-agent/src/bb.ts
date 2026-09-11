@@ -3,6 +3,7 @@ import { parentPort } from "node:worker_threads";
 import { installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
 
 import { activateBreadboardProduct } from "./breadboard/product-settings";
+import { parseStartupPrepaintArgs } from "./startup-prepaint-args";
 
 const isCompiled = process.env.PI_COMPILED === "true";
 const workerArg = process.argv[2];
@@ -12,6 +13,16 @@ if (!Bun.isMainThread && parentPort && isWorkerHostSelector(workerArg)) {
 
 async function main(): Promise<void> {
 	await activateBreadboardProduct();
+	if (Bun.isMainThread && !process.env.PI_TIMING && process.stdin.isTTY === true && process.stdout.isTTY === true) {
+		const startupPrepaint = parseStartupPrepaintArgs(process.argv.slice(2));
+		if (startupPrepaint !== null) {
+			const [{ VERSION }, { beginStartupComposer }] = await Promise.all([
+				import("@oh-my-pi/pi-utils/dirs"),
+				import("./modes/startup-composer"),
+			]);
+			beginStartupComposer({ version: VERSION, modelSelector: startupPrepaint.modelSelector });
+		}
+	}
 	const { runCli } = await import("./cli");
 	// A compiled CLI module self-dispatches from its process entry. Source
 	// execution imports cli.ts as a module, so the wrapper owns invocation there.

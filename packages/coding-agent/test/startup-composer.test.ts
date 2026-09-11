@@ -177,10 +177,15 @@ describe("Composer prepaint", () => {
 		}
 	});
 
-	it("keeps submit gated during initialization, then dispatches with steer", async () => {
+	it("replays a pre-session Enter after initialization completes", async () => {
 		const terminal = new CountingTerminal();
 		const composer = new Composer({ preferences: config, terminal });
+		composer.captureStartupSubmissions();
 		composer.start();
+		terminal.sendInput("alpha");
+		terminal.sendInput("\r");
+		expect(composer.editor.getExpandedText()).toBe("");
+		terminal.sendInput("beta");
 		const lease = new ComposerLease(composer);
 		const testSession = await createTestSession({ inMemory: true });
 		const mode = new InteractiveMode(
@@ -207,23 +212,20 @@ describe("Composer prepaint", () => {
 		try {
 			const initializing = mode.init({ suppressWelcomeIntro: true });
 			await enteredInit.promise;
-			terminal.sendInput("alpha");
-			terminal.sendInput("\r");
 
 			expect(prompt).not.toHaveBeenCalled();
-			expect(mode.editor.getExpandedText()).toBe("alpha");
+			expect(mode.editor.getExpandedText()).toBe("beta");
 			expect(mode.editor.disableSubmit).toBe(true);
 
 			releaseInit.resolve();
 			await initializing;
-			// Init wired the submit pipeline and lifted the gate: an Enter before
-			// the input loop's first getUserInput dispatches directly with steer
-			// instead of being silently dropped.
+			// Init wired the submit pipeline and lifted the gate. The Enter
+			// captured by the pre-session composer now dispatches with steer
+			// instead of disappearing during terminal handoff.
 			expect(mode.editor.disableSubmit).toBe(false);
-			terminal.sendInput("\r");
 			for (let i = 0; i < 50 && prompt.mock.calls.length === 0; i++) await Promise.resolve();
 			expect(prompt).toHaveBeenCalledWith("alpha", expect.objectContaining({ streamingBehavior: "steer" }));
-			expect(mode.editor.getExpandedText()).toBe("");
+			expect(mode.editor.getExpandedText()).toBe("beta");
 		} finally {
 			releaseInit.resolve();
 			mode.stop();
@@ -523,6 +525,26 @@ describe("Composer prepaint", () => {
 		expect(lease?.composer.welcome?.isTranscriptBlockFinalized()).toBe(true);
 		lease?.composer.ui.stop();
 	});
+	it("shows an explicit launch model while startup input is live", async () => {
+		const terminal = new InputTrackingTerminal(80, 32);
+		beginStartupComposer({
+			preferences: config,
+			terminal,
+			version: "9.9.9",
+			modelSelector: "mock/reference",
+			cache: false,
+		});
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("mock/reference · connecting")),
+		);
+		expect(terminal.startOptions?.deferInput).not.toBeTrue();
+		expect(
+			terminal
+				.getViewport()
+				.map(row => Bun.stripANSI(row))
+				.join("\n"),
+		).toContain("mock/reference · connecting");
+	});
 
 	it("preferences feed applies quiet mode", async () => {
 		const terminal = new CountingTerminal(80, 32);
@@ -614,13 +636,12 @@ describe("Composer prepaint", () => {
 		expect(await lease?.recentSessions).toEqual(rows);
 		lease?.dispose();
 	});
-	it("defers raw input until resolved settings arrive, adoption as fallback", async () => {
-		// Regression contract: losing the deferral re-blinds typing during the
-		// startup module-load stall; losing the enable leaves the keyboard dead
-		// for the whole session.
+	it("owns raw input from prepaint through adoption", async () => {
+		// Regression contract: startup keystrokes must reach the live editor
+		// before settings/session work completes, without a second stdin attach.
 		const terminal = new InputTrackingTerminal(80, 32);
 		beginStartupComposer({ preferences: config, terminal, version: "9.9.9", cache: false });
-		expect(terminal.startOptions?.deferInput).toBeTrue();
+		expect(terminal.startOptions?.deferInput).not.toBeTrue();
 		expect(terminal.inputEnables).toBe(0);
 
 		applyStartupComposerPreferences({
@@ -628,21 +649,11 @@ describe("Composer prepaint", () => {
 			reduceMotion: settings.get("display.reduceMotion"),
 			theme: {},
 		});
-		expect(terminal.inputEnables).toBe(1);
+		expect(terminal.inputEnables).toBe(0);
 
-		// Adoption after preferences must not double-enable…
 		const lease = takeStartupComposerLease();
 		lease?.adopt();
-		expect(terminal.inputEnables).toBe(1);
-		lease?.composer.ui.stop();
-	});
-
-	it("adoption enables raw input when settings never resolved", () => {
-		const terminal = new InputTrackingTerminal(80, 32);
-		beginStartupComposer({ preferences: config, terminal, version: "9.9.9", cache: false });
-		const lease = takeStartupComposerLease();
-		lease?.adopt();
-		expect(terminal.inputEnables).toBe(1);
+		expect(terminal.inputEnables).toBe(0);
 		lease?.composer.ui.stop();
 	});
 });

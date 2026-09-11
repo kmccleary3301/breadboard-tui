@@ -971,6 +971,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.composer.setPreferences(preferences);
 		this.ui = this.composer.ui;
 		this.editor = this.composer.editor;
+		this.editor.disableSubmit = true;
 		this.editor.magicKeywordsEnabled = () => this.settings.get("magicKeywords.enabled");
 		this.editor.reduceMotionEnabled = () => this.settings.get("display.reduceMotion");
 		this.editor.imageReferenceHyperlink = imageReferenceHyperlink;
@@ -1562,6 +1563,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// `streamingBehavior: "steer"`, so whichever lands second queues into the
 		// other's turn instead of dying.
 		this.editor.disableSubmit = false;
+		this.composer.replayPendingStartupSubmissions();
 	}
 
 	/** Reload the title-generation system prompt override for the provided working

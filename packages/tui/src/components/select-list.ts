@@ -202,33 +202,39 @@ export class SelectList implements Component, MouseRoutable {
 		// every item is one row, so the budget matches the original item count.
 		const visualBudget = this.#maxVisible;
 
-		// Compute per-item visual row counts at the conservative width (i.e.
-		// assume the scrollbar column might be reserved). For non-wrap layouts
-		// every count is 1, so visualTotal == #filteredItems and overflow falls
-		// back to the original `N > maxVisible` predicate exactly.
-		const conservativeRowWidth = Math.max(0, width - 1);
-		// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
-		const rowCounts = new Array<number>(this.#filteredItems.length);
-		let visualTotal = 0;
-		for (let i = 0; i < this.#filteredItems.length; i++) {
-			const item = this.#filteredItems[i];
-			if (!item) {
-				rowCounts[i] = 0;
-				continue;
+		let visualTotal: number;
+		let startIndex: number;
+		let endIndex: number;
+		let visualOffset: number;
+		if (wrapEnabled) {
+			// Compute visual row counts only when descriptions can wrap. The flat
+			// picker is the common command-palette path and needs no per-render array.
+			const conservativeRowWidth = Math.max(0, width - 1);
+			// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
+			const rowCounts = new Array<number>(this.#filteredItems.length);
+			visualTotal = 0;
+			for (let i = 0; i < this.#filteredItems.length; i++) {
+				const item = this.#filteredItems[i];
+				if (!item) {
+					rowCounts[i] = 0;
+					continue;
+				}
+				rowCounts[i] = this.#computeItemRowCount(item, conservativeRowWidth, primaryColumnWidth, iconColumnWidth);
+				visualTotal += rowCounts[i];
 			}
-			rowCounts[i] = wrapEnabled
-				? this.#computeItemRowCount(item, conservativeRowWidth, primaryColumnWidth, iconColumnWidth)
-				: 1;
-			visualTotal += rowCounts[i];
+			({ startIndex, endIndex, visualOffset } = this.#pickWindow(rowCounts, visualBudget));
+		} else {
+			visualTotal = this.#filteredItems.length;
+			startIndex = Math.min(
+				Math.max(0, this.#selectedIndex - Math.floor(visualBudget / 2)),
+				Math.max(0, visualTotal - visualBudget),
+			);
+			endIndex = Math.min(visualTotal, startIndex + visualBudget);
+			visualOffset = startIndex;
 		}
 
 		const overflow = visualTotal > visualBudget;
 		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
-
-		// Pick a window centered on the selected item that fits in visualBudget
-		// rows. Falls through to the original item-count window when every row
-		// count is 1.
-		const { startIndex, endIndex, visualOffset } = this.#pickWindow(rowCounts, visualBudget);
 
 		// Render visible items. Cap rows at the budget so a single item that
 		// wraps to more than `visualBudget` rows (pathological — e.g. a 5-row

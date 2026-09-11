@@ -202,6 +202,8 @@ export class Composer implements TerminalFrameProvider {
 	#started = false;
 	#stopped = false;
 	#transferred = false;
+	#inputDeferred = false;
+	readonly #pendingStartupSubmissions: string[] = [];
 
 	constructor(options: ComposerOptions = {}) {
 		if (typeof theme === "undefined") initThemeSync();
@@ -251,6 +253,17 @@ export class Composer implements TerminalFrameProvider {
 		this.ui.addChild(this.editor);
 		this.ui.addChild(this.#statusHost);
 		this.ui.setFocus(this.editor);
+	}
+	/**
+	 * Keep startup input live before the session submit pipeline exists. Enter
+	 * records the completed draft; InteractiveMode replays queued drafts after
+	 * its submit handler and session subscriptions are ready.
+	 */
+	captureStartupSubmissions(): void {
+		this.editor.disableSubmit = false;
+		this.editor.onSubmit = text => {
+			this.#pendingStartupSubmissions.push(text);
+		};
 	}
 	/** Compose the bounded mutable viewport and the next ordered history append. */
 	renderFrame(viewport: ViewportSize): TerminalFramePlan {
@@ -533,12 +546,14 @@ export class Composer implements TerminalFrameProvider {
 	start(options: ComposerStartOptions = {}): void {
 		if (this.#started || this.#stopped) return;
 		this.#started = true;
-		this.ui.start({ clearScrollback: options.clearScrollback === true, deferInput: options.deferInput === true });
+		this.#inputDeferred = options.deferInput === true;
+		this.ui.start({ clearScrollback: options.clearScrollback === true, deferInput: this.#inputDeferred });
 		if (options.playWelcomeIntro !== false) this.playWelcomeIntro();
 	}
 	/** Take raw-input ownership after a deferred-input start. Idempotent. */
 	enableInput(): void {
-		if (this.#stopped) return;
+		if (this.#stopped || !this.#inputDeferred) return;
+		this.#inputDeferred = false;
 		this.ui.enableInput();
 	}
 
@@ -673,6 +688,17 @@ export class Composer implements TerminalFrameProvider {
 	setWelcomeReducedMotion(value: boolean | undefined): void {
 		this.#welcomeReducedMotion = value;
 		this.#welcome?.setReducedMotion(value);
+	}
+
+	/** Replay drafts submitted before InteractiveMode could safely dispatch them. */
+	replayPendingStartupSubmissions(): void {
+		if (this.#pendingStartupSubmissions.length === 0) return;
+		const draft = this.editor.getText();
+		for (const submission of this.#pendingStartupSubmissions.splice(0)) {
+			this.editor.setText(submission);
+			this.editor.submit();
+		}
+		this.editor.setText(draft);
 	}
 
 	/** Transfer terminal ownership to InteractiveMode without stopping the composer. */

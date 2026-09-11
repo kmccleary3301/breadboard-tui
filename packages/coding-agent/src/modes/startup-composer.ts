@@ -1,5 +1,5 @@
-import type { Terminal } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import { Text, type Terminal } from "@oh-my-pi/pi-tui";
+import { APP_NAME, logger } from "@oh-my-pi/pi-utils";
 import { getRecentSessions } from "../session/session-listing";
 import { computeDefaultSessionDir } from "../session/session-paths";
 import { FileSessionStorage } from "../session/session-storage";
@@ -21,6 +21,7 @@ export interface PrepaintComposerOptions {
 	readonly now?: () => number;
 	readonly version?: string;
 	readonly cwd?: string;
+	readonly modelSelector?: string;
 	readonly preferences?: Partial<ComposerPreferences>;
 	readonly theme?: ComposerThemePreferences;
 	readonly recentSessions?: () => Promise<RecentSession[]>;
@@ -88,10 +89,12 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 	const theme = { ...cached.theme, ...options.theme };
 	initThemeSync(theme.symbolPreset, theme.colorBlindMode, theme.darkTheme, theme.lightTheme);
 	const preferences = { ...COMPOSER_DEFAULTS, ...cached.preferences, ...options.preferences };
+	const modelSelector = options.modelSelector;
+	const separator = modelSelector?.indexOf("/") ?? -1;
 	const welcome: ComposerWelcomeUpdate = {
 		version: options.version ?? "",
-		modelName: cached.welcome?.modelName,
-		providerName: cached.welcome?.providerName,
+		modelName: modelSelector ?? cached.welcome?.modelName,
+		providerName: separator > 0 ? modelSelector?.slice(0, separator) : cached.welcome?.providerName,
 		recentSessions: cached.recentSessions,
 		lspServers: cached.lspServers,
 	};
@@ -104,8 +107,12 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 		welcome,
 		status: cached.status,
 	});
+	if (modelSelector) {
+		composer.setStatusComponent(new Text(` ${APP_NAME}  · ${modelSelector} · connecting`, 0, 0));
+	}
+	composer.captureStartupSubmissions();
 	try {
-		composer.start({ clearScrollback: true, deferInput: true });
+		composer.start({ clearScrollback: true });
 	} catch (error) {
 		try {
 			composer.stop();
@@ -115,6 +122,10 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 	const pending: PendingComposer = { composer, cwd, cache: useCache };
 	pendingComposer = pending;
 	pending.recentSessions = refreshRecentSessions(pending, options.recentSessions);
+}
+
+export function hasPendingStartupComposer(): boolean {
+	return pendingComposer !== undefined;
 }
 
 /** Take the live prepaint composer away from the module-level startup owner. */
@@ -150,9 +161,8 @@ export function applyStartupComposerPreferences(update: PrepaintComposerPreferen
 	pending.composer.setPreferences(preferences);
 	pending.composer.setWelcomeReducedMotion(undefined);
 	// Settings resolved means the module graph is loaded and the event loop is
-	// responsive again: take raw-input ownership now. The kernel echoed (and
-	// buffered) everything typed during the load; the editor replays it here.
-	pending.composer.enableInput();
+	// responsive again. Input already belongs to the startup composer, so the
+	// in-flight draft remains editable without a terminal-mode handoff.
 	if (pending.cache) {
 		void writeComposerUiCache(pending.cwd, { ...preferences, reduceMotion: update.reduceMotion }, update.theme).catch(
 			error => {
