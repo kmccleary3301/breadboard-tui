@@ -3650,6 +3650,80 @@ describe("E4AgentStreamBridge", () => {
 			await bridge.close();
 		}
 	});
+
+	test("isolates permission scope and rejects a conflicting same-owner replay", async () => {
+		const decisions = new Map<string, "allow" | "deny">();
+		const backend = permissionSession([], []).session;
+		const permission = {
+			request_id: "permission-shared",
+			tool: "edit",
+			kind: "write",
+			summary: "Deny session",
+			default_scope: null,
+			rewindable: true,
+		};
+		const session: OpenedSession = {
+			...openedSession(
+				[
+					started,
+					wireEvent(3, "permission_request", permission),
+					wireEvent(4, "permission_request", { ...permission, source: "session" }),
+					wireEvent(5, "permission_request", {
+						...permission,
+						source: "task",
+						task_session_id: "task-a",
+						summary: "Allow task A",
+					}),
+					wireEvent(6, "permission_request", {
+						...permission,
+						source: "task",
+						task_session_id: "task-b",
+						summary: "Deny task B",
+					}),
+					wireEvent(7, "permission_request", {
+						...permission,
+						source: "task",
+						task_session_id: "task-a",
+						summary: "Contradict task A",
+					}),
+					wireEvent(8, "turn_completed", {}),
+				],
+				[],
+			),
+			cancel: backend.cancel,
+			async respondPermission(request) {
+				const scope = request.source === "task" ? request.taskSessionId : "session";
+				if (scope === undefined || decisions.has(scope)) {
+					throw new Error("Missing owner or duplicate authorization effect");
+				}
+				decisions.set(scope, request.decision);
+				return backend.respondPermission(request);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+			requestPermission: async request => (request.summary === "Allow task A" ? "allow" : "deny"),
+		});
+		try {
+			const stream = await startBridgeStream(bridge, model, context);
+			const result = await stream.result();
+			expect(result.stopReason).toBe("error");
+			expect(decisions).toEqual(
+				new Map([
+					["session", "deny"],
+					["task-a", "allow"],
+					["task-b", "deny"],
+				]),
+			);
+		} finally {
+			await bridge.close();
+		}
+	});
 	test("tears down the current permission request after an earlier response", async () => {
 		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
 		const cancelled: Array<Parameters<OpenedSession["cancel"]>[0]> = [];

@@ -45,7 +45,7 @@ function rendered(view: HarnessView, height = 50): string {
 }
 
 function nextPanel(view: HarnessView, count: number): void {
-	for (let index = 0; index < count; index++) view.handleInput("right");
+	for (let index = 0; index < count; index++) view.handleInput("\x1b[C");
 }
 
 describe("HarnessView canonical lock projection", () => {
@@ -99,6 +99,9 @@ describe("HarnessView canonical lock projection", () => {
 		expect(rendered(view)).toContain("Team size: 2");
 		expect(rendered(view)).toContain("multi_agent.team_config.team.agents.main.role: main");
 		expect(rendered(view)).toContain("multi_agent.team_config.team.coordination.mission_owner_role: supervisor");
+		view.handleInput("\x1b[D");
+		expect(rendered(view)).toContain("Mode 1: plan");
+		nextPanel(view, 1);
 		nextPanel(view, 1);
 		expect(rendered(view)).toContain("tools.aliases.bash: run_shell");
 		expect(rendered(view)).toContain("tools.registry.include:");
@@ -161,7 +164,7 @@ describe("HarnessView canonical lock projection", () => {
 
 		for (let index = 0; index < 8; index++) {
 			expect(rendered(view)).not.toContain("must-not-render");
-			view.handleInput("right");
+			view.handleInput("\x1b[C");
 		}
 	});
 });

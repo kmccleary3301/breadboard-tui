@@ -134,6 +134,30 @@ describe("Agent hub Enter activation", () => {
 		hub.dispose();
 	});
 
+	it("closes the harness section on raw Escape", () => {
+		const registry = new AgentRegistry();
+		let closed = false;
+		const hub = new AgentHubOverlayComponent({
+			settings: Settings.isolated(),
+			registry,
+			observers: new SessionObserverRegistry(),
+			irc: new IrcBus(registry),
+			hubKeys: [],
+			initialSection: "harness",
+			initialHarnessPanel: "team",
+			onDone: () => {
+				closed = true;
+			},
+			requestRender: () => {},
+		});
+		try {
+			hub.handleInput("\x1b");
+			expect(closed).toBe(true);
+		} finally {
+			hub.dispose();
+		}
+	});
+
 	it("a focus failure keeps the hub open and shows the error as a notice", async () => {
 		const message = 'Agent "X" is aborted and cannot be revived';
 		const { hub, doneCalls, renderRequested } = makeHub(() => Promise.reject(new Error(message)));

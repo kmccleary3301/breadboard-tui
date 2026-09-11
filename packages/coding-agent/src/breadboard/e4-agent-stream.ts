@@ -63,7 +63,13 @@ type PermissionResponseState = {
 };
 
 const permissionOwnerKey = (owner: PermissionOwner): string =>
-	JSON.stringify([owner.inputId, owner.turnId, owner.requestId]);
+	JSON.stringify([
+		owner.source?.trim().toLowerCase() ?? "session",
+		owner.taskSessionId?.trim() ?? "",
+		owner.inputId.trim(),
+		owner.turnId.trim(),
+		owner.requestId.trim(),
+	]);
 
 function permissionOwnerFromEvent(
 	event: Extract<LoggedSessionEvent, { readonly kind: "permission_requested" }>,

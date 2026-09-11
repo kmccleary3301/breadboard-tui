@@ -463,8 +463,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		}
 		if (this.#section === "activity") this.#handleActivityInput(keyData);
 		else if (this.#section === "messages") this.#messages.handleInput(keyData);
-		else if (this.#section === "harness") this.#harness.handleInput(keyData);
-		else this.#handleTableInput(keyData);
+		else if (this.#section === "harness") {
+			if (matchesKey(keyData, "escape")) this.#onDone();
+			else this.#harness.handleInput(keyData);
+		} else this.#handleTableInput(keyData);
 	}
 
 	/**

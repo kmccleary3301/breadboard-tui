@@ -1,4 +1,4 @@
-import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { matchesKey, visibleWidth } from "@oh-my-pi/pi-tui";
 import { detectSensitiveValues } from "@breadboard/sdk/session";
 import type { HarnessProvenance, HarnessSnapshot } from "../../../breadboard/harness-port";
 import { theme } from "../../theme/theme";
@@ -257,12 +257,12 @@ export class HarnessView {
 	}
 
 	handleInput(key: string): boolean {
-		if (key === "j" || key === "right") {
+		if (key === "j" || matchesKey(key, "right")) {
 			this.#panel = PANELS[(PANELS.indexOf(this.#panel) + 1) % PANELS.length]!;
 			this.deps.requestRender();
 			return true;
 		}
-		if (key === "k" || key === "left") {
+		if (key === "k" || matchesKey(key, "left")) {
 			this.#panel = PANELS[(PANELS.indexOf(this.#panel) + PANELS.length - 1) % PANELS.length]!;
 			this.deps.requestRender();
 			return true;
