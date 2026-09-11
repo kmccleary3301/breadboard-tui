@@ -244,6 +244,16 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 		},
 		setSessionModel: options.setSessionModel,
 		listHarnessChoices: (directory?: string) => listHarnessChoices(options.client, directory),
+		describeRuntime: async (explicitSessionId?: string) => {
+			const targetSessionId =
+				explicitSessionId ?? (typeof options.sessionId === "function" ? options.sessionId() : options.sessionId);
+			if (!targetSessionId) return null;
+			const clientAny = options.client as unknown as Record<string, unknown>;
+			if (typeof clientAny.describeRuntime === "function") {
+				return (clientAny.describeRuntime as (id: string) => Promise<unknown>)(targetSessionId);
+			}
+			return null;
+		},
 	};
 }
 

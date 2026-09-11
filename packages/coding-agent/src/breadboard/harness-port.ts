@@ -79,4 +79,9 @@ export interface HarnessPort {
 	readonly listHarnessChoices?: (
 		directory?: string,
 	) => Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]>;
+	/**
+	 * Query the live runtime description for a session (E12 Phase B).
+	 * Returns null when the underlying engine does not provide a runtime.describe operation.
+	 */
+	readonly describeRuntime?: (sessionId?: string) => Promise<unknown>;
 }
