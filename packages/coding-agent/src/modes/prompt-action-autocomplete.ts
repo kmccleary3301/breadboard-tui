@@ -271,8 +271,11 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 	getInlineHint(lines: string[], cursorLine: number, cursorCol: number): string | null {
 		return this.#baseProvider.getInlineHint?.(lines, cursorLine, cursorCol) ?? null;
 	}
-	trySyncSlashCompletion(textBeforeCursor: string): { items: AutocompleteItem[]; prefix: string } | null {
-		return this.#baseProvider.trySyncSlashCompletion?.(textBeforeCursor) ?? null;
+	trySyncSlashCompletion(
+		textBeforeCursor: string,
+		options?: { includeBare?: boolean },
+	): { items: AutocompleteItem[]; prefix: string } | null {
+		return this.#baseProvider.trySyncSlashCompletion?.(textBeforeCursor, options) ?? null;
 	}
 	trySyncInlineReplace(textBeforeCursor: string): { replaceLen: number; insert: string } | null {
 		if (isSettingsInitialized() && !settings.get("emojiAutocomplete")) return null;

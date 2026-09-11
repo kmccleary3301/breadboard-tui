@@ -115,6 +115,16 @@ describe("Editor async autocomplete scheduling", () => {
 	});
 });
 
+describe("Editor slash autocomplete rendering", () => {
+	it("opens the bare slash menu before returning from input handling", () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "model" }], "/tmp"));
+
+		editor.handleInput("/");
+
+		expect(editor.isShowingAutocomplete()).toBeTrue();
+	});
+});
 describe("Editor slash autocomplete acceptance", () => {
 	it("submits the current command instead of a lower-ranked stale description match", async () => {
 		const editor = new Editor(defaultEditorTheme);

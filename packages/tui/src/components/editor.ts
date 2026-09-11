@@ -2259,9 +2259,12 @@ export class Editor implements Component, Focusable {
 
 		// Check if we should trigger or update autocomplete
 		if (!this.#autocompleteState) {
-			// Auto-trigger for "/" at the start of a submitted command or a mid-prompt skill lookup.
+			// A bare command slash is entirely synchronous. Open it before the
+			// outer input handler paints, avoiding an intermediate draft-only frame.
 			if (char === "/" && (this.#isAtStartOfSubmittedMessage() || this.#isInMidPromptSkillSlashContext())) {
-				this.#tryTriggerAutocomplete();
+				if (!this.#isAtStartOfSubmittedMessage() || !this.#openSyncSlashAutocomplete()) {
+					void this.#tryTriggerAutocomplete();
+				}
 			}
 			// Auto-trigger for "@" file reference (fuzzy search)
 			else if (char === "@") {
@@ -3453,6 +3456,23 @@ export class Editor implements Component, Focusable {
 	 */
 	#textTriggersUrlAutocomplete(textBeforeCursor: string): boolean {
 		return /(?:^|[\s"'`(<=])[a-z][a-z0-9+.-]*:\/{1,2}[^\s"'`()<>]*$/i.test(textBeforeCursor);
+	}
+
+	#openSyncSlashAutocomplete(): boolean {
+		const provider = this.#autocompleteProvider;
+		if (!provider?.trySyncSlashCompletion) return false;
+		const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
+		const textBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
+		const suggestions = provider.trySyncSlashCompletion(textBeforeCursor, { includeBare: true });
+		if (!suggestions || suggestions.items.length === 0) return false;
+
+		this.#autocompleteRequestId += 1;
+		this.#autocompleteAbortController?.abort();
+		this.#autocompletePrefix = suggestions.prefix;
+		this.#autocompleteList = this.#createAutocompleteList(suggestions.prefix, suggestions.items);
+		this.#autocompleteState = "regular";
+		this.onAutocompleteUpdate?.();
+		return true;
 	}
 
 	async #tryTriggerAutocomplete(explicitTab: boolean = false): Promise<void> {

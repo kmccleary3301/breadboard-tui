@@ -895,6 +895,12 @@ describe("trySyncSlashCompletion", () => {
 		const result = provider.trySyncSlashCompletion("/");
 		expect(result).toBeNull();
 	});
+	it("returns bare-slash command items for synchronous menu opening", () => {
+		const provider = new CombinedAutocompleteProvider([{ name: "model" }, { name: "skill:review" }], "/tmp");
+		const values = provider.trySyncSlashCompletion("/", { includeBare: true })?.items.map(item => item.value);
+		expect(values).toContain("model");
+		expect(values).toContain("skill:");
+	});
 
 	it("returns null for non-slash text", () => {
 		const provider = new CombinedAutocompleteProvider([], "/tmp");

@@ -238,9 +238,15 @@ export interface AutocompleteProvider {
 
 	/** Get inline hint text to show as dim ghost text after the cursor */
 	getInlineHint?(lines: string[], cursorLine: number, cursorCol: number): string | null;
-	/** Synchronously try to complete a slash command at the start of a line (no async I/O). */
-	/** Returns matched items and the full prefix, or null if not applicable. */
-	trySyncSlashCompletion?(textBeforeCursor: string): { items: AutocompleteItem[]; prefix: string } | null;
+	/**
+	 * Synchronously resolve slash-command items. By default a bare slash is
+	 * excluded so Enter cannot apply the first command accidentally; menu
+	 * callers may include it to avoid an otherwise redundant async render.
+	 */
+	trySyncSlashCompletion?(
+		textBeforeCursor: string,
+		options?: { includeBare?: boolean },
+	): { items: AutocompleteItem[]; prefix: string } | null;
 	/**
 	 * Synchronously try to expand text immediately before the cursor (no async I/O).
 	 * Called after every single-character insert. Implementations MUST cheaply
@@ -317,6 +323,27 @@ function buildSlashCommandCompletions(
 	lowerPrefix: string,
 	commandUsage?: (name: string) => number,
 ): AutocompleteItem[] {
+	if (lowerPrefix.length === 0) {
+		const matches: Array<AutocompleteItem & { score: number; usage: number }> = [];
+		for (const cmd of commands) {
+			const name = getCommandName(cmd);
+			if (!name) continue;
+			const hint = "argumentHint" in cmd && cmd.argumentHint ? cmd.argumentHint : undefined;
+			const displayDesc = getAutocompleteCommandDescription(cmd);
+			const description = hint ? (displayDesc ? `${hint} - ${displayDesc}` : hint) : displayDesc;
+			matches.push({
+				value: name,
+				label: "name" in cmd ? cmd.name : cmd.label,
+				score: name.startsWith(SKILL_NAMESPACE) ? 950 : 1,
+				usage: commandUsage?.(name) ?? 0,
+				...(cmd.icon && { icon: cmd.icon }),
+				...(description && { description }),
+			});
+		}
+		matches.sort((a, b) => b.score - a.score || b.usage - a.usage);
+		return matches.map(({ score: _score, usage: _usage, ...item }) => item);
+	}
+
 	return (
 		commands
 			.flatMap(cmd => {
@@ -1193,27 +1220,29 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 
 		return command.getInlineHint(argumentText);
 	}
-	trySyncSlashCompletion(textBeforeCursor: string): { items: AutocompleteItem[]; prefix: string } | null {
+	trySyncSlashCompletion(
+		textBeforeCursor: string,
+		options?: { includeBare?: boolean },
+	): { items: AutocompleteItem[]; prefix: string } | null {
 		const slashStart = findLeadingSlashCommandStart(textBeforeCursor);
 		if (slashStart === null) return null;
 		const commandText = textBeforeCursor.slice(slashStart);
-		if (commandText.length <= 1) return null; // Bare "/" alone, don't auto-complete
+		const includeBare = options?.includeBare === true;
+		if (commandText.length <= 1 && !includeBare) return null;
 		if (commandText.includes(" ")) return null; // Only complete command name, not args
 
 		const prefix = commandText.slice(1);
 		const lowerPrefix = prefix.toLowerCase();
-
-		// The `/skill:` namespace row is excluded here: the sync path submits
-		// immediately after applying, and the bare namespace is not a command.
 		const matches = buildSlashCommandCompletions(
 			collapseSkillNamespace(this.#commands, lowerPrefix),
 			lowerPrefix,
 			this.#commandUsage,
-		).filter(item => item.value !== SKILL_NAMESPACE);
+		);
+		const applicable = includeBare ? matches : matches.filter(item => item.value !== SKILL_NAMESPACE);
 
-		if (matches.length === 0) return null;
-		// Mirror `getSuggestions`: preserve leading whitespace so the editor's
-		// sync apply path passes the full text-before-cursor through.
-		return { items: matches, prefix: textBeforeCursor };
+		if (applicable.length === 0) return null;
+		// Preserve leading whitespace so the editor's apply path passes the
+		// full text-before-cursor through.
+		return { items: applicable, prefix: textBeforeCursor };
 	}
 }

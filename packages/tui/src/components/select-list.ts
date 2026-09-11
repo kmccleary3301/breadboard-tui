@@ -6,7 +6,6 @@ import { type MouseRoutable, routeSelectListMouse, type SgrMouseEvent } from "..
 import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
 import { Ellipsis, padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
-import { ScrollView } from "./scroll-view";
 
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
@@ -102,6 +101,11 @@ export class SelectList implements Component, MouseRoutable {
 	#hoveredIndex: number | null = null;
 	/** Per-render map of 0-based output line → filtered-item index. */
 	#hitRows: (number | undefined)[] = [];
+	#primaryColumnWidth: number | undefined;
+	#iconColumnWidth: number | undefined;
+	readonly #displayValues = new Map<SelectItem, string>();
+	readonly #descriptions = new Map<SelectItem, string>();
+	readonly #iconWidths = new Map<SelectItem, number>();
 
 	onSelect?: (item: SelectItem) => void;
 	onCancel?: () => void;
@@ -178,7 +182,11 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	invalidate(): void {
-		// No cached state to invalidate currently
+		this.#primaryColumnWidth = undefined;
+		this.#iconColumnWidth = undefined;
+		this.#displayValues.clear();
+		this.#descriptions.clear();
+		this.#iconWidths.clear();
 	}
 
 	render(width: number): readonly string[] {
@@ -259,14 +267,24 @@ export class SelectList implements Component, MouseRoutable {
 			}
 		}
 
-		const sv = new ScrollView(rows, {
-			height: rows.length,
-			scrollbar: "auto",
-			totalRows: visualTotal,
-			theme: { track: t => this.theme.scrollInfo(t), thumb: t => this.theme.selectedPrefix(t) },
-		});
-		sv.setScrollOffset(visualOffset);
-		lines.push(...sv.render(width));
+		if (width <= 0) {
+			lines.push(...rows.map(() => ""));
+		} else if (!overflow) {
+			lines.push(...rows);
+		} else {
+			const height = rows.length;
+			const thumbSize = Math.max(1, Math.min(Math.floor((height * height) / visualTotal), height));
+			const travel = height - thumbSize;
+			const maxOffset = Math.max(0, visualTotal - height);
+			const thumbStart = maxOffset === 0 ? 0 : Math.round((visualOffset / maxOffset) * travel);
+			for (let rowIndex = 0; rowIndex < height; rowIndex++) {
+				const row = rows[rowIndex] ?? "";
+				const content = `${row}${padding(rowWidth - visibleWidth(row))}`;
+				const thumb = rowIndex >= thumbStart && rowIndex < thumbStart + thumbSize;
+				const bar = thumb ? this.theme.selectedPrefix("█") : this.theme.scrollInfo("│");
+				lines.push(`${content}${bar}`);
+			}
+		}
 
 		// Add search status when relevant (scrollbar now indicates overflow)
 		if (showSearchStatus) {
@@ -443,10 +461,10 @@ export class SelectList implements Component, MouseRoutable {
 		const prefix = isSelected ? `${cursor} ` : padding(visibleWidth(cursor) + 1);
 		// Icon column: every row reserves the same width so labels stay aligned
 		// whether or not an individual item carries an icon.
-		const iconWidth = item.icon ? visibleWidth(item.icon) : 0;
+		const iconWidth = this.#getIconWidth(item);
 		const iconCell = iconColumnWidth > 0 ? (item.icon ?? "") + padding(iconColumnWidth - iconWidth + 1) : "";
 		const prefixWidth = visibleWidth(prefix) + (iconColumnWidth > 0 ? iconColumnWidth + 1 : 0);
-		const descriptionSingleLine = item.description ? sanitizeSingleLine(item.description) : undefined;
+		const descriptionSingleLine = this.#getDescription(item);
 
 		if (descriptionSingleLine && width > 40) {
 			const effectivePrimaryColumnWidth = Math.max(1, Math.min(primaryColumnWidth, width - prefixWidth - 4));
@@ -483,20 +501,28 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	#getIconColumnWidth(): number {
+		if (this.#iconColumnWidth !== undefined) return this.#iconColumnWidth;
 		let widest = 0;
 		for (const item of this.#filteredItems) {
-			if (item.icon) widest = Math.max(widest, visibleWidth(item.icon));
+			widest = Math.max(widest, this.#getIconWidth(item));
 		}
+		this.#iconColumnWidth = widest;
 		return widest;
 	}
 
 	#getPrimaryColumnWidth(): number {
+		if (this.#primaryColumnWidth !== undefined) return this.#primaryColumnWidth;
 		const { min, max } = this.#getPrimaryColumnBounds();
-		const widestPrimary = this.#filteredItems.reduce((widest, item) => {
-			return Math.max(widest, visibleWidth(this.#getDisplayValue(item)) + PRIMARY_COLUMN_GAP);
-		}, 0);
-
-		return clamp(widestPrimary, min, max);
+		let widestPrimary = 0;
+		for (const item of this.#filteredItems) {
+			widestPrimary = Math.max(widestPrimary, visibleWidth(this.#getDisplayValue(item)) + PRIMARY_COLUMN_GAP);
+			if (widestPrimary >= max) {
+				this.#primaryColumnWidth = max;
+				return max;
+			}
+		}
+		this.#primaryColumnWidth = clamp(widestPrimary, min, max);
+		return this.#primaryColumnWidth;
 	}
 
 	#getPrimaryColumnBounds(): { min: number; max: number } {
@@ -527,7 +553,29 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	#getDisplayValue(item: SelectItem): string {
-		return sanitizeSingleLine(item.label || item.value);
+		const cached = this.#displayValues.get(item);
+		if (cached !== undefined) return cached;
+		const value = sanitizeSingleLine(item.label || item.value);
+		this.#displayValues.set(item, value);
+		return value;
+	}
+
+	#getDescription(item: SelectItem): string | undefined {
+		if (!item.description) return undefined;
+		const cached = this.#descriptions.get(item);
+		if (cached !== undefined) return cached;
+		const value = sanitizeSingleLine(item.description);
+		this.#descriptions.set(item, value);
+		return value;
+	}
+
+	#getIconWidth(item: SelectItem): number {
+		if (!item.icon) return 0;
+		const cached = this.#iconWidths.get(item);
+		if (cached !== undefined) return cached;
+		const width = visibleWidth(item.icon);
+		this.#iconWidths.set(item, width);
+		return width;
 	}
 
 	#renderStatusLine(width: number): string {
@@ -580,6 +628,8 @@ export class SelectList implements Component, MouseRoutable {
 		} else {
 			this.#filteredItems = this.items;
 		}
+		this.#primaryColumnWidth = undefined;
+		this.#iconColumnWidth = undefined;
 		this.#selectedIndex = 0;
 		if (notify) {
 			this.#notifySelectionChange();
