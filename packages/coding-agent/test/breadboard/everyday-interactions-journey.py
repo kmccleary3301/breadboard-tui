@@ -1118,9 +1118,10 @@ class Journey:
                     )
                     allow = physical_allow_evidence(self.roots["agent"], self.roots["workspace"], binding)
                     write_json(self.output / "allow-execution-evidence.json", allow)
+                    allow_details = {k: v for k, v in allow.items() if k != "status"}
                     self.record(
                         "approval-allow-tool-runs", allow["status"], tool_capture,
-                        CONVENTIONS["approval"], **allow,
+                        CONVENTIONS["approval"], **allow_details,
                     )
                     if allow["status"] != "PASS":
                         return
