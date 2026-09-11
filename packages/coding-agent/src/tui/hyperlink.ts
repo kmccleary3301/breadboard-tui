@@ -35,22 +35,44 @@ const BEL = "\x07";
 const DETECTED_TERMINAL_HYPERLINKS = TERMINAL.hyperlinks;
 type HyperlinkMode = "off" | "auto" | "always";
 
+let lastLinkIdUri: string | undefined;
+let lastLinkId: string | undefined;
+let lastFileUri:
+	| {
+			readonly filePath: string;
+			readonly line: number | undefined;
+			readonly col: number | undefined;
+			readonly uri: string;
+	  }
+	| undefined;
+
 /** Stable 8-char hex ID derived from a URI — hints terminals to coalesce identical adjacent links. */
 function buildLinkId(uri: string): string {
+	if (uri === lastLinkIdUri && lastLinkId !== undefined) return lastLinkId;
 	let h = 0;
 	for (let i = 0; i < uri.length; i++) {
 		// FNV-1a-inspired mix — good enough for a UI hint, no deps
 		h = (Math.imul(31, h) + uri.charCodeAt(i)) | 0;
 	}
-	return (h >>> 0).toString(16).padStart(8, "0");
+	const id = (h >>> 0).toString(16).padStart(8, "0");
+	lastLinkIdUri = uri;
+	lastLinkId = id;
+	return id;
 }
 
 /** Build a properly encoded `file://` URI with optional line/col query params. */
 function buildFileUri(filePath: string, opts?: { line?: number; col?: number }): string {
+	const line = opts?.line;
+	const col = opts?.col;
+	if (lastFileUri?.filePath === filePath && lastFileUri.line === line && lastFileUri.col === col) {
+		return lastFileUri.uri;
+	}
 	const uri = url.pathToFileURL(filePath);
-	if (opts?.line !== undefined) uri.searchParams.set("line", String(opts.line));
-	if (opts?.col !== undefined) uri.searchParams.set("col", String(opts.col));
-	return uri.href;
+	if (line !== undefined) uri.searchParams.set("line", String(line));
+	if (col !== undefined) uri.searchParams.set("col", String(col));
+	const href = uri.href;
+	lastFileUri = { filePath, line, col, uri: href };
+	return href;
 }
 
 /**
