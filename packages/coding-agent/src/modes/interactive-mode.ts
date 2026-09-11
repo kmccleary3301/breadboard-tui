@@ -5004,7 +5004,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** Shared `shutdown()`/`restart()` teardown: dispose the session and hand the terminal back. */
 	async #teardown(): Promise<void> {
-		await logger.time("InteractiveMode.teardown.liveCommandController.stop", () => this.#liveCommandController.stop());
+		await logger.time("InteractiveMode.teardown.liveCommandController.stop", () =>
+			this.#liveCommandController.stop(),
+		);
 
 		this.#btwController.dispose();
 		this.#omfgController.dispose();
@@ -5843,6 +5845,7 @@ export class InteractiveMode implements InteractiveModeContext {
 							? `${resolvedHarness.id.slice(0, -4)}.lock.json`
 							: `${resolvedHarness.id}.lock.json`;
 			const configPath = resolvedHarness.id;
+			await this.sessionManager.ensureOnDisk();
 			const parentSession = this.sessionManager.getSessionFile() ?? this.sessionManager.getSessionId();
 			const switched = await this.#switchHarnessSession(configPath, lockId, () =>
 				this.session.newSession({

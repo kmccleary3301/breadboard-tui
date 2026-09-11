@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { describe, expect, it } from "bun:test";
 import { Markdown } from "@oh-my-pi/pi-tui";
+import { UserMessageComponent } from "../src/modes/components/user-message";
 import { WelcomeComponent } from "../src/modes/components/welcome";
 import { attachmentSgr } from "../src/modes/composer-attachments";
 import { highlightMagicKeywords } from "../src/modes/magic-keywords";
@@ -109,7 +110,10 @@ describe("product renderer capability matrix", () => {
 					getMarkdownTheme(),
 				).render(80);
 				const markdownOutput = markdown.join("\n");
+				const userMessage = new UserMessageComponent("A readable user message").render(80);
+				expect(Bun.stripANSI(userMessage.join("\n"))).toContain("A readable user message");
 				const output = [
+					...userMessage,
 					...new WelcomeComponent(
 						"1.0.0",
 						"model",

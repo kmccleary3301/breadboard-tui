@@ -357,6 +357,7 @@ export class Theme {
 	 */
 	fgOnBg(color: ThemeColor, background: ThemeBg, text: string): string {
 		const ansi = this.getFgOnBgAnsi(color, background);
+		if (!ansi) return text;
 		return `${ansi}${text.replace(FOREGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[39m`;
 	}
 
@@ -399,11 +400,9 @@ export class Theme {
 	 * Explicit theme colors win; terminal-default tokens become black or near-white.
 	 */
 	getFgOnBgAnsi(color: ThemeColor, background: ThemeBg): string {
-		const ansi = this.#fgColors[color];
-		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		const ansi = this.getFgAnsi(color);
 		if (ansi !== "\x1b[39m") return ansi;
-		const backgroundAnsi = this.#bgColors[background];
-		if (!backgroundAnsi) throw new Error(`Unknown theme background color: ${background}`);
+		const backgroundAnsi = this.getBgAnsi(background);
 		if (backgroundAnsi === "\x1b[49m") return ansi;
 		const backgroundLuma = colorLuma(this.getBgHex(background));
 		return colorToAnsi(backgroundLuma !== undefined && backgroundLuma > 0.5 ? "#000000" : "#e5e5e7", this.mode);
