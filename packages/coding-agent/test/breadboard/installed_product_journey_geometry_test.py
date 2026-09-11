@@ -16,19 +16,42 @@ RUNNER_SPEC.loader.exec_module(runner)
 
 
 class InstalledProductJourneyGeometryTests(unittest.TestCase):
-    def test_terminal_screen_resize_drops_grid_and_clamps_cursor(self) -> None:
+    def test_terminal_screen_resize_clears_and_clamps_with_split_escape(self) -> None:
         screen = runner.TerminalScreen(rows=2, columns=8)
-        screen.feed(b"0123456789abcdef\x1b")
-        self.assertEqual(screen.pending, "\x1b")
-        self.assertEqual((screen.row, screen.column), (1, 8))
-
+        screen.feed(b"0123456789abcdef")
         screen.resize(2, 3)
+        self.assertEqual(screen.text(), "")
+        screen.feed(b"Z\x1b")
+        screen.feed(b"[HX")
+        self.assertEqual(screen.text(), "X\n  Z\n")
 
-        self.assertEqual(screen.rows, 2)
-        self.assertEqual(screen.columns, 3)
-        self.assertEqual((screen.row, screen.column), (1, 2))
-        self.assertEqual(screen.grid, [[" "] * 3 for _ in range(2)])
-        self.assertEqual(screen.pending, "\x1b")
+    def test_alternate_screen_restores_primary_content_and_saved_cursor(self) -> None:
+        screen = runner.TerminalScreen(rows=3, columns=16)
+        screen.feed(b"PRIMARY\x1b7\x1b[2;3H\x1b[?104")
+        screen.feed(b"9h\x1b[HPANEL\x1b7\x1b[3;1Hother")
+        self.assertEqual(screen.text(), "PANEL\n\nother\n")
+        screen.feed(b"\x1b[?1049l!\x1b[H\x1b8?")
+        self.assertEqual(screen.text(), "PRIMARY\n  ?\n")
+
+    def test_alternate_screen_switches_are_private_and_repeat_safe(self) -> None:
+        screen = runner.TerminalScreen(rows=3, columns=16)
+        screen.feed(b"MAIN\x1b[1049h?")
+        self.assertEqual(screen.text(), "MAIN?\n")
+        screen.feed(b"\x1b[?1049h\x1b[HALT\x1b[?1049h")
+        self.assertEqual(screen.text(), "ALT\n")
+        screen.feed(b"\x1b[?1049l!\x1b[?1049l?")
+        self.assertEqual(screen.text(), "MAIN?!?\n")
+        screen.feed(b"\x1b[?1049h")
+        self.assertEqual(screen.text(), "")
+        screen.feed(b"\x1b[?1049l")
+        self.assertEqual(screen.text(), "MAIN?!?\n")
+
+    def test_resize_in_alternate_screen_does_not_restore_obsolete_geometry(self) -> None:
+        screen = runner.TerminalScreen(rows=3, columns=16)
+        screen.feed(b"PRIMARY\x1b[3;16H\x1b[?1049h\x1b[HPANEL")
+        screen.resize(2, 3)
+        screen.feed(b"\x1b[?1049lX")
+        self.assertEqual(screen.text(), "\n  X\n")
 
     def test_pty_resize_updates_child_and_parser(self) -> None:
         child = runner.PtyChild(

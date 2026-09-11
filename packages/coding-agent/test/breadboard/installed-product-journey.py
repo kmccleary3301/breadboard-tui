@@ -806,6 +806,7 @@ class TerminalScreen:
         self.row = 0
         self.column = 0
         self.saved = (0, 0)
+        self.primary_screen: tuple[list[list[str]], int, int] | None = None
         self.pending = ""
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
 
@@ -822,6 +823,13 @@ class TerminalScreen:
             max(0, min(self.saved[0], rows - 1)),
             max(0, min(self.saved[1], columns - 1)),
         )
+        if self.primary_screen is not None:
+            _, row, column = self.primary_screen
+            self.primary_screen = (
+                [[" "] * columns for _ in range(rows)],
+                max(0, min(row, rows - 1)),
+                max(0, min(column, columns - 1)),
+            )
 
     def feed(self, data: bytes) -> None:
         self.pending += self.decoder.decode(data)
@@ -916,6 +924,17 @@ class TerminalScreen:
     def _csi(self, raw: str, final: str) -> None:
         values = self._params(raw)
         count = values[0] or 1
+        if final in {"h", "l"}:
+            if raw.startswith("?") and 1049 in values:
+                if final == "h" and self.primary_screen is None:
+                    self.primary_screen = (self.grid, self.row, self.column)
+                    self.saved = (self.row, self.column)
+                    self.grid = [[" "] * self.columns for _ in range(self.rows)]
+                elif final == "l" and self.primary_screen is not None:
+                    self.grid, self.row, self.column = self.primary_screen
+                    self.saved = (self.row, self.column)
+                    self.primary_screen = None
+            return
         if final in {"H", "f"}:
             self.row = max(0, min(self.rows - 1, (values[0] or 1) - 1))
             self.column = max(
