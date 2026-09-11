@@ -3346,8 +3346,8 @@ export class Editor implements Component, Focusable {
 	 *   engages for command-shaped selections: absolute-path completions (`/tmp/fo`
 	 *   via the no-command-match fall-through) share the leading-slash prefix shape
 	 *   but must use the live-suffix path rule so the apply slice stays anchored.
-	 *   A changed normal token must also retain the selected canonical value in the
-	 *   provider's current synchronous slash candidates.
+	 *   A changed normal token must also retain the selected value as the
+	 *   provider's first-ranked current synchronous slash candidate.
 	 * - Mid-prompt skill branch re-anchors when the popup item is a skill and the
 	 *   current text still ends in a matching trailing slash token, preventing a
 	 *   stale selection from replacing a newer skill prefix.
@@ -3383,7 +3383,7 @@ export class Editor implements Component, Focusable {
 				const token = currentTextBeforeCursor.slice(currentLeadingStart);
 				if (!token.includes(" ") && !token.slice(1).includes("/")) {
 					const currentCandidates = this.#autocompleteProvider?.trySyncSlashCompletion?.(currentTextBeforeCursor);
-					if (!item || !currentCandidates?.items.some(candidate => candidate.value === item.value)) return false;
+					if (!item || currentCandidates?.items[0]?.value !== item.value) return false;
 					return true;
 				}
 			}

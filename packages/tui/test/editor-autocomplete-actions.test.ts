@@ -116,13 +116,17 @@ describe("Editor async autocomplete scheduling", () => {
 });
 
 describe("Editor slash autocomplete acceptance", () => {
-	it("submits the current command instead of a stale slash selection", async () => {
+	it("submits the current command instead of a lower-ranked stale description match", async () => {
 		const editor = new Editor(defaultEditorTheme);
 		editor.setAutocompleteProvider(
 			new CombinedAutocompleteProvider(
 				[
-					{ name: "harness", description: "Harness" },
-					{ name: "team", description: "Team" },
+					{
+						name: "harness",
+						description:
+							"Harness: daily_driver.v1 · generation sha256:1c756e4ff8ae7dee8dd96e37ba759dce661054245e387cd3dcba357b78dbd5af · Lock-derived command",
+					},
+					{ name: "team", description: "[Harness] Static harness panel" },
 				],
 				"/tmp",
 			),
