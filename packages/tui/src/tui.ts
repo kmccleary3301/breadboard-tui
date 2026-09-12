@@ -65,6 +65,7 @@ const LINE_FIT_MIN_SOURCE_CODE_UNITS = 4096;
 const LINE_FIT_MAX_SOURCE_CODE_UNITS = 65536;
 const LINE_FIT_SOURCE_WIDTH_MULTIPLIER = 64;
 const PREPARED_LINE_CACHE_LIMIT = 1024;
+const PREPARED_LINE_CACHE_MAX_CODE_UNITS = 4096;
 // Hide the hardware cursor before each paint/move write. Ghostty-style bar
 // cursors can otherwise leave visual afterimages while the TUI repaints the
 // row under a visible cursor. Paint writes also disable terminal autowrap:
@@ -718,11 +719,12 @@ export class TUI extends Container {
 	#previousFrameLength = 0;
 	#previousWidth = 0;
 	#previousHeight = 0;
-	// Line normalization and width fitting are deterministic for one terminal
-	// width. Most differential frames retain nearly every row, so preserve the
+	// Line normalization and width fitting depend on width configuration and
+	// image protocol. Most differential frames retain nearly every row, so preserve the
 	// prepared bytes instead of reparsing ANSI and remeasuring stable lines.
 	#preparedLineCacheWidth = 0;
 	#preparedLineCacheEpoch = -1;
+	#preparedLineCacheImageProtocol = TERMINAL.imageProtocol;
 	#preparedLineCacheHot = new Map<string, string>();
 	#preparedLineCacheCold = new Map<string, string>();
 	#focusedComponent: Component | null = null;
@@ -2861,18 +2863,25 @@ export class TUI extends Container {
 
 	#prepareLine(raw: string, width: number): string {
 		const widthEpoch = getWidthConfigEpoch();
-		if (width !== this.#preparedLineCacheWidth || widthEpoch !== this.#preparedLineCacheEpoch) {
+		if (
+			width !== this.#preparedLineCacheWidth ||
+			widthEpoch !== this.#preparedLineCacheEpoch ||
+			TERMINAL.imageProtocol !== this.#preparedLineCacheImageProtocol
+		) {
 			this.#preparedLineCacheWidth = width;
 			this.#preparedLineCacheEpoch = widthEpoch;
+			this.#preparedLineCacheImageProtocol = TERMINAL.imageProtocol;
 			this.#preparedLineCacheHot.clear();
 			this.#preparedLineCacheCold.clear();
 		}
-		const hot = this.#preparedLineCacheHot.get(raw);
-		if (hot !== undefined) return hot;
-		const cold = this.#preparedLineCacheCold.get(raw);
-		if (cold !== undefined) {
-			this.#rememberPreparedLine(raw, cold);
-			return cold;
+		if (raw.length <= PREPARED_LINE_CACHE_MAX_CODE_UNITS) {
+			const hot = this.#preparedLineCacheHot.get(raw);
+			if (hot !== undefined) return hot;
+			const cold = this.#preparedLineCacheCold.get(raw);
+			if (cold !== undefined) {
+				this.#rememberPreparedLine(raw, cold);
+				return cold;
+			}
 		}
 
 		let line: string;
@@ -2892,6 +2901,7 @@ export class TUI extends Container {
 	}
 
 	#rememberPreparedLine(raw: string, line: string): void {
+		if (raw.length > PREPARED_LINE_CACHE_MAX_CODE_UNITS || line.length > PREPARED_LINE_CACHE_MAX_CODE_UNITS) return;
 		if (this.#preparedLineCacheHot.size >= PREPARED_LINE_CACHE_LIMIT) {
 			this.#preparedLineCacheCold = this.#preparedLineCacheHot;
 			this.#preparedLineCacheHot = new Map();

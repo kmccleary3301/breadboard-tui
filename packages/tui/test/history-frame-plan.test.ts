@@ -6,6 +6,7 @@ import {
 	TUI,
 	type ViewportSize,
 } from "@oh-my-pi/pi-tui";
+import { ImageProtocol, setTerminalImageProtocol, TERMINAL } from "../src/terminal-capabilities";
 import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
 
@@ -485,5 +486,23 @@ describe("terminal frame plans", () => {
 		expect(resized.some(row => row.includes("@20"))).toBe(false);
 		expect(resized).toEqual(["history-one@30", "history-two@30", "editor@30"]);
 		tui.stop();
+	});
+
+	it("preserves an image row after runtime protocol detection", () => {
+		const originalProtocol = TERMINAL.imageProtocol;
+		const terminal = new CountingTerminal(4, 2);
+		const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
+		const row = "\x1bPq~\x1b\\ABCDEFGHIJKLMN";
+		try {
+			setTerminalImageProtocol(null);
+			tui.setFrameProvider(new Provider({ viewport: [row] }));
+			setTerminalImageProtocol(ImageProtocol.Sixel);
+			terminal.writes.length = 0;
+			tui.requestRender(true);
+			expect(terminal.writes.join("")).toContain(row);
+		} finally {
+			tui.stop();
+			setTerminalImageProtocol(originalProtocol);
+		}
 	});
 });
