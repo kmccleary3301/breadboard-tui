@@ -55,6 +55,8 @@ const WATCHER_FAILURE_POLL_TTL_MS = 5000;
 const BRAND_FADE_MS = 450;
 /** Repaint cadence while the brand fade is in flight (rust omp's `FADE_FRAME`). */
 const BRAND_FADE_FRAME_MS = 40;
+/** Bound stale external snapshots while reusing status chrome across burst renders. */
+const STATUS_RENDER_CACHE_MS = 250;
 
 /** A displayable limit after provider, account, model, and window filtering. */
 interface UsageWindowCandidate {
@@ -250,6 +252,16 @@ export class StatusLineComponent implements Component {
 	#standaloneGap = false;
 	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#renderRevision = 0;
+	#renderCache:
+		| {
+				width: number;
+				revision: number;
+				bucket: number;
+				standalone: false | "full" | "left-only";
+				autocompleteActive: boolean;
+				lines: readonly string[];
+		  }
+		| undefined;
 	#settings: StatusLineSettings = {};
 	#effectiveSettings: EffectiveStatusLineSettings | undefined;
 	#cachedBranch: string | null | undefined = undefined;
@@ -481,6 +493,7 @@ export class StatusLineComponent implements Component {
 		this.#settings = settings;
 		this.#effectiveSettings = undefined;
 		if (this.#onBranchChange) this.#setupGitWatcher();
+		this.#renderCache = undefined;
 	}
 
 	getEffectiveSettingsForTest(): EffectiveStatusLineSettings {
@@ -489,11 +502,13 @@ export class StatusLineComponent implements Component {
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.#autoCompactEnabled = enabled;
+		this.#renderCache = undefined;
 	}
 
 	setRunningSubagents(agentIds: readonly string[]): void {
 		this.#subagentCount = agentIds.length;
 		this.#runningSubagentIds = new Set(agentIds);
+		this.#renderCache = undefined;
 	}
 
 	/**
@@ -519,6 +534,7 @@ export class StatusLineComponent implements Component {
 		const meter = this.#meter();
 		meter.activeMs = 0;
 		meter.activeStartedAt = null;
+		this.#renderCache = undefined;
 	}
 
 	/**
@@ -532,6 +548,7 @@ export class StatusLineComponent implements Component {
 		const meter = this.#meter();
 		if (meter.activeStartedAt !== null) return;
 		meter.activeStartedAt = Date.now();
+		this.#renderCache = undefined;
 	}
 
 	/**
@@ -545,6 +562,7 @@ export class StatusLineComponent implements Component {
 		if (meter.activeStartedAt === null) return;
 		meter.activeMs += Math.max(0, Date.now() - meter.activeStartedAt);
 		meter.activeStartedAt = null;
+		this.#renderCache = undefined;
 	}
 
 	/**
@@ -597,18 +615,22 @@ export class StatusLineComponent implements Component {
 
 	setPlanModeStatus(status: { enabled: boolean; paused: boolean } | undefined): void {
 		this.#planModeStatus = status ?? null;
+		this.#renderCache = undefined;
 	}
 
 	setLoopModeStatus(status: NonNullable<SegmentContext["loopMode"]> | undefined): void {
 		this.#loopModeStatus = status ?? null;
+		this.#renderCache = undefined;
 	}
 
 	setGoalModeStatus(status: { enabled: boolean; paused: boolean } | undefined): void {
 		this.#goalModeStatus = status ?? null;
+		this.#renderCache = undefined;
 	}
 
 	setVibeModeStatus(status: { enabled: boolean } | undefined): void {
 		this.#vibeModeStatus = status ?? null;
+		this.#renderCache = undefined;
 	}
 
 	/**
@@ -620,10 +642,12 @@ export class StatusLineComponent implements Component {
 	 */
 	setVibeWorkerTokenRateProvider(provider: (() => number | null) | undefined): void {
 		this.#vibeWorkerTokenRate = provider ?? null;
+		this.#renderCache = undefined;
 	}
 
 	setCollabStatus(status: CollabStatus | null): void {
 		this.#collabStatus = status;
+		this.#renderCache = undefined;
 	}
 	setHarness(harness: HarnessSnapshot | null | undefined): void {
 		this.#harness = harness ?? null;
@@ -645,6 +669,7 @@ export class StatusLineComponent implements Component {
 		this.#sortedHookStatuses = Array.from(this.#hookStatuses.entries())
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([, status]) => status);
+		this.#renderCache = undefined;
 	}
 
 	watchBranch(onBranchChange: () => void): void {
@@ -2306,11 +2331,13 @@ export class StatusLineComponent implements Component {
 		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
 		this.#topAttachment = style.statusAttachment;
 		this.#standaloneGap = style.bottomBarGap;
+		this.#renderCache = undefined;
 	}
 
 	/** While true, the standalone bar yields its row to the editor's autocomplete menu. */
 	setAutocompleteActiveProbe(probe: (() => boolean) | undefined): void {
 		this.#autocompleteActiveProbe = probe;
+		this.#renderCache = undefined;
 	}
 
 	/** Plain right-group content for the claude composer's top rule. */
@@ -2373,8 +2400,26 @@ export class StatusLineComponent implements Component {
 	}
 
 	render(width: number): readonly string[] {
+		const autocompleteActive = this.#autocompleteActiveProbe?.() === true;
+		const bucket = Math.floor(Date.now() / STATUS_RENDER_CACHE_MS);
+		const cacheable =
+			this.getTurnElapsedMs() === null &&
+			this.#brandFade === null &&
+			this.session.compactionSpeculation !== "running";
+		const cached = this.#renderCache;
+		if (
+			cacheable &&
+			cached?.width === width &&
+			cached.revision === this.#renderRevision &&
+			cached.bucket === bucket &&
+			cached.standalone === this.#standalone &&
+			cached.autocompleteActive === autocompleteActive
+		) {
+			return cached.lines;
+		}
+
 		const lines: string[] = [];
-		if (this.#standalone && !this.#autocompleteActiveProbe?.()) {
+		if (this.#standalone && !autocompleteActive) {
 			const content = this.renderBottomBar(width, this.#standalone === "left-only" ? "left" : "full");
 			if (content) {
 				if (this.#standaloneGap) lines.push("");
@@ -2385,6 +2430,16 @@ export class StatusLineComponent implements Component {
 		if (showHooks && this.#sortedHookStatuses.length > 0) {
 			lines.push(...this.#sortedHookStatuses.map(text => truncateToWidth(sanitizeStatusText(text), width)));
 		}
+		this.#renderCache = cacheable
+			? {
+					width,
+					revision: this.#renderRevision,
+					bucket,
+					standalone: this.#standalone,
+					autocompleteActive,
+					lines,
+				}
+			: undefined;
 		return lines;
 	}
 }

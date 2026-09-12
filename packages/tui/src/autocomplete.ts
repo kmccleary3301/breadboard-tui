@@ -279,6 +279,8 @@ type CommandEntry = SlashCommand | AutocompleteItem;
 export interface CombinedAutocompleteOptions {
 	/** Usage count per command name; higher counts rank earlier among equal text-match scores. */
 	commandUsage?: (name: string) => number;
+	/** Monotonic revision for usage counts; enables safe reuse of bare-slash ranking. */
+	commandUsageRevision?: () => number;
 }
 
 function getCommandName(cmd: CommandEntry): string | undefined {
@@ -556,6 +558,8 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 	#commands: CommandEntry[];
 	#basePath: string;
 	#commandUsage?: (name: string) => number;
+	#commandUsageRevision?: () => number;
+	#bareCommandCompletions?: { revision: number; items: AutocompleteItem[] };
 	// Intentionally separate from pi-natives cache: this cache is a local,
 	// per-directory readdir fast-path for prefix completions. Global fuzzy
 	// discovery continues to use native fuzzyFind + shared scan cache.
@@ -570,6 +574,28 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		this.#commands = commands;
 		this.#basePath = basePath;
 		this.#commandUsage = options?.commandUsage;
+		this.#commandUsageRevision = options?.commandUsageRevision;
+	}
+
+	#buildCommandCompletions(lowerPrefix: string): AutocompleteItem[] {
+		if (lowerPrefix.length !== 0) {
+			return buildSlashCommandCompletions(
+				collapseSkillNamespace(this.#commands, lowerPrefix),
+				lowerPrefix,
+				this.#commandUsage,
+			);
+		}
+		const revision = this.#commandUsageRevision?.();
+		if (this.#commandUsage && revision === undefined) {
+			return buildSlashCommandCompletions(collapseSkillNamespace(this.#commands, ""), "", this.#commandUsage);
+		}
+		const cacheRevision = revision ?? 0;
+		if (this.#bareCommandCompletions?.revision === cacheRevision) {
+			return this.#bareCommandCompletions.items;
+		}
+		const items = buildSlashCommandCompletions(collapseSkillNamespace(this.#commands, ""), "", this.#commandUsage);
+		this.#bareCommandCompletions = { revision: cacheRevision, items };
+		return items;
 	}
 
 	async getSuggestions(
@@ -606,11 +632,7 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 
 				const matches = isMidPromptSkillLookup
 					? buildMidPromptSkillCompletions(this.#commands, lowerPrefix)
-					: buildSlashCommandCompletions(
-							collapseSkillNamespace(this.#commands, lowerPrefix),
-							lowerPrefix,
-							this.#commandUsage,
-						);
+					: this.#buildCommandCompletions(lowerPrefix);
 
 				if (matches.length > 0) {
 					return {
@@ -1250,11 +1272,7 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 
 		const prefix = commandText.slice(1);
 		const lowerPrefix = prefix.toLowerCase();
-		const matches = buildSlashCommandCompletions(
-			collapseSkillNamespace(this.#commands, lowerPrefix),
-			lowerPrefix,
-			this.#commandUsage,
-		);
+		const matches = this.#buildCommandCompletions(lowerPrefix);
 		const applicable = includeBare ? matches : matches.filter(item => item.value !== SKILL_NAMESPACE);
 
 		if (applicable.length === 0) return null;

@@ -17,6 +17,7 @@ import { AgentStorage } from "../session/agent-storage";
 let counts: Record<string, number> = {};
 let storage: AgentStorage | undefined;
 let loadPromise: Promise<void> | undefined;
+let revision = 0;
 
 /** Load persisted usage counts once per process; concurrent calls share one read. */
 export function loadSlashCommandUsage(): Promise<void> {
@@ -27,6 +28,7 @@ export function loadSlashCommandUsage(): Promise<void> {
 			// Keep hits recorded while the load was in flight visible in ranking.
 			for (const name in counts) persisted[name] = (persisted[name] ?? 0) + counts[name]!;
 			counts = persisted;
+			revision++;
 			storage = opened;
 		} catch (err) {
 			logger.warn("Failed to load slash command usage", { error: String(err) });
@@ -40,9 +42,15 @@ export function getSlashCommandUsage(name: string): number {
 	return counts[name] ?? 0;
 }
 
+/** Monotonic revision for cached usage-ranked slash completion lists. */
+export function getSlashCommandUsageRevision(): number {
+	return revision;
+}
+
 /** Increment a command's usage count; persists when the store is loaded. */
 export function recordSlashCommandUsage(name: string): void {
 	counts[name] = (counts[name] ?? 0) + 1;
+	revision++;
 	storage?.recordCommandUsage(name);
 }
 
@@ -51,4 +59,5 @@ export function __resetSlashCommandUsageForTests(): void {
 	counts = {};
 	storage = undefined;
 	loadPromise = undefined;
+	revision++;
 }

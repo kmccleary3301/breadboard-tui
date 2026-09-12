@@ -35,6 +35,8 @@ interface PromptActionAutocompleteOptions {
 	basePath: string;
 	/** Usage count per command name for frequency-ranked slash completions. */
 	commandUsage?: (name: string) => number;
+	/** Monotonic revision for usage-ranked bare-slash completions. */
+	commandUsageRevision?: () => number;
 	/** Read the receiving session at lookup time, following focus and session replacement. */
 	internalUrlCaller?: () => InternalUrlCallerContext;
 	keybindings: KeybindingsManager;
@@ -141,10 +143,14 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 		basePath: string,
 		actions: PromptActionDefinition[],
 		commandUsage?: (name: string) => number,
+		commandUsageRevision?: () => number,
 		internalUrlCaller?: () => InternalUrlCallerContext,
 	) {
 		this.#commands = commands;
-		this.#baseProvider = new CombinedAutocompleteProvider(commands, basePath, { commandUsage });
+		this.#baseProvider = new CombinedAutocompleteProvider(commands, basePath, {
+			commandUsage,
+			commandUsageRevision,
+		});
 		this.#internalUrlCaller = internalUrlCaller ?? (() => ({ cwd: basePath }));
 		this.#actions = actions;
 	}
@@ -344,6 +350,7 @@ export function createPromptActionAutocompleteProvider(
 		options.basePath,
 		actions,
 		options.commandUsage,
+		options.commandUsageRevision,
 		options.internalUrlCaller,
 	);
 }

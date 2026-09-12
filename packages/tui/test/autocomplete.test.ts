@@ -1048,6 +1048,32 @@ describe("trySyncSlashCompletion", () => {
 		expect(plain?.items.map(i => i.value)).toEqual(["setup", "settings", "session"]);
 	});
 
+	it("reuses bare-slash ranking until command usage changes", async () => {
+		const commands = [{ name: "setup" }, { name: "settings" }];
+		const usage: Record<string, number> = {};
+		let revision = 0;
+		let usageReads = 0;
+		const provider = new CombinedAutocompleteProvider(commands, "/tmp", {
+			commandUsage: name => {
+				usageReads++;
+				return usage[name] ?? 0;
+			},
+			commandUsageRevision: () => revision,
+		});
+
+		const first = await provider.getSuggestions(["/"], 0, 1);
+		const readsAfterFirst = usageReads;
+		const second = await provider.getSuggestions(["/"], 0, 1);
+		expect(second?.items).toBe(first?.items);
+		expect(usageReads).toBe(readsAfterFirst);
+
+		usage.settings = 1;
+		revision++;
+		const updated = await provider.getSuggestions(["/"], 0, 1);
+		expect(updated?.items.map(item => item.value)).toEqual(["settings", "setup"]);
+		expect(usageReads).toBeGreaterThan(readsAfterFirst);
+	});
+
 	it("carries command icons into name and alias suggestion rows", async () => {
 		const provider = new CombinedAutocompleteProvider(
 			[
