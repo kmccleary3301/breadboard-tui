@@ -30,10 +30,10 @@ interface PendingContextSnapshot {
 	 */
 	epoch: number;
 }
-interface ContextUsageTurnMemo {
+interface ContextUsageMemo {
 	messages: readonly AgentMessage[];
 	messageCount: number;
-	lastMessage: AgentMessage | undefined;
+	lastFingerprint: string | undefined;
 	contextWindow: number | undefined;
 	revision: number;
 	systemPrompt: readonly string[] | undefined;
@@ -55,6 +55,125 @@ export interface SessionStatsTrackerHost {
 function correctedPromptTokens(assistant: AssistantMessage): number {
 	const providerPromptTokens = assistant.contextSnapshot?.promptTokens ?? calculatePromptTokens(assistant.usage);
 	return Math.max(0, providerPromptTokens - (assistant.contextSnapshot?.historyRewriteTokensRemoved ?? 0));
+}
+/**
+ * Cheap structural fingerprint of a message's tokenizable content. O(blocks) —
+ * only reads string `.length` and primitives, never copies or serializes.
+ * Detects in-place growth of the streaming tail (and other in-place mutations)
+ * so the cached `getContextUsage()` result is recomputed when — and only when —
+ * the numbers it depends on change.
+ */
+export function messageFingerprint(msg: AgentMessage): string {
+	const role = (msg as { role?: string }).role ?? "";
+	const ts = (msg as { timestamp?: number }).timestamp ?? 0;
+	let textLen = 0;
+	let blocks = 0;
+	let images = 0;
+	if (role === "bashExecution") {
+		const b = msg as { command?: unknown; output?: unknown };
+		if (typeof b.command === "string") textLen += b.command.length;
+		if (typeof b.output === "string") textLen += b.output.length;
+	} else if (role === "user") {
+		const content = (msg as { content?: unknown }).content;
+		if (typeof content === "string") {
+			textLen += content.length;
+		} else if (Array.isArray(content)) {
+			blocks = content.length;
+			for (const block of content) {
+				if (block?.type === "text" && typeof block.text === "string") textLen += block.text.length;
+			}
+		}
+	} else if (role === "assistant") {
+		const assistantMsg = msg as AssistantMessage;
+		const usageExt = assistantMsg.usage as unknown as { promptTokensDetails?: unknown };
+		const usageTotal = assistantMsg.usage?.totalTokens ?? 0;
+		const promptBuckets = usageExt?.promptTokensDetails ? 1 : 0;
+		const stopReason = assistantMsg.stopReason ?? "";
+
+		let signatureLen = 0;
+		let redactedLen = 0;
+		const msgExt = assistantMsg as unknown as {
+			thinkingSignature?: string;
+			textSignature?: string;
+			thoughtSignature?: string;
+			redactedThinking?: { data?: string };
+		};
+		const thinkingSignature = msgExt.thinkingSignature;
+		if (typeof thinkingSignature === "string") {
+			signatureLen += thinkingSignature.length;
+		}
+		const textSignature = msgExt.textSignature;
+		if (typeof textSignature === "string") {
+			signatureLen += textSignature.length;
+		}
+		const thoughtSignature = msgExt.thoughtSignature;
+		if (typeof thoughtSignature === "string") {
+			signatureLen += thoughtSignature.length;
+		}
+		const redactedData = msgExt.redactedThinking?.data;
+		if (typeof redactedData === "string") {
+			redactedLen += redactedData.length;
+		}
+
+		const content = (msg as { content?: unknown }).content;
+		if (Array.isArray(content)) {
+			blocks = content.length;
+			for (const block of content) {
+				if (!block || typeof block !== "object") continue;
+				const b = block as {
+					type?: string;
+					text?: string;
+					thinking?: string;
+					thinkingSignature?: string;
+					signature?: string;
+					textSignature?: string;
+					thoughtSignature?: string;
+					data?: string;
+					name?: string;
+					arguments?: unknown;
+				};
+				if (b.type === "text" && typeof b.text === "string") textLen += b.text.length;
+				else if (b.type === "thinking") {
+					if (typeof b.thinking === "string") textLen += b.thinking.length;
+					if (typeof b.thinkingSignature === "string") signatureLen += b.thinkingSignature.length;
+					if (typeof b.signature === "string") signatureLen += b.signature.length;
+					if (typeof b.textSignature === "string") signatureLen += b.textSignature.length;
+					if (typeof b.thoughtSignature === "string") signatureLen += b.thoughtSignature.length;
+				} else if (b.type === "redactedThinking" && typeof b.data === "string") {
+					redactedLen += b.data.length;
+				} else if (b.type === "toolCall") {
+					if (typeof b.name === "string") textLen += b.name.length;
+					if (b.arguments !== undefined) {
+						try {
+							textLen += JSON.stringify(b.arguments, (_key, value) =>
+								typeof value === "bigint" ? value.toString() : value,
+							).length;
+						} catch {
+							textLen += String(b.arguments).length;
+						}
+					}
+				}
+			}
+		}
+		return `${role}:${ts}:${textLen}:${blocks}:${images}:${signatureLen}:${redactedLen}:${usageTotal}:${promptBuckets}:${stopReason}`;
+	} else if (role === "toolResult" || role === "hookMessage") {
+		const content = (msg as { content?: unknown }).content;
+		if (typeof content === "string") {
+			textLen += content.length;
+		} else if (Array.isArray(content)) {
+			blocks = content.length;
+			for (const block of content) {
+				if (!block || typeof block !== "object") continue;
+				const b = block as { type?: string; text?: string };
+				if (b.type === "text" && typeof b.text === "string") textLen += b.text.length;
+				else if (b.type === "image") images++;
+			}
+		}
+	} else if (role === "branchSummary" || role === "compactionSummary") {
+		const s = (msg as { summary?: unknown }).summary;
+		if (typeof s === "string") textLen += s.length;
+	}
+	return `${role}:${ts}:${textLen}:${blocks}:${images}`;
 }
 
 function isUsageWindowBoundary(entry: SessionEntry): boolean {
@@ -89,8 +208,7 @@ export class SessionStatsTracker {
 	#pendingContextSnapshot: PendingContextSnapshot | undefined;
 	#contextUsageRevision = 0;
 	#compactionEpoch = 0;
-	#contextUsageTurnMemo: ContextUsageTurnMemo | undefined;
-	#contextUsageTurnMemoScheduled = false;
+	#contextUsageMemo: ContextUsageMemo | undefined;
 
 	constructor(host: SessionStatsTrackerHost) {
 		this.#host = host;
@@ -317,26 +435,25 @@ export class SessionStatsTracker {
 	/**
 	 * Returns current context tokens, capacity, and percentage.
 	 *
-	 * A bare slash-menu render asks several dynamic command descriptions for
-	 * this value synchronously. Tokenizing the same transcript for each command
-	 * is pure duplicate work, so retain one value until the current microtask
-	 * drains. Stable input identities guard synchronous state changes within
-	 * that turn; the microtask boundary prevents the memo from spanning events.
+	 * Slash-menu descriptions and status surfaces ask for this value on
+	 * successive renders while the transcript is unchanged. Key the memo on
+	 * every tokenizable input so menu navigation stays O(1) without retaining
+	 * a streaming or post-compaction value after its inputs change.
 	 */
 	getContextUsage(options?: { contextWindow?: number }): ContextUsage | undefined {
 		const messages = this.#host.agent.state.messages;
 		const messageCount = messages.length;
-		const lastMessage = messageCount > 0 ? messages[messageCount - 1] : undefined;
+		const lastFingerprint = messageCount > 0 ? messageFingerprint(messages[messageCount - 1]!) : undefined;
 		const contextWindow = options?.contextWindow;
 		const systemPrompt = this.#host.session.systemPrompt;
 		const tools = this.#host.session.agent?.state?.tools;
 		const skills = this.#host.session.skills;
-		const memo = this.#contextUsageTurnMemo;
+		const memo = this.#contextUsageMemo;
 		if (
 			memo &&
 			memo.messages === messages &&
 			memo.messageCount === messageCount &&
-			memo.lastMessage === lastMessage &&
+			memo.lastFingerprint === lastFingerprint &&
 			memo.contextWindow === contextWindow &&
 			memo.revision === this.#contextUsageRevision &&
 			memo.systemPrompt === systemPrompt &&
@@ -354,10 +471,10 @@ export class SessionStatsTracker {
 					percent: breakdown.contextWindow > 0 ? (breakdown.usedTokens / breakdown.contextWindow) * 100 : 0,
 				}
 			: undefined;
-		this.#contextUsageTurnMemo = {
+		this.#contextUsageMemo = {
 			messages,
 			messageCount,
-			lastMessage,
+			lastFingerprint,
 			contextWindow,
 			revision: this.#contextUsageRevision,
 			systemPrompt,
@@ -365,13 +482,6 @@ export class SessionStatsTracker {
 			skills,
 			usage,
 		};
-		if (!this.#contextUsageTurnMemoScheduled) {
-			this.#contextUsageTurnMemoScheduled = true;
-			queueMicrotask(() => {
-				this.#contextUsageTurnMemo = undefined;
-				this.#contextUsageTurnMemoScheduled = false;
-			});
-		}
 		return usage ? { ...usage } : undefined;
 	}
 

@@ -176,6 +176,36 @@ describe("AgentSession session stats", () => {
 		expect(stats.contextUsage).toEqual(directUsage);
 	});
 
+	it("refreshes cached context usage when the active transcript is replaced", () => {
+		const target = model();
+		const message: UserMessage = {
+			role: "user",
+			content: "short",
+			timestamp: Date.now(),
+		};
+		const agent = new Agent({
+			initialState: {
+				model: target,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [message],
+			},
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+		});
+
+		const before = session.getContextUsage()?.tokens;
+		agent.replaceMessages([{ ...message, content: "expanded context ".repeat(1_000) }]);
+		const after = session.getContextUsage()?.tokens;
+
+		expect(before).toBeNumber();
+		expect(after).toBeGreaterThan(before!);
+	});
+
 	it("treats persisted assistant messages without usage as zero-cost history", async () => {
 		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 		if (!model) {

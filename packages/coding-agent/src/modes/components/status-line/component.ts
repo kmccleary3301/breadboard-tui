@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
+import type { UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import {
 	getAntigravityCounterKeyForModel,
 	scopeAntigravityLimitsForModel,
@@ -20,6 +20,7 @@ import type { HarnessSnapshot } from "../../../breadboard/harness-port";
 import { settings } from "../../../config/settings";
 import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../../../product-identity";
 import type { AgentSession } from "../../../session/agent-session";
+import { messageFingerprint } from "../../../session/session-stats";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
 import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/active-oauth-account";
 import { type ActiveRepoContext, resolveActiveRepoContextSync } from "../../../utils/active-repo-context";
@@ -103,126 +104,6 @@ function codexReportMatchesExactIdentity(report: UsageReport, identity: OAuthAcc
 // ═══════════════════════════════════════════════════════════════════════════
 // Context-usage memo
 // ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Cheap structural fingerprint of a message's tokenizable content. O(blocks) —
- * only reads string `.length` and primitives, never copies or serializes.
- * Detects in-place growth of the streaming tail (and other in-place mutations)
- * so the cached `getContextUsage()` result is recomputed when — and only when —
- * the numbers it depends on change.
- */
-function messageFingerprint(msg: AgentMessage): string {
-	const role = (msg as { role?: string }).role ?? "";
-	const ts = (msg as { timestamp?: number }).timestamp ?? 0;
-	let textLen = 0;
-	let blocks = 0;
-	let images = 0;
-	if (role === "bashExecution") {
-		const b = msg as { command?: unknown; output?: unknown };
-		if (typeof b.command === "string") textLen += b.command.length;
-		if (typeof b.output === "string") textLen += b.output.length;
-	} else if (role === "user") {
-		const content = (msg as { content?: unknown }).content;
-		if (typeof content === "string") {
-			textLen += content.length;
-		} else if (Array.isArray(content)) {
-			blocks = content.length;
-			for (const block of content) {
-				if (block?.type === "text" && typeof block.text === "string") textLen += block.text.length;
-			}
-		}
-	} else if (role === "assistant") {
-		const assistantMsg = msg as AssistantMessage;
-		const usageExt = assistantMsg.usage as unknown as { promptTokensDetails?: unknown };
-		const usageTotal = assistantMsg.usage?.totalTokens ?? 0;
-		const promptBuckets = usageExt?.promptTokensDetails ? 1 : 0;
-		const stopReason = assistantMsg.stopReason ?? "";
-
-		let signatureLen = 0;
-		let redactedLen = 0;
-		const msgExt = assistantMsg as unknown as {
-			thinkingSignature?: string;
-			textSignature?: string;
-			thoughtSignature?: string;
-			redactedThinking?: { data?: string };
-		};
-		const thinkingSignature = msgExt.thinkingSignature;
-		if (typeof thinkingSignature === "string") {
-			signatureLen += thinkingSignature.length;
-		}
-		const textSignature = msgExt.textSignature;
-		if (typeof textSignature === "string") {
-			signatureLen += textSignature.length;
-		}
-		const thoughtSignature = msgExt.thoughtSignature;
-		if (typeof thoughtSignature === "string") {
-			signatureLen += thoughtSignature.length;
-		}
-		const redactedData = msgExt.redactedThinking?.data;
-		if (typeof redactedData === "string") {
-			redactedLen += redactedData.length;
-		}
-
-		const content = (msg as { content?: unknown }).content;
-		if (Array.isArray(content)) {
-			blocks = content.length;
-			for (const block of content) {
-				if (!block || typeof block !== "object") continue;
-				const b = block as {
-					type?: string;
-					text?: string;
-					thinking?: string;
-					thinkingSignature?: string;
-					signature?: string;
-					textSignature?: string;
-					thoughtSignature?: string;
-					data?: string;
-					name?: string;
-					arguments?: unknown;
-				};
-				if (b.type === "text" && typeof b.text === "string") textLen += b.text.length;
-				else if (b.type === "thinking") {
-					if (typeof b.thinking === "string") textLen += b.thinking.length;
-					if (typeof b.thinkingSignature === "string") signatureLen += b.thinkingSignature.length;
-					if (typeof b.signature === "string") signatureLen += b.signature.length;
-					if (typeof b.textSignature === "string") signatureLen += b.textSignature.length;
-					if (typeof b.thoughtSignature === "string") signatureLen += b.thoughtSignature.length;
-				} else if (b.type === "redactedThinking" && typeof b.data === "string") {
-					redactedLen += b.data.length;
-				} else if (b.type === "toolCall") {
-					if (typeof b.name === "string") textLen += b.name.length;
-					if (b.arguments !== undefined) {
-						try {
-							textLen += JSON.stringify(b.arguments, (_key, value) =>
-								typeof value === "bigint" ? value.toString() : value,
-							).length;
-						} catch {
-							textLen += String(b.arguments).length;
-						}
-					}
-				}
-			}
-		}
-		return `${role}:${ts}:${textLen}:${blocks}:${images}:${signatureLen}:${redactedLen}:${usageTotal}:${promptBuckets}:${stopReason}`;
-	} else if (role === "toolResult" || role === "hookMessage") {
-		const content = (msg as { content?: unknown }).content;
-		if (typeof content === "string") {
-			textLen += content.length;
-		} else if (Array.isArray(content)) {
-			blocks = content.length;
-			for (const block of content) {
-				if (!block || typeof block !== "object") continue;
-				const b = block as { type?: string; text?: string };
-				if (b.type === "text" && typeof b.text === "string") textLen += b.text.length;
-				else if (b.type === "image") images++;
-			}
-		}
-	} else if (role === "branchSummary" || role === "compactionSummary") {
-		const s = (msg as { summary?: unknown }).summary;
-		if (typeof s === "string") textLen += s.length;
-	}
-	return `${role}:${ts}:${textLen}:${blocks}:${images}`;
-}
 
 interface ContextUsageMemo {
 	messagesRef: readonly AgentMessage[];
