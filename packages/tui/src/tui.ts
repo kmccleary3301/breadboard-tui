@@ -12,6 +12,7 @@
  * provider paint their composed children as a bounded viewport and never
  * touch history. See `docs/tui-core-renderer.md`.
  */
+import { dlopen, FFIType, type Library, ptr } from "bun:ffi";
 import * as fs from "node:fs";
 import { performance } from "node:perf_hooks";
 import { $flag, getDebugLogPath, logger, postmortem } from "@oh-my-pi/pi-utils";
@@ -103,6 +104,90 @@ function resizeInPlaceOverride(): boolean | null {
 	if (override === "0" || override === "false") return false;
 	return null;
 }
+function timingNonce(): string | undefined {
+	const nonce = process.env.OMP_TUI_TIMING_NONCE;
+	return nonce !== undefined && /^[0-9a-f]{32}$/.test(nonce) ? nonce : undefined;
+}
+
+interface FrameTimingState {
+	readonly nonce: string;
+	frameId: number;
+	inputId: number;
+	inputData: string;
+	inputAtMs: number | null;
+	readonly monotonicOriginMs: number | null;
+	readonly clockUncertaintyMs: number | null;
+}
+
+const MACH_TIME_SYMBOLS = {
+	mach_absolute_time: { args: [], returns: FFIType.u64 },
+	mach_timebase_info: { args: [FFIType.ptr], returns: FFIType.i32 },
+} as const;
+type MachTimeLibrary = Library<typeof MACH_TIME_SYMBOLS>;
+let machTimeLibrary: MachTimeLibrary | undefined;
+let machTimebase: { numer: number; denom: number } | undefined;
+
+function machAbsoluteTimeMs(): number | undefined {
+	if (process.platform !== "darwin") return undefined;
+	try {
+		const library = (machTimeLibrary ??= dlopen("/usr/lib/libSystem.B.dylib", MACH_TIME_SYMBOLS));
+		if (machTimebase === undefined) {
+			const timebase = new Uint32Array(2);
+			if (library.symbols.mach_timebase_info(ptr(timebase)) !== 0 || timebase[1] === 0) return undefined;
+			machTimebase = { numer: timebase[0]!, denom: timebase[1]! };
+		}
+		return (Number(library.symbols.mach_absolute_time()) * machTimebase.numer) / machTimebase.denom / 1e6;
+	} catch {
+		return undefined;
+	}
+}
+
+function createFrameTimingState(nonce: string, renderScheduler: RenderScheduler): FrameTimingState {
+	const bracketStartMs = machAbsoluteTimeMs();
+	const schedulerAtConstructionMs = renderScheduler.now();
+	const bracketEndMs = machAbsoluteTimeMs();
+	const bracketWidthMs =
+		bracketStartMs === undefined || bracketEndMs === undefined ? undefined : bracketEndMs - bracketStartMs;
+	const bracketMidpointMs =
+		bracketStartMs === undefined || bracketEndMs === undefined ? undefined : (bracketStartMs + bracketEndMs) / 2;
+	const mappingValid =
+		bracketMidpointMs !== undefined &&
+		bracketWidthMs !== undefined &&
+		Number.isFinite(schedulerAtConstructionMs) &&
+		Number.isFinite(bracketMidpointMs) &&
+		Number.isFinite(bracketWidthMs) &&
+		bracketWidthMs >= 0 &&
+		Number.isFinite(bracketMidpointMs - schedulerAtConstructionMs);
+	const monotonicOriginMs =
+		mappingValid && bracketMidpointMs !== undefined ? bracketMidpointMs - schedulerAtConstructionMs : null;
+	const clockUncertaintyMs = mappingValid && bracketWidthMs !== undefined ? bracketWidthMs / 2 : null;
+	return {
+		nonce,
+		frameId: 0,
+		inputId: 0,
+		inputData: "",
+		inputAtMs: null,
+		monotonicOriginMs,
+		clockUncertaintyMs,
+	};
+}
+function encodeFrameTimingTrailer(
+	nonce: string,
+	frame: {
+		version: 1;
+		frameId: number;
+		inputId: number;
+		inputData: string;
+		inputAtMs: number | null;
+		writtenAtMs: number;
+		monotonicOriginMs: number | null;
+		clockUncertaintyMs: number | null;
+	},
+): string {
+	const payload = Buffer.from(JSON.stringify(frame), "utf8").toString("base64");
+	return `\x1b]777;omp-frame-timing;${nonce};${payload}\x07`;
+}
+
 type InputListenerResult = { consume?: boolean; data?: string } | undefined;
 type InputListener = (data: string) => InputListenerResult;
 type StartListener = () => void;
@@ -740,6 +825,7 @@ export class TUI extends Container {
 	#debugNextWindowTop = 0;
 	#inputListeners = new Set<InputListener>();
 	#startListeners = new Set<StartListener>();
+	#frameTiming: FrameTimingState | undefined;
 
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	onDebug?: () => void;
@@ -869,6 +955,8 @@ export class TUI extends Container {
 		super();
 		this.terminal = terminal;
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
+		const nonce = timingNonce();
+		if (nonce !== undefined) this.#frameTiming = createFrameTimingState(nonce, this.#renderScheduler);
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
 	}
@@ -2033,6 +2121,37 @@ export class TUI extends Container {
 		return true;
 	}
 
+	#recordInput(data: string): void {
+		const timing = this.#frameTiming;
+		if (timing === undefined) return;
+		timing.inputAtMs = this.#renderScheduler.now();
+		timing.inputId += 1;
+		timing.inputData = Buffer.from(data, "utf8").toString("base64");
+	}
+
+	#writeFrame(buffer: string): void {
+		const timing = this.#frameTiming;
+		if (timing === undefined) {
+			this.terminal.write(buffer);
+			return;
+		}
+		const writtenAtMs = this.#renderScheduler.now();
+		this.terminal.write(buffer);
+		this.terminal.write(
+			encodeFrameTimingTrailer(timing.nonce, {
+				version: 1,
+				frameId: timing.frameId,
+				inputId: timing.inputId,
+				inputData: timing.inputData,
+				inputAtMs: timing.inputAtMs,
+				writtenAtMs,
+				monotonicOriginMs: timing.monotonicOriginMs,
+				clockUncertaintyMs: timing.clockUncertaintyMs,
+			}),
+		);
+		timing.frameId += 1;
+	}
+
 	#handleInput(data: string): void {
 		// Consume CPR replies (CSI row;col R) while an anchor probe is unanswered;
 		// they are terminal reports, never keystrokes, and must not reach the
@@ -2072,6 +2191,7 @@ export class TUI extends Container {
 			data = data.slice(0, searchFrom + match.index) + data.slice(searchFrom + match.index + match[0].length);
 		}
 		if (data.length === 0) return;
+		this.#recordInput(data);
 		// Ctrl+C/Esc use app-level double-press windows. Give those gestures one
 		// frame to drain queued input before an ordinary repaint; delaying every
 		// key would make idle navigation pay a full frame of latency.
@@ -2707,7 +2827,7 @@ export class TUI extends Container {
 			this.#parkedViewportOffset = 0;
 		}
 		buffer += this.#paintEndSequence;
-		this.terminal.write(buffer);
+		this.#writeFrame(buffer);
 		this.#debugPaint = {
 			lines: prepared,
 			windowTop: this.#debugNextWindowTop,
@@ -3227,7 +3347,7 @@ export class TUI extends Container {
 			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r));
 		}
 		buffer += this.#paintEndSequence;
-		this.terminal.write(buffer);
+		this.#writeFrame(buffer);
 		this.#altPreviousLines = fitted;
 		this.#debugPaint = { lines: fitted, windowTop: 0, altScreen: true };
 		this.#fullRedrawCount += 1;

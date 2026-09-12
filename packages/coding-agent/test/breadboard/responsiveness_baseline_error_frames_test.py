@@ -1,7 +1,10 @@
+import base64
 import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from dataclasses import replace
 
 
 HARNESS_PATH = Path(__file__).with_name("responsiveness-baseline.py")
@@ -73,6 +76,64 @@ class ErrorFramesTests(unittest.TestCase):
                 self.assertTrue(harness._has_provider_free_status_row(_screen(row)))
         self.assertFalse(harness._has_provider_free_status_row(_screen(BB_STATUS_ROW)))
 
+
+    def test_frame_selection_requires_fresh_input_id_and_exact_payload(self) -> None:
+        nonce = "0123456789abcdef0123456789abcdef"
+        payload = b"\x1b[6~"
+
+        def event(frame_id: int, input_id: int, data: bytes, screen: str) -> object:
+            return harness.runner.FrameTimingEvent(
+                nonce=nonce,
+                metadata={
+                    "version": 1,
+                    "frameId": frame_id,
+                    "inputId": input_id,
+                    "inputData": base64.b64encode(data).decode("ascii"),
+                    "inputAtMs": 1.0,
+                    "writtenAtMs": float(frame_id),
+                    "monotonicOriginMs": None,
+                    "clockUncertaintyMs": None,
+                },
+                raw_metadata="{}",
+                screen=screen,
+            )
+
+        selected = harness._select_frame_event(
+            [
+                event(2, 4, payload, "matching stale"),
+                event(3, 5, b"wrong", "matching wrong-payload"),
+                event(4, 5, payload, "matching fresh"),
+                event(5, 5, payload, "matching later"),
+            ],
+            "before",
+            payload,
+            4,
+            lambda before, after: after.startswith("matching"),
+        )
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.screen, "matching fresh")
+
+    def test_clock_mapping_uses_write_time_and_retains_uncertainty_not_observer_delay(self) -> None:
+        child = SimpleNamespace(clock_mapping=harness.runner.MonotonicClockMapping(1000.0, 0.25))
+        event = harness.runner.FrameTimingEvent(
+            nonce="0123456789abcdef0123456789abcdef",
+            metadata={
+                "inputAtMs": 111.0,
+                "writtenAtMs": 115.0,
+                "monotonicOriginMs": 900.0,
+                "clockUncertaintyMs": 0.5,
+            },
+            raw_metadata="",
+            screen="ready",
+            observed_at_monotonic=0.016,
+        )
+        details = harness._frame_clock_details(child, event, 0.010)
+        delayed = harness._frame_clock_details(child, replace(event, observed_at_monotonic=0.216), 0.010)
+        self.assertEqual(details["latencyUpperBoundMs"], 5.75)
+        self.assertEqual(details["inputToWriteMs"], 4.0)
+        self.assertEqual(delayed["latencyUpperBoundMs"], details["latencyUpperBoundMs"])
+        missing = harness._frame_clock_details(SimpleNamespace(clock_mapping=None), event, 0.010)
+        self.assertIsNone(missing["latencyUpperBoundMs"])
 
 if __name__ == "__main__":
     unittest.main()

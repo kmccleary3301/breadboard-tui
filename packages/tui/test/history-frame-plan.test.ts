@@ -40,15 +40,24 @@ class FullscreenOverlay implements Component {
 
 class CountingTerminal extends VirtualTerminal {
 	readonly writes: string[] = [];
+	onWrite?: (data: string) => void;
 
 	override write(data: string): void {
 		this.writes.push(data);
+		this.onWrite?.(data);
 		super.write(data);
 	}
 }
 
+function parseFrameTiming(write: string, nonce: string): unknown {
+	const prefix = `\x1b]777;omp-frame-timing;${nonce};`;
+	if (!write.startsWith(prefix) || !write.endsWith("\x07")) throw new Error("not a frame timing trailer");
+	return JSON.parse(Buffer.from(write.slice(prefix.length, -1), "base64").toString("utf8"));
+}
+
+let schedulerNow = 0;
 const scheduler = {
-	now: () => 0,
+	now: () => schedulerNow,
 	scheduleImmediate(callback: () => void) {
 		callback();
 		return { cancel() {} };
@@ -503,6 +512,122 @@ describe("terminal frame plans", () => {
 		} finally {
 			tui.stop();
 			setTerminalImageProtocol(originalProtocol);
+		}
+	});
+	it("exports scheduler input and pre-write timestamps around synchronous rendering", () => {
+		const nonce = "0123456789abcdef0123456789abcdef";
+		const previousNonce = process.env.OMP_TUI_TIMING_NONCE;
+		process.env.OMP_TUI_TIMING_NONCE = nonce;
+		const renderScheduler = scheduler;
+		const terminal = new CountingTerminal(20, 3);
+		let tui: TUI | undefined;
+		try {
+			tui = new TUI(terminal, undefined, { renderScheduler });
+			tui.setFrameProvider(new Provider({ viewport: ["editor"] }));
+
+			const startupTrailer = terminal.writes.find(write => write.startsWith(`\x1b]777;omp-frame-timing;${nonce};`));
+			expect(startupTrailer).toBeDefined();
+			expect(parseFrameTiming(startupTrailer!, nonce)).toMatchObject({
+				version: 1,
+				frameId: 0,
+				inputId: 0,
+				inputData: "",
+				inputAtMs: null,
+			});
+
+			terminal.writes.length = 0;
+			schedulerNow = 50;
+			let frameWrite = true;
+			terminal.onWrite = () => {
+				if (frameWrite) {
+					frameWrite = false;
+					schedulerNow = 75;
+				}
+			};
+			tui.addInputListener(data => {
+				expect(data).toBe("é");
+				tui!.renderNow();
+				return { consume: true };
+			});
+			tui.injectDebugInput("é");
+
+			const trailerIndex = terminal.writes.findIndex(write =>
+				write.startsWith(`\x1b]777;omp-frame-timing;${nonce};`),
+			);
+			expect(trailerIndex).toBeGreaterThan(0);
+			expect(terminal.writes[trailerIndex - 1]).toContain("editor");
+			const payload = parseFrameTiming(terminal.writes[trailerIndex]!, nonce);
+			expect(payload).toMatchObject({
+				version: 1,
+				frameId: 1,
+				inputId: 1,
+				inputData: Buffer.from("é", "utf8").toString("base64"),
+				inputAtMs: 50,
+				writtenAtMs: 50,
+			});
+			if (process.platform === "darwin") {
+				expect(payload).toMatchObject({
+					monotonicOriginMs: expect.any(Number),
+					clockUncertaintyMs: expect.any(Number),
+				});
+			} else {
+				expect(payload).toMatchObject({ monotonicOriginMs: null, clockUncertaintyMs: null });
+			}
+			expect(schedulerNow).toBe(75);
+		} finally {
+			tui?.stop();
+			schedulerNow = 0;
+			if (previousNonce === undefined) delete process.env.OMP_TUI_TIMING_NONCE;
+			else process.env.OMP_TUI_TIMING_NONCE = previousNonce;
+		}
+	});
+
+	it("rejects malformed timing nonces without changing frame output", () => {
+		const previousNonce = process.env.OMP_TUI_TIMING_NONCE;
+		process.env.OMP_TUI_TIMING_NONCE = "0123456789abcdef0123456789ABCDEf";
+		const terminal = new CountingTerminal(20, 3);
+		const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
+		try {
+			tui.setFrameProvider(new Provider({ viewport: ["editor"] }));
+			tui.requestRender(true);
+			expect(terminal.writes.some(write => write.includes("\x1b]777;omp-frame-timing;"))).toBe(false);
+		} finally {
+			tui.stop();
+			schedulerNow = 0;
+			if (previousNonce === undefined) delete process.env.OMP_TUI_TIMING_NONCE;
+			else process.env.OMP_TUI_TIMING_NONCE = previousNonce;
+		}
+	});
+
+	it("exports alternate-buffer final writes through the timing protocol", () => {
+		const nonce = "fedcba9876543210fedcba9876543210";
+		const previousNonce = process.env.OMP_TUI_TIMING_NONCE;
+		process.env.OMP_TUI_TIMING_NONCE = nonce;
+		const renderScheduler = scheduler;
+		const terminal = new CountingTerminal(20, 3);
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		try {
+			tui.setFrameProvider(new Provider({ viewport: ["editor"] }));
+			terminal.writes.length = 0;
+			tui.showOverlay(new FullscreenOverlay(), { fullscreen: true });
+
+			const trailerIndex = terminal.writes.findIndex(write =>
+				write.startsWith(`\x1b]777;omp-frame-timing;${nonce};`),
+			);
+			expect(trailerIndex).toBeGreaterThan(0);
+			expect(terminal.writes[trailerIndex - 1]).toContain("fullscreen overlay");
+			expect(parseFrameTiming(terminal.writes[trailerIndex]!, nonce)).toMatchObject({
+				version: 1,
+				frameId: 1,
+				inputId: 0,
+				inputData: "",
+				inputAtMs: null,
+			});
+		} finally {
+			tui.stop();
+			schedulerNow = 0;
+			if (previousNonce === undefined) delete process.env.OMP_TUI_TIMING_NONCE;
+			else process.env.OMP_TUI_TIMING_NONCE = previousNonce;
 		}
 	});
 });

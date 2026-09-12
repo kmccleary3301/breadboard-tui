@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Provider-free PTY responsiveness, startup, resource, and fixture harness.
 
-The harness deliberately measures the endpoint owned by the PTY runner: the
-monotonic timestamp on the read that first makes the expected screen predicate
-true.  It imports ``installed-product-journey.py`` so the two harnesses share
-one terminal parser and one isolated-root environment policy.
+The harness consumes the child's opt-in frame-timing OSC trailers.  Each
+trailer carries the screen snapshot at the actual terminal write and the
+source scheduler timestamp; parent read times remain diagnostics only.  It
+imports ``installed-product-journey.py`` so the two harnesses share one
+terminal parser and one isolated-root environment policy.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
@@ -34,11 +36,13 @@ READY_PREDICATE = "status/composer row containing mock/reference (or plain OMP n
 PAGE_UP = b"\x1b[5~"
 PAGE_DOWN = b"\x1b[6~"
 ESCAPE = b"\x1b"
-BACKSPACE = b"\x7f"
-ENTER = b"\r"
-SCALE_NAMES = ("everyday", "complex", "adverse")
-ACTION_NAMES = ("key", "menu", "scroll", "submit", "cancel")
+TIMING_ENDPOINT = (
+    "first exported frame trailer matching the unchanged screen predicate, "
+    "nonce, input payload, and fresh inputId; latency uses mapped scheduler write "
+    "time with uncertainty upper bound"
+)
 GEOMETRIES = ((120, 36), (80, 24))
+ACTION_NAMES = ("key", "menu", "scroll", "submit", "cancel")
 
 
 def _load_runner() -> Any:
@@ -77,9 +81,11 @@ def _write_aggregate(path: Path, key: str, value: dict[str, Any]) -> None:
                 existing = loaded
         except json.JSONDecodeError:
             existing = {}
-    product = value.get("product")
-    if existing.get("product") not in (None, product):
-        raise RuntimeError(f"output already belongs to product {existing['product']!r}: {path}")
+    endpoint = value.get("endpoint")
+    if endpoint is not None:
+        if existing.get("endpoint") not in (None, endpoint):
+            raise RuntimeError(f"output already contains mixed timing endpoints: {path}")
+        existing["endpoint"] = endpoint
     existing.update({"schemaVersion": RESULT_VERSION, "product": product, key: value})
     write_json(path, existing)
 
@@ -367,7 +373,13 @@ def _argv(binary: Path, fixture: Path | None) -> list[str]:
 def _start_child(binary: Path, roots: RootSet, rows: int, columns: int, fixture: Path | None) -> Any:
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise RuntimeError(f"binary is not executable: {binary}")
-    return runner.PtyChild(_argv(binary, fixture), roots.workspace, roots.environment(), rows=rows, columns=columns)
+    return runner.PtyChild(
+        _argv(binary, fixture),
+        roots.workspace,
+        runner.timing_environment(roots.environment()),
+        rows=rows,
+        columns=columns,
+    )
 
 
 def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
@@ -404,7 +416,7 @@ def _prepare_bb_cell_fixture(
     child = runner.PtyChild(
         [str(binary), "--model", "mock/reference"],
         roots.workspace,
-        roots.environment(),
+        runner.timing_environment(roots.environment()),
         rows=rows,
         columns=columns,
     )
@@ -606,6 +618,76 @@ def _screen_hash(child: Any) -> str:
     return hashlib.sha256(child.screen.text().encode("utf-8", "replace")).hexdigest()
 
 
+def _drain_frame_events(child: Any) -> list[Any]:
+    drain = getattr(child, "drain_frame_events", None)
+    if drain is None:
+        return []
+    return list(drain())
+
+
+def _select_frame_event(
+    events: Iterable[Any],
+    before: str,
+    payload: bytes,
+    pre_input_id: int | None,
+    predicate: Callable[[str, str], bool],
+) -> Any | None:
+    expected_data = base64.b64encode(payload).decode("ascii")
+    for event in events:
+        metadata = event.metadata
+        input_id = metadata["inputId"]
+        if pre_input_id is None or input_id <= pre_input_id:
+            continue
+        if metadata["inputData"] != expected_data:
+            continue
+        if predicate(before, event.screen):
+            return event
+    return None
+
+
+def _frame_clock_details(child: Any, event: Any, t0: float) -> dict[str, Any]:
+    metadata = dict(event.metadata)
+    input_at = metadata.get("inputAtMs")
+    written_at = metadata["writtenAtMs"]
+    source_delta = written_at - input_at if input_at is not None else None
+    mapping = getattr(child, "clock_mapping", None)
+    origin = metadata.get("monotonicOriginMs")
+    uncertainty = metadata.get("clockUncertaintyMs")
+    nominal_latency: float | None = None
+    upper_latency: float | None = None
+    mapping_status = "unknown"
+    if mapping is not None and origin is not None and uncertainty is not None:
+        parent_mach_at_t0 = t0 * 1000.0 + mapping.origin_ms
+        source_mach_at_write = written_at + origin
+        nominal_latency = source_mach_at_write - parent_mach_at_t0
+        upper_latency = (
+            source_mach_at_write
+            + uncertainty
+            - (parent_mach_at_t0 - mapping.uncertainty_ms)
+        )
+        valid_mapping = all(math.isfinite(value) for value in (nominal_latency, upper_latency)) and upper_latency >= 0
+        if event.observed_at_monotonic is not None:
+            latest_possible_observation = (
+                event.observed_at_monotonic * 1000.0 + mapping.origin_ms + mapping.uncertainty_ms
+            )
+            valid_mapping = valid_mapping and source_mach_at_write - uncertainty <= latest_possible_observation
+        if valid_mapping:
+            mapping_status = "mapped"
+        else:
+            upper_latency = None
+            mapping_status = "invalid"
+    details = event.as_dict()
+    details["mappingStatus"] = mapping_status
+    details["latencyNominalMs"] = nominal_latency
+    details["latencyUpperBoundMs"] = upper_latency
+    details["inputToWriteMs"] = source_delta
+    details["parentClockMapping"] = (
+        {"originMs": mapping.origin_ms, "uncertaintyMs": mapping.uncertainty_ms, "source": mapping.source}
+        if mapping is not None else None
+    )
+    return details
+
+
 def _status_ready(screen: str) -> bool:
     lines = screen.splitlines()
     model_status = any(("mock/reference" in line or "no-model" in line) and ">" in line for line in lines)
@@ -619,7 +701,11 @@ def _cell_ready(screen: str) -> bool:
     return _status_ready(screen) and "Welcome!" not in screen
 
 
-def _wait_ready(child: Any, timeout: float = 30.0, predicate: Callable[[str], bool] = _status_ready) -> tuple[bool, str | None]:
+def _wait_ready(
+    child: Any,
+    timeout: float = 30.0,
+    predicate: Callable[[str], bool] = _status_ready,
+) -> tuple[bool, Any | None]:
     return _pump_until(child, predicate, timeout)
 
 
@@ -631,6 +717,7 @@ def _settle(child: Any, quiet: float = 0.15, limit: float = 1.5) -> bool:
     quiet_since = time.monotonic()
     while time.monotonic() < deadline:
         child.pump(0.02)
+        _drain_frame_events(child)
         if child.output_reads != last:
             last = child.output_reads
             quiet_since = time.monotonic()
@@ -639,13 +726,19 @@ def _settle(child: Any, quiet: float = 0.15, limit: float = 1.5) -> bool:
     return False
 
 
-def _pump_until(child: Any, predicate: Callable[[str], bool], timeout: float, read_before: int | None = None) -> tuple[bool, str | None]:
+def _pump_until(
+    child: Any,
+    predicate: Callable[[str], bool],
+    timeout: float,
+) -> tuple[bool, Any | None]:
     deadline = time.monotonic() + timeout
-    reads = child.output_reads if read_before is None else read_before
+    _drain_frame_events(child)
     while time.monotonic() < deadline:
         child.pump(min(0.005, max(0.0, deadline - time.monotonic())))
-        if child.output_reads > reads and predicate(child.screen.text()):
-            return True, child.last_output_at
+        events = _drain_frame_events(child)
+        for event in events:
+            if predicate(event.screen):
+                return True, event
         if child.exit_status is not None:
             break
     return False, None
@@ -701,7 +794,10 @@ def _measurement(
             }
         settled = (_settle(child) and settled) if settle else False
         before = child.screen.text()
+    _drain_frame_events(child)
     reads_before = child.output_reads
+    pre_input_id = getattr(child.screen, "latest_input_id", None)
+    rejections_before = child.screen.frame_rejections
     t0 = time.monotonic()
     try:
         child.send(payload)
@@ -711,38 +807,63 @@ def _measurement(
             "status": "UNKNOWN",
             "latencyMs": None,
             "reason": f"send-error:{error}",
+            "t0Monotonic": t0,
+            "inputIdBefore": pre_input_id,
             "alive": _process_alive(int(child.pid)),
             "exitCode": child.exit_status,
             "screenHash": _screen_hash(child),
         }
     deadline = t0 + timeout
-    observed = False
+    event: Any | None = None
     while time.monotonic() < deadline:
         child.pump(min(0.005, max(0.0, deadline - time.monotonic())))
-        if child.output_reads > reads_before and predicate(before, child.screen.text()):
-            observed = True
+        events = _drain_frame_events(child)
+        event = _select_frame_event(events, before, payload, pre_input_id, predicate)
+        if event is not None:
             break
         if child.exit_status is not None:
             break
-    t1 = child.last_output_at if observed else None
-    status = "valid" if observed and t1 is not None else "UNKNOWN"
+    observed = event is not None
+    timing_details = _frame_clock_details(child, event, t0) if event is not None else None
+    mapped_latency = (
+        timing_details["latencyUpperBoundMs"] if timing_details is not None else None
+    )
+    mapped = (
+        timing_details is not None and timing_details["latencyUpperBoundMs"] is not None
+    )
+    rejections = {
+        reason: count - rejections_before.get(reason, 0)
+        for reason, count in child.screen.frame_rejections.items()
+        if reason != "wrong_nonce" and count > rejections_before.get(reason, 0)
+    }
+    status = "valid" if observed and mapped and not rejections else "UNKNOWN"
     result: dict[str, Any] = {
         "action": action,
         "status": status,
-        "latencyMs": (t1 - t0) * 1000 if t1 is not None else None,
+        "latencyMs": mapped_latency,
         "t0Monotonic": t0,
-        "t1Monotonic": t1,
         "settledBeforeSend": settled,
         "recoveredOverlay": recovered,
         "readsBefore": reads_before,
         "readsAfter": child.output_reads,
+        "inputIdBefore": pre_input_id,
         "alive": _process_alive(int(child.pid)),
         "exitCode": child.exit_status,
         "screenHash": _screen_hash(child),
     }
-    if not observed:
+    if timing_details is not None:
+        result["frameTiming"] = timing_details
+        result["parentObservedAtMonotonic"] = event.observed_at_monotonic
+        result["inputIdAfter"] = event.metadata["inputId"]
+        if not mapped:
+            result["reason"] = "clock-mapping-unknown"
+    elif not observed:
         result["reason"] = "timeout-or-exit"
         result["screenTail"] = _tail(child.screen.text(), 6)
+    if rejections:
+        result["reason"] = "invalid-frame-timing"
+        result["frameRejections"] = rejections
+        result["latencyMs"] = None
     return result
 
 
@@ -911,9 +1032,8 @@ def _action_sample(child: Any, action: str, marker: str = "~") -> dict[str, Any]
             return _unknown(child, action, "no-provider-free-model")
         _prepare_composer(child, marker)
         errors_before = _error_frames(child.screen.text())
-        submit_before = child.output_reads
         child.send(ENTER)
-        in_flight, _ = _pump_until(child, _turn_in_flight, 1.0, submit_before)
+        in_flight, _ = _pump_until(child, _turn_in_flight, 1.0)
         if not in_flight:
             _settle(child, limit=3.0)
             _reset_escape(child)
@@ -1047,23 +1167,56 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
         child: Any | None = None
         descendants: list[dict[str, Any]] = []
         start = time.monotonic()
-        row: dict[str, Any] = {"kind": kind, "index": index, "root": str(roots.base), "rows": args.rows, "cols": args.cols}
+        row: dict[str, Any] = {
+            "kind": kind,
+            "index": index,
+            "root": str(roots.base),
+            "rows": args.rows,
+            "cols": args.cols,
+        }
         try:
             child = _start_child(binary, roots, args.rows, args.cols, None)
             descendants = _process_descendants(int(child.pid))
             ready, endpoint = _wait_ready(child)
-            row.update({
-                "ready": ready,
-                "latencyMs": (endpoint - start) * 1000 if endpoint is not None else None,
-                "exitCode": child.exit_status,
-                "lastOutputAt": endpoint,
-                "screenHash": _screen_hash(child),
-            })
-            if not ready:
+            timing_details = (
+                _frame_clock_details(child, endpoint, start)
+                if isinstance(endpoint, runner.FrameTimingEvent)
+                else None
+            )
+            latency = (
+                timing_details["latencyUpperBoundMs"]
+                if timing_details is not None
+                else None
+            )
+            row.update(
+                {
+                    "ready": ready,
+                    "latencyMs": latency,
+                    "exitCode": child.exit_status,
+                    "parentObservedAtMonotonic": (
+                        endpoint.observed_at_monotonic
+                        if isinstance(endpoint, runner.FrameTimingEvent)
+                        else None
+                    ),
+                    "screenHash": _screen_hash(child),
+                }
+            )
+            if timing_details is not None:
+                row["readyFrameTiming"] = timing_details
+                if latency is None:
+                    row["reason"] = "clock-mapping-unknown"
+            elif not ready:
                 row["reason"] = "usable-composer-timeout-or-exit"
             row["descendantCountAtLaunch"] = len(descendants)
         except Exception as error:
-            row.update({"ready": False, "latencyMs": None, "reason": f"launch-error:{error}", "exitCode": child.exit_status if child else None})
+            row.update(
+                {
+                    "ready": False,
+                    "latencyMs": None,
+                    "reason": f"launch-error:{error}",
+                    "exitCode": child.exit_status if child else None,
+                }
+            )
             descendants = _process_descendants(int(child.pid)) if child else []
         finally:
             if child is not None:
@@ -1083,6 +1236,7 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "product": args.product,
         "binary": str(binary),
+        "endpoint": TIMING_ENDPOINT,
         "rows": args.rows,
         "cols": args.cols,
         "readyPredicate": READY_PREDICATE,
@@ -1132,10 +1286,14 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                 "rotations": [],
             }
 
-            def open_child(current_root: RootSet) -> tuple[Any, list[dict[str, Any]], Path, bool, float | None]:
+            def open_child(
+                current_root: RootSet,
+            ) -> tuple[Any, list[dict[str, Any]], Path, bool, Any | None]:
                 bound = fixture
                 if args.product == "bb":
-                    bound = _prepare_bb_cell_fixture(binary, current_root, rows, columns, fixture)
+                    bound = _prepare_bb_cell_fixture(
+                        binary, current_root, rows, columns, fixture
+                    )
                 started = _start_child(binary, current_root, rows, columns, bound)
                 started_descendants = _process_descendants(int(started.pid))
                 ready, ready_at = _wait_ready(started, 60.0, _cell_ready)
@@ -1145,7 +1303,16 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                 child, descendants, active_fixture, ready, ready_at = open_child(root)
                 cell["fixture"] = str(active_fixture)
                 cell["ready"] = ready
-                cell["readyOutputAt"] = ready_at
+                cell["readyFrameTiming"] = (
+                    ready_at.as_dict()
+                    if isinstance(ready_at, runner.FrameTimingEvent)
+                    else None
+                )
+                cell["readyObservedAtMonotonic"] = (
+                    ready_at.observed_at_monotonic
+                    if isinstance(ready_at, runner.FrameTimingEvent)
+                    else None
+                )
                 cell["initialScreenHash"] = _screen_hash(child)
                 cell["initialScreenText"] = child.screen.text()
                 if not ready:
@@ -1185,7 +1352,16 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                         child, descendants, active_fixture, rotated_ready, rotated_ready_at = open_child(root)
                         cell["rotations"][-1]["replacementRoot"] = str(root.base)
                         cell["rotations"][-1]["replacementReady"] = rotated_ready
-                        cell["rotations"][-1]["replacementReadyOutputAt"] = rotated_ready_at
+                        cell["rotations"][-1]["replacementReadyFrameTiming"] = (
+                            rotated_ready_at.as_dict()
+                            if isinstance(rotated_ready_at, runner.FrameTimingEvent)
+                            else None
+                        )
+                        cell["rotations"][-1]["replacementReadyObservedAtMonotonic"] = (
+                            rotated_ready_at.observed_at_monotonic
+                            if isinstance(rotated_ready_at, runner.FrameTimingEvent)
+                            else None
+                        )
                         if not rotated_ready:
                             raise RuntimeError("replacement session never reached a usable composer")
                         return row
@@ -1205,9 +1381,18 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                             deficits = [
                                 action
                                 for action in actions
-                                if sum(1 for row in samples[action] if row["block"] == block and row.get("status") == "valid") < per_block
-                                and sum(1 for row in samples[action] if row["block"] == block) < retry_cap
-                                and not any(str(row.get("reason", "")).startswith("no-provider") for row in samples[action] if row["block"] == block)
+                                if sum(
+                                    1
+                                    for row in samples[action]
+                                    if row["block"] == block and row.get("status") == "valid"
+                                ) < per_block
+                                and sum(1 for row in samples[action] if row["block"] == block)
+                                < retry_cap
+                                and not any(
+                                    str(row.get("reason", "")).startswith("no-provider")
+                                    for row in samples[action]
+                                    if row["block"] == block
+                                )
                             ]
                             if not deficits:
                                 break
@@ -1234,7 +1419,7 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
         "warmup": args.warmup,
         "samples": args.samples,
         "blocks": args.blocks,
-        "endpoint": "PtyChild.last_output_at on first read satisfying the action predicate",
+        "endpoint": TIMING_ENDPOINT,
         "cells": cells,
     }
 
@@ -1531,6 +1716,7 @@ def run_soak(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "product": args.product,
         "binary": str(binary),
+        "endpoint": TIMING_ENDPOINT,
         "fixture": str(active_fixture),
         "ready": ready,
         "error": error,
@@ -1566,6 +1752,19 @@ def _read_result(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"result must be a JSON object: {path}")
     return value
+
+
+def _require_timing_endpoint(data: dict[str, Any], label: str) -> None:
+    endpoint = data.get("endpoint")
+    if endpoint != TIMING_ENDPOINT:
+        raise ValueError(
+            f"{label} does not use the exported-frame timing endpoint; "
+            "legacy PTY read timestamps cannot be compared"
+        )
+    for key in ("cells", "startup", "soak"):
+        section = data.get(key)
+        if isinstance(section, dict) and "product" in section and section.get("endpoint") != TIMING_ENDPOINT:
+            raise ValueError(f"{label} {key} section uses a different timing endpoint")
 
 
 def _product_section(data: dict[str, Any], key: str) -> dict[str, Any]:
@@ -1725,12 +1924,14 @@ def summarize_results(bb_path: Path, omp_path: Path, out_path: Path) -> None:
     resolution: per cell BB p95 <= 1.5x OMP p95 and BB max <= 1.5x OMP max,
     BB startup p95 <= 1.5x OMP startup p95, absolute backstops (BB p95 <= 250
     ms everyday/complex, <= 400 ms adverse; startup cold p95 <= 2,500 ms / max
-    <= 4,000 ms, warm p95 <= 1,000 ms / max <= 2,000 ms), resource gates
-    unchanged. A cell whose OMP baseline is structurally unavailable (for
     example cancel without a provider-free model) keeps its absolute gates and
     reports the relative gate UNKNOWN with the reason."""
     bb = _read_result(bb_path)
     omp = _read_result(omp_path)
+    _require_timing_endpoint(bb, "BB result")
+    _require_timing_endpoint(omp, "OMP result")
+    if bb.get("endpoint") != omp.get("endpoint"):
+        raise ValueError("BB and OMP results use mixed timing endpoints")
     bb_cells_section = _product_section(bb, "cells")
     omp_cells_section = _product_section(omp, "cells")
     bb_cells = bb_cells_section.get("cells", {}) if isinstance(bb_cells_section, dict) else {}
@@ -1828,7 +2029,7 @@ def summarize_results(bb_path: Path, omp_path: Path, out_path: Path) -> None:
     overall = _combine([*(cell["status"] for cell in cell_output.values()), *(row["status"] for row in startup.values()), resource["bb"]["status"]])
     output = {
         "schemaVersion": RESULT_VERSION,
-        "contract": "bb-2j1u.6 (resolution 2026-09-09: PTY frame-written endpoint, relative-to-OMP gates)",
+        "contract": "bb-2j1u.6 (exported frame-written scheduler endpoint, mapped to Darwin Mach absolute time; relative-to-OMP gates)",
         "inputs": {"bb": str(bb_path), "omp": str(omp_path)},
         "samplesRequired": samples_required,
         "blockMinValid": block_min_valid,

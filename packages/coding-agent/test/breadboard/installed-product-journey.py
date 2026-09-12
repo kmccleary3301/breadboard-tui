@@ -4,21 +4,23 @@
 from __future__ import annotations
 
 import atexit
+import base64
+import codecs
 import copy
 import http.client
 import http.server
-import codecs
-import csv
+import binascii
 import ctypes
-import errno
 import fcntl
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import pty
 import pwd
 import re
+import secrets
 import select
 import shutil
 import signal
@@ -28,9 +30,10 @@ import struct
 import subprocess
 import sys
 import termios
+import threading
 import time
 import unicodedata
-import threading
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,9 +77,162 @@ ANSI_RE = re.compile(
     rb"(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~]|\x1B[@-_])"
 )
 
+TIMING_NONCE_ENV = "OMP_TUI_TIMING_NONCE"
+TIMING_NONCE_RE = re.compile(r"[0-9a-f]{32}")
+MAX_FRAME_EVENTS = 256
+
+
+def new_timing_nonce() -> str:
+    return secrets.token_hex(16)
+
+
+def timing_environment(env: dict[str, str]) -> dict[str, str]:
+    child_env = dict(env)
+    child_env[TIMING_NONCE_ENV] = new_timing_nonce()
+    return child_env
+
+
+@dataclass(frozen=True)
+class FrameTimingEvent:
+    nonce: str
+    metadata: dict[str, Any]
+    raw_metadata: str
+    screen: str
+    observed_at_monotonic: float | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "nonce": self.nonce,
+            "metadata": dict(self.metadata),
+            "rawMetadata": self.raw_metadata,
+            "screen": self.screen,
+            "observedAtMonotonic": self.observed_at_monotonic,
+        }
+
+
+def _valid_timing_number(value: Any, *, nonnegative: bool = True) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    number = float(value)
+    return math.isfinite(number) and (not nonnegative or number >= 0)
+
+
+def _parse_frame_timing(
+    raw_metadata: str,
+    nonce: str,
+    previous_frame_id: int | None,
+    previous_input_id: int | None,
+    previous_input_data: str | None,
+    previous_input_at: float | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        decoded = base64.b64decode(raw_metadata, validate=True).decode("utf-8")
+        metadata = json.loads(decoded)
+    except (json.JSONDecodeError, TypeError, ValueError, UnicodeError, binascii.Error):
+        return None, "invalid_json"
+    if (
+        not isinstance(metadata, dict)
+        or isinstance(metadata.get("version"), bool)
+        or metadata.get("version") != 1
+    ):
+        return None, "invalid_version"
+    frame_id = metadata.get("frameId")
+    input_id = metadata.get("inputId")
+    if (
+        not _valid_timing_number(frame_id)
+        or not isinstance(frame_id, int)
+        or not _valid_timing_number(input_id)
+        or not isinstance(input_id, int)
+    ):
+        return None, "invalid_id"
+    if frame_id != (0 if previous_frame_id is None else previous_frame_id + 1):
+        return None, "unexpected_frame_id"
+    if previous_input_id is not None and input_id < previous_input_id:
+        return None, "nonmonotonic_input_id"
+    input_data = metadata.get("inputData")
+    if not isinstance(input_data, str):
+        return None, "invalid_input_data"
+    try:
+        base64.b64decode(input_data, validate=True)
+    except (ValueError, binascii.Error):
+        return None, "invalid_input_data"
+    input_at = metadata.get("inputAtMs")
+    if input_id == 0:
+        if input_data != "" or input_at is not None:
+            return None, "invalid_startup_input"
+    else:
+        if not _valid_timing_number(input_at):
+            return None, "invalid_input_time"
+        if previous_input_id == input_id and (
+            input_data != previous_input_data or input_at != previous_input_at
+        ):
+            return None, "changed_input"
+    if input_at is not None and not _valid_timing_number(input_at):
+        return None, "invalid_input_time"
+    written_at = metadata.get("writtenAtMs")
+    if not _valid_timing_number(written_at) or (input_at is not None and written_at < input_at):
+        return None, "invalid_written_time"
+    origin = metadata.get("monotonicOriginMs")
+    uncertainty = metadata.get("clockUncertaintyMs")
+    if (origin is None) != (uncertainty is None):
+        return None, "partial_clock_mapping"
+    if origin is not None and (
+        not _valid_timing_number(origin, nonnegative=False) or not _valid_timing_number(uncertainty)
+    ):
+        return None, "invalid_clock_mapping"
+    return metadata, None
+
 
 class JourneyFailure(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class MonotonicClockMapping:
+    origin_ms: float
+    uncertainty_ms: float
+    source: str = "mach_absolute_time"
+
+class _MachTimebaseInfo(ctypes.Structure):
+    _fields_ = [
+        ("numer", ctypes.c_uint32),
+        ("denom", ctypes.c_uint32),
+    ]
+
+
+def _mach_absolute_ms() -> float:
+    if sys.platform != "darwin":
+        raise OSError("mach clock is only available on Darwin")
+    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    info = _MachTimebaseInfo()
+    timebase_info = library.mach_timebase_info
+    timebase_info.argtypes = [ctypes.POINTER(_MachTimebaseInfo)]
+    timebase_info.restype = ctypes.c_int
+    if timebase_info(ctypes.byref(info)) != 0 or info.denom == 0:
+        raise OSError("mach_timebase_info failed")
+    mach_absolute_time = library.mach_absolute_time
+    mach_absolute_time.argtypes = []
+    mach_absolute_time.restype = ctypes.c_uint64
+    return (
+        float(mach_absolute_time()) * float(info.numer) / float(info.denom) / 1_000_000.0
+    )
+
+
+def capture_monotonic_clock_mapping() -> MonotonicClockMapping | None:
+    if sys.platform != "darwin":
+        return None
+    try:
+        mono_before = time.monotonic() * 1000.0
+        mach_ms = _mach_absolute_ms()
+        mono_after = time.monotonic() * 1000.0
+    except (OSError, AttributeError):
+        return None
+    if not all(math.isfinite(value) for value in (mono_before, mach_ms, mono_after)) or mono_after < mono_before:
+        return None
+    return MonotonicClockMapping(
+        origin_ms=mach_ms - ((mono_before + mono_after) / 2.0),
+        uncertainty_ms=(mono_after - mono_before) / 2.0,
+    )
 
 
 class _HeldSessionMutationProxyServer(http.server.ThreadingHTTPServer):
@@ -799,7 +955,14 @@ class HeldSessionMutationProxy:
 
 
 class TerminalScreen:
-    def __init__(self, rows: int = ROWS, columns: int = COLUMNS) -> None:
+    def __init__(
+        self,
+        rows: int = ROWS,
+        columns: int = COLUMNS,
+        timing_nonce: str | None = None,
+    ) -> None:
+        if timing_nonce is not None and TIMING_NONCE_RE.fullmatch(timing_nonce) is None:
+            raise ValueError("timing nonce must be exactly 32 lowercase hex characters")
         self.rows = rows
         self.columns = columns
         self.grid = [[" "] * columns for _ in range(rows)]
@@ -809,6 +972,30 @@ class TerminalScreen:
         self.primary_screen: tuple[list[list[str]], int, int] | None = None
         self.pending = ""
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        self.timing_nonce = timing_nonce
+        self._frame_events: deque[FrameTimingEvent] = deque(maxlen=MAX_FRAME_EVENTS)
+        self._frame_rejections: dict[str, int] = {}
+        self._last_frame_id: int | None = None
+        self._last_input_id: int | None = None
+        self._last_input_data: str | None = None
+        self._last_input_at: float | None = None
+        self._saw_valid_frame = False
+
+
+    @property
+    def frame_rejections(self) -> dict[str, int]:
+        return dict(self._frame_rejections)
+
+
+    @property
+    def latest_input_id(self) -> int | None:
+        return self._last_input_id
+
+
+    def drain_frame_events(self) -> list[FrameTimingEvent]:
+        events = list(self._frame_events)
+        self._frame_events.clear()
+        return events
 
 
     def resize(self, rows: int, columns: int) -> None:
@@ -831,7 +1018,7 @@ class TerminalScreen:
                 max(0, min(column, columns - 1)),
             )
 
-    def feed(self, data: bytes) -> None:
+    def feed(self, data: bytes, observed_at_monotonic: float | None = None) -> None:
         self.pending += self.decoder.decode(data)
         index = 0
         while index < len(self.pending):
@@ -863,6 +1050,7 @@ class TerminalScreen:
                 if not ends:
                     break
                 end = min(ends)
+                self._osc(self.pending[index + 2 : end], observed_at_monotonic)
                 index = end + (2 if self.pending.startswith("\x1b\\", end) else 1)
                 continue
             if kind == "7":
@@ -871,6 +1059,56 @@ class TerminalScreen:
                 self.row, self.column = self.saved
             index += 2
         self.pending = self.pending[index:]
+
+
+    def _reject_frame(self, reason: str) -> None:
+        self._frame_rejections[reason] = self._frame_rejections.get(reason, 0) + 1
+
+
+    def _osc(self, raw: str, observed_at_monotonic: float | None) -> None:
+        parts = raw.split(";", 3)
+        if len(parts) != 4 or parts[0] != "777" or parts[1] != "omp-frame-timing":
+            return
+        nonce, raw_metadata = parts[2], parts[3]
+        if self.timing_nonce is None:
+            return
+        if nonce != self.timing_nonce:
+            self._reject_frame("wrong_nonce")
+            return
+        metadata, reason = _parse_frame_timing(
+            raw_metadata,
+            nonce,
+            self._last_frame_id,
+            self._last_input_id,
+            self._last_input_data,
+            self._last_input_at,
+        )
+        if metadata is None:
+            self._reject_frame(reason or "invalid")
+            return
+        frame_id = metadata["frameId"]
+        input_id = metadata["inputId"]
+        input_data = metadata["inputData"]
+        input_at = metadata["inputAtMs"]
+        if not self._saw_valid_frame and input_id != 0:
+            self._reject_frame("missing_startup_frame")
+            return
+        if len(self._frame_events) == MAX_FRAME_EVENTS:
+            self._reject_frame("event_overflow")
+        self._frame_events.append(
+            FrameTimingEvent(
+                nonce=nonce,
+                metadata=metadata,
+                raw_metadata=raw_metadata,
+                screen=self.text(),
+                observed_at_monotonic=observed_at_monotonic,
+            )
+        )
+        self._last_frame_id = frame_id
+        self._last_input_id = input_id
+        self._last_input_data = input_data
+        self._last_input_at = input_at
+        self._saw_valid_frame = True
 
     def _scroll(self) -> None:
         while self.row >= self.rows:
@@ -1007,6 +1245,13 @@ class PtyChild:
     ) -> None:
         if rows <= 0 or columns <= 0:
             raise ValueError("terminal dimensions must be positive")
+        timing_nonce = env.get(TIMING_NONCE_ENV)
+        if timing_nonce is not None and TIMING_NONCE_RE.fullmatch(timing_nonce) is None:
+            raise ValueError("timing nonce must be exactly 32 lowercase hex characters")
+        self.timing_nonce = timing_nonce
+        self.clock_mapping = (
+            capture_monotonic_clock_mapping() if timing_nonce is not None else None
+        )
         pid, master = pty.fork()
         if pid == 0:
             try:
@@ -1022,7 +1267,7 @@ class PtyChild:
         self.pid = pid
         self.master = master
         self.raw = bytearray()
-        self.screen = TerminalScreen(rows, columns)
+        self.screen = TerminalScreen(rows, columns, timing_nonce=timing_nonce)
         self.rows = rows
         self.columns = columns
         self.last_output_at: float | None = None
@@ -1056,13 +1301,17 @@ class PtyChild:
                     raise
                 if not data:
                     break
-                self.last_output_at = time.monotonic()
+                observed_at = time.monotonic()
+                self.last_output_at = observed_at
                 self.output_reads += 1
                 self.raw.extend(data)
-                self.screen.feed(data)
+                self.screen.feed(data, observed_at)
                 if len(data) < 65536:
                     break
         self._observe_exit()
+
+    def drain_frame_events(self) -> list[FrameTimingEvent]:
+        return self.screen.drain_frame_events()
 
     def resize(self, rows: int, columns: int) -> None:
         if rows <= 0 or columns <= 0:
@@ -2647,7 +2896,7 @@ def main() -> int:
     initial = PtyChild(
         [str(bb)],
         roots["workspace"],
-        environment,
+        timing_environment(environment),
         rows=options.rows,
         columns=options.cols,
     )
@@ -2873,7 +3122,7 @@ def main() -> int:
         initial = PtyChild(
             [str(bb)],
             roots["workspace"],
-            environment,
+            timing_environment(environment),
             rows=options.rows,
             columns=options.cols,
         )
@@ -3463,7 +3712,7 @@ def main() -> int:
     resume = PtyChild(
         [str(bb), "--resume", str(final_initial.session_file)],
         roots["workspace"],
-        environment,
+        timing_environment(environment),
         rows=options.rows,
         columns=options.cols,
     )

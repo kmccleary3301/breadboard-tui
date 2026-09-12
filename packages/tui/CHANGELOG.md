@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in scheduler frame-write timing trailers for controlled PTY measurements through `OMP_TUI_TIMING_NONCE`.
+
+### Fixed
+
+- Invalidated prepared-line caches when the runtime image protocol changes and excluded oversized strings from cache retention.
+
 ## [18.1.15] - 2026-09-08
 
 ### Fixed

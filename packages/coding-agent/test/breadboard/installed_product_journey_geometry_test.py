@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+import base64
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -25,7 +29,51 @@ sys.modules[EVERYDAY_SPEC.name] = everyday
 EVERYDAY_SPEC.loader.exec_module(everyday)
 
 
+def _frame_trailer(
+    nonce: str,
+    frame_id: int,
+    input_id: int,
+    input_data: str = "",
+    input_at: float | None = None,
+) -> bytes:
+    metadata = {
+        "version": 1,
+        "frameId": frame_id,
+        "inputId": input_id,
+        "inputData": input_data,
+        "inputAtMs": input_at,
+        "writtenAtMs": float(frame_id) + 10,
+        "monotonicOriginMs": None,
+        "clockUncertaintyMs": None,
+    }
+    encoded = base64.b64encode(json.dumps(metadata, separators=(",", ":")).encode()).decode()
+    return f"\x1b]777;omp-frame-timing;{nonce};{encoded}\x07".encode()
+
+
 class InstalledProductJourneyGeometryTests(unittest.TestCase):
+    def test_frame_trailer_snapshots_exact_screen_across_split_and_multiple_markers(self) -> None:
+        nonce = "0123456789abcdef0123456789abcdef"
+        screen = runner.TerminalScreen(rows=2, columns=8, timing_nonce=nonce)
+        first = _frame_trailer(nonce, 0, 0)
+        screen.feed(b"\x1b[2J\x1b[Hfirst" + first[: len(first) // 2])
+        self.assertEqual(screen.drain_frame_events(), [])
+        screen.feed(first[len(first) // 2 :] + b"\x1b[2J\x1b[Hsecond")
+        second = _frame_trailer(nonce, 1, 1, "Yg==", 1.5)
+        screen.feed(second)
+        events = screen.drain_frame_events()
+        self.assertEqual([event.metadata["frameId"] for event in events], [0, 1])
+        self.assertEqual(events[0].screen, "first\n")
+        self.assertEqual(events[1].screen, "second\n")
+
+    def test_frame_trailer_rejects_wrong_nonce_and_invalid_metadata_without_rendering(self) -> None:
+        nonce = "0123456789abcdef0123456789abcdef"
+        screen = runner.TerminalScreen(rows=2, columns=8, timing_nonce=nonce)
+        wrong = _frame_trailer("fedcba9876543210fedcba9876543210", 1, 0)
+        screen.feed(b"\x1b[2J\x1b[Hok" + wrong)
+        screen.feed(b"\x1b]777;omp-frame-timing;" + nonce.encode() + b";not-json\x07")
+        self.assertEqual(screen.drain_frame_events(), [])
+        self.assertEqual(screen.text(), "ok\n")
+        self.assertEqual(screen.frame_rejections, {"wrong_nonce": 1, "invalid_json": 1})
     def test_terminal_screen_resize_clears_and_clamps_with_split_escape(self) -> None:
         screen = runner.TerminalScreen(rows=2, columns=8)
         screen.feed(b"0123456789abcdef")
