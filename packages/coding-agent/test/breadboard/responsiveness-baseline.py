@@ -36,10 +36,13 @@ READY_PREDICATE = "status/composer row containing mock/reference (or plain OMP n
 PAGE_UP = b"\x1b[5~"
 PAGE_DOWN = b"\x1b[6~"
 ESCAPE = b"\x1b"
+BACKSPACE = b"\x7f"
+ENTER = b"\r"
+SCALE_NAMES = ("everyday", "complex", "adverse")
 TIMING_ENDPOINT = (
     "first exported frame trailer matching the unchanged screen predicate, "
-    "nonce, input payload, and fresh inputId; latency uses mapped scheduler write "
-    "time with uncertainty upper bound"
+    "nonce, input payload, and fresh inputId; latency uses per-endpoint "
+    "Mach-bracketed scheduler write time with uncertainty upper bound"
 )
 GEOMETRIES = ((120, 36), (80, 24))
 ACTION_NAMES = ("key", "menu", "scroll", "submit", "cancel")
@@ -81,6 +84,11 @@ def _write_aggregate(path: Path, key: str, value: dict[str, Any]) -> None:
                 existing = loaded
         except json.JSONDecodeError:
             existing = {}
+    product = value.get("product")
+    if existing.get("product") not in (None, product):
+        raise RuntimeError(f"output already belongs to product {existing['product']!r}: {path}")
+    if existing:
+        _require_timing_endpoint(existing, str(path))
     endpoint = value.get("endpoint")
     if endpoint is not None:
         if existing.get("endpoint") not in (None, endpoint):
@@ -798,7 +806,7 @@ def _measurement(
     reads_before = child.output_reads
     pre_input_id = getattr(child.screen, "latest_input_id", None)
     rejections_before = child.screen.frame_rejections
-    t0 = time.monotonic()
+    t0, child.clock_mapping = runner.capture_mapped_monotonic_time()
     try:
         child.send(payload)
     except Exception as error:
@@ -1166,7 +1174,7 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
         roots = retained or _new_root_set(roots_base, args.product, kind)
         child: Any | None = None
         descendants: list[dict[str, Any]] = []
-        start = time.monotonic()
+        start, start_mapping = runner.capture_mapped_monotonic_time()
         row: dict[str, Any] = {
             "kind": kind,
             "index": index,
@@ -1176,6 +1184,7 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
         }
         try:
             child = _start_child(binary, roots, args.rows, args.cols, None)
+            child.clock_mapping = start_mapping
             descendants = _process_descendants(int(child.pid))
             ready, endpoint = _wait_ready(child)
             timing_details = (
@@ -1762,9 +1771,13 @@ def _require_timing_endpoint(data: dict[str, Any], label: str) -> None:
             "legacy PTY read timestamps cannot be compared"
         )
     for key in ("cells", "startup", "soak"):
-        section = data.get(key)
-        if isinstance(section, dict) and "product" in section and section.get("endpoint") != TIMING_ENDPOINT:
+        if key not in data:
+            continue
+        section = data[key]
+        if not isinstance(section, dict) or section.get("endpoint") != TIMING_ENDPOINT:
             raise ValueError(f"{label} {key} section uses a different timing endpoint")
+        if section.get("product") not in ("bb", "omp") or section["product"] != data.get("product"):
+            raise ValueError(f"{label} {key} section has an invalid product identity")
 
 
 def _product_section(data: dict[str, Any], key: str) -> dict[str, Any]:

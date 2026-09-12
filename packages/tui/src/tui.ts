@@ -115,8 +115,6 @@ interface FrameTimingState {
 	inputId: number;
 	inputData: string;
 	inputAtMs: number | null;
-	readonly monotonicOriginMs: number | null;
-	readonly clockUncertaintyMs: number | null;
 }
 
 const MACH_TIME_SYMBOLS = {
@@ -142,35 +140,6 @@ function machAbsoluteTimeMs(): number | undefined {
 	}
 }
 
-function createFrameTimingState(nonce: string, renderScheduler: RenderScheduler): FrameTimingState {
-	const bracketStartMs = machAbsoluteTimeMs();
-	const schedulerAtConstructionMs = renderScheduler.now();
-	const bracketEndMs = machAbsoluteTimeMs();
-	const bracketWidthMs =
-		bracketStartMs === undefined || bracketEndMs === undefined ? undefined : bracketEndMs - bracketStartMs;
-	const bracketMidpointMs =
-		bracketStartMs === undefined || bracketEndMs === undefined ? undefined : (bracketStartMs + bracketEndMs) / 2;
-	const mappingValid =
-		bracketMidpointMs !== undefined &&
-		bracketWidthMs !== undefined &&
-		Number.isFinite(schedulerAtConstructionMs) &&
-		Number.isFinite(bracketMidpointMs) &&
-		Number.isFinite(bracketWidthMs) &&
-		bracketWidthMs >= 0 &&
-		Number.isFinite(bracketMidpointMs - schedulerAtConstructionMs);
-	const monotonicOriginMs =
-		mappingValid && bracketMidpointMs !== undefined ? bracketMidpointMs - schedulerAtConstructionMs : null;
-	const clockUncertaintyMs = mappingValid && bracketWidthMs !== undefined ? bracketWidthMs / 2 : null;
-	return {
-		nonce,
-		frameId: 0,
-		inputId: 0,
-		inputData: "",
-		inputAtMs: null,
-		monotonicOriginMs,
-		clockUncertaintyMs,
-	};
-}
 function encodeFrameTimingTrailer(
 	nonce: string,
 	frame: {
@@ -956,7 +925,9 @@ export class TUI extends Container {
 		this.terminal = terminal;
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
 		const nonce = timingNonce();
-		if (nonce !== undefined) this.#frameTiming = createFrameTimingState(nonce, this.#renderScheduler);
+		if (nonce !== undefined) {
+			this.#frameTiming = { nonce, frameId: 0, inputId: 0, inputData: "", inputAtMs: null };
+		}
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
 	}
@@ -2135,8 +2106,22 @@ export class TUI extends Container {
 			this.terminal.write(buffer);
 			return;
 		}
+		const bracketStartMs = machAbsoluteTimeMs();
 		const writtenAtMs = this.#renderScheduler.now();
+		const bracketEndMs = machAbsoluteTimeMs();
 		this.terminal.write(buffer);
+		const mappingValid =
+			bracketStartMs !== undefined &&
+			bracketEndMs !== undefined &&
+			Number.isFinite(bracketStartMs) &&
+			Number.isFinite(bracketEndMs) &&
+			Number.isFinite(writtenAtMs) &&
+			bracketEndMs >= bracketStartMs;
+		const monotonicOriginMs = mappingValid ? (bracketStartMs + bracketEndMs) / 2 - writtenAtMs : null;
+		const clockUncertaintyMs = mappingValid
+			? (bracketEndMs - bracketStartMs) / 2 +
+				2 * Number.EPSILON * (Math.abs(bracketStartMs) + Math.abs(bracketEndMs) + Math.abs(writtenAtMs))
+			: null;
 		this.terminal.write(
 			encodeFrameTimingTrailer(timing.nonce, {
 				version: 1,
@@ -2145,8 +2130,8 @@ export class TUI extends Container {
 				inputData: timing.inputData,
 				inputAtMs: timing.inputAtMs,
 				writtenAtMs,
-				monotonicOriginMs: timing.monotonicOriginMs,
-				clockUncertaintyMs: timing.clockUncertaintyMs,
+				monotonicOriginMs,
+				clockUncertaintyMs,
 			}),
 		);
 		timing.frameId += 1;

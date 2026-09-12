@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+import argparse
 import atexit
 import base64
+import binascii
 import codecs
 import copy
-import http.client
-import http.server
-import binascii
+import csv
 import ctypes
+import errno
 import fcntl
 import hashlib
+import http.client
+import http.server
 import ipaddress
 import json
 import math
@@ -80,6 +83,7 @@ ANSI_RE = re.compile(
 TIMING_NONCE_ENV = "OMP_TUI_TIMING_NONCE"
 TIMING_NONCE_RE = re.compile(r"[0-9a-f]{32}")
 MAX_FRAME_EVENTS = 256
+MAX_FRAME_METADATA_BYTES = 64 * 1024
 
 
 def new_timing_nonce() -> str:
@@ -113,7 +117,10 @@ class FrameTimingEvent:
 def _valid_timing_number(value: Any, *, nonnegative: bool = True) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        return False
     return math.isfinite(number) and (not nonnegative or number >= 0)
 
 
@@ -125,10 +132,12 @@ def _parse_frame_timing(
     previous_input_data: str | None,
     previous_input_at: float | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
+    if len(raw_metadata) > MAX_FRAME_METADATA_BYTES:
+        return None, "oversized_metadata"
     try:
         decoded = base64.b64decode(raw_metadata, validate=True).decode("utf-8")
         metadata = json.loads(decoded)
-    except (json.JSONDecodeError, TypeError, ValueError, UnicodeError, binascii.Error):
+    except (json.JSONDecodeError, TypeError, ValueError, UnicodeError, binascii.Error, RecursionError):
         return None, "invalid_json"
     if (
         not isinstance(metadata, dict)
@@ -200,38 +209,45 @@ class _MachTimebaseInfo(ctypes.Structure):
     ]
 
 
+_mach_clock: tuple[ctypes.CDLL, _MachTimebaseInfo] | None = None
+
+
 def _mach_absolute_ms() -> float:
+    global _mach_clock
     if sys.platform != "darwin":
         raise OSError("mach clock is only available on Darwin")
-    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
-    info = _MachTimebaseInfo()
-    timebase_info = library.mach_timebase_info
-    timebase_info.argtypes = [ctypes.POINTER(_MachTimebaseInfo)]
-    timebase_info.restype = ctypes.c_int
-    if timebase_info(ctypes.byref(info)) != 0 or info.denom == 0:
-        raise OSError("mach_timebase_info failed")
-    mach_absolute_time = library.mach_absolute_time
-    mach_absolute_time.argtypes = []
-    mach_absolute_time.restype = ctypes.c_uint64
-    return (
-        float(mach_absolute_time()) * float(info.numer) / float(info.denom) / 1_000_000.0
-    )
+    if _mach_clock is None:
+        library = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        info = _MachTimebaseInfo()
+        timebase_info = library.mach_timebase_info
+        timebase_info.argtypes = [ctypes.POINTER(_MachTimebaseInfo)]
+        timebase_info.restype = ctypes.c_int
+        if timebase_info(ctypes.byref(info)) != 0 or info.denom == 0:
+            raise OSError("mach_timebase_info failed")
+        library.mach_absolute_time.argtypes = []
+        library.mach_absolute_time.restype = ctypes.c_uint64
+        _mach_clock = library, info
+    library, info = _mach_clock
+    return float(library.mach_absolute_time()) * info.numer / info.denom / 1_000_000.0
 
 
-def capture_monotonic_clock_mapping() -> MonotonicClockMapping | None:
-    if sys.platform != "darwin":
-        return None
+def capture_mapped_monotonic_time() -> tuple[float, MonotonicClockMapping | None]:
     try:
-        mono_before = time.monotonic() * 1000.0
-        mach_ms = _mach_absolute_ms()
-        mono_after = time.monotonic() * 1000.0
+        mach_before = _mach_absolute_ms()
     except (OSError, AttributeError):
-        return None
-    if not all(math.isfinite(value) for value in (mono_before, mach_ms, mono_after)) or mono_after < mono_before:
-        return None
-    return MonotonicClockMapping(
-        origin_ms=mach_ms - ((mono_before + mono_after) / 2.0),
-        uncertainty_ms=(mono_after - mono_before) / 2.0,
+        return time.monotonic(), None
+    timestamp = time.monotonic()
+    try:
+        mach_after = _mach_absolute_ms()
+    except (OSError, AttributeError):
+        return timestamp, None
+    mono_ms = timestamp * 1000.0
+    if not all(math.isfinite(value) for value in (mach_before, mono_ms, mach_after)) or mach_after < mach_before:
+        return timestamp, None
+    rounding_bound = 2.0 * sys.float_info.epsilon * (abs(mach_before) + abs(mach_after) + abs(mono_ms))
+    return timestamp, MonotonicClockMapping(
+        origin_ms=((mach_before + mach_after) / 2.0) - mono_ms,
+        uncertainty_ms=(mach_after - mach_before) / 2.0 + rounding_bound,
     )
 
 
@@ -1250,7 +1266,7 @@ class PtyChild:
             raise ValueError("timing nonce must be exactly 32 lowercase hex characters")
         self.timing_nonce = timing_nonce
         self.clock_mapping = (
-            capture_monotonic_clock_mapping() if timing_nonce is not None else None
+            capture_mapped_monotonic_time()[1] if timing_nonce is not None else None
         )
         pid, master = pty.fork()
         if pid == 0:

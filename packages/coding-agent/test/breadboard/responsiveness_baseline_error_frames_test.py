@@ -1,11 +1,12 @@
 import base64
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from dataclasses import replace
-
 
 HARNESS_PATH = Path(__file__).with_name("responsiveness-baseline.py")
 HARNESS_SPEC = importlib.util.spec_from_file_location(
@@ -45,6 +46,25 @@ def _screen(*rows: str) -> str:
 
 
 class ErrorFramesTests(unittest.TestCase):
+    def test_aggregate_preserves_phases_and_rejects_cross_product_append(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "measurements.json"
+            for phase in ("startup", "cells", "soak"):
+                harness._write_aggregate(path, phase, {"product": "bb", "endpoint": harness.TIMING_ENDPOINT})
+            retained = path.read_bytes()
+            self.assertEqual(set(json.loads(retained)) & {"startup", "cells", "soak"}, {"startup", "cells", "soak"})
+            with self.assertRaises(RuntimeError):
+                harness._write_aggregate(path, "cells", {"product": "omp", "endpoint": harness.TIMING_ENDPOINT})
+            self.assertEqual(path.read_bytes(), retained)
+
+    def test_missing_product_cannot_bypass_nested_endpoint_checks(self) -> None:
+        for section in ({"endpoint": "legacy PTY"}, {"endpoint": harness.TIMING_ENDPOINT}):
+            with self.subTest(section=section):
+                with self.assertRaises(ValueError):
+                    harness._require_timing_endpoint(
+                        {"product": "bb", "endpoint": harness.TIMING_ENDPOINT, "cells": section}, "BB"
+                    )
+
     def test_provider_free_rejection_is_not_an_error_under_the_plain_omp_row(self) -> None:
         self.assertEqual(harness._error_frames(_screen(OMP_STATUS_ROW, PROVIDER_FREE_REJECTION)), 0)
 

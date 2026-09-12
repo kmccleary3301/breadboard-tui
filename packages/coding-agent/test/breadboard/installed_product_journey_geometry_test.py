@@ -7,7 +7,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 RUNNER_PATH = Path(__file__).with_name("installed-product-journey.py")
 RUNNER_SPEC = importlib.util.spec_from_file_location(
     "installed_product_journey", RUNNER_PATH
@@ -51,6 +50,30 @@ def _frame_trailer(
 
 
 class InstalledProductJourneyGeometryTests(unittest.TestCase):
+    def test_malformed_timing_payload_does_not_abort_screen_parsing(self) -> None:
+        nonce = "0123456789abcdef0123456789abcdef"
+        malformed = (
+            b"[" * 2000 + b"0" + b"]" * 2000,
+            json.dumps({"version": 1, "frameId": 10 ** 400, "inputId": 0}).encode(),
+        )
+        for payload in malformed:
+            with self.subTest(payload_bytes=len(payload)):
+                screen = runner.TerminalScreen(rows=2, columns=8, timing_nonce=nonce)
+                screen.feed(b"\x1b]777;omp-frame-timing;" + nonce.encode() + b";" + base64.b64encode(payload) + b"\x07ok")
+                self.assertEqual(screen.drain_frame_events(), [])
+                screen.feed(_frame_trailer(nonce, 0, 0))
+                self.assertEqual([event.screen for event in screen.drain_frame_events()], ["ok\n"])
+
+    def test_oversized_valid_timing_payload_is_not_retained(self) -> None:
+        nonce = "0123456789abcdef0123456789abcdef"
+        screen = runner.TerminalScreen(rows=2, columns=8, timing_nonce=nonce)
+        screen.feed(_frame_trailer(nonce, 0, 0))
+        screen.drain_frame_events()
+        payload = base64.b64encode(b"x" * runner.MAX_FRAME_METADATA_BYTES).decode()
+        screen.feed(_frame_trailer(nonce, 1, 1, payload, 1.0) + b"after")
+        self.assertEqual(screen.drain_frame_events(), [])
+        self.assertEqual(screen.text(), "after\n")
+
     def test_frame_trailer_snapshots_exact_screen_across_split_and_multiple_markers(self) -> None:
         nonce = "0123456789abcdef0123456789abcdef"
         screen = runner.TerminalScreen(rows=2, columns=8, timing_nonce=nonce)
