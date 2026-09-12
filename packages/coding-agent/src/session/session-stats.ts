@@ -30,6 +30,17 @@ interface PendingContextSnapshot {
 	 */
 	epoch: number;
 }
+interface ContextUsageTurnMemo {
+	messages: readonly AgentMessage[];
+	messageCount: number;
+	lastMessage: AgentMessage | undefined;
+	contextWindow: number | undefined;
+	revision: number;
+	systemPrompt: readonly string[] | undefined;
+	tools: NonNullable<NonNullable<NonMessageTokenSource["agent"]>["state"]>["tools"];
+	skills: NonMessageTokenSource["skills"];
+	usage: ContextUsage | undefined;
+}
 
 /** Capabilities the stats tracker borrows from its owning session. */
 export interface SessionStatsTrackerHost {
@@ -78,6 +89,8 @@ export class SessionStatsTracker {
 	#pendingContextSnapshot: PendingContextSnapshot | undefined;
 	#contextUsageRevision = 0;
 	#compactionEpoch = 0;
+	#contextUsageTurnMemo: ContextUsageTurnMemo | undefined;
+	#contextUsageTurnMemoScheduled = false;
 
 	constructor(host: SessionStatsTrackerHost) {
 		this.#host = host;
@@ -301,15 +314,65 @@ export class SessionStatsTracker {
 		};
 	}
 
-	/** Returns current context tokens, capacity, and percentage. */
+	/**
+	 * Returns current context tokens, capacity, and percentage.
+	 *
+	 * A bare slash-menu render asks several dynamic command descriptions for
+	 * this value synchronously. Tokenizing the same transcript for each command
+	 * is pure duplicate work, so retain one value until the current microtask
+	 * drains. Stable input identities guard synchronous state changes within
+	 * that turn; the microtask boundary prevents the memo from spanning events.
+	 */
 	getContextUsage(options?: { contextWindow?: number }): ContextUsage | undefined {
+		const messages = this.#host.agent.state.messages;
+		const messageCount = messages.length;
+		const lastMessage = messageCount > 0 ? messages[messageCount - 1] : undefined;
+		const contextWindow = options?.contextWindow;
+		const systemPrompt = this.#host.session.systemPrompt;
+		const tools = this.#host.session.agent?.state?.tools;
+		const skills = this.#host.session.skills;
+		const memo = this.#contextUsageTurnMemo;
+		if (
+			memo &&
+			memo.messages === messages &&
+			memo.messageCount === messageCount &&
+			memo.lastMessage === lastMessage &&
+			memo.contextWindow === contextWindow &&
+			memo.revision === this.#contextUsageRevision &&
+			memo.systemPrompt === systemPrompt &&
+			memo.tools === tools &&
+			memo.skills === skills
+		) {
+			return memo.usage ? { ...memo.usage } : undefined;
+		}
+
 		const breakdown = this.getContextBreakdown(options);
-		if (!breakdown) return undefined;
-		return {
-			tokens: breakdown.usedTokens,
-			contextWindow: breakdown.contextWindow,
-			percent: breakdown.contextWindow > 0 ? (breakdown.usedTokens / breakdown.contextWindow) * 100 : 0,
+		const usage = breakdown
+			? {
+					tokens: breakdown.usedTokens,
+					contextWindow: breakdown.contextWindow,
+					percent: breakdown.contextWindow > 0 ? (breakdown.usedTokens / breakdown.contextWindow) * 100 : 0,
+				}
+			: undefined;
+		this.#contextUsageTurnMemo = {
+			messages,
+			messageCount,
+			lastMessage,
+			contextWindow,
+			revision: this.#contextUsageRevision,
+			systemPrompt,
+			tools,
+			skills,
+			usage,
 		};
+		if (!this.#contextUsageTurnMemoScheduled) {
+			this.#contextUsageTurnMemoScheduled = true;
+			queueMicrotask(() => {
+				this.#contextUsageTurnMemo = undefined;
+				this.#contextUsageTurnMemoScheduled = false;
+			});
+		}
+		return usage ? { ...usage } : undefined;
 	}
 
 	/** Monotonic revision for in-flight context snapshot changes. */

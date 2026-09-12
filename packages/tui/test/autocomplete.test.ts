@@ -995,6 +995,18 @@ describe("trySyncSlashCompletion", () => {
 		const on = await provider.getSuggestions(["/fa"], 0, 3);
 		expect(on?.items[0]).toMatchObject({ value: "fast", label: "fast", description: "Fast: on" });
 	});
+	it("keeps bare-menu dynamic descriptions live until rendered", () => {
+		let enabled = false;
+		const provider = new CombinedAutocompleteProvider(
+			[{ name: "fast", getAutocompleteDescription: () => `Fast: ${enabled ? "on" : "off"}` }],
+			"/tmp",
+		);
+		const result = provider.trySyncSlashCompletion("/", { includeBare: true });
+
+		enabled = true;
+
+		expect(result?.items[0]?.description).toBe("Fast: on");
+	});
 
 	it("keeps static slash descriptions as the search corpus", async () => {
 		const provider = new CombinedAutocompleteProvider(

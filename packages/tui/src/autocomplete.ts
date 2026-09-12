@@ -318,30 +318,47 @@ export function scoreCommandTextMatch(lowerPrefix: string, lowerTarget: string):
 	return fuzzyMatch(lowerPrefix, lowerTarget) ? fuzzyScore(lowerPrefix, lowerTarget) : 0;
 }
 
+function buildBareCommandCompletion(cmd: CommandEntry, name: string, hint: string | undefined): AutocompleteItem {
+	const item: AutocompleteItem = {
+		value: name,
+		label: "name" in cmd ? cmd.name : cmd.label,
+		...(cmd.icon && { icon: cmd.icon }),
+	};
+	if ("getAutocompleteDescription" in cmd && typeof cmd.getAutocompleteDescription === "function") {
+		Object.defineProperty(item, "description", {
+			enumerable: true,
+			get: () => {
+				const displayDesc = getAutocompleteCommandDescription(cmd);
+				return hint ? (displayDesc ? `${hint} - ${displayDesc}` : hint) : displayDesc || undefined;
+			},
+		});
+		return item;
+	}
+	const displayDesc = getAutocompleteCommandDescription(cmd);
+	const description = hint ? (displayDesc ? `${hint} - ${displayDesc}` : hint) : displayDesc;
+	if (description) item.description = description;
+	return item;
+}
+
 function buildSlashCommandCompletions(
 	commands: CommandEntry[],
 	lowerPrefix: string,
 	commandUsage?: (name: string) => number,
 ): AutocompleteItem[] {
 	if (lowerPrefix.length === 0) {
-		const matches: Array<AutocompleteItem & { score: number; usage: number }> = [];
+		const matches: Array<{ item: AutocompleteItem; score: number; usage: number }> = [];
 		for (const cmd of commands) {
 			const name = getCommandName(cmd);
 			if (!name) continue;
 			const hint = "argumentHint" in cmd && cmd.argumentHint ? cmd.argumentHint : undefined;
-			const displayDesc = getAutocompleteCommandDescription(cmd);
-			const description = hint ? (displayDesc ? `${hint} - ${displayDesc}` : hint) : displayDesc;
 			matches.push({
-				value: name,
-				label: "name" in cmd ? cmd.name : cmd.label,
+				item: buildBareCommandCompletion(cmd, name, hint),
 				score: name.startsWith(SKILL_NAMESPACE) ? 950 : 1,
 				usage: commandUsage?.(name) ?? 0,
-				...(cmd.icon && { icon: cmd.icon }),
-				...(description && { description }),
 			});
 		}
 		matches.sort((a, b) => b.score - a.score || b.usage - a.usage);
-		return matches.map(({ score: _score, usage: _usage, ...item }) => item);
+		return matches.map(match => match.item);
 	}
 
 	return (

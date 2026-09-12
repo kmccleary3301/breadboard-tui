@@ -2234,26 +2234,30 @@ export class Editor implements Component, Focusable {
 			const textBeforeCursor = replaceLine.slice(0, this.#state.cursorCol);
 			const inlineReplacement = this.#autocompleteProvider?.trySyncInlineReplace?.(textBeforeCursor);
 			if (inlineReplacement && this.#applyInlineReplacement(inlineReplacement)) return;
-			const cursorLine = this.#state.cursorLine;
-			const cursorCol = this.#state.cursorCol;
-			const currentLine = this.#state.lines[cursorLine] ?? "";
-			const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(this.#state.lines, cursorLine, cursorCol);
-			if (autocorrection instanceof Promise) {
-				autocorrection
-					.then(replacement => {
-						if (
-							replacement &&
-							this.#state.cursorLine === cursorLine &&
-							this.#state.cursorCol === cursorCol &&
-							this.#state.lines[cursorLine] === currentLine &&
-							this.#applyInlineReplacement(replacement)
-						) {
-							this.onTextAssistApplied?.();
-						}
-					})
-					.catch(() => {});
-			} else if (autocorrection && this.#applyInlineReplacement(autocorrection)) {
-				return;
+			// A slash at the submitted-command boundary has no preceding word to
+			// correct. Skip platform spell-check I/O before opening its menu.
+			if (char !== "/" || !this.#isAtStartOfSubmittedMessage()) {
+				const cursorLine = this.#state.cursorLine;
+				const cursorCol = this.#state.cursorCol;
+				const currentLine = this.#state.lines[cursorLine] ?? "";
+				const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(this.#state.lines, cursorLine, cursorCol);
+				if (autocorrection instanceof Promise) {
+					autocorrection
+						.then(replacement => {
+							if (
+								replacement &&
+								this.#state.cursorLine === cursorLine &&
+								this.#state.cursorCol === cursorCol &&
+								this.#state.lines[cursorLine] === currentLine &&
+								this.#applyInlineReplacement(replacement)
+							) {
+								this.onTextAssistApplied?.();
+							}
+						})
+						.catch(() => {});
+				} else if (autocorrection && this.#applyInlineReplacement(autocorrection)) {
+					return;
+				}
 			}
 		}
 

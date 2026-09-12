@@ -104,7 +104,7 @@ export class SelectList implements Component, MouseRoutable {
 	#primaryColumnWidth: number | undefined;
 	#iconColumnWidth: number | undefined;
 	readonly #displayValues = new Map<SelectItem, string>();
-	readonly #descriptions = new Map<SelectItem, string>();
+	readonly #descriptions = new Map<SelectItem, string | undefined>();
 	readonly #iconWidths = new Map<SelectItem, number>();
 
 	onSelect?: (item: SelectItem) => void;
@@ -561,10 +561,9 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	#getDescription(item: SelectItem): string | undefined {
-		if (!item.description) return undefined;
-		const cached = this.#descriptions.get(item);
-		if (cached !== undefined) return cached;
-		const value = sanitizeSingleLine(item.description);
+		if (this.#descriptions.has(item)) return this.#descriptions.get(item);
+		const description = item.description;
+		const value = description ? sanitizeSingleLine(description) : undefined;
 		this.#descriptions.set(item, value);
 		return value;
 	}
@@ -638,8 +637,9 @@ export class SelectList implements Component, MouseRoutable {
 
 	#getFilterText(item: SelectItem): string {
 		let text = `${item.label} ${item.value}`;
-		if (item.description) {
-			text += ` ${item.description}`;
+		const description = this.#getDescription(item);
+		if (description) {
+			text += ` ${description}`;
 		}
 		if (item.hint) {
 			text += ` ${item.hint}`;

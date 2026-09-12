@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Editor, type EditorTextAssistProvider } from "@oh-my-pi/pi-tui";
+import { CombinedAutocompleteProvider, Editor, type EditorTextAssistProvider } from "@oh-my-pi/pi-tui";
 import { defaultEditorTheme } from "./test-themes";
 
 describe("Editor text assistance", () => {
@@ -77,6 +77,16 @@ describe("Editor text assistance", () => {
 		editor.handleInput(" ");
 
 		expect(editor.getText()).toBe("I typed the ");
+	});
+	it("gives a submitted command slash precedence over autocorrection", () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setTextAssistProvider({ tryAutocorrect: () => ({ replaceLen: 1, insert: "wrong" }) });
+		editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: "model" }], "/tmp"));
+
+		editor.handleInput("/");
+
+		expect(editor.getText()).toBe("/");
+		expect(editor.isShowingAutocomplete()).toBeTrue();
 	});
 
 	it("applies an async autocorrection and notifies the host when the document is untouched", async () => {
