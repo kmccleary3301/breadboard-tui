@@ -9,6 +9,7 @@
 ### Fixed
 
 - Invalidated prepared-line caches when the runtime image protocol changes and excluded oversized strings from cache retention.
+- Started the BreadBoard cached composer before loading product setting defaults, while retaining those defaults before the shared CLI.
 
 ## [18.1.15] - 2026-09-08
 
