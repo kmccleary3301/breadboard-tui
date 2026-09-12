@@ -38,6 +38,7 @@ import {
 import {
 	Ellipsis,
 	extractSegments,
+	getWidthConfigEpoch,
 	isOsc66Line,
 	normalizeTerminalOutput,
 	osc66MaxScale,
@@ -63,6 +64,7 @@ const ERASE_TO_END_OF_LINE = "\x1b[K";
 const LINE_FIT_MIN_SOURCE_CODE_UNITS = 4096;
 const LINE_FIT_MAX_SOURCE_CODE_UNITS = 65536;
 const LINE_FIT_SOURCE_WIDTH_MULTIPLIER = 64;
+const PREPARED_LINE_CACHE_LIMIT = 1024;
 // Hide the hardware cursor before each paint/move write. Ghostty-style bar
 // cursors can otherwise leave visual afterimages while the TUI repaints the
 // row under a visible cursor. Paint writes also disable terminal autowrap:
@@ -516,12 +518,6 @@ interface HardwareCursorState {
 	visible: boolean;
 }
 
-interface PreparedLine {
-	raw: string;
-	width: number;
-	line: string;
-}
-
 // SGR coalescing. The renderer's component tree emits a styled span as
 // `<set-color>text<reset>`, so adjacent spans produce runs of byte-adjacent
 // SGR sequences (e.g. a `CSI 39 m` fg-reset immediately followed by the next
@@ -722,6 +718,13 @@ export class TUI extends Container {
 	#previousFrameLength = 0;
 	#previousWidth = 0;
 	#previousHeight = 0;
+	// Line normalization and width fitting are deterministic for one terminal
+	// width. Most differential frames retain nearly every row, so preserve the
+	// prepared bytes instead of reparsing ANSI and remeasuring stable lines.
+	#preparedLineCacheWidth = 0;
+	#preparedLineCacheEpoch = -1;
+	#preparedLineCacheHot = new Map<string, string>();
+	#preparedLineCacheCold = new Map<string, string>();
 	#focusedComponent: Component | null = null;
 	#debugServer: TuiDebugServer | undefined;
 	#debugPaint:
@@ -2851,23 +2854,49 @@ export class TUI extends Container {
 		// oxlint-disable-next-line unicorn/no-new-array -- render-frame length preallocation
 		const prepared: string[] = new Array(lines.length);
 		for (let i = 0; i < lines.length; i++) {
-			prepared[i] = this.#prepareLine(lines[i]!, width).line;
+			prepared[i] = this.#prepareLine(lines[i]!, width);
 		}
 		return prepared;
 	}
 
-	#prepareLine(raw: string, width: number): PreparedLine {
+	#prepareLine(raw: string, width: number): string {
+		const widthEpoch = getWidthConfigEpoch();
+		if (width !== this.#preparedLineCacheWidth || widthEpoch !== this.#preparedLineCacheEpoch) {
+			this.#preparedLineCacheWidth = width;
+			this.#preparedLineCacheEpoch = widthEpoch;
+			this.#preparedLineCacheHot.clear();
+			this.#preparedLineCacheCold.clear();
+		}
+		const hot = this.#preparedLineCacheHot.get(raw);
+		if (hot !== undefined) return hot;
+		const cold = this.#preparedLineCacheCold.get(raw);
+		if (cold !== undefined) {
+			this.#rememberPreparedLine(raw, cold);
+			return cold;
+		}
+
+		let line: string;
 		if (TERMINAL.isImageLine(raw)) {
-			return { raw, width, line: raw };
+			line = raw;
+		} else {
+			const source = this.#lineFitSource(raw, width);
+			const normalized = normalizeTerminalOutput(source);
+			const asciiWidth = this.#ansiAsciiLineWidth(normalized, width);
+			line =
+				(asciiWidth ?? visibleWidth(normalized)) <= width
+					? normalized
+					: truncateToWidth(normalized, width, Ellipsis.Omit);
 		}
-		const source = this.#lineFitSource(raw, width);
-		const normalized = normalizeTerminalOutput(source);
-		const asciiWidth = this.#ansiAsciiLineWidth(normalized, width);
-		if ((asciiWidth ?? visibleWidth(normalized)) <= width) {
-			return { raw, width, line: normalized };
+		this.#rememberPreparedLine(raw, line);
+		return line;
+	}
+
+	#rememberPreparedLine(raw: string, line: string): void {
+		if (this.#preparedLineCacheHot.size >= PREPARED_LINE_CACHE_LIMIT) {
+			this.#preparedLineCacheCold = this.#preparedLineCacheHot;
+			this.#preparedLineCacheHot = new Map();
 		}
-		const line = truncateToWidth(normalized, width, Ellipsis.Omit);
-		return { raw, width, line };
+		this.#preparedLineCacheHot.set(raw, line);
 	}
 
 	#lineFitSource(raw: string, width: number): string {
