@@ -13,19 +13,26 @@ if (!Bun.isMainThread && parentPort && isWorkerHostSelector(workerArg)) {
 
 async function main(): Promise<void> {
 	process.env.BREADBOARD_PRODUCT = "1";
+	let stopStartupComposer: (() => void) | undefined;
 	if (Bun.isMainThread && !process.env.PI_TIMING && process.stdin.isTTY === true && process.stdout.isTTY === true) {
 		const startupPrepaint = parseStartupPrepaintArgs(process.argv.slice(2));
 		if (startupPrepaint !== null) {
-			const [{ VERSION }, { beginStartupComposer }] = await Promise.all([
+			const [{ VERSION }, { beginStartupComposer, stopPendingStartupComposer }] = await Promise.all([
 				import("@oh-my-pi/pi-utils/dirs"),
 				import("./modes/startup-composer"),
 			]);
 			beginStartupComposer({ version: VERSION, modelSelector: startupPrepaint.modelSelector });
+			stopStartupComposer = stopPendingStartupComposer;
 		}
 	}
 	// Product setting defaults must precede the shared CLI, not the first paint.
 	// Deferring their module graph lets the cached composer paint while it loads.
-	await activateBreadboardProduct();
+	try {
+		await activateBreadboardProduct();
+	} catch (error) {
+		stopStartupComposer?.();
+		throw error;
+	}
 	const { runCli } = await import("./cli");
 	// A compiled CLI module self-dispatches from its process entry. Source
 	// execution imports cli.ts as a module, so the wrapper owns invocation there.
