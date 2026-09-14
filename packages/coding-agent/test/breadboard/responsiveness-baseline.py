@@ -1075,10 +1075,10 @@ TURN_ERROR_REASON = "turn-ended-with-error"
 MAX_SESSION_ROTATIONS = 16
 
 
-def _prune_root_extractions(root: Path) -> None:
-    # The native addon is re-extracted into every fresh config root (~160 MB);
-    # it is reproducible from the product, not evidence, so retired roots drop it.
-    shutil.rmtree(root / "config" / "natives", ignore_errors=True)
+def _remove_scratch_root(root: Path) -> None:
+    # Timing evidence is copied into the result before cleanup. Extracted
+    # runtimes and private config roots are reproducible scratch.
+    shutil.rmtree(root, ignore_errors=True)
 
 
 # Plain OMP without a model answers a submit with this frame. It is the expected
@@ -1230,6 +1230,8 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
         finally:
             if child is not None:
                 row["cleanup"] = _cleanup_receipt(child, descendants, roots.base)
+            if retained is None:
+                _remove_scratch_root(roots.base)
         launches.append(row)
 
     for index in range(args.cold):
@@ -1240,6 +1242,7 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
             launch("warmup", index, warm_root)
         for index in range(args.warm):
             launch("warm", index, warm_root)
+        _remove_scratch_root(warm_root.base)
     cold_rows = [row for row in launches if row["kind"] == "cold"]
     warm_rows = [row for row in launches if row["kind"] == "warm"]
     return {
@@ -1356,7 +1359,7 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                         if len(cell["rotations"]) >= MAX_SESSION_ROTATIONS:
                             raise RuntimeError(f"session failures exceeded {MAX_SESSION_ROTATIONS} rotations: {row.get('turnError')}")
                         cell["rotations"].append(_cleanup_receipt(child, descendants, root.base))
-                        _prune_root_extractions(root.base)
+                        _remove_scratch_root(root.base)
                         root = _new_root_set(roots_base, args.product, f"{label}-r{len(cell['rotations'])}")
                         child, descendants, active_fixture, rotated_ready, rotated_ready_at = open_child(root)
                         cell["rotations"][-1]["replacementRoot"] = str(root.base)
@@ -1418,7 +1421,7 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                     cell["cleanup"] = _cleanup_receipt(child, descendants, root.base)
                 elif args.product == "bb":
                     cell["cleanup"] = _cleanup_root_orphans(root.base)
-                _prune_root_extractions(root.base)
+                _remove_scratch_root(root.base)
             cells[cell_key] = cell
     return {
         "product": args.product,
