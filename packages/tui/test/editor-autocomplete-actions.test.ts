@@ -124,6 +124,25 @@ describe("Editor slash autocomplete rendering", () => {
 
 		expect(editor.isShowingAutocomplete()).toBeTrue();
 	});
+
+	it("refreshes dynamic descriptions when the bare slash menu reopens", () => {
+		let description = "first state";
+		const editor = new Editor(defaultEditorTheme);
+		editor.setAutocompleteProvider(
+			new CombinedAutocompleteProvider([{ name: "state", getAutocompleteDescription: () => description }], "/tmp"),
+		);
+
+		editor.handleInput("/");
+		expect(editor.render(80).join("\n")).toContain(description);
+		editor.handleInput("\x1b");
+		editor.setText("");
+		description = "second state";
+		editor.handleInput("/");
+
+		const rendered = editor.render(80).join("\n");
+		expect(rendered).toContain(description);
+		expect(rendered).not.toContain("first state");
+	});
 });
 describe("Editor slash autocomplete acceptance", () => {
 	it("submits the current command instead of a lower-ranked stale description match", async () => {

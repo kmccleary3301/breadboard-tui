@@ -106,6 +106,10 @@ export class SelectList implements Component, MouseRoutable {
 	readonly #displayValues = new Map<SelectItem, string>();
 	readonly #descriptions = new Map<SelectItem, string | undefined>();
 	readonly #iconWidths = new Map<SelectItem, number>();
+	readonly #itemSnapshot: SelectItem[];
+	readonly #rowCounts: number[] = [];
+	#rowCountsWidth: number | undefined;
+	#rowCountsTotal = 0;
 
 	onSelect?: (item: SelectItem) => void;
 	onCancel?: () => void;
@@ -119,6 +123,7 @@ export class SelectList implements Component, MouseRoutable {
 	) {
 		this.#maxVisible = Math.max(1, Math.trunc(maxVisible));
 		this.#filteredItems = items;
+		this.#itemSnapshot = [...items];
 	}
 	/** Return item, selection, and filter state for debug inspection. */
 	debugState(): Record<string, unknown> {
@@ -187,8 +192,53 @@ export class SelectList implements Component, MouseRoutable {
 		this.#displayValues.clear();
 		this.#descriptions.clear();
 		this.#iconWidths.clear();
+		this.#rowCountsWidth = undefined;
 	}
 
+	/**
+	 * Refresh mutable item properties without discarding unchanged derived values.
+	 * Returns quickly for stable provider-owned item arrays.
+	 */
+	refreshItems(): void {
+		let membershipChanged = this.#itemSnapshot.length !== this.items.length;
+		if (!membershipChanged) {
+			for (let i = 0; i < this.items.length; i++) {
+				if (this.#itemSnapshot[i] !== this.items[i]) {
+					membershipChanged = true;
+					break;
+				}
+			}
+		}
+		if (membershipChanged) {
+			this.invalidate();
+			this.#itemSnapshot.length = this.items.length;
+			for (let i = 0; i < this.items.length; i++) this.#itemSnapshot[i] = this.items[i]!;
+		}
+
+		let changed = membershipChanged;
+		for (const item of this.items) {
+			const displayValue = sanitizeSingleLine(item.label || item.value);
+			if (!this.#displayValues.has(item) || this.#displayValues.get(item) !== displayValue) {
+				this.#displayValues.set(item, displayValue);
+				changed = true;
+			}
+			const description = item.description;
+			const sanitizedDescription = description ? sanitizeSingleLine(description) : undefined;
+			if (!this.#descriptions.has(item) || this.#descriptions.get(item) !== sanitizedDescription) {
+				this.#descriptions.set(item, sanitizedDescription);
+				changed = true;
+			}
+			const iconWidth = item.icon ? visibleWidth(item.icon) : 0;
+			if (!this.#iconWidths.has(item) || this.#iconWidths.get(item) !== iconWidth) {
+				this.#iconWidths.set(item, iconWidth);
+				changed = true;
+			}
+		}
+		if (!changed) return;
+		this.#primaryColumnWidth = undefined;
+		this.#iconColumnWidth = undefined;
+		this.#rowCountsWidth = undefined;
+	}
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
 		this.#hitRows = [];
@@ -218,19 +268,21 @@ export class SelectList implements Component, MouseRoutable {
 			// Compute visual row counts only when descriptions can wrap. The flat
 			// picker is the common command-palette path and needs no per-render array.
 			const conservativeRowWidth = Math.max(0, width - 1);
-			// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
-			const rowCounts = new Array<number>(this.#filteredItems.length);
-			visualTotal = 0;
-			for (let i = 0; i < this.#filteredItems.length; i++) {
-				const item = this.#filteredItems[i];
-				if (!item) {
-					rowCounts[i] = 0;
-					continue;
+			if (this.#rowCountsWidth !== conservativeRowWidth || this.#rowCounts.length !== this.#filteredItems.length) {
+				this.#rowCounts.length = this.#filteredItems.length;
+				this.#rowCountsTotal = 0;
+				for (let i = 0; i < this.#filteredItems.length; i++) {
+					const item = this.#filteredItems[i];
+					const count = item
+						? this.#computeItemRowCount(item, conservativeRowWidth, primaryColumnWidth, iconColumnWidth)
+						: 0;
+					this.#rowCounts[i] = count;
+					this.#rowCountsTotal += count;
 				}
-				rowCounts[i] = this.#computeItemRowCount(item, conservativeRowWidth, primaryColumnWidth, iconColumnWidth);
-				visualTotal += rowCounts[i];
+				this.#rowCountsWidth = conservativeRowWidth;
 			}
-			({ startIndex, endIndex, visualOffset } = this.#pickWindow(rowCounts, visualBudget));
+			visualTotal = this.#rowCountsTotal;
+			({ startIndex, endIndex, visualOffset } = this.#pickWindow(this.#rowCounts, visualBudget));
 		} else {
 			visualTotal = this.#filteredItems.length;
 			startIndex = Math.min(
@@ -628,6 +680,7 @@ export class SelectList implements Component, MouseRoutable {
 			this.#filteredItems = this.items;
 		}
 		this.#primaryColumnWidth = undefined;
+		this.#rowCountsWidth = undefined;
 		this.#iconColumnWidth = undefined;
 		this.#selectedIndex = 0;
 		if (notify) {

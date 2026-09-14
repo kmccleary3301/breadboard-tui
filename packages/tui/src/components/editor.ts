@@ -576,6 +576,7 @@ export class Editor implements Component, Focusable {
 	#autocompleteProvider?: AutocompleteProvider;
 	#textAssistProvider?: EditorTextAssistProvider;
 	#autocompleteList?: SelectList;
+	#bareSlashAutocompleteCache?: { items: ReadonlyArray<SelectItem>; length: number; list: SelectList };
 	#autocompleteState: "regular" | "force" | "assist" | null = null;
 	#textAssistReplacement:
 		| { line: number; startCol: number; endCol: number; original: string; cursorOffset: number }
@@ -682,11 +683,13 @@ export class Editor implements Component, Focusable {
 	setTheme(theme: EditorTheme): void {
 		this.#theme = theme;
 		this.borderColor = theme.borderColor;
+		this.#bareSlashAutocompleteCache = undefined;
 	}
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
 		if (this.#autocompleteProvider !== provider) {
 			this.#cancelAutocomplete();
+			this.#bareSlashAutocompleteCache = undefined;
 		}
 		this.#autocompleteProvider = provider;
 	}
@@ -3535,11 +3538,20 @@ export class Editor implements Component, Focusable {
 		}
 		await this.#queueAutocompleteRequest({ kind: "regular", explicitTab });
 	}
-	#createAutocompleteList(
-		prefix: string,
-		items: Array<{ value: string; label: string; description?: string }>,
-	): SelectList {
+	#createAutocompleteList(prefix: string, items: ReadonlyArray<SelectItem>): SelectList {
 		const layout = prefix.startsWith("/") ? SLASH_COMMAND_SELECT_LIST_LAYOUT : AUTOCOMPLETE_SELECT_LIST_LAYOUT;
+		if (prefix === "/") {
+			const cached = this.#bareSlashAutocompleteCache;
+			if (cached?.items === items && cached.length === items.length) {
+				cached.list.setSelectedIndex(0);
+				cached.list.refreshItems();
+				cached.list.setHoverIndex(null);
+				return cached.list;
+			}
+			const list = new SelectList(items, this.#autocompleteMaxVisible, this.#theme.selectList, layout);
+			this.#bareSlashAutocompleteCache = { items, length: items.length, list };
+			return list;
+		}
 		return new SelectList(items, this.#autocompleteMaxVisible, this.#theme.selectList, layout);
 	}
 
