@@ -106,6 +106,9 @@ export class SelectList implements Component, MouseRoutable {
 	readonly #displayValues = new Map<SelectItem, string>();
 	readonly #descriptions = new Map<SelectItem, string | undefined>();
 	readonly #iconWidths = new Map<SelectItem, number>();
+	readonly #displaySources = new Map<SelectItem, string>();
+	readonly #descriptionSources = new Map<SelectItem, string | undefined>();
+	readonly #iconSources = new Map<SelectItem, string | undefined>();
 	readonly #itemSnapshot: SelectItem[];
 	readonly #rowCounts: number[] = [];
 	#rowCountsWidth: number | undefined;
@@ -190,6 +193,9 @@ export class SelectList implements Component, MouseRoutable {
 		this.#primaryColumnWidth = undefined;
 		this.#iconColumnWidth = undefined;
 		this.#displayValues.clear();
+		this.#displaySources.clear();
+		this.#descriptionSources.clear();
+		this.#iconSources.clear();
 		this.#descriptions.clear();
 		this.#iconWidths.clear();
 		this.#rowCountsWidth = undefined;
@@ -217,22 +223,20 @@ export class SelectList implements Component, MouseRoutable {
 
 		let changed = membershipChanged;
 		for (const item of this.items) {
-			const displayValue = sanitizeSingleLine(item.label || item.value);
-			if (!this.#displayValues.has(item) || this.#displayValues.get(item) !== displayValue) {
-				this.#displayValues.set(item, displayValue);
-				changed = true;
-			}
-			const description = item.description;
-			const sanitizedDescription = description ? sanitizeSingleLine(description) : undefined;
-			if (!this.#descriptions.has(item) || this.#descriptions.get(item) !== sanitizedDescription) {
-				this.#descriptions.set(item, sanitizedDescription);
-				changed = true;
-			}
-			const iconWidth = item.icon ? visibleWidth(item.icon) : 0;
-			if (!this.#iconWidths.has(item) || this.#iconWidths.get(item) !== iconWidth) {
-				this.#iconWidths.set(item, iconWidth);
-				changed = true;
-			}
+			const hadDisplayValue = this.#displayValues.has(item);
+			const previousDisplayValue = this.#displayValues.get(item);
+			const displayValue = this.#getDisplayValue(item);
+			if (!hadDisplayValue || previousDisplayValue !== displayValue) changed = true;
+
+			const hadDescription = this.#descriptions.has(item);
+			const previousDescription = this.#descriptions.get(item);
+			const description = this.#getDescription(item);
+			if (!hadDescription || previousDescription !== description) changed = true;
+
+			const hadIconWidth = this.#iconWidths.has(item);
+			const previousIconWidth = this.#iconWidths.get(item);
+			const iconWidth = this.#getIconWidth(item);
+			if (!hadIconWidth || previousIconWidth !== iconWidth) changed = true;
 		}
 		if (!changed) return;
 		this.#primaryColumnWidth = undefined;
@@ -605,26 +609,38 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	#getDisplayValue(item: SelectItem): string {
-		const cached = this.#displayValues.get(item);
-		if (cached !== undefined) return cached;
-		const value = sanitizeSingleLine(item.label || item.value);
+		const source = item.label || item.value;
+		if (this.#displaySources.get(item) === source && this.#displayValues.has(item)) {
+			return this.#displayValues.get(item)!;
+		}
+		const value = sanitizeSingleLine(source);
+		this.#displaySources.set(item, source);
 		this.#displayValues.set(item, value);
 		return value;
 	}
 
 	#getDescription(item: SelectItem): string | undefined {
-		if (this.#descriptions.has(item)) return this.#descriptions.get(item);
-		const description = item.description;
-		const value = description ? sanitizeSingleLine(description) : undefined;
+		const source = item.description;
+		if (
+			this.#descriptionSources.has(item) &&
+			this.#descriptionSources.get(item) === source &&
+			this.#descriptions.has(item)
+		) {
+			return this.#descriptions.get(item);
+		}
+		const value = source ? sanitizeSingleLine(source) : undefined;
+		this.#descriptionSources.set(item, source);
 		this.#descriptions.set(item, value);
 		return value;
 	}
 
 	#getIconWidth(item: SelectItem): number {
-		if (!item.icon) return 0;
-		const cached = this.#iconWidths.get(item);
-		if (cached !== undefined) return cached;
-		const width = visibleWidth(item.icon);
+		const source = item.icon;
+		if (this.#iconSources.has(item) && this.#iconSources.get(item) === source && this.#iconWidths.has(item)) {
+			return this.#iconWidths.get(item)!;
+		}
+		const width = source ? visibleWidth(source) : 0;
+		this.#iconSources.set(item, source);
 		this.#iconWidths.set(item, width);
 		return width;
 	}
