@@ -527,3 +527,20 @@ describe("overflow: path survives before model", () => {
 		expect(rendered).not.toContain("MODEL_SHOULD_DROP");
 	});
 });
+
+describe("band width budget", () => {
+	it("includes the one-cell gauge when overflow leaves only one segment group", () => {
+		const component = new StatusLineComponent(createStatusLineSession(""));
+		component.updateSettings({
+			preset: "default",
+			segmentOptions: { path: { abbreviate: true, maxLength: 40, stripWorkPrefix: false } },
+		});
+		try {
+			for (const width of [64, 76, 80]) {
+				expect(component.getBandTopBorder(width).width).toBe(width);
+			}
+		} finally {
+			component.dispose();
+		}
+	});
+});

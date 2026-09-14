@@ -144,7 +144,7 @@ describe("TUI adaptive render backpressure (#4145)", () => {
 		}
 	});
 
-	it("caps the adaptive delay so a pathological frame doesn't stall the UI", () => {
+	it("caps the adaptive floor after a frame exceeds half the maximum", () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
 		const probe = new ScriptedFrameCost();
@@ -157,17 +157,17 @@ describe("TUI adaptive render backpressure (#4145)", () => {
 			stepRender(scheduler);
 			scheduler.timers.length = 0;
 
-			// A pathological 5-second frame — the adaptive floor must cap so
-			// the follow-up delay doesn't become 5s.
-			probe.scheduleCost(5_000);
+			// A 150ms frame would impose another 150ms idle without the cap.
+			// Capping the start-to-start floor at 200ms leaves only 50ms.
+			const frameCostMs = 150;
+			probe.scheduleCost(frameCostMs);
 			tui.requestRender();
 			stepRender(scheduler);
 
 			probe.scheduleCost(1);
 			tui.requestRender();
 			const delay = stepRender(scheduler);
-			expect(delay).not.toBeNull();
-			expect(delay!).toBeLessThanOrEqual(MAX_ADAPTIVE_RENDER_MS);
+			expect(delay).toBe(MAX_ADAPTIVE_RENDER_MS - frameCostMs);
 		} finally {
 			tui.stop();
 		}

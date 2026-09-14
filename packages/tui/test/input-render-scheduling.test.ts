@@ -81,11 +81,8 @@ describe("TUI input/render scheduling", () => {
 			tui.requestRender();
 			term.sendInput("x");
 			scheduler.immediates.shift()?.();
-			const repaintTimer = scheduler.timers.shift();
-			if (repaintTimer && !repaintTimer.canceled) repaintTimer.callback();
 
-			expect(events[0]).toBe("input");
-			expect(events).toContain("render");
+			expect(events).toEqual(["input", "render"]);
 		} finally {
 			tui.stop();
 		}

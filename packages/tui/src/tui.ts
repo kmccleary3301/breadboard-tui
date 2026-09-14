@@ -1991,7 +1991,7 @@ export class TUI extends Container {
 	#requestOrdinaryRender(): void {
 		if (this.#renderRequested) return;
 		this.#renderRequested = true;
-		this.#renderScheduler.scheduleImmediate(() => this.#scheduleRender());
+		this.#renderScheduler.scheduleImmediate(() => this.#scheduleRender(true));
 	}
 
 	#maybeDeferGhosttyInitialImagePaint(): boolean {
@@ -2043,7 +2043,7 @@ export class TUI extends Container {
 		}
 	};
 
-	#scheduleRender(): void {
+	#scheduleRender(renderWhenReady = false): void {
 		if (this.#stopped || this.#renderTimer || !this.#renderRequested) {
 			return;
 		}
@@ -2060,6 +2060,13 @@ export class TUI extends Container {
 		const adaptiveDelay = Math.max(0, adaptiveFloor - elapsed);
 		const inputGraceDelay = Math.max(0, this.#inputRenderGraceUntilMs - now);
 		const delay = Math.max(cadenceDelay, adaptiveDelay, inputGraceDelay);
+		// The ordinary request already crossed an immediate boundary. Avoid a
+		// second zero-delay timer; follow-up renders requested during paint do not
+		// opt in, preserving the recursion barrier.
+		if (renderWhenReady && delay === 0) {
+			this.#runScheduledRender();
+			return;
+		}
 		this.#renderTimer = this.#renderScheduler.scheduleRender(this.#runScheduledRender, delay);
 	}
 
