@@ -2780,7 +2780,8 @@ export class Editor implements Component, Focusable {
 
 	#recordUndoState(): void {
 		if (this.#suspendUndo) return;
-		this.#undoStack.push(structuredClone(this.#state));
+		const { lines, cursorLine, cursorCol } = this.#state;
+		this.#undoStack.push({ lines: [...lines], cursorLine, cursorCol });
 	}
 
 	#applyUndo(): void {
