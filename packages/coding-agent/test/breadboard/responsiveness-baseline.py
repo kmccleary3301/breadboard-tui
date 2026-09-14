@@ -1075,10 +1075,13 @@ TURN_ERROR_REASON = "turn-ended-with-error"
 MAX_SESSION_ROTATIONS = 16
 
 
-def _remove_scratch_root(root: Path) -> None:
-    # Timing evidence is copied into the result before cleanup. Extracted
-    # runtimes and private config roots are reproducible scratch.
+def _remove_scratch_root(root: Path, cleanup: dict[str, Any]) -> None:
+    if cleanup.get("rootProcessesGone") is not True:
+        cleanup["scratchRemoved"] = False
+        cleanup["scratchRemovalReason"] = "owned-processes-remain"
+        return
     shutil.rmtree(root, ignore_errors=True)
+    cleanup["scratchRemoved"] = not root.exists()
 
 
 # Plain OMP without a model answers a submit with this frame. It is the expected
@@ -1228,10 +1231,14 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
             )
             descendants = _process_descendants(int(child.pid)) if child else []
         finally:
-            if child is not None:
-                row["cleanup"] = _cleanup_receipt(child, descendants, roots.base)
+            cleanup = (
+                _cleanup_receipt(child, descendants, roots.base)
+                if child is not None
+                else _cleanup_root_orphans(roots.base)
+            )
+            row["cleanup"] = cleanup
             if retained is None:
-                _remove_scratch_root(roots.base)
+                _remove_scratch_root(roots.base, cleanup)
         launches.append(row)
 
     for index in range(args.cold):
@@ -1242,7 +1249,7 @@ def run_startup(args: argparse.Namespace) -> dict[str, Any]:
             launch("warmup", index, warm_root)
         for index in range(args.warm):
             launch("warm", index, warm_root)
-        _remove_scratch_root(warm_root.base)
+        _remove_scratch_root(warm_root.base, launches[-1]["cleanup"])
     cold_rows = [row for row in launches if row["kind"] == "cold"]
     warm_rows = [row for row in launches if row["kind"] == "warm"]
     return {
@@ -1358,8 +1365,9 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                         )
                         if len(cell["rotations"]) >= MAX_SESSION_ROTATIONS:
                             raise RuntimeError(f"session failures exceeded {MAX_SESSION_ROTATIONS} rotations: {row.get('turnError')}")
-                        cell["rotations"].append(_cleanup_receipt(child, descendants, root.base))
-                        _remove_scratch_root(root.base)
+                        cleanup = _cleanup_receipt(child, descendants, root.base)
+                        cell["rotations"].append(cleanup)
+                        _remove_scratch_root(root.base, cleanup)
                         root = _new_root_set(roots_base, args.product, f"{label}-r{len(cell['rotations'])}")
                         child, descendants, active_fixture, rotated_ready, rotated_ready_at = open_child(root)
                         cell["rotations"][-1]["replacementRoot"] = str(root.base)
@@ -1417,11 +1425,13 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
                 cell["ready"] = False
                 cell["error"] = str(error)
             finally:
-                if child is not None:
-                    cell["cleanup"] = _cleanup_receipt(child, descendants, root.base)
-                elif args.product == "bb":
-                    cell["cleanup"] = _cleanup_root_orphans(root.base)
-                _remove_scratch_root(root.base)
+                cleanup = (
+                    _cleanup_receipt(child, descendants, root.base)
+                    if child is not None
+                    else _cleanup_root_orphans(root.base)
+                )
+                cell["cleanup"] = cleanup
+                _remove_scratch_root(root.base, cleanup)
             cells[cell_key] = cell
     return {
         "product": args.product,
