@@ -291,9 +291,23 @@ describe("TranscriptContainer", () => {
 		transcript.addChild(new Block(["settled"], true));
 		transcript.addChild(new Block(["streaming"], false));
 
+		transcript.beginFrame(frame);
 		// Both fit: nothing retires, the settled block still renders live.
 		expect(transcript.peekFinalizedBatch(80, 10)).toBeUndefined();
 		expect(transcript.renderViewport(80, 10, frame)).toEqual(["settled", "", "streaming"]);
+	});
+
+	it("invalidates prepared viewport rows when the transcript mutates in the same frame", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["first"], false));
+		transcript.beginFrame(frame);
+		expect(transcript.peekFinalizedBatch(80, 10)).toBeUndefined();
+
+		transcript.addChild(new Block(["second"], false));
+		expect(transcript.renderViewport(80, 10, frame)).toEqual(["first", "", "second"]);
+
+		transcript.clear();
+		expect(transcript.renderViewport(80, 10, frame)).toEqual([]);
 	});
 
 	it("retires the settled prefix only under capacity pressure, in order", () => {
@@ -316,6 +330,7 @@ describe("TranscriptContainer", () => {
 		transcript.addChild(active);
 		transcript.addChild(settled);
 
+		transcript.beginFrame(frame);
 		// Pressure exists but the prefix starts with an active block: no batch,
 		// and both blocks still render (clipped by the viewport).
 		expect(transcript.peekFinalizedBatch(80, 1)).toBeUndefined();

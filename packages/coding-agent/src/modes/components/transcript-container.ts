@@ -85,6 +85,13 @@ type Offered =
 	| { batch: HistoryBatch; kind: "append"; entry: number; emittedEnd: number }
 	| { batch: HistoryBatch; kind: "commit"; end: number }
 	| { batch: HistoryBatch; kind: "replay" };
+interface PreparedViewport {
+	readonly frame: AnimationFrame;
+	readonly width: number;
+	readonly capacity: number;
+	readonly live: ReadonlyArray<{ entry: TranscriptEntry; index: number }>;
+	readonly blocks: ReadonlyArray<readonly string[]>;
+}
 
 const MAX_LIVE_BLOCKS = 256;
 /** Grace before a pressure-blocked frontier is reported; a streaming block may legitimately hold it briefly. */
@@ -143,6 +150,7 @@ export class TranscriptContainer extends Container {
 	#replayRequested = false;
 	#toolActivityVisible = true;
 	#lastFrame: AnimationFrame = { tick: 0, now: 0 };
+	#preparedViewport: PreparedViewport | undefined;
 	// Start rows from the last full render(), keyed by child component (transcript deep-links).
 	#childStartRows = new Map<Component, number>();
 	// Watchdog for the wedge where an unfinalized frontier block pins pressure
@@ -151,6 +159,7 @@ export class TranscriptContainer extends Container {
 	#pinnedFrontier: { index: number; since: number; logged: boolean } | undefined;
 
 	override addChild(component: Component): void {
+		this.#preparedViewport = undefined;
 		if (isToolActivityComponent(component)) component.setToolActivityVisible(this.#toolActivityVisible);
 		super.addChild(component);
 		this.#entries.push({
@@ -166,6 +175,7 @@ export class TranscriptContainer extends Container {
 
 	override removeChild(component: Component): void {
 		if (this.children.indexOf(component) < 0 || !this.canRemoveBlock(component)) return;
+		this.#preparedViewport = undefined;
 		super.removeChild(component);
 		this.#entries = this.#entries.filter(candidate => candidate.component !== component);
 		this.#frontier = Math.min(this.#frontier, this.#entries.length);
@@ -174,6 +184,7 @@ export class TranscriptContainer extends Container {
 
 	override clear(): void {
 		super.clear();
+		this.#preparedViewport = undefined;
 		this.#entries = [];
 		this.#frontier = 0;
 		this.#offered = undefined;
@@ -185,6 +196,7 @@ export class TranscriptContainer extends Container {
 
 	setToolActivityVisible(visible: boolean): void {
 		if (this.#toolActivityVisible === visible) return;
+		this.#preparedViewport = undefined;
 		this.#toolActivityVisible = visible;
 		for (const child of this.children) {
 			if (isToolActivityComponent(child)) child.setToolActivityVisible(visible);
@@ -205,6 +217,7 @@ export class TranscriptContainer extends Container {
 	 * rewrites them, so unpaired use would duplicate them on the next retirement.
 	 */
 	resetStableEmission(): void {
+		this.#preparedViewport = undefined;
 		this.#syncEntries();
 		if (this.#offered?.kind === "append") this.#offered = undefined;
 		for (const entry of this.#entries) {
@@ -256,6 +269,7 @@ export class TranscriptContainer extends Container {
 
 	/** Prepares one atomic replay of the committed ledger and an emitted active-head prefix. */
 	beginReplay(): void {
+		this.#preparedViewport = undefined;
 		this.#syncEntries();
 		if (this.#offered !== undefined) {
 			this.#replayRequested = true;
@@ -269,8 +283,20 @@ export class TranscriptContainer extends Container {
 	 * quit is pure write volume. An already offered replay batch stays valid.
 	 */
 	cancelReplay(): void {
+		this.#preparedViewport = undefined;
 		this.#replayPending = false;
 		this.#replayRequested = false;
+	}
+
+	/**
+	 * Begin one synchronous composer frame. Pressure retirement and viewport
+	 * allocation share this identity, allowing the viewport pass to reuse the
+	 * full-allocation rows when retirement produced no history batch.
+	 */
+	beginFrame(frame: AnimationFrame): void {
+		if (this.#lastFrame === frame) return;
+		this.#lastFrame = frame;
+		this.#preparedViewport = undefined;
 	}
 
 	/** Total rows the live, un-emitted tail occupies at `width`. */
@@ -289,7 +315,7 @@ export class TranscriptContainer extends Container {
 
 	/** Render the live tail, constrained to the supplied transcript height. */
 	renderViewport(width: number, rows: number, frame: AnimationFrame): readonly string[] {
-		this.#lastFrame = frame;
+		this.beginFrame(frame);
 		this.#syncEntries();
 		this.#settleFinalized();
 		const live = this.#liveEntries();
@@ -299,10 +325,27 @@ export class TranscriptContainer extends Container {
 		const shown: Array<{ entry: TranscriptEntry; index: number }> = [];
 		const blocks: (readonly string[])[] = [];
 		let total = 0;
-		for (const candidate of live) {
-			this.#setAllocation(candidate.entry.component, Number.MAX_SAFE_INTEGER, frame);
-			const rendered = this.#renderEntry(candidate.entry, width);
-			const block = rendered.slice(this.#projectedEmitted(candidate.entry, candidate.index, width));
+		const prepared = this.#preparedViewport;
+		const canReusePrepared =
+			prepared !== undefined &&
+			prepared.frame === frame &&
+			prepared.width === width &&
+			prepared.capacity === capacity &&
+			prepared.live.length === live.length &&
+			prepared.live.every((candidate, index) => {
+				const current = live[index];
+				return current?.entry === candidate.entry && current.index === candidate.index;
+			});
+		for (let index = 0; index < live.length; index++) {
+			const candidate = live[index]!;
+			let block: readonly string[];
+			if (canReusePrepared) {
+				block = prepared.blocks[index] ?? EMPTY_ROWS;
+			} else {
+				this.#setAllocation(candidate.entry.component, Number.MAX_SAFE_INTEGER, frame);
+				const rendered = this.#renderEntry(candidate.entry, width);
+				block = rendered.slice(this.#projectedEmitted(candidate.entry, candidate.index, width));
+			}
 			if (block.length === 0) continue;
 			total += block.length + (shown.length > 0 ? 1 : 0);
 			shown.push(candidate);
@@ -398,6 +441,15 @@ export class TranscriptContainer extends Container {
 		return offered.batch;
 	}
 
+	#rememberPreparedViewport(
+		width: number,
+		capacity: number,
+		live: ReadonlyArray<{ entry: TranscriptEntry; index: number }>,
+		blocks: ReadonlyArray<readonly string[]>,
+	): void {
+		this.#preparedViewport = { frame: this.#lastFrame, width, capacity, live, blocks };
+	}
+
 	#peekBatch(width: number, capacity: number, policy: RetirementPolicy): HistoryBatch | undefined {
 		this.#syncEntries();
 		this.#settleFinalized();
@@ -429,6 +481,7 @@ export class TranscriptContainer extends Container {
 		const overflowing = total > room || this.#liveCount() >= MAX_LIVE_BLOCKS;
 		if (policy === "pressure" && !overflowing) {
 			this.#pinnedFrontier = undefined;
+			this.#rememberPreparedViewport(width, room, live, rendered);
 			return undefined;
 		}
 
@@ -446,6 +499,7 @@ export class TranscriptContainer extends Container {
 			const after = this.#renderStablePrefix(head, emittedEnd, width);
 			if (!isRowPrefix(before, after) || after.length === before.length) {
 				this.#freezeStableRows(head, EMPTY_ROWS, "semantic row render added no suffix");
+				this.#rememberPreparedViewport(width, room, live, rendered);
 				return undefined;
 			}
 			const batch: HistoryBatch = {
@@ -474,6 +528,7 @@ export class TranscriptContainer extends Container {
 		}
 		if (end === this.#frontier) {
 			if (policy === "pressure") this.#notePinnedFrontier();
+			this.#rememberPreparedViewport(width, room, live, rendered);
 			return undefined;
 		}
 		this.#pinnedFrontier = undefined;
@@ -490,6 +545,7 @@ export class TranscriptContainer extends Container {
 	acknowledgeFinalizedBatch(id: number): void {
 		const offered = this.#offered;
 		if (offered === undefined || offered.batch.id !== id) return;
+		this.#preparedViewport = undefined;
 		if (offered.kind === "append") {
 			const entry = this.#entries[offered.entry];
 			if (entry === undefined || offered.entry !== this.#frontier || offered.emittedEnd !== entry.emitted + 1)
@@ -766,6 +822,7 @@ export class TranscriptContainer extends Container {
 			this.#entries.every((entry, index) => entry.component === this.children[index])
 		)
 			return;
+		this.#preparedViewport = undefined;
 		const existing = new Map(this.#entries.map(entry => [entry.component, entry]));
 		this.#entries = this.children.map(
 			component =>
