@@ -2711,6 +2711,17 @@ describe("Editor component", () => {
 			editor.handleInput("\x1b[45;5u"); // undo → removes "hi"
 			expect(editor.getText()).toBe("");
 		});
+
+		it("retains the newest 100 undo units when capacity is exceeded", () => {
+			const editor = new Editor(defaultEditorTheme);
+			for (let i = 0; i < 105; i++) editor.handleInput(" ");
+
+			for (let i = 0; i < 100; i++) editor.handleInput("\x1b[45;5u");
+			expect(editor.getText()).toBe(" ".repeat(5));
+
+			editor.handleInput("\x1b[45;5u");
+			expect(editor.getText()).toBe(" ".repeat(5));
+		});
 	});
 
 	describe("decorateText around the cursor seam", () => {

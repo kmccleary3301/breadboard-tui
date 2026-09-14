@@ -262,6 +262,15 @@ export class StatusLineComponent implements Component {
 				lines: readonly string[];
 		  }
 		| undefined;
+	#topBorderCache:
+		| {
+				width: number;
+				layout: "box" | "band" | "plain-right";
+				previewTitle: string | undefined;
+				revision: number;
+				result: { content: string; width: number; revision: number };
+		  }
+		| undefined;
 	#settings: StatusLineSettings = {};
 	#effectiveSettings: EffectiveStatusLineSettings | undefined;
 	#cachedBranch: string | null | undefined = undefined;
@@ -340,12 +349,15 @@ export class StatusLineComponent implements Component {
 	#harness: HarnessSnapshot | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
+	#repositoryProbeImmediate: NodeJS.Immediate | undefined;
 
 	// Git status caching (1s TTL)
 	#cachedGitStatus: { staged: number; unstaged: number; untracked: number } | null = null;
 	#cachedGitStatusCwd: string | undefined = undefined;
 	#gitStatusLastFetch = 0;
-	#gitStatusInFlightCwd: string | undefined = undefined;
+	#gitStatusGeneration = 0;
+	#gitStatusRequestSeq = 0;
+	#gitStatusActive: { id: number; cwd: string; generation: number } | undefined;
 	#cachedJjBranch: string | null = null;
 	#jjBranchLastFetch = 0;
 	#jjResolveSeq = 0;
@@ -455,6 +467,22 @@ export class StatusLineComponent implements Component {
 		cache.repositoryCheckedAt = now;
 		return cache.repository;
 	}
+	#scheduleRepositoryProbe(cache: ActiveRepoCache): void {
+		if (
+			this.#disposed ||
+			this.#repositoryProbeImmediate ||
+			Date.now() - cache.repositoryCheckedAt < WATCHER_FAILURE_POLL_TTL_MS
+		) {
+			return;
+		}
+		this.#repositoryProbeImmediate = setImmediate(() => {
+			this.#repositoryProbeImmediate = undefined;
+			if (this.#disposed || this.#activeRepoCache !== cache || !this.#resolveRepository(cache)) return;
+			this.#setupGitWatcher();
+			this.#clearRenderedOutput();
+			this.#onBranchChange?.();
+		});
+	}
 
 	/**
 	 * Re-point the status line at another session (focus proxy). Invalidate: model/context/usage all derive
@@ -493,7 +521,7 @@ export class StatusLineComponent implements Component {
 		this.#settings = settings;
 		this.#effectiveSettings = undefined;
 		if (this.#onBranchChange) this.#setupGitWatcher();
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	getEffectiveSettingsForTest(): EffectiveStatusLineSettings {
@@ -502,13 +530,13 @@ export class StatusLineComponent implements Component {
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.#autoCompactEnabled = enabled;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	setRunningSubagents(agentIds: readonly string[]): void {
 		this.#subagentCount = agentIds.length;
 		this.#runningSubagentIds = new Set(agentIds);
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -534,7 +562,7 @@ export class StatusLineComponent implements Component {
 		const meter = this.#meter();
 		meter.activeMs = 0;
 		meter.activeStartedAt = null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -548,7 +576,7 @@ export class StatusLineComponent implements Component {
 		const meter = this.#meter();
 		if (meter.activeStartedAt !== null) return;
 		meter.activeStartedAt = Date.now();
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -562,7 +590,7 @@ export class StatusLineComponent implements Component {
 		if (meter.activeStartedAt === null) return;
 		meter.activeMs += Math.max(0, Date.now() - meter.activeStartedAt);
 		meter.activeStartedAt = null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -615,22 +643,22 @@ export class StatusLineComponent implements Component {
 
 	setPlanModeStatus(status: { enabled: boolean; paused: boolean } | undefined): void {
 		this.#planModeStatus = status ?? null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	setLoopModeStatus(status: NonNullable<SegmentContext["loopMode"]> | undefined): void {
 		this.#loopModeStatus = status ?? null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	setGoalModeStatus(status: { enabled: boolean; paused: boolean } | undefined): void {
 		this.#goalModeStatus = status ?? null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	setVibeModeStatus(status: { enabled: boolean } | undefined): void {
 		this.#vibeModeStatus = status ?? null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -642,12 +670,12 @@ export class StatusLineComponent implements Component {
 	 */
 	setVibeWorkerTokenRateProvider(provider: (() => number | null) | undefined): void {
 		this.#vibeWorkerTokenRate = provider ?? null;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	setCollabStatus(status: CollabStatus | null): void {
 		this.#collabStatus = status;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 	setHarness(harness: HarnessSnapshot | null | undefined): void {
 		this.#harness = harness ?? null;
@@ -669,7 +697,7 @@ export class StatusLineComponent implements Component {
 		this.#sortedHookStatuses = Array.from(this.#hookStatuses.entries())
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([, status]) => status);
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	watchBranch(onBranchChange: () => void): void {
@@ -728,6 +756,11 @@ export class StatusLineComponent implements Component {
 		this.#onCodexResetFireworks = undefined;
 		this.#codexResetSnapshots.clear();
 		this.#retireGitWatcher();
+		if (this.#repositoryProbeImmediate) {
+			clearImmediate(this.#repositoryProbeImmediate);
+			this.#repositoryProbeImmediate = undefined;
+		}
+		this.#resetGitStatusCache();
 	}
 
 	/**
@@ -831,8 +864,14 @@ export class StatusLineComponent implements Component {
 		this.#usageStartTimer = null;
 	}
 
+	#clearRenderedOutput(): void {
+		this.#renderCache = undefined;
+		this.#topBorderCache = undefined;
+	}
+
 	invalidate(): void {
 		this.#renderRevision++;
+		this.#clearRenderedOutput();
 		// Generic repaint invalidation (theme change, message event, model
 		// switch, …). Must NOT abort or restart a live reftable HEAD/PR resolve:
 		// the render path self-invalidates via cwd/context cache-miss checks, so
@@ -863,6 +902,14 @@ export class StatusLineComponent implements Component {
 	 * repo/cwd switch. Generic repaints use {@link invalidate} instead and
 	 * must never reach this path.
 	 */
+	#resetGitStatusCache(): void {
+		this.#cachedGitStatus = null;
+		this.#cachedGitStatusCwd = undefined;
+		this.#gitStatusLastFetch = 0;
+		this.#gitStatusActive = undefined;
+		this.#gitStatusGeneration++;
+	}
+
 	invalidateGitCaches(): void {
 		this.#cachedBranch = undefined;
 		this.#cachedBranchRepoId = undefined;
@@ -883,6 +930,8 @@ export class StatusLineComponent implements Component {
 		this.#cachedJjStatus = null;
 		this.#jjStatusLastFetch = 0;
 		this.#jjCacheGeneration++;
+		this.#resetGitStatusCache();
+		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -939,7 +988,10 @@ export class StatusLineComponent implements Component {
 				if (this.#jjCacheGeneration !== generation || this.#disposed) return;
 				const changed = next !== this.#cachedJjBranch;
 				this.#cachedJjBranch = next;
-				if (changed) this.#onBranchChange?.();
+				if (changed) {
+					this.#clearRenderedOutput();
+					this.#onBranchChange?.();
+				}
 			})();
 			return this.#cachedJjBranch;
 		}
@@ -1000,7 +1052,10 @@ export class StatusLineComponent implements Component {
 				this.#cachedBranchRepoId = repoId;
 				this.#cachedBranch = next;
 				this.#branchLastFetch = Date.now();
-				if (prev !== next && this.#onBranchChange) this.#onBranchChange();
+				if (prev !== next && this.#onBranchChange) {
+					this.#clearRenderedOutput();
+					this.#onBranchChange();
+				}
 			})();
 			return this.#cachedBranchCwd === gitCwd ? (this.#cachedBranch ?? null) : null;
 		}
@@ -1083,19 +1138,27 @@ export class StatusLineComponent implements Component {
 				if (this.#jjCacheGeneration !== generation || this.#disposed) return;
 				const prev = this.#cachedJjStatus;
 				this.#cachedJjStatus = next;
-				if (JSON.stringify(prev) !== JSON.stringify(next)) this.#onBranchChange?.();
+				if (JSON.stringify(prev) !== JSON.stringify(next)) {
+					this.#clearRenderedOutput();
+					this.#onBranchChange?.();
+				}
 			})();
 			return this.#cachedJjStatus;
 		}
 
-		if (this.#gitStatusInFlightCwd !== undefined) {
+		if (this.#gitStatusActive) {
 			return this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
 		}
 		if (this.#cachedGitStatusCwd === gitCwd && Date.now() - this.#gitStatusLastFetch < 1000) {
 			return this.#cachedGitStatus;
 		}
 
-		this.#gitStatusInFlightCwd = gitCwd;
+		const request = {
+			id: ++this.#gitStatusRequestSeq,
+			cwd: gitCwd,
+			generation: this.#gitStatusGeneration,
+		};
+		this.#gitStatusActive = request;
 
 		(async () => {
 			let nextStatus: { staged: number; unstaged: number; untracked: number } | null = null;
@@ -1104,15 +1167,21 @@ export class StatusLineComponent implements Component {
 			} catch {
 				nextStatus = null;
 			} finally {
-				if (this.#gitStatusInFlightCwd === gitCwd) {
-					const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
-					this.#cachedGitStatus = nextStatus;
-					this.#cachedGitStatusCwd = gitCwd;
-					this.#gitStatusLastFetch = Date.now();
-					this.#gitStatusInFlightCwd = undefined;
-					if (!this.#disposed && this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
-						this.#onBranchChange();
-					}
+				if (
+					this.#disposed ||
+					this.#gitStatusActive?.id !== request.id ||
+					this.#gitStatusGeneration !== request.generation
+				) {
+					return;
+				}
+				const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
+				this.#cachedGitStatus = nextStatus;
+				this.#cachedGitStatusCwd = gitCwd;
+				this.#gitStatusLastFetch = Date.now();
+				this.#gitStatusActive = undefined;
+				if (this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
+					this.#clearRenderedOutput();
+					this.#onBranchChange();
 				}
 			}
 		})();
@@ -1165,6 +1234,7 @@ export class StatusLineComponent implements Component {
 				if (lookupContext && isSamePrCacheContext(latestContext, lookupContext)) {
 					this.#cachedPr = value;
 					this.#cachedPrContext = lookupContext;
+					this.#clearRenderedOutput();
 				}
 			};
 			try {
@@ -1316,13 +1386,23 @@ export class StatusLineComponent implements Component {
 		this.#usageInFlight = true;
 		this.#usageStartTimer = setTimeout(() => {
 			this.#usageStartTimer = null;
-			void this.#runUsageRefresh(session, fetcher);
+			void this.#runUsageRefresh(session, fetcher, usageContextKey);
 		}, STATUS_USAGE_START_DELAY_MS);
 	}
 
-	async #runUsageRefresh(session: AgentSession, fetcher: (signal?: AbortSignal) => Promise<unknown>): Promise<void> {
-		if (this.#disposed || this.session !== session) {
+	async #runUsageRefresh(
+		session: AgentSession,
+		fetcher: (signal?: AbortSignal) => Promise<unknown>,
+		usageContextKey: string,
+	): Promise<void> {
+		if (
+			this.#disposed ||
+			this.session !== session ||
+			this.#getUsageContextKey(session) !== usageContextKey ||
+			this.#cachedUsageContextKey !== usageContextKey
+		) {
 			this.#usageInFlight = false;
+			if (!this.#disposed && this.session === session) this.refreshUsageInBackground();
 			return;
 		}
 		const sequence = ++this.#usageRefreshSequence;
@@ -1334,20 +1414,36 @@ export class StatusLineComponent implements Component {
 				session,
 				await this.#raceUsageRefreshWithSignal(reportsPromise, signal),
 				sequence,
+				usageContextKey,
 			);
 		} catch {
-			if (this.session !== session) return;
+			if (
+				this.session !== session ||
+				this.#getUsageContextKey(session) !== usageContextKey ||
+				this.#cachedUsageContextKey !== usageContextKey
+			) {
+				return;
+			}
 			this.#usageFetchedAt = Date.now();
 			if (signal.aborted && reportsPromise) {
-				this.#observeLateUsageRefresh(session, reportsPromise, sequence);
+				this.#observeLateUsageRefresh(session, reportsPromise, sequence, usageContextKey);
 			}
 		} finally {
-			if (this.session === session) this.#usageInFlight = false;
+			if (!this.#disposed && this.session === session) {
+				this.#usageInFlight = false;
+				if (this.#getUsageContextKey(session) !== usageContextKey) this.refreshUsageInBackground();
+			}
 		}
 	}
 
-	#applyUsageRefreshReports(session: AgentSession, reports: unknown, sequence: number): void {
-		if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
+	#applyUsageRefreshReports(session: AgentSession, reports: unknown, sequence: number, usageContextKey: string): void {
+		if (
+			this.#disposed ||
+			this.session !== session ||
+			this.#getUsageContextKey(session) !== usageContextKey ||
+			this.#cachedUsageContextKey !== usageContextKey ||
+			sequence < this.#latestAppliedUsageRefreshSequence
+		) {
 			return;
 		}
 		this.#latestAppliedUsageRefreshSequence = sequence;
@@ -1369,7 +1465,10 @@ export class StatusLineComponent implements Component {
 		this.#usageFetchedAt = Date.now();
 		// Usage fetch is async; without a repaint the top border stays blank until
 		// some unrelated event (git resolve, keystroke, …) rebuilds it.
-		if (usageChanged) this.#onBranchChange?.();
+		if (usageChanged) {
+			this.#clearRenderedOutput();
+			this.#onBranchChange?.();
+		}
 		if (!resetSnapshot) return;
 		const contextKey = this.#formatUsageContextKey(activeProvider, activeIdentity);
 		const previous = this.#codexResetSnapshots.get(contextKey);
@@ -1379,13 +1478,24 @@ export class StatusLineComponent implements Component {
 		if (event) this.#onCodexResetFireworks?.(event);
 	}
 
-	#observeLateUsageRefresh(session: AgentSession, reportsPromise: Promise<unknown>, sequence: number): void {
+	#observeLateUsageRefresh(
+		session: AgentSession,
+		reportsPromise: Promise<unknown>,
+		sequence: number,
+		usageContextKey: string,
+	): void {
 		void reportsPromise
 			.then(reports => {
-				this.#applyUsageRefreshReports(session, reports, sequence);
+				this.#applyUsageRefreshReports(session, reports, sequence, usageContextKey);
 			})
 			.catch(() => {
-				if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
+				if (
+					this.#disposed ||
+					this.session !== session ||
+					this.#getUsageContextKey(session) !== usageContextKey ||
+					this.#cachedUsageContextKey !== usageContextKey ||
+					sequence < this.#latestAppliedUsageRefreshSequence
+				) {
 					return;
 				}
 				this.#usageFetchedAt = Date.now();
@@ -2296,23 +2406,53 @@ export class StatusLineComponent implements Component {
 		return this.#buildStatusLine(width, layout, undefined, { placeholders: true });
 	}
 
-	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, "box", previewTitle));
-		return {
+	#renderTopBorder(
+		width: number,
+		layout: "box" | "band" | "plain-right",
+		previewTitle?: string,
+	): { content: string; width: number; revision: number } {
+		const cacheable =
+			this.getTurnElapsedMs() === null &&
+			this.#brandFade === null &&
+			this.session.compactionSpeculation !== "running" &&
+			this.#loopModeStatus === null &&
+			this.#vibeWorkerTokenRate === null &&
+			this.#cachedUsage === null &&
+			this.#lastTokensPerSecond === null &&
+			(this.#activeRepoCache?.repository === null || this.#activeRepoCache?.repository === undefined);
+		const cached = this.#topBorderCache;
+		if (
+			cacheable &&
+			cached?.width === width &&
+			cached.layout === layout &&
+			cached.previewTitle === previewTitle &&
+			cached.revision === this.#renderRevision
+		) {
+			if (this.#gitWatcherUnavailable) {
+				this.#scheduleRepositoryProbe(this.#resolveActiveRepoCache());
+			}
+			return cached.result;
+		}
+
+		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, layout, previewTitle));
+		const result = {
 			content,
 			width: visibleWidth(content),
 			revision: this.#renderRevision,
 		};
+		this.#topBorderCache = cacheable
+			? { width, layout, previewTitle, revision: this.#renderRevision, result }
+			: undefined;
+		return result;
+	}
+
+	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
+		return this.#renderTopBorder(width, "box", previewTitle);
 	}
 
 	/** Flush-left soft-capped powerline band (the band composer's top row). */
 	getBandTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, "band", previewTitle));
-		return {
-			content,
-			width: visibleWidth(content),
-			revision: this.#renderRevision,
-		};
+		return this.#renderTopBorder(width, "band", previewTitle);
 	}
 
 	/** Dim the whole bar while focus-proxied. Group/cap terminators emit full
@@ -2334,23 +2474,18 @@ export class StatusLineComponent implements Component {
 		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
 		this.#topAttachment = style.statusAttachment;
 		this.#standaloneGap = style.bottomBarGap;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/** While true, the standalone bar yields its row to the editor's autocomplete menu. */
 	setAutocompleteActiveProbe(probe: (() => boolean) | undefined): void {
 		this.#autocompleteActiveProbe = probe;
-		this.#renderCache = undefined;
+		this.#clearRenderedOutput();
 	}
 
 	/** Plain right-group content for the claude composer's top rule. */
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, "plain-right", previewTitle));
-		return {
-			content,
-			width: visibleWidth(content),
-			revision: this.#renderRevision,
-		};
+		return this.#renderTopBorder(width, "plain-right", previewTitle);
 	}
 
 	/**

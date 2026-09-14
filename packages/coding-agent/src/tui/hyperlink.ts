@@ -193,7 +193,8 @@ export function urlHyperlinkAlways(url: string, displayText: string): string {
  * @param opts - Optional line/col position appended as `?line=N&col=M` query params
  */
 export function fileHyperlink(filePath: string, displayText: string, opts?: { line?: number; col?: number }): string {
-	return wrapHyperlink(buildFileUri(filePath, opts), displayText);
+	if (!isHyperlinkEnabled()) return displayText;
+	return wrapHyperlinkCore(buildFileUri(filePath, opts), displayText, ST);
 }
 
 /**

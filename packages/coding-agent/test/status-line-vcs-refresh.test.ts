@@ -197,6 +197,32 @@ describe("StatusLineComponent repaints when an async VCS fetch resolves", () => 
 		component.dispose();
 	});
 
+	it("rejects a stale same-cwd git status after VCS invalidation", async () => {
+		gitControls.headSync.mockReturnValue(fakeRefHead);
+		gitControls.defaultBranch.mockReturnValue(Promise.withResolvers<string | null>().promise);
+		const stale = Promise.withResolvers<GitStatus | null>();
+		const fresh = Promise.withResolvers<GitStatus | null>();
+		gitControls.statusSummary.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+
+		const component = new StatusLineComponent(makeSession());
+		component.updateSettings(gitSegment);
+		component.watchBranch(vi.fn());
+		component.getTopBorder(80);
+
+		component.invalidateGitCaches();
+		component.getTopBorder(80);
+		fresh.resolve({ staged: 4, unstaged: 0, untracked: 0 });
+		await Promise.resolve();
+		await Promise.resolve();
+		const freshBorder = component.getTopBorder(80).content;
+
+		stale.resolve({ staged: 0, unstaged: 9, untracked: 0 });
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(component.getTopBorder(80).content).toBe(freshBorder);
+		component.dispose();
+	});
+
 	it("fires #onBranchChange when the jj label resolves on the cold paint", async () => {
 		gitControls.headSync.mockReturnValue(null); // no git branch -> jj overlay
 		gitControls.defaultBranch.mockReturnValue(Promise.withResolvers<string | null>().promise);
@@ -503,9 +529,13 @@ describe("StatusLineComponent VCS watcher and jj request lifecycle", () => {
 		component.getTopBorder(80);
 		expect(gitControls.head).not.toHaveBeenCalled();
 
-		// The bounded discovery interval reaches the new repository. Repeated
-		// paints while its reftable resolve is hung must reuse the one request.
+		// The bounded discovery interval schedules the filesystem probe after the
+		// current paint. Once it discovers the repository, repeated repaints while
+		// the reftable resolve is hung must reuse the one request.
 		now += 4_001;
+		component.getTopBorder(80);
+		component.getTopBorder(80);
+		await new Promise<void>(resolve => setImmediate(resolve));
 		component.getTopBorder(80);
 		component.getTopBorder(80);
 		expect(gitControls.head).toHaveBeenCalledTimes(1);

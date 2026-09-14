@@ -279,6 +279,40 @@ describe("StatusLineComponent usage refresh", () => {
 		expect(calls).toBe(2);
 	});
 
+	it("rejects an in-flight report after the usage context changes", async () => {
+		const stale = Promise.withResolvers<unknown>();
+		let calls = 0;
+		const base = makeSession(() => {
+			calls++;
+			return calls === 1 ? stale.promise : Promise.resolve(usageReport(24));
+		}) as unknown as Record<string, unknown>;
+		base.state = {
+			messages: [],
+			model: { id: "claude-old", contextWindow: 200_000, provider: "anthropic" },
+		};
+		const component = new StatusLineComponent(base as unknown as AgentSession);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["usage"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		await refreshUsage(component);
+		(base.state as { model: { id: string } }).model.id = "claude-new";
+		component.refreshUsageInBackground();
+
+		stale.resolve(usageReport(91));
+		await flushMicrotasks();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+
+		expect(calls).toBe(2);
+		const content = plain(component.getTopBorder(80).content);
+		expect(content).toContain("5h 24%");
+		expect(content).not.toContain("91%");
+	});
+
 	it("keeps reset fireworks opt-in while advancing the disabled baseline", async () => {
 		const sevenDayResetAt = Date.now() + 80 * 3_600_000;
 		let state: CodexUsageState = {

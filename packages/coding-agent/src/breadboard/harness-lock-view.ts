@@ -68,15 +68,30 @@ function readRow(value: unknown): EffectiveLockValueRow | undefined {
 	return { path, valueKind, value: value.value, visibility };
 }
 
+const effectiveRowsByLock = new WeakMap<
+	Readonly<Record<string, unknown>>,
+	ReadonlyMap<string, EffectiveLockValueRow>
+>();
+
+function effectiveRows(lock: Exclude<Lock, null>): ReadonlyMap<string, EffectiveLockValueRow> {
+	const cached = effectiveRowsByLock.get(lock);
+	if (cached) return cached;
+
+	const rows = new Map<string, EffectiveLockValueRow>();
+	const candidates = lock.effective_values;
+	if (Array.isArray(candidates)) {
+		for (const candidate of candidates) {
+			const row = readRow(candidate);
+			if (row) rows.set(row.path, row);
+		}
+	}
+	effectiveRowsByLock.set(lock, rows);
+	return rows;
+}
+
 function findRow(lock: Lock, path: string): EffectiveLockValueRow | undefined {
 	if (!lock) return undefined;
-	const effectiveValues = lock.effective_values;
-	if (!Array.isArray(effectiveValues)) return undefined;
-	for (const candidate of effectiveValues) {
-		const row = readRow(candidate);
-		if (row?.path === path) return row;
-	}
-	return undefined;
+	return effectiveRows(lock).get(path);
 }
 
 /** Return a model-safe exact-path value from the effective config graph. */

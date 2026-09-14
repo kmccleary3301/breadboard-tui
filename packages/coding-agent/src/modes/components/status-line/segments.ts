@@ -65,12 +65,23 @@ function thinkingGlyph(display: string): string {
 	return space === -1 ? display : display.slice(0, space);
 }
 
+let cachedDisplayRootInput: string | undefined;
+let cachedDisplayRootOutput: string | undefined;
+
 function stripDisplayRoot(pwd: string): string {
+	if (pwd === cachedDisplayRootInput && cachedDisplayRootOutput !== undefined) return cachedDisplayRootOutput;
+
+	let displayPath = pwd;
 	for (const root of [path.join(os.homedir(), "Projects"), "/work"]) {
 		const relative = relativePathWithinRoot(root, pwd);
-		if (relative) return relative;
+		if (relative) {
+			displayPath = relative;
+			break;
+		}
 	}
-	return pwd;
+	cachedDisplayRootInput = pwd;
+	cachedDisplayRootOutput = displayPath;
+	return displayPath;
 }
 
 function normalizePremiumRequests(value: number): number {

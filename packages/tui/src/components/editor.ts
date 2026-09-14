@@ -379,6 +379,50 @@ interface EditorState {
 	cursorLine: number;
 	cursorCol: number;
 }
+class BoundedStack<T> {
+	readonly #items: Array<T | undefined>;
+	#start = 0;
+	#size = 0;
+
+	constructor(private readonly capacity: number) {
+		this.#items = new Array<T | undefined>(capacity);
+	}
+
+	get size(): number {
+		return this.#size;
+	}
+
+	push(value: T): void {
+		if (this.#size < this.capacity) {
+			this.#items[(this.#start + this.#size) % this.capacity] = value;
+			this.#size++;
+			return;
+		}
+		this.#items[this.#start] = value;
+		this.#start = (this.#start + 1) % this.capacity;
+	}
+
+	peek(): T | undefined {
+		if (this.#size === 0) return undefined;
+		return this.#items[(this.#start + this.#size - 1) % this.capacity];
+	}
+
+	pop(): T | undefined {
+		if (this.#size === 0) return undefined;
+		const index = (this.#start + this.#size - 1) % this.capacity;
+		const value = this.#items[index];
+		this.#items[index] = undefined;
+		this.#size--;
+		if (this.#size === 0) this.#start = 0;
+		return value;
+	}
+
+	clear(): void {
+		this.#items.fill(undefined);
+		this.#start = 0;
+		this.#size = 0;
+	}
+}
 
 interface LayoutLine {
 	text: string;
@@ -574,7 +618,7 @@ export class Editor implements Component, Focusable {
 	#historyStorage?: HistoryStorage;
 
 	// Undo stack for editor state changes
-	#undoStack: EditorState[] = [];
+	#undoStack = new BoundedStack<EditorState>(MAX_UNDO_STACK);
 	#suspendUndo = false;
 
 	// Debounce timer for autocomplete updates
@@ -827,7 +871,7 @@ export class Editor implements Component, Focusable {
 	}
 	/** Internal setText that doesn't reset history state - used by navigateHistory */
 	#setTextInternal(text: string, cursorAnchor: HistoryCursorAnchor = "end"): void {
-		this.#undoStack.length = 0;
+		this.#undoStack.clear();
 		const lines = sanitizeLoadedText(text).split("\n");
 		this.#state.lines = lines.length === 0 ? [""] : lines;
 		if (cursorAnchor === "start") {
@@ -2034,7 +2078,7 @@ export class Editor implements Component, Focusable {
 		this.#setCursorCol(transientStartCol);
 
 		while (true) {
-			const snapshot = this.#undoStack.at(-1);
+			const snapshot = this.#undoStack.peek();
 			if (
 				!snapshot ||
 				!this.#matchesTransientUndoSnapshot(
@@ -2050,7 +2094,7 @@ export class Editor implements Component, Focusable {
 			this.#undoStack.pop();
 		}
 
-		if (this.#undoStack.length === 0) {
+		if (this.#undoStack.size === 0) {
 			if (this.onChange) {
 				this.onChange(this.getText());
 			}
@@ -2467,7 +2511,7 @@ export class Editor implements Component, Focusable {
 		this.#atoms.clear();
 		this.#historyIndex = -1;
 		this.#scrollOffset = 0;
-		this.#undoStack.length = 0;
+		this.#undoStack.clear();
 
 		if (this.onChange) this.onChange("");
 		if (this.onSubmit) this.onSubmit(result);
@@ -2734,9 +2778,6 @@ export class Editor implements Component, Focusable {
 	#recordUndoState(): void {
 		if (this.#suspendUndo) return;
 		this.#undoStack.push(structuredClone(this.#state));
-		if (this.#undoStack.length > MAX_UNDO_STACK) {
-			this.#undoStack.shift();
-		}
 	}
 
 	#applyUndo(): void {
