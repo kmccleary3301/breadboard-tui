@@ -1080,8 +1080,16 @@ def _remove_scratch_root(root: Path, cleanup: dict[str, Any]) -> None:
         cleanup["scratchRemoved"] = False
         cleanup["scratchRemovalReason"] = "owned-processes-remain"
         return
-    shutil.rmtree(root, ignore_errors=True)
-    cleanup["scratchRemoved"] = not root.exists()
+    try:
+        for current, _, _ in os.walk(root):
+            path = Path(current)
+            path.chmod(path.stat().st_mode | 0o700)
+        shutil.rmtree(root)
+    except OSError as error:
+        cleanup["scratchRemoved"] = False
+        cleanup["scratchRemovalError"] = str(error)
+        return
+    cleanup["scratchRemoved"] = True
 
 
 # Plain OMP without a model answers a submit with this frame. It is the expected
