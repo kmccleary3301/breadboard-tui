@@ -10,6 +10,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAutoLearnCaptureRunner } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 class FakeSession {
 	readonly listeners: Array<(event: AgentSessionEvent) => void> = [];
@@ -343,6 +344,48 @@ describe("isolated auto-learn capture", () => {
 		};
 	}
 
+	it("authenticates a native capture independently of an externally authenticated main stream", async () => {
+		const captureMock = createMockModel({
+			provider: "sdk-capture-auth-test",
+			responses: [{ content: ["Captured."] }],
+		});
+		const manageSkillTool = captureTool("manage_skill", "Manage reusable skills");
+		const sourceAgent = new Agent({
+			initialState: { model: captureMock, systemPrompt: ["Test"], tools: [manageSkillTool] },
+		});
+		const nativeAuth = createInMemoryAuthStorage();
+		nativeAuth.setRuntimeApiKey(captureMock.provider, "native-capture-key");
+		let captureAgent: Agent | undefined;
+		const runCapture = createAutoLearnCaptureRunner({
+			sourceAgent,
+			captureTools: [manageSkillTool],
+			getApiKey: model => nativeAuth.getApiKey(model.provider),
+			createAgent: options => {
+				captureAgent = new Agent({
+					...options,
+					convertToLlm,
+					streamFn: (model, context, streamOptions) => {
+						if (streamOptions?.apiKey !== "native-capture-key") {
+							throw new Error("Native capture provider rejected missing credentials");
+						}
+						return captureMock.stream(model, context, streamOptions);
+					},
+				});
+				return captureAgent;
+			},
+		});
+		try {
+			await runCapture("Capture reusable knowledge");
+			expect(captureAgent?.state.messages.at(-1)).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: "Captured." }],
+				stopReason: "stop",
+			});
+		} finally {
+			nativeAuth.close();
+		}
+	});
+
 	it("uses constrained tools and sends full Google context without the primary anchor", async () => {
 		const model = googleInteractionsModel();
 		const manageSkillTool = captureTool("manage_skill", "Manage reusable skills");
@@ -379,6 +422,7 @@ describe("isolated auto-learn capture", () => {
 		const runCapture = createAutoLearnCaptureRunner({
 			sourceAgent,
 			captureTools: [manageSkillTool],
+			getApiKey: model => sourceAgent.getApiKey?.(model),
 			createSessionId: () => "0193c8f2-7b1a-7c4d-9e2f-123456789abc",
 			createAgent: options => {
 				captureMessages = options.initialState?.messages ?? [];
@@ -435,6 +479,7 @@ describe("isolated auto-learn capture", () => {
 		const runCapture = createAutoLearnCaptureRunner({
 			sourceAgent,
 			captureTools: [manageSkillTool],
+			getApiKey: model => sourceAgent.getApiKey?.(model),
 			onPayload,
 			onResponse,
 			createAgent: options => {
@@ -467,6 +512,7 @@ describe("isolated auto-learn capture", () => {
 		const runCapture = createAutoLearnCaptureRunner({
 			sourceAgent,
 			captureTools: [manageSkillTool, learnTool],
+			getApiKey: model => sourceAgent.getApiKey?.(model),
 			createAgent: options => {
 				captureToolNames = options.initialState?.tools?.map(tool => tool.name) ?? [];
 				return new Agent({
@@ -514,6 +560,7 @@ describe("isolated auto-learn capture", () => {
 		const runCapture = createAutoLearnCaptureRunner({
 			sourceAgent,
 			captureTools: [manageSkillTool],
+			getApiKey: model => sourceAgent.getApiKey?.(model),
 			createSessionId: () => "capture-transport",
 			createAgent: options =>
 				new Agent({
@@ -550,6 +597,7 @@ describe("isolated auto-learn capture", () => {
 		const runCapture = createAutoLearnCaptureRunner({
 			sourceAgent,
 			captureTools: [manageSkillTool],
+			getApiKey: model => sourceAgent.getApiKey?.(model),
 			createAgent: options => {
 				providerState = options.providerSessionState;
 				providerState?.set("blocked", { close: () => closeCalls++ });

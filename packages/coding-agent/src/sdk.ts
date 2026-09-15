@@ -1203,6 +1203,8 @@ function buildMCPPromptCommands(manager: MCPManager): LoadedCustomCommand[] {
 export interface AutoLearnCaptureRunnerOptions {
 	sourceAgent: Agent;
 	captureTools: AgentTool[];
+	/** Credentials belong to the capture transport, independently of the primary stream. */
+	getApiKey: AgentOptions["getApiKey"];
 	createAgent: (options: AgentOptions) => Agent;
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
@@ -1241,7 +1243,7 @@ export function createAutoLearnCaptureRunner(
 			sessionId: captureSessionId,
 			promptCacheKey: captureSessionId,
 			providerSessionState: captureProviderSessionState,
-			getApiKey: requestModel => options.sourceAgent.getApiKey?.(requestModel),
+			getApiKey: options.getApiKey,
 			onPayload: options.onPayload,
 			onResponse: options.onResponse,
 		});
@@ -4149,6 +4151,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const runAutoLearnCapture = createAutoLearnCaptureRunner({
 			sourceAgent: agent,
 			captureTools: autoLearnCaptureTools,
+			getApiKey:
+				options.mainStreamFn === undefined && options.getApiKey
+					? options.getApiKey
+					: requestModel => modelRegistry.resolver(requestModel, agent.sessionId),
 			onPayload,
 			onResponse,
 			createAgent: captureOptions => {
