@@ -71,6 +71,7 @@ const IRC_MESSAGE_VISIBLE_TTL_MS = 10_000;
 const MAX_LIVE_IRC_CARDS = 4;
 const IDLE_RECAP_MIN_SECONDS = 1;
 const IDLE_RECAP_MAX_SECONDS = 3600;
+const TURN_END_GC_HEAP_GROWTH_BYTES = 32 * 1024 * 1024;
 
 const RAW_PARTIAL_JSON_RENDERERS: Record<string, true> = { bash: true, edit: true, apply_patch: true };
 
@@ -177,8 +178,17 @@ export class EventController {
 	#retryPending = false;
 	#idleCompactionTimer?: NodeJS.Timeout;
 	#idleRecapTimer?: NodeJS.Timeout;
+	#heapUsedAtLastCollectionRequest = process.memoryUsage().heapUsed;
 	#collectAfterPaint = (): void => {
-		if (!this.ctx.viewSession.isStreaming) Bun.gc(false);
+		if (this.ctx.viewSession.isStreaming) return;
+		const heapUsed = process.memoryUsage().heapUsed;
+		if (heapUsed < this.#heapUsedAtLastCollectionRequest) {
+			this.#heapUsedAtLastCollectionRequest = heapUsed;
+			return;
+		}
+		if (heapUsed - this.#heapUsedAtLastCollectionRequest < TURN_END_GC_HEAP_GROWTH_BYTES) return;
+		this.#heapUsedAtLastCollectionRequest = heapUsed;
+		Bun.gc(false);
 	};
 	// In-flight ephemeral recap turn; aborted by #cancelIdleRecap when any
 	// activity (new turn, compaction, editor draft) supersedes the idle recap.
@@ -1987,9 +1997,8 @@ export class EventController {
 		// When the interrupted/failed turn died on a tool call, this replaces the
 		// torn-down "Working…" row with the "F5 to Retry" affordance.
 		this.ctx.syncRetryHintRow();
-		// The terminal turn boundary is the first predictable idle point after
-		// transcript growth. Start a non-forced collection after its repaint
-		// instead of leaving the next editor input to cross the allocation threshold.
+		// Reclaim turn churn only after material heap growth. Collecting after
+		// every provider-free turn injects GC work into the next input window.
 		this.ctx.ui.requestRenderAfterPaint(this.#collectAfterPaint);
 		this.#scheduleIdleCompaction();
 		this.#scheduleIdleRecap();
