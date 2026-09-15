@@ -30,8 +30,12 @@ export type {
 	TurnId,
 };
 
-export function breadboardCancellationRequestKey(sessionId: SessionId | string, turnId: TurnId | string): string {
-	return `breadboard:${String(sessionId)}:${String(turnId)}`;
+export function breadboardCancellationRequestKey(
+	sessionId: SessionId | string,
+	turnId: TurnId | string,
+	reason: CancelTurnRequest["reason"],
+): string {
+	return `breadboard:${String(sessionId)}:${String(turnId)}:${reason}`;
 }
 
 /**

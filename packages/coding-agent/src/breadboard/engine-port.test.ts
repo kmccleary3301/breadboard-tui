@@ -157,7 +157,7 @@ describe("createLifecycleMonitor", () => {
 		expect(await closeOpenedSession(session, 1_000)).toEqual({ kind: "closed" });
 		expect(cancellations).toHaveLength(1);
 		expect(cancellations[0]).toMatchObject({ turnId: "turn-1", reason: "user_requested" });
-		expect(cancellations[0]?.cancellationRequestKey).toBe("breadboard:session-1:turn-1");
+		expect(cancellations[0]?.cancellationRequestKey).toBe("breadboard:session-1:turn-1:user_requested");
 	});
 });
 

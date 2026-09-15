@@ -2628,7 +2628,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			process.exitOnNextWait();
 			expect((await supervisor.stop({ consumerClosed: true })).kind).toBe("stopped");
 			expect(cancellationRequests).toHaveLength(1);
-			expect(cancellationRequests[0]?.cancellation_request_key).toBe("breadboard:session-1:turn-1");
+			expect(cancellationRequests[0]?.cancellation_request_key).toBe("breadboard:session-1:turn-1:user_requested");
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

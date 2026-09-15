@@ -1343,8 +1343,9 @@ describe("E4AgentStreamBridge", () => {
 			expect(closeOutcome.reason).toContain("SDK session close timed out");
 		}
 	});
-	test("retries an ambiguous cancellation with the original idempotency body", async () => {
+	test("uses distinct idempotency bodies when cancellation reasons change", async () => {
 		const cancellations: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		const acceptedReasons = new Map<string, string>();
 		let active = true;
 		const bridge = new E4AgentStreamBridge({
 			session: {
@@ -1354,11 +1355,17 @@ describe("E4AgentStreamBridge", () => {
 				},
 				async cancel(request) {
 					cancellations.push(request);
+					const { cancellationRequestKey, reason } = request;
+					if (cancellationRequestKey === undefined || reason === undefined) {
+						throw new Error("Missing cancellation request identity");
+					}
+					const acceptedReason = acceptedReasons.get(cancellationRequestKey);
+					if (acceptedReason !== undefined && acceptedReason !== reason) {
+						throw new Error("Session cancellation conflict");
+					}
+					acceptedReasons.set(cancellationRequestKey, reason);
 					if (cancellations.length === 1) {
 						throw new Error("response lost after durable acceptance");
-					}
-					if (request.reason !== cancellations[0]?.reason) {
-						throw new Error("Session cancellation conflict");
 					}
 					active = false;
 					return {} as CancellationReceipt;
@@ -1379,8 +1386,8 @@ describe("E4AgentStreamBridge", () => {
 		expect((await stream.result()).stopReason).toBe("error");
 		expect(await bridge.close()).toEqual({ kind: "closed" });
 		expect(cancellations).toHaveLength(2);
-		expect(cancellations[0]?.reason).toBe("timeout");
-		expect(cancellations[1]).toEqual(cancellations[0]);
+		expect(cancellations.map(request => request.reason)).toEqual(["timeout", "user_requested"]);
+		expect(cancellations[0]?.cancellationRequestKey).not.toBe(cancellations[1]?.cancellationRequestKey);
 	});
 
 	test("reuses one cancellation key while waiting for a delayed terminal", async () => {
@@ -1410,7 +1417,7 @@ describe("E4AgentStreamBridge", () => {
 		expect(closeOutcome).toEqual({ kind: "closed" });
 		expect(cancellations).toHaveLength(1);
 		expect(cancellations[0]).toMatchObject({ turnId: "turn-1", reason: "user_requested" });
-		expect(cancellations[0]?.cancellationRequestKey).toBe("breadboard:session-1:turn-1");
+		expect(cancellations[0]?.cancellationRequestKey).toBe("breadboard:session-1:turn-1:user_requested");
 	});
 	test("rejects an allow response that reaches the boundary during teardown", async () => {
 		const responded: Array<Parameters<OpenedSession["respondPermission"]>[0]> = [];
@@ -3835,7 +3842,11 @@ describe("E4AgentStreamBridge", () => {
 				expectedPermissionResponse("permission-current", "deny"),
 			]);
 			expect(cancelled).toMatchObject([
-				{ turnId: receipt.turnId, reason: "user_requested", cancellationRequestKey: "breadboard:session-1:turn-1" },
+				{
+					turnId: receipt.turnId,
+					reason: "user_requested",
+					cancellationRequestKey: "breadboard:session-1:turn-1:user_requested",
+				},
 			]);
 		} finally {
 			await bridge.close();

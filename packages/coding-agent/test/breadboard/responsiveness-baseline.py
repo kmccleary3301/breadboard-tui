@@ -1676,6 +1676,11 @@ def _minute_rows(samples: list[dict[str, Any]], duration: float, phase_of: Calla
     return rows
 
 
+def _planned_soak_duration_observed(child: Any, started: float, duration: float) -> bool:
+    child.pump(0.0)
+    return child.exit_status is None and time.monotonic() - started >= duration
+
+
 def run_soak(args: argparse.Namespace) -> dict[str, Any]:
     """Contract bb-2j1u.6 resource run: warmup, active mix and idle tail split
     1/6, 4/6, 1/6 of `--minutes` (5/20/5 at the default 30), one action per
@@ -1730,7 +1735,7 @@ def run_soak(args: argparse.Namespace) -> dict[str, Any]:
                     next_action = max(next_action + 1.0, time.monotonic())
                 child.pump(0.005)
                 time.sleep(0.01)
-            planned_duration_observed = time.monotonic() - started >= duration
+            planned_duration_observed = _planned_soak_duration_observed(child, started, duration)
     except Exception as failure:
         error = str(failure)
     finally:

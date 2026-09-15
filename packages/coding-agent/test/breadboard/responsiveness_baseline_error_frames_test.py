@@ -182,5 +182,14 @@ class ResourceGateTests(unittest.TestCase):
         soak["plannedDurationObserved"] = False
         self.assertEqual(harness._resource_gates(soak)["gates"]["completed"], "UNKNOWN")
 
+    def test_duration_observation_pumps_exit_before_deciding(self) -> None:
+        child = SimpleNamespace(exit_status=None)
+
+        def pump(_timeout: float) -> None:
+            child.exit_status = 1
+
+        child.pump = pump
+        self.assertFalse(harness._planned_soak_duration_observed(child, 0.0, 0.0))
+
 if __name__ == "__main__":
     unittest.main()

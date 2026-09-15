@@ -95,7 +95,7 @@ export async function closeOpenedSession(
 		}
 		if (activeTurnId === null) break;
 		const request = cancellationRequests.get(activeTurnId) ?? {
-			key: breadboardCancellationRequestKey(session.sessionId, activeTurnId),
+			key: breadboardCancellationRequestKey(session.sessionId, activeTurnId, "user_requested"),
 			accepted: false,
 		};
 		cancellationRequests.set(activeTurnId, request);

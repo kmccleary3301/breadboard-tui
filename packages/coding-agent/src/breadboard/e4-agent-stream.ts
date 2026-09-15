@@ -240,7 +240,6 @@ interface TurnSink {
 	readonly streamedToolCallsByCallId: Map<string, StreamedToolCallState>;
 	turnId: TurnId | undefined;
 	inputId: string | undefined;
-	cancellationRequestKey: string | undefined;
 	cancelRequested: boolean;
 	text: string;
 	messageText: string;
@@ -342,7 +341,6 @@ export class E4AgentStreamBridge {
 		string,
 		{
 			readonly key: string;
-			reason?: "user_requested" | "timeout";
 			accepted: boolean;
 			inFlight?: Promise<boolean>;
 		}
@@ -516,7 +514,6 @@ export class E4AgentStreamBridge {
 			pendingProjectionKeys: [],
 			inputId: undefined,
 			turnId: undefined,
-			cancellationRequestKey: undefined,
 			cancelRequested: false,
 			text: "",
 			messageText: "",
@@ -531,26 +528,30 @@ export class E4AgentStreamBridge {
 		};
 	}
 
-	#ensureCancellationRequest(turnId: TurnId): {
+	#ensureCancellationRequest(
+		turnId: TurnId,
+		reason: "user_requested" | "timeout",
+	): {
 		readonly key: string;
-		reason?: "user_requested" | "timeout";
 		accepted: boolean;
 		inFlight?: Promise<boolean>;
 	} {
-		const requestId = `${String(this.#session.sessionId)}:${String(turnId)}`;
+		const requestId = `${String(this.#session.sessionId)}:${String(turnId)}:${reason}`;
 		const existing = this.#cancellationRequests.get(requestId);
 		if (existing) return existing;
-		const created = { key: breadboardCancellationRequestKey(this.#session.sessionId, turnId), accepted: false };
+		const created = {
+			key: breadboardCancellationRequestKey(this.#session.sessionId, turnId, reason),
+			accepted: false,
+		};
 		this.#cancellationRequests.set(requestId, created);
 		return created;
 	}
 
 	#requestCancellation(turnId: TurnId, reason: "user_requested" | "timeout"): Promise<boolean> {
-		const state = this.#ensureCancellationRequest(turnId);
+		const state = this.#ensureCancellationRequest(turnId, reason);
 		if (state.accepted) return Promise.resolve(true);
 		if (state.inFlight) return state.inFlight;
-		state.reason ??= reason;
-		const request = this.#cancel(turnId, state.reason, state.key).then(result => {
+		const request = this.#cancel(turnId, reason, state.key).then(result => {
 			if (result) state.accepted = true;
 			return result;
 		});
@@ -860,7 +861,6 @@ export class E4AgentStreamBridge {
 			if (this.#pendingSubmit === attempt) this.#pendingSubmit = undefined;
 			sink.turnId = receipt.turnId;
 			sink.inputId = receipt.inputId;
-			sink.cancellationRequestKey = this.#ensureCancellationRequest(receipt.turnId).key;
 			const failure = this.#currentObserveFailure();
 			if (failure) {
 				const cancellation = this.#trackCancellation(sink, "timeout");
@@ -991,7 +991,6 @@ export class E4AgentStreamBridge {
 			sink = this.#newSink(backendModel);
 			sink.turnId = event.turnId;
 			sink.inputId = event.inputId;
-			sink.cancellationRequestKey = this.#ensureCancellationRequest(event.turnId).key;
 			this.#sinks.set(turnKey, sink);
 		}
 		await this.#trackEventApplication(this.#applyEvent(sink, event));
@@ -1661,7 +1660,6 @@ export class E4AgentStreamBridge {
 	#trackCancellation(sink: TurnSink, reason: "user_requested" | "timeout"): Promise<boolean> | undefined {
 		if (sink.cancelRequested || sink.turnId === undefined) return undefined;
 		sink.cancelRequested = true;
-		sink.cancellationRequestKey = this.#ensureCancellationRequest(sink.turnId).key;
 		return this.#requestCancellation(sink.turnId, reason);
 	}
 

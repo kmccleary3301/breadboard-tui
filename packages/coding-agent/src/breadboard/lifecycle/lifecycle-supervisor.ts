@@ -2439,7 +2439,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				const cancellationRequestKey =
 					this.cancellationRequestKeys.get(cancellationKeyId) ??
 					(() => {
-						const created = breadboardCancellationRequestKey(sessionId, turnId);
+						const created = breadboardCancellationRequestKey(sessionId, turnId, "user_requested");
 						this.cancellationRequestKeys.set(cancellationKeyId, created);
 						return created;
 					})();
