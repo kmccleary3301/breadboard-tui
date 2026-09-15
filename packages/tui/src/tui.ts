@@ -874,6 +874,7 @@ export class TUI extends Container {
 	#forceViewportRepaintOnNextRender = false;
 	#hasEverRendered = false;
 	#stopped = false;
+	#lifecycleEpoch = 0;
 	#cancelPostmortemRestore?: () => void;
 	/** True between a `deferInput` start() and enableInput(). */
 	#inputDeferred = false;
@@ -1178,6 +1179,7 @@ export class TUI extends Container {
 	}
 
 	start(options?: TUIStartOptions): void {
+		this.#lifecycleEpoch += 1;
 		this.#stopped = false;
 		this.#debugPaint = undefined;
 		this.#debugServer?.stop();
@@ -1850,6 +1852,8 @@ export class TUI extends Container {
 	}
 
 	stop(): void {
+		this.#lifecycleEpoch += 1;
+		this.#afterPaintCallbacks.clear();
 		this.#cancelPostmortemRestore?.();
 		this.#cancelPostmortemRestore = undefined;
 		this.#debugServer?.stop();
@@ -1900,7 +1904,6 @@ export class TUI extends Container {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
 		}
-		this.#afterPaintCallbacks.clear();
 		if (this.#ghosttyInitialImageDelayTimer) {
 			this.#ghosttyInitialImageDelayTimer.cancel();
 			this.#ghosttyInitialImageDelayTimer = undefined;
@@ -1987,7 +1990,6 @@ export class TUI extends Container {
 		this.#lastRenderAt = start;
 		this.#doRender();
 		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
-		this.#runAfterPaintCallbacks();
 	}
 
 	/**
@@ -2095,14 +2097,20 @@ export class TUI extends Container {
 		this.#lastRenderAt = start;
 		this.#doRender();
 		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
-		this.#runAfterPaintCallbacks();
 	}
 
-	#runAfterPaintCallbacks(): void {
+	#scheduleAfterPaintCallbacks(): void {
 		const callbacks = this.#afterPaintCallbacks;
+		if (callbacks.size === 0) return;
 		this.#afterPaintCallbacks = new Set();
+		const lifecycleEpoch = this.#lifecycleEpoch;
+		queueMicrotask(() => this.#runAfterPaintCallbacks(callbacks, lifecycleEpoch));
+	}
+
+	#runAfterPaintCallbacks(callbacks: ReadonlySet<() => void>, lifecycleEpoch: number): void {
+		if (this.#stopped || lifecycleEpoch !== this.#lifecycleEpoch) return;
 		for (const callback of callbacks) {
-			if (this.#stopped) break;
+			if (this.#stopped || lifecycleEpoch !== this.#lifecycleEpoch) break;
 			callback();
 		}
 	}
@@ -2135,6 +2143,7 @@ export class TUI extends Container {
 		const timing = this.#frameTiming;
 		if (timing === undefined) {
 			this.terminal.write(buffer);
+			this.#scheduleAfterPaintCallbacks();
 			return;
 		}
 		const bracketStartMs = machAbsoluteTimeMs();
@@ -2166,6 +2175,7 @@ export class TUI extends Container {
 			}),
 		);
 		timing.frameId += 1;
+		this.#scheduleAfterPaintCallbacks();
 	}
 
 	#handleInput(data: string): void {

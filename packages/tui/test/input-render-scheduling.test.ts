@@ -88,7 +88,7 @@ describe("TUI input/render scheduling", () => {
 		}
 	});
 
-	it("runs a coalesced post-paint callback after a cadence-delayed render", () => {
+	it("runs a coalesced post-paint callback after a cadence-delayed render", async () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
 		const events: string[] = [];
@@ -110,13 +110,15 @@ describe("TUI input/render scheduling", () => {
 			expect(events).toEqual([]);
 			const requestedTimer = scheduler.timers.shift();
 			if (requestedTimer && !requestedTimer.canceled) requestedTimer.callback();
+			expect(events).toEqual(["render"]);
+			await Promise.resolve();
 			expect(events).toEqual(["render", "after-paint"]);
 		} finally {
 			tui.stop();
 		}
 	});
 
-	it("drops pending post-paint callbacks when stopped before the render", () => {
+	it("drops pending post-paint callbacks when stopped before the render", async () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
@@ -130,7 +132,31 @@ describe("TUI input/render scheduling", () => {
 
 			tui.start();
 			tui.renderNow();
+			await Promise.resolve();
 			expect(afterPaint).not.toHaveBeenCalled();
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("abandons the painted callback batch when one callback restarts the TUI", async () => {
+		const term = new VirtualTerminal(20, 4);
+		const scheduler = new DeferredRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const staleCallback = vi.fn();
+
+		try {
+			tui.start();
+			tui.renderNow();
+			tui.requestRenderAfterPaint(() => {
+				tui.stop();
+				tui.start();
+			});
+			tui.requestRenderAfterPaint(staleCallback);
+			tui.renderNow();
+
+			await Promise.resolve();
+			expect(staleCallback).not.toHaveBeenCalled();
 		} finally {
 			tui.stop();
 		}
