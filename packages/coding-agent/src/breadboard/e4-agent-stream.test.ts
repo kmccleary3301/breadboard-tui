@@ -1343,6 +1343,46 @@ describe("E4AgentStreamBridge", () => {
 			expect(closeOutcome.reason).toContain("SDK session close timed out");
 		}
 	});
+	test("retries an ambiguous cancellation with the original idempotency body", async () => {
+		const cancellations: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
+		let active = true;
+		const bridge = new E4AgentStreamBridge({
+			session: {
+				...openedSession([], []),
+				async snapshot() {
+					return { activeTurnId: active ? receipt.turnId : null } as never;
+				},
+				async cancel(request) {
+					cancellations.push(request);
+					if (cancellations.length === 1) {
+						throw new Error("response lost after durable acceptance");
+					}
+					if (request.reason !== cancellations[0]?.reason) {
+						throw new Error("Session cancellation conflict");
+					}
+					active = false;
+					return {} as CancellationReceipt;
+				},
+				async *events() {
+					yield started;
+					yield wireEvent(3, "error", { code: "worker_crash", message: "worker failed" });
+				},
+			},
+			submissionOwned: async () => {},
+			releaseAgentEvent: () => {},
+			projectionCommitted: async () => {},
+			emitAgentEvent: async () => {},
+			modelPolicy: { kind: "fixed", model },
+		});
+
+		const stream = await startBridgeStream(bridge, model, context);
+		expect((await stream.result()).stopReason).toBe("error");
+		expect(await bridge.close()).toEqual({ kind: "closed" });
+		expect(cancellations).toHaveLength(2);
+		expect(cancellations[0]?.reason).toBe("timeout");
+		expect(cancellations[1]).toEqual(cancellations[0]);
+	});
+
 	test("reuses one cancellation key while waiting for a delayed terminal", async () => {
 		const cancellations: Array<Parameters<OpenedSession["cancel"]>[0]> = [];
 		let snapshots = 0;

@@ -340,7 +340,12 @@ export class E4AgentStreamBridge {
 	readonly #ownershipWaiters = new Set<() => void>();
 	readonly #cancellationRequests = new Map<
 		string,
-		{ readonly key: string; accepted: boolean; inFlight?: Promise<boolean> }
+		{
+			readonly key: string;
+			reason?: "user_requested" | "timeout";
+			accepted: boolean;
+			inFlight?: Promise<boolean>;
+		}
 	>();
 	#activeModel: E4BackendModelAttribution | undefined;
 	#modelSelectionBarrier = Promise.resolve();
@@ -528,6 +533,7 @@ export class E4AgentStreamBridge {
 
 	#ensureCancellationRequest(turnId: TurnId): {
 		readonly key: string;
+		reason?: "user_requested" | "timeout";
 		accepted: boolean;
 		inFlight?: Promise<boolean>;
 	} {
@@ -543,12 +549,12 @@ export class E4AgentStreamBridge {
 		const state = this.#ensureCancellationRequest(turnId);
 		if (state.accepted) return Promise.resolve(true);
 		if (state.inFlight) return state.inFlight;
-		const request = this.#cancel(turnId, reason, state.key).then(result => {
+		state.reason ??= reason;
+		const request = this.#cancel(turnId, state.reason, state.key).then(result => {
 			if (result) state.accepted = true;
 			return result;
 		});
-		let tracked: Promise<boolean>;
-		tracked = request.finally(() => {
+		const tracked = request.finally(() => {
 			state.inFlight = undefined;
 			this.#cancellationsInFlight.delete(tracked);
 		});

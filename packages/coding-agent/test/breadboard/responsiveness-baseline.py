@@ -1706,6 +1706,7 @@ def run_soak(args: argparse.Namespace) -> dict[str, Any]:
     child: Any | None = None
     observer: _ResourceObserver | None = None
     error: str | None = None
+    planned_duration_observed = False
     try:
         if args.product == "bb":
             active_fixture = _prepare_bb_cell_fixture(binary, root, 36, 120, fixture)
@@ -1729,6 +1730,7 @@ def run_soak(args: argparse.Namespace) -> dict[str, Any]:
                     next_action = max(next_action + 1.0, time.monotonic())
                 child.pump(0.005)
                 time.sleep(0.01)
+            planned_duration_observed = time.monotonic() - started >= duration
     except Exception as failure:
         error = str(failure)
     finally:
@@ -1752,6 +1754,7 @@ def run_soak(args: argparse.Namespace) -> dict[str, Any]:
         "error": error,
         "durationSeconds": finished - started,
         "plannedSeconds": duration,
+        "plannedDurationObserved": planned_duration_observed,
         "phases": {"warmupEndSeconds": warmup_end, "activeEndSeconds": active_end, "idleEndSeconds": duration},
         "workload": "adverse fixture; key/edit, menu, scroll, submit, cancel round-robin at one action per second",
         "actions": actions,
@@ -1918,7 +1921,7 @@ def _resource_gates(soak: dict[str, Any]) -> dict[str, Any]:
         "cleanup": "UNKNOWN" if not cleanup else ("pass" if cleanup.get("gone") or cleanup.get("rootProcessesGone") else "fail"),
         "observerOverhead": _gate(soak.get("observerOverheadRatio"), 0.01),
         "sampleGaps": "UNKNOWN" if soak.get("gapsOver2Seconds") is None else ("pass" if soak.get("gapsOver2Seconds") == 0 else "UNKNOWN"),
-        "completed": "pass" if soak.get("ready") and not soak.get("error") and soak.get("exitCode") in (None, 0) and float(soak.get("durationSeconds") or 0) >= float(soak.get("plannedSeconds") or 1) else "UNKNOWN",
+        "completed": "pass" if soak.get("ready") and not soak.get("error") and soak.get("plannedDurationObserved") is True else "UNKNOWN",
     }
     return {
         "status": _combine(gates.values()),

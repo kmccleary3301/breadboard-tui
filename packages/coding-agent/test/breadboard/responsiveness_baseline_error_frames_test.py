@@ -155,5 +155,32 @@ class ErrorFramesTests(unittest.TestCase):
         missing = harness._frame_clock_details(SimpleNamespace(clock_mapping=None), event, 0.010)
         self.assertIsNone(missing["latencyUpperBoundMs"])
 
+
+class ResourceGateTests(unittest.TestCase):
+    def test_authenticated_cleanup_exit_does_not_invalidate_completed_duration(self) -> None:
+        soak = {
+            "ready": True,
+            "error": None,
+            "exitCode": -9,
+            "durationSeconds": 1800.0,
+            "plannedSeconds": 1800.0,
+            "plannedDurationObserved": True,
+            "resources": [
+                {"phase": "idle", "cpuPercent": 1.0},
+                {"phase": "active", "cpuPercent": 1.0},
+            ],
+            "minutes": [
+                {"minute": 5, "phase": "active", "rssMedianKb": 1000},
+                {"minute": 6, "phase": "active", "rssMedianKb": 1000},
+            ],
+            "cleanup": {"gone": True},
+            "observerOverheadRatio": 0.0,
+            "gapsOver2Seconds": 0,
+        }
+
+        self.assertEqual(harness._resource_gates(soak)["gates"]["completed"], "pass")
+        soak["plannedDurationObserved"] = False
+        self.assertEqual(harness._resource_gates(soak)["gates"]["completed"], "UNKNOWN")
+
 if __name__ == "__main__":
     unittest.main()
