@@ -382,6 +382,7 @@ describe("connected BreadBoard runtime lifecycle", () => {
 		await runtime.activate(store);
 		expect(branch.at(-1)?.data).toMatchObject({
 			cursor: { eventId: "event-5", sequence: 5 },
+			ownedSubmissions: [],
 		});
 		await runtime.close();
 	});

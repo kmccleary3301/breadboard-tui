@@ -210,6 +210,14 @@ describe("BreadBoard session binding", () => {
 		const sameCursor = advanceProjectionBinding(withSecond, { eventId: "event-5", sequence: 5 }, [owned("2")]);
 		expect(sameCursor.cursor).toEqual({ eventId: "event-5", sequence: 5 });
 		expect(sameCursor.ownedSubmissions).toEqual([owned("1"), owned("2")]);
+
+		const advanced = advanceProjectionBinding(withSecond, { eventId: "event-6", sequence: 6 }, [owned("2")]);
+		expect(advanced.ownedSubmissions).toEqual([owned("2")]);
+		expect(() =>
+			advanceProjectionBinding(withSecond, { eventId: "event-6", sequence: 6 }, [
+				{ ...owned("2"), inputId: "other-input" },
+			]),
+		).toThrow("conflicts with the durable binding");
 		expect(() => advanceProjectionBinding(withSecond, { eventId: "other-event", sequence: 5 }, [])).toThrow(
 			"conflicts with or rolls back",
 		);

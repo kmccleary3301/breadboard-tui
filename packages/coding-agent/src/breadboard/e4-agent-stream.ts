@@ -1483,6 +1483,7 @@ export class E4AgentStreamBridge {
 		event: Extract<LoggedSessionEvent, { readonly kind: "turn_completed" }>,
 	): Promise<void> {
 		this.#ensureStarted(sink);
+		if (sink.turnId !== undefined) this.#ownedSubmissions.delete(String(sink.turnId));
 		const reason = completionStopReason(event);
 		const usage = completionUsage(event);
 		const errorMessage = completionErrorMessage(reason);
@@ -1635,6 +1636,13 @@ export class E4AgentStreamBridge {
 			await this.#session.cancel({ turnId, reason, cancellationRequestKey });
 			return true;
 		} catch (error) {
+			if (
+				error instanceof CanonicalE4ClientError &&
+				error.failure.kind === "cancellation-conflict" &&
+				error.failure.code === "turn_already_terminal"
+			) {
+				return true;
+			}
 			const message = safeErrorMessage(error);
 			const sink = this.#sinks.get(String(turnId));
 			if (sink) this.#failSinkPendingTerminal(sink, message, "error");
@@ -1765,6 +1773,9 @@ export class E4AgentStreamBridge {
 		sink.permissionAbort.abort();
 		if (sink.turnId === undefined) return;
 		this.#sinks.delete(String(sink.turnId));
+		for (const reason of ["user_requested", "timeout"] as const) {
+			this.#cancellationRequests.delete(`${String(this.#session.sessionId)}:${String(sink.turnId)}:${reason}`);
+		}
 	}
 }
 

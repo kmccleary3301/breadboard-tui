@@ -291,23 +291,30 @@ export function advanceProjectionBinding(
 			"BreadBoard projection cursor conflicts with or rolls back the durable OMP session binding.",
 		);
 	}
-	const merged = new Map(current.ownedSubmissions.map(submission => [submission.turnId, submission]));
+	const currentByTurnId = new Map(current.ownedSubmissions.map(submission => [submission.turnId, submission]));
+	const nextByTurnId =
+		cursor.sequence === current.cursor.sequence ? new Map(currentByTurnId) : new Map<string, E4OwnedSubmission>();
 	for (const submission of ownedSubmissions) {
-		const existing = merged.get(submission.turnId);
+		const currentSubmission = currentByTurnId.get(submission.turnId);
+		const nextSubmission = nextByTurnId.get(submission.turnId);
 		if (
-			existing &&
-			(existing.clientMessageId !== submission.clientMessageId || existing.inputId !== submission.inputId)
+			(currentSubmission &&
+				(currentSubmission.clientMessageId !== submission.clientMessageId ||
+					currentSubmission.inputId !== submission.inputId)) ||
+			(nextSubmission &&
+				(nextSubmission.clientMessageId !== submission.clientMessageId ||
+					nextSubmission.inputId !== submission.inputId))
 		) {
 			throw new BreadboardSessionTransitionError(
 				`BreadBoard owned submission ${submission.turnId} conflicts with the durable binding.`,
 			);
 		}
-		merged.set(submission.turnId, submission);
+		nextByTurnId.set(submission.turnId, submission);
 	}
 	return parseBreadboardSessionBindingData({
 		...current,
 		cursor: { eventId: cursor.eventId, sequence: cursor.sequence },
-		ownedSubmissions: [...merged.values()].sort((left, right) => left.turnId.localeCompare(right.turnId)),
+		ownedSubmissions: [...nextByTurnId.values()].sort((left, right) => left.turnId.localeCompare(right.turnId)),
 	});
 }
 

@@ -939,7 +939,7 @@ describe("E4AgentStreamBridge", () => {
 			persistOwnership.resolve();
 			await terminalCommitted.promise;
 			expect(ownershipCalls).toEqual([String(receipt.turnId)]);
-			expect(ownershipSnapshots.at(-1)).toEqual([String(receipt.turnId)]);
+			expect(ownershipSnapshots.at(-1)).toEqual([]);
 		} finally {
 			persistOwnership.resolve();
 			await bridge.close();
@@ -1783,7 +1783,7 @@ describe("E4AgentStreamBridge", () => {
 			expect(secondResult.content).toEqual([{ type: "text", text: "healthy" }]);
 			expect(cancelled).toMatchObject([{ turnId: receipt.turnId, reason: "timeout" }]);
 			await bridge.close();
-			expect(ownershipSnapshots.at(-1)).toEqual([String(secondReceipt.turnId)]);
+			expect(ownershipSnapshots.at(-1)).toEqual([]);
 		} finally {
 			await bridge.close();
 		}
@@ -3332,14 +3332,19 @@ describe("E4AgentStreamBridge", () => {
 		}
 	});
 
-	test("finishes an aborted stream from the engine cancellation terminal", async () => {
+	test("accepts a terminal cancellation race when the engine emits the terminal event", async () => {
 		const cancellationObserved = Promise.withResolvers<void>();
 		const partialObserved = Promise.withResolvers<void>();
 		const session: OpenedSession = {
 			...openedSession([], []),
 			async cancel(): Promise<CancellationReceipt> {
 				cancellationObserved.resolve();
-				return {} as CancellationReceipt;
+				throw new CanonicalE4ClientError({
+					kind: "cancellation-conflict",
+					sessionId: started.sessionId,
+					turnId: receipt.turnId,
+					code: "turn_already_terminal",
+				});
 			},
 			async *events(request) {
 				yield started;

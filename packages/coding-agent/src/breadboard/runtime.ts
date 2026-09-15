@@ -697,7 +697,7 @@ export async function prepareConnectedBreadboardRuntime(
 				bridgeBinding = advanceProjectionBinding(
 					initialBinding,
 					{ eventId: snapshot.headEventId, sequence: snapshot.headSequence },
-					initialBinding.ownedSubmissions,
+					[],
 				);
 			}
 		}
@@ -1130,7 +1130,8 @@ export async function prepareBreadboardRuntime(
 		const runtime = await prepareConnectedBreadboardRuntime({
 			engine: enginePort,
 			harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
-			modelCatalogConfigPath: resolvedHarnessId ?? config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+			modelCatalogConfigPath:
+				resolvedHarnessId ?? config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			sessionTarget: resolvedSessionTarget,
 			terminalResumeTarget: resolvedTerminalResumeTarget,
 			emitAgentEvent: async (event, idempotencyKey) => {
