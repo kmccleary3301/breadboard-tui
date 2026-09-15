@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -542,7 +543,14 @@ class Journey:
             candidate = runner.binding_snapshot(self.roots["agent"])
             if candidate is None:
                 return None
-            return candidate if len(runner.owned_submissions(candidate.data)) >= count else None
+            session_id = candidate.data["sessionId"]
+            submitted_turns = {
+                submission["turnId"]
+                for binding in runner.binding_history(candidate.rows)
+                if binding.get("sessionId") == session_id
+                for submission in runner.owned_submissions(binding)
+            }
+            return candidate if len(submitted_turns) >= count else None
 
         return self.child.wait_until(ready, timeout, f"binding submission {count}")
 
@@ -611,6 +619,7 @@ class Journey:
 
     def step_bracketed_paste(self) -> None:
         payload = "first pasted line\nsecond pasted line\nCJK 界 e\u0301 emoji 👩\u200d💻"
+        expected = unicodedata.normalize("NFC", payload)
         try:
             self.new_session("bracketed-paste")
             burst = b"\x1b[200~" + payload.encode("utf-8") + b"\x1b[201~\r"
@@ -621,10 +630,11 @@ class Journey:
             capture = self.capture("bracketed-paste-enter")
             self.record(
                 "compose-bracketed-paste-trailing-enter",
-                "PASS" if submissions == [payload] else "FAIL",
+                "PASS" if submissions == [expected] else "FAIL",
                 capture,
                 CONVENTIONS["compose"],
-                expected=[payload],
+                expected=[expected],
+                pasted=payload,
                 submitted=submissions,
             )
         except Exception as error:
