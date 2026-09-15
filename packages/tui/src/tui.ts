@@ -799,6 +799,7 @@ export class TUI extends Container {
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	onDebug?: () => void;
 	#renderRequested = false;
+	#renderEpoch = 0;
 	#renderTimer: RenderTimer | undefined;
 	#renderScheduler: RenderScheduler;
 	#afterPaintCallbacks = new Set<() => void>();
@@ -2010,6 +2011,25 @@ export class TUI extends Container {
 		this.#renderScheduler.scheduleImmediate(() => this.#scheduleRender(true));
 	}
 
+	/**
+	 * Prioritize an input-owned repaint over cadence and adaptive-delay timers
+	 * without invalidating the viewport. Output backpressure remains
+	 * authoritative in {@link #executeRender}.
+	 */
+	#requestInputRender(): void {
+		if (this.#stopped) return;
+		this.#renderRequested = true;
+		this.#renderScheduler.scheduleImmediate(() => {
+			if (this.#stopped || !this.#renderRequested) return;
+			if (this.#renderTimer) {
+				this.#renderTimer.cancel();
+				this.#renderTimer = undefined;
+			}
+			this.#renderRequested = false;
+			this.#executeRender();
+		});
+	}
+
 	#maybeDeferGhosttyInitialImagePaint(): boolean {
 		if (this.#ghosttyInitialImageDelayDone) return false;
 		if (TERMINAL.id !== "ghostty" || TERMINAL.imageProtocol !== ImageProtocol.Kitty) {
@@ -2143,6 +2163,7 @@ export class TUI extends Container {
 		const timing = this.#frameTiming;
 		if (timing === undefined) {
 			this.terminal.write(buffer);
+			this.#renderEpoch += 1;
 			this.#scheduleAfterPaintCallbacks();
 			return;
 		}
@@ -2175,6 +2196,7 @@ export class TUI extends Container {
 			}),
 		);
 		timing.frameId += 1;
+		this.#renderEpoch += 1;
 		this.#scheduleAfterPaintCallbacks();
 	}
 
@@ -2278,9 +2300,14 @@ export class TUI extends Container {
 			if (isKeyRelease(data) && !focused.wantsKeyRelease) {
 				return;
 			}
+			const renderEpochBeforeInput = this.#renderEpoch;
 			focused.handleInput(data);
+			// Submission handlers can synchronously paint their pending row.
+			// Do not append a second frame for the same input; otherwise upgrade
+			// any requested or pending ordinary repaint to the scoped input path.
+			if (this.#renderEpoch !== renderEpochBeforeInput) return;
 			if (interruptInput) this.requestRender();
-			else this.requestRender(true);
+			else this.#requestInputRender();
 		}
 	}
 

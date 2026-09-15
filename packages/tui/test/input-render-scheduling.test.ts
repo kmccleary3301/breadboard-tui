@@ -17,6 +17,25 @@ class InputProbe implements Component {
 	}
 }
 
+class SelfRenderingInputProbe implements Component {
+	constructor(
+		private readonly events: string[],
+		private readonly requestOwnRender: () => void,
+	) {}
+
+	invalidate(): void {}
+
+	render(_width: number): readonly string[] {
+		this.events.push("render");
+		return ["probe"];
+	}
+
+	handleInput(_data: string): void {
+		this.events.push("input");
+		this.requestOwnRender();
+	}
+}
+
 class DeferredRenderScheduler {
 	nowMs = 0;
 	readonly immediates: Array<() => void> = [];
@@ -88,7 +107,7 @@ describe("TUI input/render scheduling", () => {
 		}
 	});
 
-	it("forces non-interrupt user input past cadence", () => {
+	it("prioritizes non-interrupt user input past cadence", () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
 		const events: string[] = [];
@@ -108,6 +127,54 @@ describe("TUI input/render scheduling", () => {
 			expect(events).toEqual(["input"]);
 			scheduler.immediates.shift()?.();
 
+			expect(events).toEqual(["input", "render"]);
+			expect(scheduler.timers.filter(timer => !timer.canceled)).toEqual([]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("does not append a forced frame after a component renders synchronously", () => {
+		const term = new VirtualTerminal(20, 4);
+		const scheduler = new DeferredRenderScheduler();
+		const events: string[] = [];
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const probe = new SelfRenderingInputProbe(events, () => tui.renderNow());
+		tui.addChild(probe);
+		tui.setFocus(probe);
+
+		try {
+			tui.start();
+			scheduler.immediates.splice(0);
+			events.length = 0;
+
+			term.sendInput("\r");
+			expect(events).toEqual(["input", "render"]);
+			for (const immediate of scheduler.immediates.splice(0)) immediate();
+			expect(events).toEqual(["input", "render"]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("upgrades a component-owned ordinary repaint without forcing the viewport", () => {
+		const term = new VirtualTerminal(20, 4);
+		const scheduler = new DeferredRenderScheduler();
+		const events: string[] = [];
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const probe = new SelfRenderingInputProbe(events, () => tui.requestRender());
+		tui.addChild(probe);
+		tui.setFocus(probe);
+
+		try {
+			tui.start();
+			scheduler.immediates.shift()?.();
+			const initialTimer = scheduler.timers.shift();
+			if (initialTimer && !initialTimer.canceled) initialTimer.callback();
+			events.length = 0;
+
+			term.sendInput("/");
+			for (const immediate of scheduler.immediates.splice(0)) immediate();
 			expect(events).toEqual(["input", "render"]);
 			expect(scheduler.timers.filter(timer => !timer.canceled)).toEqual([]);
 		} finally {
