@@ -387,7 +387,7 @@ describe("InputController escape behavior", () => {
 		expect(loader.stop).toHaveBeenCalledTimes(1);
 		expect(ctx.loadingAnimation).toBeUndefined();
 		expect(ctx.statusContainer.disposeChildren).toHaveBeenCalledTimes(1);
-		expect(spies.requestRender).toHaveBeenCalledTimes(1);
+		expect(spies.requestRender).toHaveBeenCalledWith(true);
 	});
 
 	it("restores messages queued after the Working loader is cleared", () => {

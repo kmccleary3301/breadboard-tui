@@ -302,7 +302,7 @@ export class InputController {
 			loader.stop();
 			this.ctx.loadingAnimation = undefined;
 			this.ctx.statusContainer.disposeChildren();
-			this.ctx.ui.requestRender();
+			this.ctx.ui.requestRender(true);
 		}
 		void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 	}
