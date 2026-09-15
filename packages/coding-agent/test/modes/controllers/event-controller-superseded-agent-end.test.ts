@@ -99,38 +99,24 @@ describe("EventController superseded agent_end", () => {
 		expect(ctx.loadingAnimation).toBeUndefined();
 	});
 
-	it("collects after paint only when an idle turn crosses the heap-growth threshold", async () => {
-		const { ctx, streamState } = createContext();
-		const callbacks: Array<() => void> = [];
-		vi.spyOn(ctx.ui, "requestRenderAfterPaint").mockImplementation(callback => callbacks.push(callback));
-		const initialMemory = process.memoryUsage();
-		const baselineHeapUsed = 100 * 1024 * 1024;
-		const memoryUsage = vi
-			.spyOn(process, "memoryUsage")
-			.mockReturnValue({ ...initialMemory, heapUsed: baselineHeapUsed });
-		const collect = vi.spyOn(Bun, "gc").mockImplementation(() => {});
+	it("requests collection before publishing the completed turn's settled frame", async () => {
+		const { ctx } = createContext();
+		const order: string[] = [];
+		const collect = vi.spyOn(Bun, "gc").mockImplementation(() => {
+			order.push("collect");
+		});
+		const requestRender = vi.spyOn(ctx.ui, "requestRender").mockImplementation(() => {
+			order.push("render");
+		});
+		const requestRenderAfterPaint = vi.spyOn(ctx.ui, "requestRenderAfterPaint");
 		const controller = new EventController(ctx);
 
 		await controller.handleEvent(AGENT_END);
-		expect(callbacks).toHaveLength(1);
-		expect(collect).not.toHaveBeenCalled();
 
-		memoryUsage.mockReturnValue({ ...initialMemory, heapUsed: baselineHeapUsed + 64 * 1024 * 1024 });
-		streamState.isStreaming = true;
-		callbacks.shift()?.();
-		expect(collect).not.toHaveBeenCalled();
-
-		streamState.isStreaming = false;
-		memoryUsage.mockReturnValue({ ...initialMemory, heapUsed: baselineHeapUsed + 32 * 1024 * 1024 - 1 });
-		await controller.handleEvent(AGENT_END);
-		callbacks.shift()?.();
-		expect(collect).not.toHaveBeenCalled();
-
-		memoryUsage.mockReturnValue({ ...initialMemory, heapUsed: baselineHeapUsed + 32 * 1024 * 1024 });
-		await controller.handleEvent(AGENT_END);
-		callbacks.shift()?.();
-		expect(collect).toHaveBeenCalledTimes(1);
 		expect(collect).toHaveBeenCalledWith(false);
+		expect(requestRender).toHaveBeenCalled();
+		expect(requestRenderAfterPaint).not.toHaveBeenCalled();
+		expect(order.slice(-2)).toEqual(["collect", "render"]);
 	});
 	it("flushes queued command panels at a non-terminal settle", async () => {
 		const { ctx, streamState } = createContext();
