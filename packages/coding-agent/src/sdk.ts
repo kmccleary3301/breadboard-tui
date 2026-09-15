@@ -391,9 +391,9 @@ export interface CreateAgentSessionOptions {
 	modelRegistry?: ModelRegistry;
 	/**
 	 * Request credential resolver. Defaults to the model registry's normal
-	 * session-affine resolver. Security scans use this narrow seam to keep one
-	 * durable OAuth row pinned for the operation without changing ordinary
-	 * provider routing.
+	 * session-affine resolver when no `mainStreamFn` is supplied. When an
+	 * external main stream is supplied, that transport owns primary-stream
+	 * authentication unless this callback is explicitly provided.
 	 */
 	getApiKey?: AgentOptions["getApiKey"];
 
@@ -453,9 +453,11 @@ export interface CreateAgentSessionOptions {
 	/** Absolute wall-clock deadline in Unix epoch milliseconds. */
 	deadline?: number;
 	/**
-	 * Optional transport for the primary Agent loop only. Side-channel, advisor,
-	 * title, and compaction requests retain OMP's native settings-aware streams.
-	 * This is the governed seam for an external durable turn runtime.
+	 * Optional transport for the primary Agent loop only. When supplied, this
+	 * external main stream owns primary-stream authentication; the SDK neither
+	 * requires a native primary credential nor supplies its default resolver.
+	 * An explicit {@link getApiKey} is still used. Side-channel, advisor, title,
+	 * and compaction requests retain OMP's native settings-aware streams.
 	 */
 	mainStreamFn?: StreamFn;
 
@@ -3572,7 +3574,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			kimiApiFormat,
 			preferWebsockets: preferOpenAICodexWebsockets,
 			getToolContext: tc => toolContextStore.getContext(tc),
-			getApiKey: options.getApiKey ?? (requestModel => modelRegistry.resolver(requestModel, agent.sessionId)),
+			getApiKey:
+				options.getApiKey ??
+				(options.mainStreamFn === undefined
+					? requestModel => modelRegistry.resolver(requestModel, agent.sessionId)
+					: undefined),
 			streamFn: (streamModel, context, streamOptions) => {
 				if (notifyFirstChatDispatch) {
 					const cb = notifyFirstChatDispatch;
@@ -3764,6 +3770,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			skillsReloadable: options.skills === undefined,
 			skillsSettings: settings.getGroup("skills"),
 			modelRegistry,
+			mainStreamManagesAuth: options.mainStreamFn !== undefined,
 			rebindModelAfterDiscovery: options.model === undefined || options.rebindModelAfterDiscovery === true,
 			toolRegistry,
 			reconcileBrowserMcpFilter: mcpManager

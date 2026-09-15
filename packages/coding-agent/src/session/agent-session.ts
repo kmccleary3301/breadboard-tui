@@ -727,6 +727,8 @@ export class AgentSession {
 
 	// Model registry for API key resolution
 	#modelRegistry: ModelRegistry;
+	/** Whether the external main stream owns primary-prompt authentication. */
+	#mainStreamManagesAuth = false;
 	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
 	#usagePreflightAbortControllers = new Set<AbortController>();
 	#queuedMessageDrainBlocked = false;
@@ -1229,6 +1231,7 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
 		this.#modelRegistry = config.modelRegistry;
+		this.#mainStreamManagesAuth = config.mainStreamManagesAuth ?? false;
 		this.#extensionRoots =
 			config.extensionRoots ??
 			(() => ({
@@ -6379,13 +6382,16 @@ export class AgentSession {
 				);
 			}
 
-			// Validate API key
-			const apiKey = await this.#modelRegistry.getApiKey(this.model, this.sessionId);
-			if (!apiKey) {
-				throw new Error(
-					`No API key found for ${this.model.provider}.\n\n` +
-						`Use /login, set an API key environment variable, or create ${getAgentDbPath()}`,
-				);
+			// Validate API key for native main streams. An explicitly supplied
+			// external main stream owns its own primary-stream authentication.
+			if (!this.#mainStreamManagesAuth) {
+				const apiKey = await this.#modelRegistry.getApiKey(this.model, this.sessionId);
+				if (!apiKey) {
+					throw new Error(
+						`No API key found for ${this.model.provider}.\n\n` +
+							`Use /login, set an API key environment variable, or create ${getAgentDbPath()}`,
+					);
+				}
 			}
 
 			// Recover a previously failed/incomplete assistant turn before sending.

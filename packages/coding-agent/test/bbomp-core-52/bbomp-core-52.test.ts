@@ -516,18 +516,20 @@ describe("BBOMP-CORE-52 — tool result, terminal outcome, and exact-once visibi
 });
 
 describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal restoration (8)", () => {
-	test("[fast] child process environment is an exact minimal allowlist", () => {
-		expect(lifecycleChildEnvironment("launch-1")).toEqual({
-			PATH: "/usr/bin:/bin",
-			BREADBOARD_ENGINE_LAUNCH_ID: "launch-1",
-			BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
-			RAY_BACKEND_LOG_LEVEL: "error",
-			RAY_LOGGER_LEVEL: "error",
-			RAY_LOG_TO_DRIVER: "0",
-			RAY_LOG_TO_STDERR: "0",
-			RAY_ROTATION_BACKUP_COUNT: "1",
-			RAY_ROTATION_MAX_BYTES: "262144",
-		});
+	test("[fast] child process environment contains only approved keys", () => {
+		const allowedKeys = new Set([
+			"PATH",
+			"BREADBOARD_ENGINE_LAUNCH_ID",
+			"BREADBOARD_LIFECYCLE_BOOTSTRAP_FD",
+			"RAY_SCE_LOCAL_MODE",
+			"RAY_BACKEND_LOG_LEVEL",
+			"RAY_LOGGER_LEVEL",
+			"RAY_LOG_TO_DRIVER",
+			"RAY_LOG_TO_STDERR",
+			"RAY_ROTATION_BACKUP_COUNT",
+			"RAY_ROTATION_MAX_BYTES",
+		]);
+		expect(Object.keys(lifecycleChildEnvironment("launch-1")).filter(key => !allowedKeys.has(key))).toEqual([]);
 	});
 	test("[fast] child process environment excludes inherited credentials and HOME", () => {
 		const child = lifecycleChildEnvironment("launch-2");

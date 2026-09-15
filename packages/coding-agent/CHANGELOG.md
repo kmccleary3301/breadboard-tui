@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- BreadBoard broker-authenticated main turns no longer require a second credential in OMP's native store; native side requests retain their existing authentication.
 - Fixed upstream sync verification replaying already-resolved merge conflicts in its disposable worktree.
 - BreadBoard project model roles now read and persist in `.breadboard/config.yml` without modifying native `.omp` settings.
 - Disposable upstream verification now generates tool views before running its source proofs.
