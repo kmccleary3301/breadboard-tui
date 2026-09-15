@@ -801,7 +801,7 @@ export class TUI extends Container {
 	#renderRequested = false;
 	#renderTimer: RenderTimer | undefined;
 	#renderScheduler: RenderScheduler;
-	#afterPaintCallbacks: Array<() => void> = [];
+	#afterPaintCallbacks = new Set<() => void>();
 	#lastRenderAt = 0;
 	/**
 	 * Wall-clock cost of the most recent `#doRender()` call. Used by
@@ -1970,7 +1970,7 @@ export class TUI extends Container {
 	 */
 	requestRenderAfterPaint(callback: () => void): void {
 		if (this.#stopped) return;
-		this.#afterPaintCallbacks.push(callback);
+		this.#afterPaintCallbacks.add(callback);
 		this.#requestOrdinaryRender();
 	}
 
@@ -2100,8 +2100,11 @@ export class TUI extends Container {
 
 	#runAfterPaintCallbacks(): void {
 		const callbacks = this.#afterPaintCallbacks;
-		this.#afterPaintCallbacks = [];
-		for (const callback of callbacks) callback();
+		this.#afterPaintCallbacks = new Set();
+		for (const callback of callbacks) {
+			if (this.#stopped) break;
+			callback();
+		}
 	}
 	/**
 	 * True when the frame was deferred because the terminal's output backlog

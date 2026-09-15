@@ -190,9 +190,13 @@ export function createInteractiveModeContext(overrides: ContextOverrides = {}): 
 			? undefined
 			: createSessionStub(sessionManager, contextSettings, overrides.viewSession);
 	const chatContainer = new TranscriptContainer();
+	const requestRender = vi.fn();
 	const ui = {
-		requestRender: vi.fn(),
-		requestRenderAfterPaint: vi.fn((callback: () => void) => callback()),
+		requestRender,
+		requestRenderAfterPaint: vi.fn((callback: () => void) => {
+			requestRender();
+			queueMicrotask(callback);
+		}),
 		requestComponentRender: vi.fn(),
 		setFocus: vi.fn(),
 		terminal: { setProgress: vi.fn() },

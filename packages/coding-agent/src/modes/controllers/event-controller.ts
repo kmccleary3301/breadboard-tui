@@ -177,6 +177,9 @@ export class EventController {
 	#retryPending = false;
 	#idleCompactionTimer?: NodeJS.Timeout;
 	#idleRecapTimer?: NodeJS.Timeout;
+	#collectAfterPaint = (): void => {
+		if (!this.ctx.viewSession.isStreaming) Bun.gc(false);
+	};
 	// In-flight ephemeral recap turn; aborted by #cancelIdleRecap when any
 	// activity (new turn, compaction, editor draft) supersedes the idle recap.
 	#idleRecapAbort?: AbortController;
@@ -1987,9 +1990,7 @@ export class EventController {
 		// The terminal turn boundary is the first predictable idle point after
 		// transcript growth. Start a non-forced collection after its repaint
 		// instead of leaving the next editor input to cross the allocation threshold.
-		this.ctx.ui.requestRenderAfterPaint(() => {
-			if (!this.ctx.viewSession.isStreaming) Bun.gc(false);
-		});
+		this.ctx.ui.requestRenderAfterPaint(this.#collectAfterPaint);
 		this.#scheduleIdleCompaction();
 		this.#scheduleIdleRecap();
 		this.sendErrorNotification(event);

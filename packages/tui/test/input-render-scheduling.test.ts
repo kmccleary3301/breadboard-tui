@@ -88,7 +88,7 @@ describe("TUI input/render scheduling", () => {
 		}
 	});
 
-	it("runs post-paint callbacks after a cadence-delayed ordinary render", () => {
+	it("runs a coalesced post-paint callback after a cadence-delayed render", () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
 		const events: string[] = [];
@@ -102,7 +102,9 @@ describe("TUI input/render scheduling", () => {
 			if (initialTimer && !initialTimer.canceled) initialTimer.callback();
 			events.length = 0;
 
-			tui.requestRenderAfterPaint(() => events.push("after-paint"));
+			const afterPaint = () => events.push("after-paint");
+			tui.requestRenderAfterPaint(afterPaint);
+			tui.requestRenderAfterPaint(afterPaint);
 			scheduler.immediates.shift()?.();
 
 			expect(events).toEqual([]);

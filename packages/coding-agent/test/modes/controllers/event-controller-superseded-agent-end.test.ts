@@ -21,6 +21,9 @@ function createContext() {
 		},
 		viewSession: {
 			isCompacting: false,
+			get isStreaming() {
+				return streamState.isStreaming;
+			},
 			getLastAssistantMessage: () => undefined,
 		},
 	});
@@ -96,6 +99,26 @@ describe("EventController superseded agent_end", () => {
 		expect(ctx.loadingAnimation).toBeUndefined();
 	});
 
+	it("collects only after paint while the completed turn remains idle", async () => {
+		const { ctx, streamState } = createContext();
+		const callbacks: Array<() => void> = [];
+		vi.spyOn(ctx.ui, "requestRenderAfterPaint").mockImplementation(callback => callbacks.push(callback));
+		const collect = vi.spyOn(Bun, "gc").mockImplementation(() => {});
+		const controller = new EventController(ctx);
+
+		await controller.handleEvent(AGENT_END);
+		expect(callbacks).toHaveLength(1);
+		expect(collect).not.toHaveBeenCalled();
+
+		streamState.isStreaming = true;
+		callbacks.shift()?.();
+		expect(collect).not.toHaveBeenCalled();
+
+		streamState.isStreaming = false;
+		await controller.handleEvent(AGENT_END);
+		callbacks.shift()?.();
+		expect(collect).toHaveBeenCalledWith(false);
+	});
 	it("flushes queued command panels at a non-terminal settle", async () => {
 		const { ctx, streamState } = createContext();
 		const controller = new EventController(ctx);
