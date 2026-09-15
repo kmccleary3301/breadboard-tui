@@ -297,7 +297,13 @@ export class InputController {
 	}
 
 	#abortStreamingTurn(): void {
-
+		const loader = this.ctx.loadingAnimation;
+		if (loader) {
+			loader.stop();
+			this.ctx.loadingAnimation = undefined;
+			this.ctx.statusContainer.disposeChildren();
+			this.ctx.ui.requestRender();
+		}
 		void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 	}
 
@@ -489,7 +495,7 @@ export class InputController {
 				this.ctx.isPythonMode = false;
 				this.ctx.updateEditorBorderColor();
 			} else if (this.ctx.session.isStreaming) {
-				this.#abortStreamingTurn();
+				this.restoreQueuedMessagesToEditor({ abort: true });
 			} else if (this.ctx.editor.getText().trim()) {
 				// Esc must not destroy an in-progress draft.
 				this.ctx.lastEscapeTime = 0;
@@ -1608,7 +1614,7 @@ export class InputController {
 		if (allQueued.length === 0) {
 			this.ctx.updatePendingMessagesDisplay();
 			if (options?.abort) {
-				void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
+				this.#abortStreamingTurn();
 			}
 			return 0;
 		}
@@ -1649,7 +1655,7 @@ export class InputController {
 		this.ctx.editor.setCollapsedText(combinedText);
 		this.ctx.updatePendingMessagesDisplay();
 		if (options?.abort) {
-			void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
+			this.#abortStreamingTurn();
 		}
 		return allQueued.length;
 	}

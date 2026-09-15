@@ -30,6 +30,7 @@ type FakeEditor = {
 	onDequeue?: () => void;
 	onChange?: (text: string) => void;
 	setText(text: string): void;
+	setCollapsedText(text: string): void;
 	getText(): string;
 	addToHistory(text: string): void;
 	setActionKeys(action: string, keys: string[]): void;
@@ -52,6 +53,9 @@ function createSubmission(input: {
 		started: false,
 	};
 }
+
+const loadingAnimation = (): NonNullable<InteractiveModeContext["loadingAnimation"]> =>
+	({ stop: vi.fn() }) as unknown as NonNullable<InteractiveModeContext["loadingAnimation"]>;
 
 function createContext(): {
 	ctx: InteractiveModeContext;
@@ -107,6 +111,7 @@ function createContext(): {
 	const hasActiveOmfg = vi.fn(() => false);
 	const handleCleanseEscape = vi.fn(() => true);
 	const hasActiveCleanse = vi.fn(() => false);
+
 	const updatePendingMessagesDisplay = vi.fn();
 	const prompt = vi.fn();
 	const startPendingSubmission = vi.fn(
@@ -117,6 +122,9 @@ function createContext(): {
 	);
 	const editor: FakeEditor = {
 		setText(text: string) {
+			editorText = text;
+		},
+		setCollapsedText(text: string) {
 			editorText = text;
 		},
 		getText() {
@@ -131,7 +139,7 @@ function createContext(): {
 	};
 
 	const ensureLoadingAnimation = vi.fn(() => {
-		ctx.loadingAnimation = {} as InteractiveModeContext["loadingAnimation"];
+		ctx.loadingAnimation = loadingAnimation();
 	});
 
 	const ctx = {
@@ -148,6 +156,7 @@ function createContext(): {
 		loadingAnimation: undefined,
 		autoCompactionLoader: undefined,
 		retryLoader: undefined,
+		statusContainer: { disposeChildren: vi.fn() } as unknown as InteractiveModeContext["statusContainer"],
 		autoCompactionEscapeHandler: undefined,
 		retryEscapeHandler: undefined,
 		session: {
@@ -303,7 +312,7 @@ describe("InputController escape behavior", () => {
 		const submission = createSubmission({ text: "hello" });
 		spies.startPendingSubmission.mockReturnValue(submission);
 		spies.cancelPendingSubmission.mockReturnValue(true);
-		ctx.loadingAnimation = {} as InteractiveModeContext["loadingAnimation"];
+		ctx.loadingAnimation = loadingAnimation();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
@@ -362,7 +371,8 @@ describe("InputController escape behavior", () => {
 
 	it("falls back to aborting the active session when no pending optimistic submission exists", () => {
 		const { ctx, editor, spies } = createContext();
-		ctx.loadingAnimation = {} as InteractiveModeContext["loadingAnimation"];
+		const loader = loadingAnimation();
+		ctx.loadingAnimation = loader;
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
@@ -374,6 +384,29 @@ describe("InputController escape behavior", () => {
 		// The Esc interrupt threads a user-facing reason so the aborted turn and its
 		// synthetic tool results read as a deliberate interrupt, not "Request was aborted".
 		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
+		expect(loader.stop).toHaveBeenCalledTimes(1);
+		expect(ctx.loadingAnimation).toBeUndefined();
+		expect(ctx.statusContainer.disposeChildren).toHaveBeenCalledTimes(1);
+		expect(spies.requestRender).toHaveBeenCalledTimes(1);
+	});
+
+	it("restores messages queued after the Working loader is cleared", () => {
+		const { ctx, editor, spies } = createContext();
+		mutableSessionState(ctx).isStreaming = true;
+		ctx.loadingAnimation = loadingAnimation();
+		spies.clearQueue
+			.mockReturnValueOnce({ steering: [], followUp: [] })
+			.mockReturnValueOnce({ steering: [], followUp: [{ text: "queued after interrupt" }] });
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onEscape?.();
+		expect(ctx.loadingAnimation).toBeUndefined();
+
+		editor.onEscape?.();
+		expect(spies.clearQueue).toHaveBeenCalledTimes(2);
+		expect(editor.getText()).toBe("queued after interrupt");
+		expect(spies.abort).toHaveBeenCalledTimes(2);
 	});
 
 	it("aborts a streaming loop iteration without pausing the loop", () => {
@@ -488,7 +521,7 @@ describe("InputController escape behavior", () => {
 
 	it("dismisses an active /btw panel before canceling a pending optimistic submission", () => {
 		const { ctx, editor, spies } = createContext();
-		ctx.loadingAnimation = {} as InteractiveModeContext["loadingAnimation"];
+		ctx.loadingAnimation = loadingAnimation();
 		spies.hasActiveBtw.mockReturnValue(true);
 		const controller = new InputController(ctx);
 
