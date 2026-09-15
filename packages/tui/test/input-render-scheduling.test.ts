@@ -87,4 +87,30 @@ describe("TUI input/render scheduling", () => {
 			tui.stop();
 		}
 	});
+
+	it("runs post-paint callbacks after a cadence-delayed ordinary render", () => {
+		const term = new VirtualTerminal(20, 4);
+		const scheduler = new DeferredRenderScheduler();
+		const events: string[] = [];
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new InputProbe(events));
+
+		try {
+			tui.start();
+			scheduler.immediates.shift()?.();
+			const initialTimer = scheduler.timers.shift();
+			if (initialTimer && !initialTimer.canceled) initialTimer.callback();
+			events.length = 0;
+
+			tui.requestRenderAfterPaint(() => events.push("after-paint"));
+			scheduler.immediates.shift()?.();
+
+			expect(events).toEqual([]);
+			const requestedTimer = scheduler.timers.shift();
+			if (requestedTimer && !requestedTimer.canceled) requestedTimer.callback();
+			expect(events).toEqual(["render", "after-paint"]);
+		} finally {
+			tui.stop();
+		}
+	});
 });

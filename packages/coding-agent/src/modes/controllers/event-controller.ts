@@ -1984,11 +1984,10 @@ export class EventController {
 		// When the interrupted/failed turn died on a tool call, this replaces the
 		// torn-down "Working…" row with the "F5 to Retry" affordance.
 		this.ctx.syncRetryHintRow();
-		this.ctx.ui.requestRender();
 		// The terminal turn boundary is the first predictable idle point after
-		// transcript growth. Start a non-blocking collection after its repaint
+		// transcript growth. Start a non-forced collection after its repaint
 		// instead of leaving the next editor input to cross the allocation threshold.
-		setImmediate(() => {
+		this.ctx.ui.requestRenderAfterPaint(() => {
 			if (!this.ctx.viewSession.isStreaming) Bun.gc(false);
 		});
 		this.#scheduleIdleCompaction();

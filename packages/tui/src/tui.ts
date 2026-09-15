@@ -801,6 +801,7 @@ export class TUI extends Container {
 	#renderRequested = false;
 	#renderTimer: RenderTimer | undefined;
 	#renderScheduler: RenderScheduler;
+	#afterPaintCallbacks: Array<() => void> = [];
 	#lastRenderAt = 0;
 	/**
 	 * Wall-clock cost of the most recent `#doRender()` call. Used by
@@ -1899,6 +1900,7 @@ export class TUI extends Container {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
 		}
+		this.#afterPaintCallbacks.length = 0;
 		if (this.#ghosttyInitialImageDelayTimer) {
 			this.#ghosttyInitialImageDelayTimer.cancel();
 			this.#ghosttyInitialImageDelayTimer = undefined;
@@ -1962,6 +1964,17 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Request an ordinary render and run `callback` only after that render pass
+	 * completes. Cadence and output-backlog deferrals preserve the callback;
+	 * stopping the TUI drops it.
+	 */
+	requestRenderAfterPaint(callback: () => void): void {
+		if (this.#stopped) return;
+		this.#afterPaintCallbacks.push(callback);
+		this.#requestOrdinaryRender();
+	}
+
+	/**
 	 * Paint a forced frame synchronously when startup must hand off an already
 	 * visible component tree before further async initialization. Same as
 	 * {@link requestRender} minus the `setImmediate` hop.
@@ -1974,6 +1987,7 @@ export class TUI extends Container {
 		this.#lastRenderAt = start;
 		this.#doRender();
 		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+		this.#runAfterPaintCallbacks();
 	}
 
 	/**
@@ -2081,6 +2095,13 @@ export class TUI extends Container {
 		this.#lastRenderAt = start;
 		this.#doRender();
 		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+		this.#runAfterPaintCallbacks();
+	}
+
+	#runAfterPaintCallbacks(): void {
+		const callbacks = this.#afterPaintCallbacks;
+		this.#afterPaintCallbacks = [];
+		for (const callback of callbacks) callback();
 	}
 	/**
 	 * True when the frame was deferred because the terminal's output backlog
