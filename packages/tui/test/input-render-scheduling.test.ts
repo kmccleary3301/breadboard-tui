@@ -88,6 +88,33 @@ describe("TUI input/render scheduling", () => {
 		}
 	});
 
+	it("bypasses cadence for non-interrupt user input", () => {
+		const term = new VirtualTerminal(20, 4);
+		const scheduler = new DeferredRenderScheduler();
+		const events: string[] = [];
+		const probe = new InputProbe(events);
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(probe);
+		tui.setFocus(probe);
+
+		try {
+			tui.start();
+			scheduler.immediates.shift()?.();
+			const initialTimer = scheduler.timers.shift();
+			if (initialTimer && !initialTimer.canceled) initialTimer.callback();
+			events.length = 0;
+
+			term.sendInput("x");
+			expect(events).toEqual(["input"]);
+			scheduler.immediates.shift()?.();
+
+			expect(events).toEqual(["input", "render"]);
+			expect(scheduler.timers.filter(timer => !timer.canceled)).toEqual([]);
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("runs a coalesced post-paint callback after a cadence-delayed render", async () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
