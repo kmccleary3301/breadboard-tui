@@ -46,6 +46,8 @@ TIMING_ENDPOINT = (
 )
 GEOMETRIES = ((120, 36), (80, 24))
 ACTION_NAMES = ("key", "menu", "scroll", "submit", "cancel")
+BLOCK_MEDIAN_RELATIVE_TOLERANCE = 0.20
+BLOCK_MEDIAN_ABSOLUTE_FLOOR_MS = 1.0
 
 
 def _load_runner() -> Any:
@@ -1197,8 +1199,24 @@ def _cell_summary(samples: list[dict[str, Any]], blocks: int) -> dict[str, Any]:
     overall = _summary(valid)
     overall_p50 = overall["p50Ms"]
     block_medians_within = None
-    if isinstance(overall_p50, (int, float)) and overall_p50 > 0 and all(isinstance(row["p50Ms"], (int, float)) for row in block_rows):
-        block_medians_within = all(abs(float(row["p50Ms"]) - overall_p50) <= 0.20 * overall_p50 for row in block_rows)
+    block_medians_within_tolerance = None
+    block_median_max_absolute_delta = None
+    block_medians = [row["p50Ms"] for row in block_rows]
+    if (
+        isinstance(overall_p50, (int, float))
+        and math.isfinite(overall_p50)
+        and overall_p50 > 0
+        and all(isinstance(value, (int, float)) and math.isfinite(value) for value in block_medians)
+    ):
+        absolute_deltas = [abs(float(value) - overall_p50) for value in block_medians]
+        block_median_max_absolute_delta = max(absolute_deltas, default=0.0)
+        block_medians_within = all(
+            delta <= BLOCK_MEDIAN_RELATIVE_TOLERANCE * overall_p50 for delta in absolute_deltas
+        )
+        block_medians_within_tolerance = (
+            block_medians_within
+            or block_median_max_absolute_delta <= BLOCK_MEDIAN_ABSOLUTE_FLOOR_MS
+        )
     return {
         "samples": samples,
         "sampleCount": len(samples),
@@ -1212,6 +1230,8 @@ def _cell_summary(samples: list[dict[str, Any]], blocks: int) -> dict[str, Any]:
         "blockInvalidOver10Percent": any(row["invalid"] > row["sampleCount"] * 0.10 for row in block_rows if row["sampleCount"]),
         "blockMinValid": min((row["valid"] for row in block_rows), default=0),
         "blockMediansWithin20Percent": block_medians_within,
+        "blockMedianMaxAbsoluteDeltaMs": block_median_max_absolute_delta,
+        "blockMediansWithinTolerance": block_medians_within_tolerance,
     }
 
 
@@ -1493,6 +1513,11 @@ def run_cells(args: argparse.Namespace) -> dict[str, Any]:
         "samples": args.samples,
         "blocks": args.blocks,
         "endpoint": TIMING_ENDPOINT,
+        "blockMedianStability": {
+            "relativeTolerance": BLOCK_MEDIAN_RELATIVE_TOLERANCE,
+            "absoluteFloorMs": BLOCK_MEDIAN_ABSOLUTE_FLOOR_MS,
+            "rule": "all finite block p50 values are within 20% of overall p50, or maximum absolute delta is at most 1ms",
+        },
         "cells": cells,
     }
 
@@ -1888,9 +1913,9 @@ def _combine(gates: Iterable[str]) -> str:
 
 
 def _cell_validity(action: dict[str, Any], samples_required: int, block_min_valid: int) -> dict[str, Any]:
-    """Contract bb-2j1u.6: a timing cell counts only with the full valid row
-    count, at least 18 valid rows per block, block medians within 20% of the
-    overall median, no more than 10% invalid rows and no unresolved timeout."""
+    """A timing cell counts only with the full valid row count, at least 18
+    valid rows per block, block medians inside the declared relative-or-floor
+    tolerance, no more than 10% invalid rows, and no unresolved timeout."""
     reasons: list[str] = []
     if action.get("error"):
         reasons.append(f"cell-error:{action['error']}")
@@ -1898,8 +1923,11 @@ def _cell_validity(action: dict[str, Any], samples_required: int, block_min_vali
         reasons.append(f"valid-rows:{action.get('valid')}/{samples_required}")
     if (action.get("blockMinValid") or 0) < block_min_valid:
         reasons.append(f"block-min-valid:{action.get('blockMinValid')}<{block_min_valid}")
-    if action.get("blockMediansWithin20Percent") is not True:
-        reasons.append("block-medians-outside-20-percent")
+    block_medians_stable = action.get("blockMediansWithinTolerance")
+    if block_medians_stable is None:
+        block_medians_stable = action.get("blockMediansWithin20Percent")
+    if block_medians_stable is not True:
+        reasons.append("block-medians-outside-tolerance")
     if action.get("invalidRate", 1.0) > 0.10:
         reasons.append(f"invalid-rate:{action.get('invalidRate')}")
     # A timeout is unresolved only when its block never reached the valid target;

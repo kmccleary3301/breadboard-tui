@@ -271,6 +271,51 @@ class CleanupTests(unittest.TestCase):
         self.assertFalse(receipt["scratchRemoved"])
 
 
+class BlockMedianToleranceTests(unittest.TestCase):
+    @staticmethod
+    def _samples(block_medians: tuple[float, float, float]) -> list[dict[str, object]]:
+        return [
+            {"block": block, "status": "valid", "latencyMs": value}
+            for block, value in enumerate(block_medians, start=1)
+        ]
+
+    def test_one_millisecond_absolute_floor_is_inclusive(self) -> None:
+        summary = harness._cell_summary(self._samples((1.0, 2.0, 1.0)), 3)
+
+        self.assertFalse(summary["blockMediansWithin20Percent"])
+        self.assertEqual(summary["blockMedianMaxAbsoluteDeltaMs"], 1.0)
+        self.assertTrue(summary["blockMediansWithinTolerance"])
+
+    def test_absolute_delta_above_one_millisecond_fails(self) -> None:
+        summary = harness._cell_summary(self._samples((1.0, 2.01, 1.0)), 3)
+
+        self.assertFalse(summary["blockMediansWithin20Percent"])
+        self.assertGreater(summary["blockMedianMaxAbsoluteDeltaMs"], 1.0)
+        self.assertFalse(summary["blockMediansWithinTolerance"])
+
+    def test_comparator_falls_back_only_when_new_field_is_missing_or_null(self) -> None:
+        base = {
+            "valid": 3,
+            "blockMinValid": 1,
+            "invalidRate": 0.0,
+            "timeouts": 0,
+            "invalidReasons": [],
+            "blockMediansWithin20Percent": True,
+        }
+        self.assertEqual(harness._cell_validity(base, 3, 1)["status"], "pass")
+        self.assertEqual(
+            harness._cell_validity({**base, "blockMediansWithinTolerance": None}, 3, 1)["status"],
+            "pass",
+        )
+        rejected = harness._cell_validity(
+            {**base, "blockMediansWithinTolerance": False},
+            3,
+            1,
+        )
+        self.assertEqual(rejected["status"], "UNKNOWN")
+        self.assertIn("block-medians-outside-tolerance", rejected["reasons"])
+
+
 class ResourceGateTests(unittest.TestCase):
     def test_authenticated_cleanup_exit_does_not_invalidate_completed_duration(self) -> None:
         soak = {
