@@ -488,16 +488,20 @@ def _process_rows() -> list[dict[str, Any]]:
     completed = subprocess.run(
         ["/bin/ps", "-axo", "pid=,ppid=,state=,command="], capture_output=True, text=True, timeout=10, check=False
     )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"exit {completed.returncode}"
+        raise OSError(f"process census failed: {detail}")
     rows: list[dict[str, Any]] = []
     for line in completed.stdout.splitlines():
         fields = line.strip().split(maxsplit=3)
         if len(fields) == 4 and fields[0].isdigit() and fields[1].isdigit():
             rows.append({"pid": int(fields[0]), "ppid": int(fields[1]), "state": fields[2], "command": fields[3]})
+    if not rows:
+        raise OSError("process census returned no parseable rows")
     return rows
 
 
-def _process_descendants(root_pid: int) -> list[dict[str, Any]]:
-    rows = _process_rows()
+def _process_descendants_from_rows(root_pid: int, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     descendants: list[dict[str, Any]] = []
     parents = {root_pid}
     while True:
@@ -508,36 +512,57 @@ def _process_descendants(root_pid: int) -> list[dict[str, Any]]:
         parents.update(int(child["pid"]) for child in children)
 
 
+def _process_descendants(root_pid: int) -> list[dict[str, Any]]:
+    return _process_descendants_from_rows(root_pid, _process_rows())
+
+
 def _owned_processes(root: Path, root_pid: int) -> list[dict[str, Any]]:
     root_text = str(root.resolve())
-    descendants = _process_descendants(root_pid)
     rows = _process_rows()
+    descendants = _process_descendants_from_rows(root_pid, rows)
     known = {int(row["pid"]) for row in descendants}
     known.add(root_pid)
-    owned: list[dict[str, Any]] = []
-    for row in rows:
-        # The root path is a per-cell mkdtemp directory, so it never appears in
-        # the harness's own argv (which carries only the roots base); matching
-        # the whole command line catches engine children that name the root
-        # only in an argument.
-        if int(row["pid"]) in known or root_text in str(row["command"]):
-            owned.append(row)
-    return owned
+    return [
+        row
+        for row in rows
+        if int(row["pid"]) in known or root_text in str(row["command"])
+    ]
 
 
 def _ps_snapshot(pid: int) -> dict[str, Any]:
     command = ["/bin/ps", "-o", "pid=,ppid=,rss=,%cpu=,etime=,command=", "-p", str(pid)]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"argv": command, "error": f"{type(error).__name__}: {error}"}
     return {"argv": command, "exitCode": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr}
+
+
+def _cleanup_census(
+    root: Path | None,
+    root_pid: int,
+    errors: list[dict[str, str]],
+    phase: str,
+) -> list[dict[str, Any]] | None:
+    try:
+        return _owned_processes(root, root_pid) if root is not None else _process_descendants(root_pid)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        errors.append({"phase": phase, "error": f"{type(error).__name__}: {error}"})
+        return None
+
+
 
 
 def _cleanup_receipt(child: Any, before: list[dict[str, Any]], root: Path | None = None) -> dict[str, Any]:
     pid = int(child.pid)
     root_path = root.resolve() if root is not None else None
-    owned_before = _owned_processes(root_path, pid) if root_path is not None else []
+    census_errors: list[dict[str, str]] = []
+    owned_before = _cleanup_census(root_path, pid, census_errors, "before-close")
     child.close()
     time.sleep(0.05)
-    owned_after_close = _owned_processes(root_path, pid) if root_path is not None else _process_descendants(pid)
+    owned_after_close = _cleanup_census(root_path, pid, census_errors, "after-close")
+    if owned_after_close is None:
+        owned_after_close = []
     term_pids: list[int] = []
     for row in owned_after_close:
         survivor = int(row["pid"])
@@ -552,7 +577,8 @@ def _cleanup_receipt(child: Any, before: list[dict[str, Any]], root: Path | None
     survivors = owned_after_close
     while survivors and time.monotonic() < deadline:
         time.sleep(0.1)
-        survivors = _owned_processes(root_path, pid) if root_path is not None else _process_descendants(pid)
+        observed = _cleanup_census(root_path, pid, census_errors, "term-wait")
+        survivors = observed if observed is not None else []
     kill_pids: list[int] = []
     for row in survivors:
         survivor = int(row["pid"])
@@ -564,28 +590,40 @@ def _cleanup_receipt(child: Any, before: list[dict[str, Any]], root: Path | None
         except ProcessLookupError:
             pass
     time.sleep(0.05)
-    final_owned = _owned_processes(root_path, pid) if root_path is not None else _process_descendants(pid)
+    final_owned = _cleanup_census(root_path, pid, census_errors, "final")
+    final_census_complete = final_owned is not None
+    if final_owned is None:
+        final_owned = []
+    descendants_after = _cleanup_census(None, pid, census_errors, "descendants-after")
+    if descendants_after is None:
+        descendants_after = []
+    process_alive_after = _process_alive(pid)
+    root_processes_gone = final_census_complete and not process_alive_after and not final_owned
     return {
         "pid": pid,
         "exitCode": child.exit_status,
         "descendantsBefore": before,
-        "descendantsAfter": _process_descendants(pid),
-        "processAliveAfter": _process_alive(pid),
+        "descendantsAfter": descendants_after,
+        "processAliveAfter": process_alive_after,
         "descendantCountBefore": len(before),
-        "descendantCountAfter": len(_process_descendants(pid)),
-        "rootProcessesBefore": owned_before,
+        "descendantCountAfter": len(descendants_after),
+        "rootProcessesBefore": owned_before or [],
         "rootProcessesAfterClose": owned_after_close,
         "rootProcessesAfter": final_owned,
         "sigtermPids": term_pids,
         "sigkillPids": kill_pids,
-        "rootProcessesGone": not final_owned,
-        "gone": not _process_alive(pid) and not final_owned,
+        "cleanupCensusErrors": census_errors,
+        "rootProcessesGone": root_processes_gone,
+        "gone": root_processes_gone,
         "rootSnapshot": _ps_snapshot(pid),
     }
 
 
 def _cleanup_root_orphans(root: Path) -> dict[str, Any]:
-    owned = _owned_processes(root, -1)
+    census_errors: list[dict[str, str]] = []
+    owned = _cleanup_census(root, -1, census_errors, "before-cleanup")
+    if owned is None:
+        owned = []
     term_pids: list[int] = []
     for row in owned:
         pid = int(row["pid"])
@@ -600,7 +638,8 @@ def _cleanup_root_orphans(root: Path) -> dict[str, Any]:
     survivors = owned
     while survivors and time.monotonic() < deadline:
         time.sleep(0.1)
-        survivors = _owned_processes(root, -1)
+        observed = _cleanup_census(root, -1, census_errors, "term-wait")
+        survivors = observed if observed is not None else []
     kill_pids: list[int] = []
     for row in survivors:
         pid = int(row["pid"])
@@ -612,13 +651,17 @@ def _cleanup_root_orphans(root: Path) -> dict[str, Any]:
         except ProcessLookupError:
             pass
     time.sleep(0.05)
-    final_owned = _owned_processes(root, -1)
+    final_owned = _cleanup_census(root, -1, census_errors, "final")
+    final_census_complete = final_owned is not None
+    if final_owned is None:
+        final_owned = []
     return {
         "rootProcessesBefore": owned,
         "rootProcessesAfter": final_owned,
         "sigtermPids": term_pids,
         "sigkillPids": kill_pids,
-        "rootProcessesGone": not final_owned,
+        "cleanupCensusErrors": census_errors,
+        "rootProcessesGone": final_census_complete and not final_owned,
     }
 
 

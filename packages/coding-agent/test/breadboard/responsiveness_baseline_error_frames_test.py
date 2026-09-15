@@ -2,11 +2,13 @@ import base64
 import importlib.util
 import json
 import sys
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 HARNESS_PATH = Path(__file__).with_name("responsiveness-baseline.py")
 HARNESS_SPEC = importlib.util.spec_from_file_location(
@@ -154,6 +156,119 @@ class ErrorFramesTests(unittest.TestCase):
         self.assertEqual(delayed["latencyUpperBoundMs"], details["latencyUpperBoundMs"])
         missing = harness._frame_clock_details(SimpleNamespace(clock_mapping=None), event, 0.010)
         self.assertIsNone(missing["latencyUpperBoundMs"])
+
+
+class CleanupTests(unittest.TestCase):
+    @staticmethod
+    def _child() -> SimpleNamespace:
+        child = SimpleNamespace(pid=4242, exit_status=None, closed=False)
+
+        def close() -> None:
+            child.closed = True
+            child.exit_status = -9
+
+        child.close = close
+        return child
+
+    def test_transient_process_census_timeout_does_not_abort_cleanup(self) -> None:
+        child = self._child()
+        timeout = subprocess.TimeoutExpired(["/bin/ps"], 10)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(harness, "_owned_processes", side_effect=[timeout, [], []]),
+            patch.object(harness, "_process_descendants", return_value=[]),
+            patch.object(harness, "_process_alive", return_value=False),
+            patch.object(harness.time, "sleep", return_value=None),
+        ):
+            receipt = harness._cleanup_receipt(child, [], Path(directory))
+
+        self.assertTrue(child.closed)
+        self.assertTrue(receipt["rootProcessesGone"])
+        self.assertEqual(receipt["cleanupCensusErrors"][0]["phase"], "before-close")
+
+    def test_unproven_final_census_preserves_scratch(self) -> None:
+        child = self._child()
+        timeout = subprocess.TimeoutExpired(["/bin/ps"], 10)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(harness, "_owned_processes", side_effect=timeout),
+            patch.object(harness, "_process_descendants", return_value=[]),
+            patch.object(harness, "_process_alive", return_value=False),
+            patch.object(harness.time, "sleep", return_value=None),
+        ):
+            root = Path(directory) / "scratch"
+            root.mkdir()
+            receipt = harness._cleanup_receipt(child, [], root)
+            harness._remove_scratch_root(root, receipt)
+            self.assertTrue(root.exists())
+
+        self.assertTrue(child.closed)
+        self.assertFalse(receipt["rootProcessesGone"])
+        self.assertFalse(receipt["scratchRemoved"])
+
+    def test_failed_process_census_cannot_green_cleanup(self) -> None:
+        child = self._child()
+        failed = subprocess.CompletedProcess(["/bin/ps"], 1, stdout="", stderr="snapshot failed")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(harness.subprocess, "run", return_value=failed),
+            patch.object(harness, "_process_alive", return_value=False),
+            patch.object(harness.time, "sleep", return_value=None),
+        ):
+            root = Path(directory) / "scratch"
+            root.mkdir()
+            receipt = harness._cleanup_receipt(child, [], root)
+            harness._remove_scratch_root(root, receipt)
+            self.assertTrue(root.exists())
+
+        self.assertTrue(child.closed)
+        self.assertFalse(receipt["rootProcessesGone"])
+        self.assertFalse(receipt["scratchRemoved"])
+        self.assertTrue(
+            all("process census failed" in error["error"] for error in receipt["cleanupCensusErrors"])
+        )
+
+    def test_failed_revalidation_never_signals_saved_pid(self) -> None:
+        child = self._child()
+        timeout = subprocess.TimeoutExpired(["/bin/ps"], 10)
+        saved = [{"pid": 9001, "ppid": child.pid, "state": "S", "command": "owned-before"}]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(harness, "_owned_processes", side_effect=[saved, timeout, timeout]),
+            patch.object(harness, "_process_descendants", return_value=[]),
+            patch.object(harness, "_process_alive", return_value=False),
+            patch.object(harness, "_ps_snapshot", return_value={}),
+            patch.object(harness.os, "kill") as signal_process,
+            patch.object(harness.time, "sleep", return_value=None),
+        ):
+            receipt = harness._cleanup_receipt(child, saved, Path(directory))
+
+        signal_process.assert_not_called()
+        self.assertFalse(receipt["rootProcessesGone"])
+        self.assertEqual(
+            [error["phase"] for error in receipt["cleanupCensusErrors"]],
+            ["after-close", "final"],
+        )
+
+    def test_live_root_pid_cannot_green_cleanup(self) -> None:
+        child = self._child()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(harness, "_owned_processes", side_effect=[[], [], []]),
+            patch.object(harness, "_process_descendants", return_value=[]),
+            patch.object(harness, "_process_alive", return_value=True),
+            patch.object(harness, "_ps_snapshot", return_value={}),
+            patch.object(harness.time, "sleep", return_value=None),
+        ):
+            root = Path(directory) / "scratch"
+            root.mkdir()
+            receipt = harness._cleanup_receipt(child, [], root)
+            harness._remove_scratch_root(root, receipt)
+            self.assertTrue(root.exists())
+
+        self.assertTrue(receipt["processAliveAfter"])
+        self.assertFalse(receipt["rootProcessesGone"])
+        self.assertFalse(receipt["scratchRemoved"])
 
 
 class ResourceGateTests(unittest.TestCase):
