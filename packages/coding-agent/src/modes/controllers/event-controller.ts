@@ -1985,6 +1985,12 @@ export class EventController {
 		// torn-down "Working…" row with the "F5 to Retry" affordance.
 		this.ctx.syncRetryHintRow();
 		this.ctx.ui.requestRender();
+		// The terminal turn boundary is the first predictable idle point after
+		// transcript growth. Start a non-blocking collection after its repaint
+		// instead of leaving the next editor input to cross the allocation threshold.
+		setImmediate(() => {
+			if (!this.ctx.viewSession.isStreaming) Bun.gc(false);
+		});
 		this.#scheduleIdleCompaction();
 		this.#scheduleIdleRecap();
 		this.sendErrorNotification(event);
