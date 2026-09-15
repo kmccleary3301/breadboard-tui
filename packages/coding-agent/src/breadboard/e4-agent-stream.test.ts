@@ -3289,14 +3289,15 @@ describe("E4AgentStreamBridge", () => {
 		}
 	});
 
-	test("finishes an aborted stream when the engine never emits a cancellation terminal", async () => {
+	test("finishes an aborted stream when cancellation is accepted without a terminal event", async () => {
 		const cancellationObserved = Promise.withResolvers<void>();
+		const cancellation = Promise.withResolvers<CancellationReceipt>();
 		const partialObserved = Promise.withResolvers<void>();
 		const session: OpenedSession = {
 			...openedSession([], []),
 			async cancel(): Promise<CancellationReceipt> {
 				cancellationObserved.resolve();
-				return {} as CancellationReceipt;
+				return cancellation.promise;
 			},
 			async *events(request) {
 				yield started;
@@ -3323,35 +3324,117 @@ describe("E4AgentStreamBridge", () => {
 			const startedAt = performance.now();
 			abort.abort();
 			await cancellationObserved.promise;
+			expect(stream.resultSettled).toBeFalse();
+			cancellation.resolve({} as CancellationReceipt);
 			const result = await stream.result();
-			expect(performance.now() - startedAt).toBeLessThan(4_500);
+			expect(performance.now() - startedAt).toBeLessThan(1_000);
 			expect(result.stopReason).toBe("aborted");
-			expect(result.errorMessage).toBe("BreadBoard turn cancel timed out");
+			expect(result.errorMessage).toBe("BreadBoard turn cancellation accepted");
 		} finally {
 			await bridge.close();
 		}
 	});
 
-	test("accepts a terminal cancellation race when the engine emits the terminal event", async () => {
+	test("holds the next admission until an accepted cancellation reaches its terminal event", async () => {
 		const cancellationObserved = Promise.withResolvers<void>();
+		const cancellationReceipt = Promise.withResolvers<CancellationReceipt>();
+		const terminalReleased = Promise.withResolvers<void>();
+		const secondSubmissionObserved = Promise.withResolvers<void>();
 		const partialObserved = Promise.withResolvers<void>();
+		const submissions: SubmitInput[] = [];
+		const ownershipSnapshots: string[][] = [];
+		const secondStarted = wireEvent(5, "turn_start", {}, "turn-2");
+		if (secondStarted.inputId === null || secondStarted.turnId === null) {
+			throw new Error("second fixture correlation missing");
+		}
+		const secondReceipt: SubmitReceipt = {
+			...receipt,
+			clientMessageId: `${String(receipt.clientMessageId)}-2` as ClientMessageId,
+			inputId: secondStarted.inputId,
+			turnId: secondStarted.turnId,
+		};
 		const session: OpenedSession = {
 			...openedSession([], []),
+			async submit(input) {
+				submissions.push(input);
+				if (submissions.length === 1) return receipt;
+				secondSubmissionObserved.resolve();
+				return secondReceipt;
+			},
 			async cancel(): Promise<CancellationReceipt> {
 				cancellationObserved.resolve();
-				throw new CanonicalE4ClientError({
-					kind: "cancellation-conflict",
-					sessionId: started.sessionId,
-					turnId: receipt.turnId,
-					code: "turn_already_terminal",
-				});
+				return cancellationReceipt.promise;
 			},
 			async *events(request) {
 				yield started;
 				yield wireEvent(3, "assistant.message.delta", { text: "partial output" });
 				partialObserved.resolve();
 				await cancellationObserved.promise;
+				await terminalReleased.promise;
 				yield wireEvent(4, "turn_cancelled", { reason: "user_requested" });
+				await secondSubmissionObserved.promise;
+				yield secondStarted;
+				yield wireEvent(6, "turn_completed", {}, "turn-2");
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted(_cursor, owned) {
+				ownershipSnapshots.push(owned.map(entry => entry.turnId));
+			},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const abort = new AbortController();
+		try {
+			const first = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			await partialObserved.promise;
+			abort.abort();
+			await cancellationObserved.promise;
+
+			const second = await startBridgeStream(bridge, model, context);
+			await drainMicrotasks();
+			expect(submissions).toHaveLength(1);
+			expect(second.resultSettled).toBeFalse();
+
+			cancellationReceipt.resolve({} as CancellationReceipt);
+			expect((await first.result()).stopReason).toBe("aborted");
+
+			const alreadyAborted = new AbortController();
+			alreadyAborted.abort();
+			const skipped = await startBridgeStream(bridge, model, context, { signal: alreadyAborted.signal });
+			expect((await skipped.result()).stopReason).toBe("aborted");
+			expect(submissions).toHaveLength(1);
+			expect(second.resultSettled).toBeFalse();
+
+			terminalReleased.resolve();
+			expect((await second.result()).stopReason).toBe("stop");
+			expect(submissions).toHaveLength(2);
+			await bridge.close();
+			expect(ownershipSnapshots.at(-1)).toEqual([]);
+		} finally {
+			terminalReleased.resolve();
+			await bridge.close();
+		}
+	});
+
+	test("keeps cancellation rejection authoritative for an aborted stream", async () => {
+		const partialObserved = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async cancel(): Promise<CancellationReceipt> {
+				throw new Error("cancel rejected");
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "assistant.message.delta", { text: "partial output" });
+				partialObserved.resolve();
 				await new Promise<void>(resolve =>
 					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
 				);
@@ -3369,12 +3452,66 @@ describe("E4AgentStreamBridge", () => {
 		const abort = new AbortController();
 		try {
 			const stream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
-			const startedAt = performance.now();
+			await partialObserved.promise;
 			abort.abort();
 			const result = await stream.result();
-			expect(performance.now() - startedAt).toBeLessThan(1_000);
-			expect(result.stopReason).toBe("aborted");
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toBe("cancel rejected");
 		} finally {
+			await bridge.close();
+		}
+	});
+
+	test("waits for the terminal event when cancellation races an already-terminal turn", async () => {
+		const cancellationObserved = Promise.withResolvers<void>();
+		const terminalReleased = Promise.withResolvers<void>();
+		const partialObserved = Promise.withResolvers<void>();
+		const session: OpenedSession = {
+			...openedSession([], []),
+			async cancel(): Promise<CancellationReceipt> {
+				cancellationObserved.resolve();
+				throw new CanonicalE4ClientError({
+					kind: "cancellation-conflict",
+					sessionId: started.sessionId,
+					turnId: receipt.turnId,
+					code: "turn_already_terminal",
+				});
+			},
+			async *events(request) {
+				yield started;
+				yield wireEvent(3, "assistant.message.delta", { text: "completed output" });
+				partialObserved.resolve();
+				await cancellationObserved.promise;
+				await terminalReleased.promise;
+				yield wireEvent(4, "turn_completed", {});
+				await new Promise<void>(resolve =>
+					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		const abort = new AbortController();
+		try {
+			const stream = await startBridgeStream(bridge, model, context, { signal: abort.signal });
+			await partialObserved.promise;
+			abort.abort();
+			await cancellationObserved.promise;
+			await drainMicrotasks();
+			expect(stream.resultSettled).toBeFalse();
+			terminalReleased.resolve();
+			const result = await stream.result();
+			expect(result.stopReason).toBe("stop");
+			expect(result.content).toEqual([{ type: "text", text: "completed output" }]);
+		} finally {
+			terminalReleased.resolve();
 			await bridge.close();
 		}
 	});
