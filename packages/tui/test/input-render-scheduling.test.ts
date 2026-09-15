@@ -88,7 +88,7 @@ describe("TUI input/render scheduling", () => {
 		}
 	});
 
-	it("bypasses cadence for non-interrupt user input", () => {
+	it("forces non-interrupt user input past cadence", () => {
 		const term = new VirtualTerminal(20, 4);
 		const scheduler = new DeferredRenderScheduler();
 		const events: string[] = [];

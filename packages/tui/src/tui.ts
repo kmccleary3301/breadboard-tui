@@ -2010,25 +2010,6 @@ export class TUI extends Container {
 		this.#renderScheduler.scheduleImmediate(() => this.#scheduleRender(true));
 	}
 
-	/**
-	 * Prioritize a user-input repaint over cadence and adaptive-delay timers
-	 * without forcing a full viewport repaint. Terminal output backpressure
-	 * remains authoritative in {@link #executeRender}.
-	 */
-	#requestInputRender(): void {
-		if (this.#stopped) return;
-		this.#renderRequested = true;
-		this.#renderScheduler.scheduleImmediate(() => {
-			if (this.#stopped || !this.#renderRequested) return;
-			if (this.#renderTimer) {
-				this.#renderTimer.cancel();
-				this.#renderTimer = undefined;
-			}
-			this.#renderRequested = false;
-			this.#executeRender();
-		});
-	}
-
 	#maybeDeferGhosttyInitialImagePaint(): boolean {
 		if (this.#ghosttyInitialImageDelayDone) return false;
 		if (TERMINAL.id !== "ghostty" || TERMINAL.imageProtocol !== ImageProtocol.Kitty) {
@@ -2299,7 +2280,7 @@ export class TUI extends Container {
 			}
 			focused.handleInput(data);
 			if (interruptInput) this.requestRender();
-			else this.#requestInputRender();
+			else this.requestRender(true);
 		}
 	}
 
