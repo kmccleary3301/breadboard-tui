@@ -800,6 +800,7 @@ export class TUI extends Container {
 	onDebug?: () => void;
 	#renderRequested = false;
 	#renderEpoch = 0;
+	#renderInProgress = false;
 	#renderTimer: RenderTimer | undefined;
 	#renderScheduler: RenderScheduler;
 	#afterPaintCallbacks = new Set<() => void>();
@@ -1987,10 +1988,20 @@ export class TUI extends Container {
 		if (this.#stopped) return;
 		this.#prepareForcedRender(options?.clearScrollback === true);
 		this.#renderRequested = false;
+		if (this.#renderInProgress) {
+			this.#renderRequested = true;
+			return;
+		}
 		const start = this.#renderScheduler.now();
 		this.#lastRenderAt = start;
-		this.#doRender();
-		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+		this.#renderInProgress = true;
+		try {
+			this.#doRender();
+		} finally {
+			this.#renderInProgress = false;
+			this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+		}
+		if (this.#renderRequested) this.#scheduleRender();
 	}
 
 	/**
@@ -2012,22 +2023,19 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Prioritize an input-owned repaint over cadence and adaptive-delay timers
-	 * without invalidating the viewport. Output backpressure remains
-	 * authoritative in {@link #executeRender}.
+	 * Paint input-owned state immediately after its handler returns, without
+	 * invalidating the viewport. The shared execution path still defers for
+	 * terminal output backpressure and schedules any render requested during
+	 * composition.
 	 */
 	#requestInputRender(): void {
 		if (this.#stopped) return;
+		if (this.#renderTimer) {
+			this.#renderTimer.cancel();
+			this.#renderTimer = undefined;
+		}
 		this.#renderRequested = true;
-		this.#renderScheduler.scheduleImmediate(() => {
-			if (this.#stopped || !this.#renderRequested) return;
-			if (this.#renderTimer) {
-				this.#renderTimer.cancel();
-				this.#renderTimer = undefined;
-			}
-			this.#renderRequested = false;
-			this.#executeRender();
-		});
+		this.#runScheduledRender();
 	}
 
 	#maybeDeferGhosttyInitialImagePaint(): boolean {
@@ -2112,11 +2120,21 @@ export class TUI extends Container {
 	 * reads it re-entrantly) and compute the cost once the paint returns.
 	 */
 	#executeRender(): void {
+		if (this.#renderInProgress) {
+			this.#renderRequested = true;
+			return;
+		}
 		if (this.#deferRenderForOutputBacklog()) return;
 		const start = this.#renderScheduler.now();
 		this.#lastRenderAt = start;
-		this.#doRender();
-		this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+		this.#renderInProgress = true;
+		try {
+			this.#doRender();
+		} finally {
+			this.#renderInProgress = false;
+			this.#lastFrameCostMs = this.#renderScheduler.now() - start;
+		}
+		if (this.#renderRequested) this.#scheduleRender();
 	}
 
 	#scheduleAfterPaintCallbacks(): void {
