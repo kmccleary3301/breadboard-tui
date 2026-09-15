@@ -1900,7 +1900,7 @@ export class TUI extends Container {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
 		}
-		this.#afterPaintCallbacks.length = 0;
+		this.#afterPaintCallbacks.clear();
 		if (this.#ghosttyInitialImageDelayTimer) {
 			this.#ghosttyInitialImageDelayTimer.cancel();
 			this.#ghosttyInitialImageDelayTimer = undefined;

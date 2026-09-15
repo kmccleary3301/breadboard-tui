@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { type Component, type RenderTimer, TUI } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
@@ -111,6 +111,26 @@ describe("TUI input/render scheduling", () => {
 			const requestedTimer = scheduler.timers.shift();
 			if (requestedTimer && !requestedTimer.canceled) requestedTimer.callback();
 			expect(events).toEqual(["render", "after-paint"]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("drops pending post-paint callbacks when stopped before the render", () => {
+		const term = new VirtualTerminal(20, 4);
+		const scheduler = new DeferredRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const afterPaint = vi.fn();
+
+		try {
+			tui.start();
+			tui.renderNow();
+			tui.requestRenderAfterPaint(afterPaint);
+			tui.stop();
+
+			tui.start();
+			tui.renderNow();
+			expect(afterPaint).not.toHaveBeenCalled();
 		} finally {
 			tui.stop();
 		}
