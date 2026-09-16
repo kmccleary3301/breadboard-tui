@@ -38,6 +38,8 @@ export interface LocalAuthorityRecord {
 	readonly ownerCredentialVerifier: string;
 	readonly createdAt: string;
 	readonly lastVerifiedAt: string;
+	/** Present only for a gateway-owned launch; never contains the bearer. */
+	readonly gatewayIdentity?: string;
 }
 
 export interface LocalControlAttempt {
@@ -95,6 +97,7 @@ export interface LocalStartClaim {
 	readonly argvSha256?: string;
 	readonly engineArtifactSha256?: string;
 	readonly servedBackendCommit?: string;
+	readonly gatewayIdentity?: string;
 	readonly pendingSecretRef?: string;
 	readonly pendingSecretVerifier?: string;
 	readonly enginePid?: number;
@@ -116,6 +119,7 @@ export interface PrepareStartClaimInput {
 	readonly argvSha256: string;
 	readonly engineArtifactSha256: string;
 	readonly servedBackendCommit: string;
+	readonly gatewayIdentity?: string;
 }
 
 export interface LocalAuthorityStoreSeams {
@@ -453,7 +457,7 @@ function cPath(name: string): Buffer {
 }
 
 function sameRecord(left: LocalAuthorityRecord, right: LocalAuthorityRecord): boolean {
-	return RECORD_KEYS.every(key => left[key] === right[key]);
+	return RECORD_KEYS.every(key => left[key] === right[key]) && left.gatewayIdentity === right.gatewayIdentity;
 }
 
 function expectValidatedString(value: unknown): string {
@@ -471,7 +475,11 @@ function assertRecord(value: unknown, expectedKey: string): LocalAuthorityRecord
 		throw new LocalAuthorityStoreError("authority_record_invalid", "authority record is not an object");
 	}
 	const record = value as Record<string, unknown>;
-	if (Object.keys(record).length !== RECORD_KEYS.length || RECORD_KEYS.some(key => !Object.hasOwn(record, key))) {
+	const hasGatewayIdentity = Object.hasOwn(record, "gatewayIdentity");
+	if (
+		Object.keys(record).length !== RECORD_KEYS.length + (hasGatewayIdentity ? 1 : 0) ||
+		RECORD_KEYS.some(key => !Object.hasOwn(record, key))
+	) {
 		throw new LocalAuthorityStoreError("authority_record_invalid", "authority record fields are invalid");
 	}
 	if (
@@ -512,7 +520,8 @@ function assertRecord(value: unknown, expectedKey: string): LocalAuthorityRecord
 		typeof record.createdAt !== "string" ||
 		!Number.isFinite(Date.parse(record.createdAt)) ||
 		typeof record.lastVerifiedAt !== "string" ||
-		!Number.isFinite(Date.parse(record.lastVerifiedAt))
+		!Number.isFinite(Date.parse(record.lastVerifiedAt)) ||
+		(hasGatewayIdentity && (typeof record.gatewayIdentity !== "string" || !SHA256.test(record.gatewayIdentity)))
 	) {
 		throw new LocalAuthorityStoreError("authority_record_invalid", "authority record values are invalid");
 	}
@@ -536,6 +545,7 @@ function assertRecord(value: unknown, expectedKey: string): LocalAuthorityRecord
 		ownerCredentialVerifier: record.ownerCredentialVerifier,
 		createdAt: record.createdAt,
 		lastVerifiedAt: record.lastVerifiedAt,
+		...(hasGatewayIdentity ? { gatewayIdentity: expectValidatedString(record.gatewayIdentity) } : {}),
 	} satisfies LocalAuthorityRecord);
 }
 
@@ -557,6 +567,7 @@ function assertStartClaim(value: unknown): LocalStartClaim {
 	const pendingCount = pendingFields.reduce((count, field) => count + (claim[field] === undefined ? 0 : 1), 0);
 	const engineFields = [claim.enginePid, claim.engineProcessStartToken];
 	const ownerAttemptGeneration = claim.ownerAttemptGeneration;
+	const gatewayIdentity = claim.gatewayIdentity;
 	if (
 		claim.schemaVersion !== "p30.local-start-claim.v4" ||
 		typeof claim.token !== "string" ||
@@ -565,8 +576,8 @@ function assertStartClaim(value: unknown): LocalStartClaim {
 		!Number.isSafeInteger(claim.pid) ||
 		claim.pid < 1 ||
 		typeof claim.processStartToken !== "string" ||
-		claim.processStartToken.length < 3 ||
 		!Number.isSafeInteger(claim.createdAtUnix) ||
+		(gatewayIdentity !== undefined && (typeof gatewayIdentity !== "string" || !SHA256.test(gatewayIdentity))) ||
 		(pendingCount !== 0 && pendingCount !== pendingFields.length) ||
 		(pendingCount > 0 &&
 			(typeof claim.launchId !== "string" ||
@@ -617,6 +628,7 @@ function assertStartClaim(value: unknown): LocalStartClaim {
 		parsed.pendingSecretRef = expectValidatedString(claim.pendingSecretRef);
 		parsed.pendingSecretVerifier = expectValidatedString(claim.pendingSecretVerifier);
 	}
+	if (gatewayIdentity !== undefined) parsed.gatewayIdentity = expectValidatedString(gatewayIdentity);
 	if (claim.enginePid !== undefined) {
 		parsed.enginePid = expectValidatedNumber(claim.enginePid);
 		parsed.engineProcessStartToken = expectValidatedString(claim.engineProcessStartToken);

@@ -44,6 +44,14 @@ export interface BundledEngineArtifact extends EngineArtifactIdentity {
 
 export type EngineArtifact = DirectEngineArtifact | BundledEngineArtifact;
 
+/** Ephemeral OMP auth gateway binding supplied only to a local-owned engine. */
+export interface BreadboardGatewayBinding {
+	readonly url: string;
+	readonly token: string;
+	/** Non-secret URL/token fingerprint used for lifecycle identity matching. */
+	readonly identity: `sha256:${string}`;
+}
+
 export interface BreadboardRunConfig {
 	readonly mode: BreadboardEngineMode;
 	readonly endpoint?: string;
@@ -56,6 +64,7 @@ export interface BreadboardRunConfig {
 	readonly startupTimeoutMs: number;
 	readonly requestTimeoutMs: number;
 	readonly ownerExitPolicy?: OwnerExitPolicy;
+	readonly gateway?: BreadboardGatewayBinding;
 	readonly sources: Readonly<Record<RunConfigField, ConfigSource>>;
 	readonly configDigest: `sha256:${string}`;
 }

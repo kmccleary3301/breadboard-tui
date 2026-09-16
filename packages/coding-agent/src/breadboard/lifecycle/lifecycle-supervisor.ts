@@ -298,6 +298,7 @@ export function lifecycleChildEnvironment(
 	launchId: string,
 	engineStateRoot?: string,
 	rayRuntimeRoot?: string,
+	gateway?: BreadboardRunConfig["gateway"],
 ): Readonly<Record<string, string>> {
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
@@ -314,6 +315,12 @@ export function lifecycleChildEnvironment(
 		RAY_ROTATION_MAX_BYTES: "262144",
 		...(engineStateRoot === undefined ? {} : { BREADBOARD_ENGINE_STATE_ROOT: engineStateRoot }),
 		...(rayRuntimeRoot === undefined ? {} : { RAY_TMPDIR: rayRuntimeRoot }),
+		...(gateway === undefined
+			? {}
+			: {
+					BREADBOARD_OMP_GATEWAY_URL: gateway.url,
+					BREADBOARD_OMP_GATEWAY_TOKEN: gateway.token,
+				}),
 	});
 }
 
@@ -403,14 +410,17 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #children = new Map<number, SpawnedEngineProcess>();
 	readonly #runtimeCleanup: RuntimeCleanupStore;
 	readonly #installedEngine: boolean;
+	readonly #gateway: BreadboardRunConfig["gateway"];
 
 	constructor(
 		directoryAuthority?: RuntimeCleanupDirectoryAuthority,
 		installedEngine = false,
 		cleanupSeams: RuntimeCleanupStoreSeams = {},
+		gateway?: BreadboardRunConfig["gateway"],
 	) {
 		this.#runtimeCleanup = new RuntimeCleanupStore(directoryAuthority, cleanupSeams);
 		this.#installedEngine = installedEngine;
+		this.#gateway = gateway;
 	}
 
 	async cleanupExited(identity: ExitedEngineIdentity): Promise<void> {
@@ -425,7 +435,6 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	async cleanupPreparedStart(launchId: string): Promise<void> {
 		await this.#runtimeCleanup.removePrepared(launchId);
 	}
-
 	async #failedSpawnCleanupRecord(
 		identity: ExitedEngineIdentity,
 	): Promise<"death_unconfirmed" | "record_absent" | "removed"> {
@@ -434,7 +443,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	}
 
 	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
-		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot);
+		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot, this.#gateway);
 	}
 
 	async #spawnBundledVerified(
@@ -854,13 +863,13 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		};
 	}
 }
-
 export function createDefaultLifecycleProcessAdapter(
 	directoryAuthority?: RuntimeCleanupDirectoryAuthority,
 	installedEngine = false,
 	cleanupSeams: RuntimeCleanupStoreSeams = {},
+	gateway?: BreadboardRunConfig["gateway"],
 ): LifecycleProcessAdapter {
-	return new DefaultLifecycleProcessAdapter(directoryAuthority, installedEngine, cleanupSeams);
+	return new DefaultLifecycleProcessAdapter(directoryAuthority, installedEngine, cleanupSeams, gateway);
 }
 
 const KEYCHAIN_OUTPUT_LIMIT = 64 * 1024;
@@ -1654,7 +1663,8 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
 			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
-			claim.servedBackendCommit !== artifact.servedBackendCommit
+			claim.servedBackendCommit !== artifact.servedBackendCommit ||
+			claim.gatewayIdentity !== this.config.gateway?.identity
 		)
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		const recoveryDeadline = this.clock.now() + this.config.startupTimeoutMs;
@@ -1740,8 +1750,8 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			claim.executableSha256 !== artifact.executableSha256 ||
 			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
-			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
-			claim.servedBackendCommit !== artifact.servedBackendCommit
+			claim.servedBackendCommit !== artifact.servedBackendCommit ||
+			claim.gatewayIdentity !== this.config.gateway?.identity
 		)
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		const control = await this.#process.controlFor(claim.enginePid, claim.engineProcessStartToken);
@@ -1814,6 +1824,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						argvSha256: artifact.argvSha256,
 						engineArtifactSha256: artifact.engineSourceSha256,
 						servedBackendCommit: artifact.servedBackendCommit,
+						...(this.config.gateway === undefined ? {} : { gatewayIdentity: this.config.gateway.identity }),
 						ownerExitPolicy,
 						createdAt: now,
 						lastVerifiedAt: now,
@@ -2028,6 +2039,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					argvSha256: artifact.argvSha256,
 					engineArtifactSha256: artifact.engineSourceSha256,
 					servedBackendCommit: artifact.servedBackendCommit,
+					...(this.config.gateway === undefined ? {} : { gatewayIdentity: this.config.gateway.identity }),
 				},
 				{ bootstrapCredential, ownerCredential },
 			),
@@ -2181,6 +2193,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 						argvSha256: artifact.argvSha256,
 						engineArtifactSha256: artifact.engineSourceSha256,
 						servedBackendCommit: artifact.servedBackendCommit,
+						...(this.config.gateway === undefined ? {} : { gatewayIdentity: this.config.gateway.identity }),
 						ownerExitPolicy,
 						createdAt: now,
 						lastVerifiedAt: now,
@@ -2253,7 +2266,6 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		if (!recovered) return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable", attempt);
 		return await this.restartAfterConfirmedDeath();
 	}
-
 	#recordMatchesConfig(record: LocalAuthorityRecord): boolean {
 		const artifact = this.config.engineArtifact;
 		return (
@@ -2262,7 +2274,8 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			record.executablePathSha256 === engineArtifactLocationSha256(artifact) &&
 			record.argvSha256 === artifact.argvSha256 &&
 			record.engineArtifactSha256 === artifact.engineSourceSha256 &&
-			record.servedBackendCommit === artifact.servedBackendCommit
+			record.servedBackendCommit === artifact.servedBackendCommit &&
+			record.gatewayIdentity === this.config.gateway?.identity
 		);
 	}
 

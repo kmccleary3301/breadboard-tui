@@ -582,6 +582,27 @@ describe("connected BreadBoard runtime lifecycle", () => {
 		await expect(runtime.activate(store)).rejects.toBe(flushFailure);
 		expect(harness.lifecycle).toEqual(["append", "flush", "bridge", "session", "engine"]);
 	});
+	test("closes an owned resource once even when the active runtime close fails", async () => {
+		const engineCloseError = new Error("engine close failed");
+		const harness = runtimeHarness({ engineCloseError });
+		const prepared = await harness.prepare();
+		let closeResourceCalls = 0;
+		const runtime = createRecoverableBreadboardRuntime(
+			{ runtime: prepared, lifecycleFailure: harness.monitor.signal },
+			async () => {
+				throw new Error("reconnect not used");
+			},
+			undefined,
+			undefined,
+			async () => {
+				closeResourceCalls++;
+			},
+		);
+		const closing = runtime.close();
+		expect(runtime.close()).toBe(closing);
+		await expect(closing).rejects.toBe(engineCloseError);
+		expect(closeResourceCalls).toBe(1);
+	});
 
 	test("serializes binding updates and continues after a failed durable flush", async () => {
 		const harness = runtimeHarness();

@@ -1717,6 +1717,84 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect((await adopter.connect()).state.reason).toBe("identity_changed");
 		expect(calls).toEqual([]);
 	});
+	test("gateway fingerprint drift rejects adoption before renew or registration", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const firstConfig: BreadboardRunConfig = {
+			...resolved("local-owned", "detached"),
+			gateway: {
+				url: "http://127.0.0.1:40123",
+				token: "gateway-token-original",
+				identity: `sha256:${"a".repeat(64)}` as const,
+			},
+		};
+		const first = new LifecycleSupervisor(firstConfig, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await first.connect()).kind).toBe("ready");
+		expect((await first.close({ consumerClosed: true })).kind).toBe("detached");
+		calls.length = 0;
+		const changedConfig: BreadboardRunConfig = {
+			...firstConfig,
+			gateway: {
+				url: "http://127.0.0.1:40123",
+				token: "gateway-token-replaced",
+				identity: `sha256:${"b".repeat(64)}` as const,
+			},
+		};
+		const adopter = new LifecycleSupervisor(changedConfig, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await adopter.connect()).state.reason).toBe("identity_changed");
+		expect(calls).toEqual([]);
+	});
+
+	test("persists only the gateway fingerprint, never its bearer, in public authority state", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const gatewayToken = "gateway-token-must-not-persist";
+		const gatewayIdentity = `sha256:${"c".repeat(64)}` as const;
+		const config: BreadboardRunConfig = {
+			...resolved("local-owned"),
+			gateway: {
+				url: "http://127.0.0.1:40124",
+				token: gatewayToken,
+				identity: gatewayIdentity,
+			},
+		};
+		let claimText: string | undefined;
+		const inspectingProcess: LifecycleProcessAdapter = {
+			...process.adapter,
+			spawnVerified: async (...args) => {
+				const claimName = (await readdir(store.root)).find(name => name.endsWith(".starting.json"));
+				expect(claimName).toBeDefined();
+				claimText = await readFile(join(store.root, claimName as string), "utf8");
+				return await process.adapter.spawnVerified(...args);
+			},
+		};
+		const supervisor = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: inspectingProcess,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		expect(claimText).toContain(gatewayIdentity);
+		expect(claimText).not.toContain(gatewayToken);
+		const authorityName = (await readdir(store.root)).find(name => name.endsWith(".authority.json"));
+		expect(authorityName).toBeDefined();
+		const authorityText = await readFile(join(store.root, authorityName as string), "utf8");
+		expect(authorityText).toContain(gatewayIdentity);
+		expect(authorityText).not.toContain(gatewayToken);
+	});
 
 	test("adopted detached policy is retained on close", async () => {
 		const store = await temporaryStore();

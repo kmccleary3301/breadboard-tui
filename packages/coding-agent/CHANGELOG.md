@@ -5,6 +5,7 @@
 ### Added
 
 - Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
+- Added shared OMP subscription authentication for attached local BreadBoard engines through an authenticated loopback inference gateway, retaining BreadBoard tools and permissions without copying provider credentials.
 
 ### Changed
 

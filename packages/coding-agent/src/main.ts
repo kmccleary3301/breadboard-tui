@@ -27,6 +27,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import { resolveBreadboardOmpAgentDir, startBreadboardOmpGateway } from "./breadboard/omp-auth-gateway";
 import {
 	applyCliApiKeyOverride,
 	BreadboardLifecycleStartupError,
@@ -552,7 +553,7 @@ async function runInteractiveMode(
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
 	breadboard?: {
-		readonly providerAuth: ProviderAuthPort;
+		readonly providerAuth?: ProviderAuthPort;
 		readonly close: () => Promise<void>;
 		readonly harnessClient?: BreadboardClient;
 		readonly harnessId?: string;
@@ -1575,7 +1576,9 @@ export async function runRootCommand(
 		// Auth and settings are independent; start both before awaiting either.
 		// A configured-but-unreachable auth broker still receives the actionable
 		// startup error below, while its cache/config I/O overlaps settings I/O.
-		const authStoragePromise = logger.time("discoverAuthStorage", deps.discoverAuthStorage ?? discoverAuthStorage);
+		const ompAgentDir = resolveBreadboardOmpAgentDir(process.env.BREADBOARD_OMP_AGENT_DIR);
+		const discoverAuth = deps.discoverAuthStorage ?? discoverAuthStorage;
+		const authStoragePromise = logger.time("discoverAuthStorage", () => discoverAuth(ompAgentDir));
 		authStoragePromise.catch(() => {});
 		const settingsPromise = deps.settings
 			? Promise.resolve(deps.settings)
@@ -1607,11 +1610,13 @@ export async function runRootCommand(
 			applyAcpDefaultSettingOverrides(settingsInstance);
 		}
 
-		// The registry composes policy-dependent metadata synchronously, including
-		// extended-context window caps, so it must receive the finalized settings.
 		const modelRegistry = logger.time(
 			"modelRegistry:init",
-			() => new ModelRegistry(authStorage, undefined, { settings: settingsInstance }),
+			() =>
+				new ModelRegistry(authStorage, undefined, {
+					settings: settingsInstance,
+					ignoreLocalModelConfig: ompAgentDir !== undefined,
+				}),
 		);
 
 		if (!isInteractive) {
@@ -2106,6 +2111,10 @@ export async function runRootCommand(
 						},
 						{
 							modelRegistry,
+							startOmpGateway:
+								ompAgentDir === undefined
+									? undefined
+									: () => startBreadboardOmpGateway(authStorage, modelRegistry),
 							requestPermission: breadboardPermissionHandler,
 							selectedModel: parsedArgs.model ? sessionOptions.model : undefined,
 						},

@@ -115,6 +115,8 @@ export function createProductionLifecycleSupervisor(
 					),
 			},
 			config.installedEngineIdentity !== undefined,
+			{},
+			config.gateway,
 		),
 	});
 }

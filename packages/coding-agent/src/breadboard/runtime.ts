@@ -35,6 +35,7 @@ import {
 	connectCanonicalBreadboardEnginePort,
 	type BreadboardLifecycleFailureResult as EngineLifecycleFailureResult,
 } from "./engine-port";
+import type { BreadboardOmpGateway } from "./omp-auth-gateway";
 import { formatBreadboardConnectionError, writeLifecyclePresentation } from "./lifecycle/lifecycle-presenter";
 import { resolveProductBreadboardRunConfig } from "./lifecycle/product-run-config";
 import {
@@ -294,7 +295,7 @@ export function resolveBreadboardSessionTarget(
 	);
 }
 export interface PreparedBreadboardRuntime {
-	readonly providerAuth: ProviderAuthPort;
+	readonly providerAuth?: ProviderAuthPort;
 	readonly harnessClient?: BreadboardClient;
 	readonly harnessId?: string;
 	/** Apply the model control through the lifecycle-aware engine port. */
@@ -322,11 +323,11 @@ interface BreadboardRuntimeBridge {
 	start(): void;
 	close(): Promise<void>;
 }
-
 type BreadboardModelRegistry = Pick<ModelRegistry, "getAll">;
 
 export interface BreadboardRuntimeAuthority {
 	readonly modelRegistry: BreadboardModelRegistry;
+	readonly startOmpGateway?: () => BreadboardOmpGateway;
 	readonly requestPermission: E4PermissionHandler;
 	readonly selectedModel?: Pick<Model, "provider" | "id">;
 }
@@ -361,6 +362,8 @@ export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuth
 	readonly allowTerminalSnapshotRecovery?: boolean;
 	readonly createBridge?: (options: E4AgentStreamBridgeOptions) => BreadboardRuntimeBridge;
 	readonly registerCleanup?: (close: () => Promise<void>) => () => void;
+	/** Gateway mode keeps native OMP auth views backed by this process's AuthStorage. */
+	readonly exposeProviderAuth?: boolean;
 }
 
 export type BreadboardModelAuthorityErrorCode =
@@ -804,12 +807,12 @@ export async function prepareConnectedBreadboardRuntime(
 			runtimeStarted = true;
 		};
 		return {
+			stream: runtimeBridge.stream,
 			harnessClient: options.engine.harnessClient,
 			harnessId: options.harnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			setSessionModel: model => options.engine.setSessionModel(opened!.sessionId, model),
-			stream: runtimeBridge.stream,
+			providerAuth: options.exposeProviderAuth === false ? undefined : options.engine.providerAuth,
 			sessionId: initialBinding.sessionId,
-			providerAuth: options.engine.providerAuth,
 			models: catalogModels,
 			model,
 			activate,
@@ -830,7 +833,6 @@ export interface BreadboardRuntimeGeneration {
 	readonly runtime: PreparedBreadboardRuntime;
 	readonly lifecycleFailure: BreadboardLifecycleFailureSignal;
 }
-
 export function createRecoverableBreadboardRuntime(
 	initial: BreadboardRuntimeGeneration,
 	reconnect: (sessionId: string, binding: BreadboardSessionBindingData) => Promise<BreadboardRuntimeGeneration>,
@@ -840,6 +842,7 @@ export function createRecoverableBreadboardRuntime(
 		configPath: string,
 		lockId: string,
 	) => Promise<BreadboardRuntimeGeneration>,
+	closeResource?: () => Promise<void>,
 ): PreparedBreadboardRuntime {
 	let current = initial;
 	let activatedStore: BreadboardSessionBindingStore | undefined;
@@ -970,8 +973,21 @@ export function createRecoverableBreadboardRuntime(
 			cancelRegisteredCleanup = undefined;
 			closed = true;
 			if (replacementPromise) await replacementPromise.catch(() => {});
-			await current.runtime.close();
-			await Promise.all(retiredClosures);
+			let runtimeError: unknown;
+			try {
+				await current.runtime.close();
+				await Promise.all(retiredClosures);
+			} catch (error) {
+				runtimeError = error;
+			}
+			try {
+				await closeResource?.();
+			} catch (resourceError) {
+				if (runtimeError !== undefined)
+					throw new AggregateError([runtimeError, resourceError], "BreadBoard runtime cleanup failed");
+				throw resourceError;
+			}
+			if (runtimeError !== undefined) throw runtimeError;
 		})();
 		return closePromise;
 	};
@@ -1038,6 +1054,9 @@ export async function prepareBreadboardRuntime(
 	const workspacePath = fsSync.realpathSync(getProjectDir());
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
 	const config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
+	if (authority.startOmpGateway && (config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")) {
+		throw new Error("BREADBOARD_OMP_AGENT_DIR requires an attached local-owned BreadBoard engine");
+	}
 	if (config.mode === "off") return null;
 	const sessionBinding =
 		parsed.continue || parsed.resume === true || typeof parsed.resume === "string"
@@ -1069,6 +1088,8 @@ export async function prepareBreadboardRuntime(
 					startupModelOverride,
 					activeSettings.get("tools.approvalMode"),
 				);
+	const gateway = authority.startOmpGateway?.();
+	const lifecycleConfig = gateway === undefined ? config : Object.freeze({ ...config, gateway: gateway.binding });
 
 	const connectGeneration = async (
 		sessionTarget: OpenSession,
@@ -1076,7 +1097,7 @@ export async function prepareBreadboardRuntime(
 		allowTerminalSnapshotRecovery = false,
 		harnessRequestId = requestedHarnessId,
 	): Promise<BreadboardRuntimeGeneration> => {
-		const connected = await connectCanonicalBreadboardEnginePort(config, {
+		const connected = await connectCanonicalBreadboardEnginePort(lifecycleConfig, {
 			onLateSessionCloseError: () => {
 				process.stderr.write("BreadBoard session cleanup failed after caller abort.\n");
 				process.exitCode = 1;
@@ -1091,82 +1112,98 @@ export async function prepareBreadboardRuntime(
 			throw new BreadboardLifecycleStartupError(connected.result);
 		}
 		const enginePort = connected.port;
-		let resolvedHarnessId = harnessRequestId;
-		let resolvedSessionTarget = sessionTarget;
-		const usesDefaultTerminalResume = harnessRequestId === requestedHarnessId;
-		let resolvedTerminalResumeTarget = usesDefaultTerminalResume ? terminalResumeTarget : undefined;
-		const shouldResolveHarness =
-			harnessRequestId !== undefined &&
-			!harnessRequestId.endsWith(".lock.json") &&
-			(sessionTarget.kind === "create" || resolvedTerminalResumeTarget !== undefined);
-		if (shouldResolveHarness && enginePort.harnessClient) {
-			resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, harnessRequestId);
-			const lockId =
-				sessionTarget.kind === "create"
-					? (sessionTarget.request.lockId ?? siblingHarnessLockPath(resolvedHarnessId, workspacePath))
-					: (resolvedTerminalResumeTarget?.request.lockId ??
-						siblingHarnessLockPath(resolvedHarnessId, workspacePath));
-			if (sessionTarget.kind === "create") {
-				resolvedSessionTarget = {
-					kind: "create",
-					request: {
-						...sessionTarget.request,
-						configPath: resolvedHarnessId,
-						lockId,
-					},
-				};
+		try {
+			let resolvedHarnessId = harnessRequestId;
+			let resolvedSessionTarget = sessionTarget;
+			const usesDefaultTerminalResume = harnessRequestId === requestedHarnessId;
+			let resolvedTerminalResumeTarget = usesDefaultTerminalResume ? terminalResumeTarget : undefined;
+			const shouldResolveHarness =
+				harnessRequestId !== undefined &&
+				!harnessRequestId.endsWith(".lock.json") &&
+				(sessionTarget.kind === "create" || resolvedTerminalResumeTarget !== undefined);
+			if (shouldResolveHarness && enginePort.harnessClient) {
+				resolvedHarnessId = await resolveHarnessId(enginePort.harnessClient, harnessRequestId);
+				const lockId =
+					sessionTarget.kind === "create"
+						? (sessionTarget.request.lockId ?? siblingHarnessLockPath(resolvedHarnessId, workspacePath))
+						: (resolvedTerminalResumeTarget?.request.lockId ??
+							siblingHarnessLockPath(resolvedHarnessId, workspacePath));
+				if (sessionTarget.kind === "create") {
+					resolvedSessionTarget = {
+						kind: "create",
+						request: {
+							...sessionTarget.request,
+							configPath: resolvedHarnessId,
+							lockId,
+						},
+					};
+				}
+				if (resolvedTerminalResumeTarget) {
+					resolvedTerminalResumeTarget = {
+						kind: "create",
+						request: {
+							...resolvedTerminalResumeTarget.request,
+							configPath: resolvedHarnessId,
+							lockId,
+						},
+					};
+				}
 			}
-			if (resolvedTerminalResumeTarget) {
-				resolvedTerminalResumeTarget = {
-					kind: "create",
-					request: {
-						...resolvedTerminalResumeTarget.request,
-						configPath: resolvedHarnessId,
-						lockId,
-					},
-				};
-			}
-		}
-		const runtime = await prepareConnectedBreadboardRuntime({
-			engine: enginePort,
-			harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
-			modelCatalogConfigPath:
-				resolvedHarnessId ?? config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
-			sessionTarget: resolvedSessionTarget,
-			terminalResumeTarget: resolvedTerminalResumeTarget,
-			emitAgentEvent: async (event, idempotencyKey) => {
-				await emitAgentEvent(event, idempotencyKey);
-			},
-			releaseAgentEvent,
-			sessionBinding: binding,
-			allowTerminalSnapshotRecovery,
-			modelRegistry: authority.modelRegistry,
-			requestPermission: authority.requestPermission,
-		});
-		return { runtime, lifecycleFailure: enginePort.lifecycleFailure };
-	};
-	const initial = await connectGeneration(target, sessionBinding, sessionBinding !== undefined);
-	return createRecoverableBreadboardRuntime(
-		initial,
-		(sessionId, binding) => connectGeneration({ kind: "attach", sessionId }, binding, true),
-		cleanup => postmortem.register("breadboard-recoverable-runtime", cleanup),
-		(_sessionId, configPath, lockId) => {
-			const request = createBreadboardSessionTarget(
-				configPath,
-				workspacePath,
-				IS_BREADBOARD_PRODUCT,
-				startupModelOverride,
-				activeSettings.get("tools.approvalMode"),
-			).request;
-			return connectGeneration(
-				{
-					kind: "create",
-					request: { ...request, configPath, lockId },
+			const runtime = await prepareConnectedBreadboardRuntime({
+				engine: enginePort,
+				harnessId: resolvedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+				modelCatalogConfigPath:
+					resolvedHarnessId ?? config.sessionConfigPath ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
+				sessionTarget: resolvedSessionTarget,
+				terminalResumeTarget: resolvedTerminalResumeTarget,
+				emitAgentEvent: async (event, idempotencyKey) => {
+					await emitAgentEvent(event, idempotencyKey);
 				},
-				undefined,
-				false,
-				configPath,
-			);
-		},
-	);
+				releaseAgentEvent,
+				sessionBinding: binding,
+				allowTerminalSnapshotRecovery,
+				modelRegistry: authority.modelRegistry,
+				requestPermission: authority.requestPermission,
+				exposeProviderAuth: gateway === undefined,
+			});
+			return { runtime, lifecycleFailure: enginePort.lifecycleFailure };
+		} catch (error) {
+			try {
+				await enginePort.close();
+			} catch (cleanupError) {
+				throw new AggregateError([error, cleanupError], "BreadBoard engine preparation and cleanup failed");
+			}
+			throw error;
+		}
+	};
+	try {
+		const initial = await connectGeneration(target, sessionBinding, sessionBinding !== undefined);
+		return createRecoverableBreadboardRuntime(
+			initial,
+			(sessionId, binding) => connectGeneration({ kind: "attach", sessionId }, binding, true),
+			cleanup => postmortem.register("breadboard-recoverable-runtime", cleanup),
+			(_sessionId, configPath, lockId) => {
+				const request = createBreadboardSessionTarget(
+					configPath,
+					workspacePath,
+					IS_BREADBOARD_PRODUCT,
+					startupModelOverride,
+					activeSettings.get("tools.approvalMode"),
+				).request;
+				return connectGeneration(
+					{
+						kind: "create",
+						request: { ...request, configPath, lockId },
+					},
+					undefined,
+					false,
+					configPath,
+				);
+			},
+			gateway?.close,
+		);
+	} catch (error) {
+		await gateway?.close().catch(() => undefined);
+		throw error;
+	}
 }
