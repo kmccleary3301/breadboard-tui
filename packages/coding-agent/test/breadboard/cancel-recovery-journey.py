@@ -700,8 +700,11 @@ def f02a(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint
         tail = child.screen.text().splitlines()[-8:]
         return snapshot if (
             snapshot is not None
-            and snapshot.data["cursor"]["sequence"] >= terminal["seq"]
-            and not snapshot.data["ownedSubmissions"]
+            and snapshot.data["sessionId"] == second_terminal[1]["session"]["session_id"]
+            and any(
+                row.get("message", {}).get("responseId") == f"breadboard:e4:{terminal['id']}"
+                for row in snapshot.rows
+            )
             and any(line.lstrip().startswith("bb  >") for line in tail)
             and not any("working" in line.lower() for line in tail)
         ) else None
