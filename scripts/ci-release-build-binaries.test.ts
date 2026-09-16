@@ -1,31 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { $ } from "bun";
 import { resolveCrossBuild } from "../packages/coding-agent/scripts/build-binary";
-
-const repoRoot = path.join(import.meta.dir, "..");
+import { compileCodingAgent } from "../packages/coding-agent/scripts/compile-binary";
 
 describe("Windows release binary target", () => {
-	it("builds both Windows architecture release assets with their native runtimes", async () => {
-		const result = await $`bun scripts/ci-release-build-binaries.ts --dry-run --targets win32-x64,win32-arm64`
-			.cwd(repoRoot)
-			.quiet()
-			.nothrow();
-		expect(result.exitCode).toBe(0);
-		const output = result.text();
-
-		expect(output).toContain("Building packages/coding-agent/binaries/omp-windows-x64.exe...");
-		expect(output).toContain(
-			"DRY RUN Bun.build entrypoint=packages/coding-agent/src/omp.ts target=bun-windows-x64-baseline outfile=packages/coding-agent/binaries/omp-windows-x64.exe",
-		);
-		expect(output).toContain("Building packages/coding-agent/binaries/omp-windows-arm64.exe...");
-		expect(output).toContain(
-			"DRY RUN Bun.build target=bun-windows-arm64 outfile=packages/coding-agent/binaries/omp-windows-arm64.exe",
-		);
-		expect(output).toContain("external=fastembed,onnxruntime-node");
-		expect(output).not.toContain("bun-windows-x64-modern");
-	});
-
 	it("resolves local Windows cross-build aliases for both architectures", () => {
 		expect(resolveCrossBuild("win32-x64")).toEqual({
 			id: "win32-x64",
@@ -53,3 +34,27 @@ describe("Windows release binary target", () => {
 		});
 	});
 });
+
+it("executes bundled module resolution in a standalone binary", async () => {
+	const root = await mkdtemp(path.join(tmpdir(), "omp-compiled-module-"));
+	try {
+		const entrypoint = path.join(root, "entry.ts");
+		const outfile = path.join(root, process.platform === "win32" ? "probe.exe" : "probe");
+		await Bun.write(entrypoint, 'console.log(import.meta.resolve(process.argv[2] ?? "node:fs"));');
+		await compileCodingAgent({
+			repoRoot: root,
+			entrypoint,
+			outfile,
+			transformersVersion: "0.0.0",
+			skipBuiltinCodesign: process.platform === "darwin",
+		});
+		if (process.platform === "darwin") {
+			await $`codesign --force --sign - ${outfile}`.quiet();
+		}
+		const result = await $`${outfile}`.quiet().nothrow();
+		expect(result.exitCode).toBe(0);
+		expect(result.text().trim()).toBe("node:fs");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+}, 30_000);

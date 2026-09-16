@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- Standalone builds preserve ESM semantics so bundled `import.meta.resolve` calls work with Bun 1.4; bytecode acceleration is disabled for this compatibility boundary.
 - Slash-menu icons now update immediately when switching symbol presets; harness overrides retain native menu ordering without hiding unrelated custom commands.
 - `bb setup` preserves requested model and harness arguments instead of starting with an unintended default model.
 - Unresolved explicit BreadBoard model selectors now fail before engine startup; use a qualified provider/model identifier for models not yet registered by an extension.
