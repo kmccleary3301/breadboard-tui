@@ -1738,8 +1738,10 @@
 		},
 		{
 			"path": "packages/tui/CHANGELOG.md",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
 		},
 		{
 			"path": "packages/tui/src/autocomplete.ts",

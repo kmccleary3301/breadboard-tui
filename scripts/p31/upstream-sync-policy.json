@@ -198,6 +198,7 @@
 				"docs/tools/eval.md",
 				"docs/tools/task.md",
 				"packages/coding-agent/CHANGELOG.md",
+				"packages/tui/CHANGELOG.md",
 				"packages/coding-agent/test/cli/update-cli.test.ts",
 				"package.json",
 				"**/package.json",
@@ -356,6 +357,7 @@
 			"patterns": [
 				"docs/environment-variables.md",
 				"packages/coding-agent/CHANGELOG.md",
+				"packages/tui/CHANGELOG.md",
 				"docs/task-agent-discovery.md",
 				"docs/tools/eval.md",
 				"docs/tools/task.md"
@@ -379,6 +381,7 @@
 	],
 	"adapters": {
 		"sdkImports": [
+			"packages/coding-agent/src/modes/interactive-mode.ts",
 			"packages/coding-agent/src/modes/components/agent-hub/harness-view.ts",
 			"packages/coding-agent/src/slash-commands/harness.ts",
 			"packages/coding-agent/test/interactive-terminal-e2e.test.ts",
@@ -415,6 +418,7 @@
 			"packages/coding-agent/test/flag-tables.test.ts",
 			"packages/coding-agent/test/interactive-terminal-e2e.test.ts",
 			"packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
+			"packages/coding-agent/test/modes/components/effective-lock-fixture.ts",
 			"packages/coding-agent/test/modes/components/settings-defs-breadboard.test.ts",
 			"packages/coding-agent/test/modes/components/status-line-harness.test.ts",
 			"packages/coding-agent/test/slash-commands/harness.test.ts",

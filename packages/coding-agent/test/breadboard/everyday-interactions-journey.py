@@ -401,6 +401,7 @@ class Journey:
         self.current_session: dict[str, Any] | None = None
         self.launch_context: Any = None
         self.roots: dict[str, Path] = {}
+        self.engine_endpoint = getattr(options, "engine_endpoint", None)
         self.launch_lock = load_launch_lock(self.options.launch_lock)
         self.driver_source = str(Path(__file__).resolve())
         self.driver_source_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -471,8 +472,9 @@ class Journey:
         env = runner.exact_environment(
             self.roots["home"], self.roots["config"], self.roots["agent"], self.roots["temp"]
         )
+        engine_args = ["--engine-mode", "local-owned", "--engine-url", self.engine_endpoint] if self.engine_endpoint else []
         self.child = runner.PtyChild(
-            [str(self.options.bb)] + (["--model", model] if model is not None else []),
+            [str(self.options.bb), *engine_args] + (["--model", model] if model is not None else []),
             self.roots["workspace"],
             env,
             rows=self.options.rows,
@@ -524,7 +526,7 @@ class Journey:
                 finally:
                     cleanup = cleanup_runner.end_child(
                         runner, self.output, self.roots["agent"], child,
-                        runner.process_descendants(child.pid), "http://127.0.0.1:9099",
+                        runner.process_descendants(child.pid), self.engine_endpoint or "http://127.0.0.1:9099",
                         self.current_session["enginePid"], self.current_session["engineAuthority"],
                     )
                     self.current_session.update(cleanup)
