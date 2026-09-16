@@ -1009,6 +1009,9 @@ export function createRecoverableBreadboardRuntime(
 		get providerAuth() {
 			return current.runtime.providerAuth;
 		},
+		get nativeAuthStorage() {
+			return current.runtime.nativeAuthStorage;
+		},
 		stream,
 		get sessionId() {
 			return current.runtime.sessionId;
