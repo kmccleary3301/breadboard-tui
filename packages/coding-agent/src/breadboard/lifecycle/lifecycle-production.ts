@@ -107,6 +107,7 @@ export function createProductionLifecycleSupervisor(
 		...dependencies,
 		store,
 		process: createDefaultLifecycleProcessAdapter(
+			new URL(endpoint),
 			{
 				stateRootPath: join(store.root, stateRootRelativePath),
 				ensure: relativePath =>

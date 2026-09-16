@@ -469,6 +469,10 @@ class Journey:
         (self.roots["agent"] / "config.yml").write_text(
             f"tools:\n  approvalMode: {approval_mode}\n", encoding="utf-8"
         )
+        selected_config = getattr(self.options, "breadboard_config", None)
+        if selected_config is not None:
+            with (self.roots["agent"] / "config.yml").open("a", encoding="utf-8") as config:
+                config.write(f"breadboard: {json.dumps(selected_config)}\n")
         env = runner.exact_environment(
             self.roots["home"], self.roots["config"], self.roots["agent"], self.roots["temp"]
         )

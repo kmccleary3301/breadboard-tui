@@ -326,6 +326,7 @@ async function exerciseRejectedCleanupPersistence(
 	const cleanupRecordPath = join(authorityRoot, stateRootRelativePath, "runtime-cleanup", `${launchId}.json`);
 	let cleanupRoots: CleanupRecordRootPaths | undefined;
 	const adapter = createDefaultLifecycleProcessAdapter(
+		new URL("http://127.0.0.1:9099"),
 		{
 			stateRootPath: join(authorityRoot, stateRootRelativePath),
 			ensure: relativePath =>
@@ -447,7 +448,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 		roots.push(authorityRoot);
 		const stateRootRelativePath = join("engine-state", "dead-engine");
 		const authority = new LocalAuthorityStore(authorityRoot);
-		const adapter = createDefaultLifecycleProcessAdapter({
+		const adapter = createDefaultLifecycleProcessAdapter(new URL("http://127.0.0.1:9099"), {
 			stateRootPath: join(authorityRoot, stateRootRelativePath),
 			ensure: relativePath =>
 				authority.ensurePrivateDirectory(
@@ -758,18 +759,25 @@ describe("LifecycleSupervisor mode authority", () => {
 	});
 
 	test("default child process environment is an exact minimal allowlist", () => {
-		expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
-			"BREADBOARD_OMP_GATEWAY_URL",
-		);
-		expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
-			"BREADBOARD_OMP_GATEWAY_TOKEN",
-		);
+		expect(
+			lifecycleChildEnvironment(new URL("http://127.0.0.1:9099"), "launch_environment_abcdefghijklmnopqrstuvwxyz"),
+		).not.toHaveProperty("BREADBOARD_OMP_GATEWAY_URL");
+		expect(
+			lifecycleChildEnvironment(new URL("http://127.0.0.1:9099"), "launch_environment_abcdefghijklmnopqrstuvwxyz"),
+		).not.toHaveProperty("BREADBOARD_OMP_GATEWAY_TOKEN");
 		process.env.BREADBOARD_HOSTILE_PARENT_SECRET = "must-not-cross";
 		try {
-			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).toEqual({
+			expect(
+				lifecycleChildEnvironment(
+					new URL("http://127.0.0.1:9099"),
+					"launch_environment_abcdefghijklmnopqrstuvwxyz",
+				),
+			).toEqual({
 				PATH: "/usr/bin:/bin",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				BREADBOARD_CLI_HOST: "127.0.0.1",
+				BREADBOARD_CLI_PORT: "9099",
 				RAY_SCE_LOCAL_MODE: "1",
 				RAY_BACKEND_LOG_LEVEL: "error",
 				RAY_LOG_TO_DRIVER: "0",
@@ -780,6 +788,7 @@ describe("LifecycleSupervisor mode authority", () => {
 			});
 			expect(
 				lifecycleChildEnvironment(
+					new URL("http://127.0.0.1:9099"),
 					"launch_environment_abcdefghijklmnopqrstuvwxyz",
 					"/private/engine/state",
 					"/tmp/bb-ray-private",
@@ -788,6 +797,8 @@ describe("LifecycleSupervisor mode authority", () => {
 				PATH: "/usr/bin:/bin",
 				BREADBOARD_ENGINE_LAUNCH_ID: "launch_environment_abcdefghijklmnopqrstuvwxyz",
 				BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+				BREADBOARD_CLI_HOST: "127.0.0.1",
+				BREADBOARD_CLI_PORT: "9099",
 				RAY_SCE_LOCAL_MODE: "1",
 				RAY_BACKEND_LOG_LEVEL: "error",
 				RAY_LOG_TO_DRIVER: "0",
@@ -798,10 +809,18 @@ describe("LifecycleSupervisor mode authority", () => {
 				BREADBOARD_ENGINE_STATE_ROOT: "/private/engine/state",
 				RAY_TMPDIR: "/tmp/bb-ray-private",
 			});
-			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
-				"BREADBOARD_HOSTILE_PARENT_SECRET",
-			);
-			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty("HOME");
+			expect(
+				lifecycleChildEnvironment(
+					new URL("http://127.0.0.1:9099"),
+					"launch_environment_abcdefghijklmnopqrstuvwxyz",
+				),
+			).not.toHaveProperty("BREADBOARD_HOSTILE_PARENT_SECRET");
+			expect(
+				lifecycleChildEnvironment(
+					new URL("http://127.0.0.1:9099"),
+					"launch_environment_abcdefghijklmnopqrstuvwxyz",
+				),
+			).not.toHaveProperty("HOME");
 		} finally {
 			delete process.env.BREADBOARD_HOSTILE_PARENT_SECRET;
 		}
@@ -1126,7 +1145,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		const supervisor = new LifecycleSupervisor(config, {
 			...TEST_LIFECYCLE_DEFAULTS,
 			store,
-			process: createDefaultLifecycleProcessAdapter(undefined, true),
+			process: createDefaultLifecycleProcessAdapter(new URL("http://127.0.0.1:9099"), undefined, true),
 		});
 
 		await expect(supervisor.connect()).rejects.toMatchObject({

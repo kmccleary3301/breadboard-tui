@@ -295,6 +295,7 @@ const ALLOWED_TRANSITIONS: Readonly<Partial<Record<LifecycleStateName, ReadonlyS
 };
 
 export function lifecycleChildEnvironment(
+	endpoint: URL,
 	launchId: string,
 	engineStateRoot?: string,
 	rayRuntimeRoot?: string,
@@ -303,6 +304,8 @@ export function lifecycleChildEnvironment(
 		PATH: "/usr/bin:/bin",
 		BREADBOARD_ENGINE_LAUNCH_ID: launchId,
 		BREADBOARD_LIFECYCLE_BOOTSTRAP_FD: "3",
+		BREADBOARD_CLI_HOST: endpoint.hostname.replace(/^\[|\]$/g, ""),
+		BREADBOARD_CLI_PORT: endpoint.port || (endpoint.protocol === "https:" ? "443" : "80"),
 		// The owned desktop engine executes sessions locally. Starting a private Ray
 		// cluster here delays every launch and duplicates the local server contract.
 		RAY_SCE_LOCAL_MODE: "1",
@@ -431,8 +434,10 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	readonly #runtimeCleanup: RuntimeCleanupStore;
 	readonly #installedEngine: boolean;
 	readonly #gateway: BreadboardRunConfig["gateway"];
+	readonly #endpoint: URL;
 
 	constructor(
+		endpoint: URL,
 		directoryAuthority?: RuntimeCleanupDirectoryAuthority,
 		installedEngine = false,
 		cleanupSeams: RuntimeCleanupStoreSeams = {},
@@ -441,6 +446,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		this.#runtimeCleanup = new RuntimeCleanupStore(directoryAuthority, cleanupSeams);
 		this.#installedEngine = installedEngine;
 		this.#gateway = gateway;
+		this.#endpoint = endpoint;
 	}
 
 	async cleanupExited(identity: ExitedEngineIdentity): Promise<void> {
@@ -463,7 +469,12 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	}
 
 	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
-		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot);
+		return lifecycleChildEnvironment(
+			this.#endpoint,
+			launchId,
+			await this.#runtimeCleanup.stateRoot(),
+			rayRuntimeRoot,
+		);
 	}
 
 	async #spawnBundledVerified(
@@ -892,12 +903,13 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	}
 }
 export function createDefaultLifecycleProcessAdapter(
+	endpoint: URL,
 	directoryAuthority?: RuntimeCleanupDirectoryAuthority,
 	installedEngine = false,
 	cleanupSeams: RuntimeCleanupStoreSeams = {},
 	gateway?: BreadboardRunConfig["gateway"],
 ): LifecycleProcessAdapter {
-	return new DefaultLifecycleProcessAdapter(directoryAuthority, installedEngine, cleanupSeams, gateway);
+	return new DefaultLifecycleProcessAdapter(endpoint, directoryAuthority, installedEngine, cleanupSeams, gateway);
 }
 
 const KEYCHAIN_OUTPUT_LIMIT = 64 * 1024;

@@ -521,6 +521,8 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 			"PATH",
 			"BREADBOARD_ENGINE_LAUNCH_ID",
 			"BREADBOARD_LIFECYCLE_BOOTSTRAP_FD",
+			"BREADBOARD_CLI_HOST",
+			"BREADBOARD_CLI_PORT",
 			"RAY_SCE_LOCAL_MODE",
 			"RAY_BACKEND_LOG_LEVEL",
 			"RAY_LOGGER_LEVEL",
@@ -529,10 +531,14 @@ describe("BBOMP-CORE-52 — process exit, signal, cleanup, and host-terminal res
 			"RAY_ROTATION_BACKUP_COUNT",
 			"RAY_ROTATION_MAX_BYTES",
 		]);
-		expect(Object.keys(lifecycleChildEnvironment("launch-1")).filter(key => !allowedKeys.has(key))).toEqual([]);
+		expect(
+			Object.keys(lifecycleChildEnvironment(new URL("http://127.0.0.1:9099"), "launch-1")).filter(
+				key => !allowedKeys.has(key),
+			),
+		).toEqual([]);
 	});
 	test("[fast] child process environment excludes inherited credentials and HOME", () => {
-		const child = lifecycleChildEnvironment("launch-2");
+		const child = lifecycleChildEnvironment(new URL("http://127.0.0.1:9099"), "launch-2");
 		expect(child).not.toHaveProperty("HOME");
 		expect(child).not.toHaveProperty("BREADBOARD_API_TOKEN");
 	});
@@ -613,7 +619,9 @@ describe("BBOMP-CORE-52 — credential and redaction invariants (4)", () => {
 	test("child launch environment cannot carry a credential even when the parent has one", () => {
 		process.env.BREADBOARD_API_TOKEN = "parent-secret";
 		try {
-			expect(Object.keys(lifecycleChildEnvironment("launch-3"))).not.toContain("BREADBOARD_API_TOKEN");
+			expect(Object.keys(lifecycleChildEnvironment(new URL("http://127.0.0.1:9099"), "launch-3"))).not.toContain(
+				"BREADBOARD_API_TOKEN",
+			);
 		} finally {
 			delete process.env.BREADBOARD_API_TOKEN;
 		}

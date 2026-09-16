@@ -199,11 +199,9 @@ test("real backend rolls back an expired cross-process drain exactly once and re
 		backend = spawn(backendPython!, ["-m", "breadboard_engine.api.cli_bridge.server"], {
 			cwd: verifiedBackend.root,
 			env: {
-				...lifecycleChildEnvironment(launchId, engineStateRoot),
+				...lifecycleChildEnvironment(new URL(baseUrl), launchId, engineStateRoot),
 				PYTHONPATH: verifiedBackend.root,
 				PYTHONUNBUFFERED: "1",
-				BREADBOARD_CLI_HOST: "127.0.0.1",
-				BREADBOARD_CLI_PORT: String(port),
 			},
 			stdio: ["ignore", "ignore", "pipe", "pipe"],
 		});
