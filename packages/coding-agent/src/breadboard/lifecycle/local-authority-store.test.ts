@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -411,6 +411,22 @@ describe("LocalAuthorityStore", () => {
 			store.withExclusiveLock(endpoint, () => store.commit(endpoint, null, record(), { ownerCredential })),
 		).rejects.toMatchObject({ code: "root_integrity" });
 		expect(await readdir(root)).toEqual([]);
+	});
+
+	test("rejects a persisted start claim with a truncated process identity", async () => {
+		const root = await temporaryRoot();
+		const store = new LocalAuthorityStore(root);
+		await store.withExclusiveLock(endpoint, async () => {
+			const claimed = await store.claimStart(endpoint);
+			if (claimed.kind !== "claimed") throw new Error("expected claimed start");
+			const name = (await readdir(root)).find(entry => entry.endsWith(".starting.json"));
+			if (!name) throw new Error("missing persisted claim");
+			const claimPath = join(root, name);
+			const claim = JSON.parse(await readFile(claimPath, "utf8"));
+			claim.processStartToken = "x";
+			await writeFile(claimPath, JSON.stringify(claim));
+			await expect(store.claimStart(endpoint)).rejects.toMatchObject({ code: "start_claim_integrity" });
+		});
 	});
 
 	test("recovers a bound start claim with independently mutable binary bootstrap material", async () => {

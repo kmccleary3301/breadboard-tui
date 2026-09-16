@@ -576,6 +576,7 @@ function assertStartClaim(value: unknown): LocalStartClaim {
 		!Number.isSafeInteger(claim.pid) ||
 		claim.pid < 1 ||
 		typeof claim.processStartToken !== "string" ||
+		claim.processStartToken.length < 3 ||
 		!Number.isSafeInteger(claim.createdAtUnix) ||
 		(gatewayIdentity !== undefined && (typeof gatewayIdentity !== "string" || !SHA256.test(gatewayIdentity))) ||
 		(pendingCount !== 0 && pendingCount !== pendingFields.length) ||

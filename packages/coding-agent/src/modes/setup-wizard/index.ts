@@ -1,3 +1,4 @@
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import type { Settings } from "../../config/settings";
 import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
@@ -76,6 +77,7 @@ export interface RunSetupWizardOptions {
 	markComplete?: boolean;
 	playWelcomeIntro?: boolean;
 	providerAuthPort?: ProviderAuthPort;
+	nativeAuthStorage?: AuthStorage;
 	identity?: ProductIdentity;
 	now?: () => number;
 }
@@ -89,6 +91,7 @@ export async function runSetupWizard(
 	const component = new SetupWizardComponent(ctx, scenes, {
 		identity: options.identity ?? ACTIVE_PRODUCT_IDENTITY,
 		...(options.providerAuthPort ? { providerAuthPort: options.providerAuthPort } : {}),
+		nativeAuthStorage: options.nativeAuthStorage,
 		...(options.now ? { now: options.now } : {}),
 	});
 	const overlay = ctx.ui.showOverlay(component, {

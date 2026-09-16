@@ -1,3 +1,4 @@
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { Component, SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import type { ProviderAuthPort } from "../../../breadboard/provider-auth-port";
 import type { ProductIdentity } from "../../../product-identity";
@@ -9,6 +10,7 @@ export interface SetupSceneHost {
 	ctx: InteractiveModeContext;
 	identity: ProductIdentity;
 	providerAuthPort?: ProviderAuthPort;
+	nativeAuthStorage?: AuthStorage;
 	requestRender(): void;
 	finish(result: SetupSceneResult): void;
 	setFocus(component: Component | null): void;

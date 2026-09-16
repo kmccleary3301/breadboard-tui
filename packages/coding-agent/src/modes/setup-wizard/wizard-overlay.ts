@@ -1,3 +1,4 @@
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import {
 	type Component,
 	matchesKey,
@@ -28,6 +29,7 @@ const SCENE_TRANSITION_MS = 420;
 export interface SetupWizardComponentOptions {
 	readonly identity: ProductIdentity;
 	readonly providerAuthPort?: ProviderAuthPort;
+	readonly nativeAuthStorage?: AuthStorage;
 	readonly now?: () => number;
 	readonly reduceMotion?: boolean;
 }
@@ -338,6 +340,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 			ctx: this.ctx,
 			identity: this.options.identity,
 			providerAuthPort: this.options.providerAuthPort,
+			nativeAuthStorage: this.options.nativeAuthStorage,
 			requestRender: () => this.ctx.ui.requestRender(),
 			finish: (_result: SetupSceneResult) => this.#finishScene(),
 			setFocus: component => {

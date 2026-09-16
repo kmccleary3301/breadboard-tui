@@ -101,6 +101,29 @@ describe("runRootCommand — startup early exits", () => {
 	});
 });
 
+it("rejects shared subscription auth in print mode before opening the credential store", async () => {
+	using ompDir = TempDir.createSync("@bb-shared-auth-admission-");
+	fs.writeFileSync(path.join(ompDir.path(), "agent.db"), "");
+	const previous = process.env.BREADBOARD_OMP_AGENT_DIR;
+	process.env.BREADBOARD_OMP_AGENT_DIR = ompDir.path();
+	let discoverCalls = 0;
+	try {
+		const args = ["--print", "do not run inference"];
+		await expect(
+			runRootCommand(parseArgs(args), args, {
+				discoverAuthStorage: async () => {
+					discoverCalls += 1;
+					throw new Error("unexpected credential-store discovery");
+				},
+			}),
+		).rejects.toBeInstanceOf(Error);
+		expect(discoverCalls).toBe(0);
+	} finally {
+		if (previous === undefined) delete process.env.BREADBOARD_OMP_AGENT_DIR;
+		else process.env.BREADBOARD_OMP_AGENT_DIR = previous;
+	}
+});
+
 describe("BreadBoard startup network policy", () => {
 	it("keeps BreadBoard startup offline without changing native OMP policy", () => {
 		expect(resolveStartupNetworkPolicy(true)).toEqual({

@@ -1,9 +1,11 @@
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import type { InteractiveModeContext } from "../types";
 
 export async function runProviderSetupWizard(
 	ctx: InteractiveModeContext,
 	providerAuthPort?: ProviderAuthPort,
+	nativeAuthStorage?: AuthStorage,
 ): Promise<void> {
 	// Keep the full setup wizard behind the existing cold-start boundary; a static
 	// import here would load provider/OAuth/search/theme setup deps on every TUI startup.
@@ -17,5 +19,6 @@ export async function runProviderSetupWizard(
 		markComplete: false,
 		playWelcomeIntro: false,
 		providerAuthPort,
+		nativeAuthStorage,
 	});
 }

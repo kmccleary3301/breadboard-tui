@@ -119,7 +119,9 @@ export class SignInTab implements SetupTab {
 	constructor(private readonly host: SetupSceneHost) {
 		this.#providerAuthPort = host.providerAuthPort;
 		if (!this.#providerAuthPort) {
-			if (host.identity.id === OMP_PRODUCT_IDENTITY.id) {
+			if (host.nativeAuthStorage) {
+				this.#authStorage = host.nativeAuthStorage;
+			} else if (host.identity.id === OMP_PRODUCT_IDENTITY.id) {
 				this.#authStorage = host.ctx.session.modelRegistry.authStorage;
 			} else {
 				this.#productAuthUnavailable = true;
@@ -349,7 +351,9 @@ export class SignInTab implements SetupTab {
 					"dim",
 					this.#providerAuthPort
 						? `Credentials managed by ${BREADBOARD_PRODUCT_IDENTITY.displayName} auth broker`
-						: `Credentials saved to ${getAgentDbPath()}`,
+						: this.host.nativeAuthStorage
+							? "Credentials saved to the shared OMP auth store"
+							: `Credentials saved to ${getAgentDbPath()}`,
 				),
 			];
 			this.#authUrl = undefined;

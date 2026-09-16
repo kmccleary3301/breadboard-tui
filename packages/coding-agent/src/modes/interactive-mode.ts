@@ -12,7 +12,7 @@ import {
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, Message, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, AuthStorage, ImageContent, Message, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { execReplace } from "@oh-my-pi/pi-natives";
 import type {
@@ -925,6 +925,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			transition: () => Promise<boolean>,
 		) => Promise<boolean>,
 		breadboardSessionId?: () => string,
+		private readonly nativeAuthStorage?: AuthStorage,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -5978,7 +5979,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	showProviderSetup(): Promise<void> {
-		return runProviderSetupWizard(this, this.providerAuthPort);
+		return runProviderSetupWizard(this, this.providerAuthPort, this.nativeAuthStorage);
 	}
 
 	showHookConfirm(title: string, message: string): Promise<boolean> {

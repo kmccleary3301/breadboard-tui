@@ -554,6 +554,7 @@ async function runInteractiveMode(
 	startupLease?: ComposerLease,
 	breadboard?: {
 		readonly providerAuth?: ProviderAuthPort;
+		readonly nativeAuthStorage?: AuthStorage;
 		readonly close: () => Promise<void>;
 		readonly harnessClient?: BreadboardClient;
 		readonly harnessId?: string;
@@ -585,6 +586,7 @@ async function runInteractiveMode(
 			breadboard?.setSessionModel,
 			breadboard?.switchHarnessSession,
 			breadboard?.sessionId,
+			breadboard?.nativeAuthStorage,
 		);
 		startupLease?.adopt();
 	} catch (error) {
@@ -634,7 +636,10 @@ async function runInteractiveMode(
 	}
 
 	if (setupWizard && setupScenes.length > 0) {
-		await setupWizard.runSetupWizard(mode, setupScenes, { providerAuthPort: breadboard?.providerAuth });
+		await setupWizard.runSetupWizard(mode, setupScenes, {
+			providerAuthPort: breadboard?.providerAuth,
+			nativeAuthStorage: breadboard?.nativeAuthStorage,
+		});
 	}
 
 	// Consume failures immediately, but defer any banner until the transcript is stable.
@@ -1577,6 +1582,9 @@ export async function runRootCommand(
 		// A configured-but-unreachable auth broker still receives the actionable
 		// startup error below, while its cache/config I/O overlaps settings I/O.
 		const ompAgentDir = resolveBreadboardOmpAgentDir(process.env.BREADBOARD_OMP_AGENT_DIR);
+		if (ompAgentDir !== undefined && !isInteractive) {
+			throw new Error("BREADBOARD_OMP_AGENT_DIR requires interactive BreadBoard execution");
+		}
 		const discoverAuth = deps.discoverAuthStorage ?? discoverAuthStorage;
 		const authStoragePromise = logger.time("discoverAuthStorage", () => discoverAuth(ompAgentDir));
 		authStoragePromise.catch(() => {});
@@ -2111,6 +2119,7 @@ export async function runRootCommand(
 						},
 						{
 							modelRegistry,
+							nativeAuthStorage: authStorage,
 							startOmpGateway:
 								ompAgentDir === undefined
 									? undefined
@@ -2325,6 +2334,7 @@ export async function runRootCommand(
 						breadboardRuntime
 							? {
 									providerAuth: breadboardRuntime.providerAuth,
+									nativeAuthStorage: breadboardRuntime.nativeAuthStorage,
 									close: breadboardRuntime.close,
 									harnessClient: breadboardRuntime.harnessClient,
 									harnessId: breadboardRuntime.harnessId,

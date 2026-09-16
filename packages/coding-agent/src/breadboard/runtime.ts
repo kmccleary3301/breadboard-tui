@@ -296,6 +296,7 @@ export function resolveBreadboardSessionTarget(
 }
 export interface PreparedBreadboardRuntime {
 	readonly providerAuth?: ProviderAuthPort;
+	readonly nativeAuthStorage?: AuthStorage;
 	readonly harnessClient?: BreadboardClient;
 	readonly harnessId?: string;
 	/** Apply the model control through the lifecycle-aware engine port. */
@@ -328,6 +329,7 @@ type BreadboardModelRegistry = Pick<ModelRegistry, "getAll">;
 export interface BreadboardRuntimeAuthority {
 	readonly modelRegistry: BreadboardModelRegistry;
 	readonly startOmpGateway?: () => BreadboardOmpGateway;
+	readonly nativeAuthStorage?: AuthStorage;
 	readonly requestPermission: E4PermissionHandler;
 	readonly selectedModel?: Pick<Model, "provider" | "id">;
 }
@@ -812,6 +814,7 @@ export async function prepareConnectedBreadboardRuntime(
 			harnessId: options.harnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
 			setSessionModel: model => options.engine.setSessionModel(opened!.sessionId, model),
 			providerAuth: options.exposeProviderAuth === false ? undefined : options.engine.providerAuth,
+			nativeAuthStorage: options.exposeProviderAuth === false ? options.nativeAuthStorage : undefined,
 			sessionId: initialBinding.sessionId,
 			models: catalogModels,
 			model,
@@ -1163,6 +1166,7 @@ export async function prepareBreadboardRuntime(
 				sessionBinding: binding,
 				allowTerminalSnapshotRecovery,
 				modelRegistry: authority.modelRegistry,
+				nativeAuthStorage: authority.nativeAuthStorage,
 				requestPermission: authority.requestPermission,
 				exposeProviderAuth: gateway === undefined,
 			});
