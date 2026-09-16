@@ -25,6 +25,7 @@
 - OpenRouter Responses sessions now send full conversation history instead of unsupported server-side continuation IDs.
 - Injected mode instructions no longer create verification requirements the user did not request.
 - Text tool parsing skips inactive formats, preventing an embedded patch from executing twice.
+- Completion-only assistant messages now remain pending until persisted, preventing later session observations from advancing the durable cursor past them and cancelling coding turns.
 - Fixed upstream sync verification replaying already-resolved merge conflicts in its disposable worktree.
 - BreadBoard project model roles now read and persist in `.breadboard/config.yml` without modifying native `.omp` settings.
 - Disposable upstream verification now generates tool views before running its source proofs.

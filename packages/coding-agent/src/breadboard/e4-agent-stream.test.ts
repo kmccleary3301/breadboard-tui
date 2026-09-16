@@ -24,6 +24,7 @@ import { collectPendingToolCalls } from "../session/exit-diagnostics";
 import { convertToLlm } from "../session/messages";
 import { SessionManager } from "../session/session-manager";
 import { E4AgentStreamBridge, type E4BackendModelAttribution } from "./e4-agent-stream";
+import { advanceProjectionBinding, parseBreadboardSessionBindingData } from "./session-binding";
 import type { OpenedSession } from "./session-port";
 
 const normalizePersistedMessage = <T>(message: T): T =>
@@ -468,6 +469,54 @@ describe("E4AgentStreamBridge", () => {
 		expect(result.content).toEqual([{ type: "text", text: "ready" }]);
 		expect(committed).toEqual(expect.arrayContaining([1, 3, 4]));
 		await bridge.close();
+	});
+
+	test("keeps completion-only text durable before later observations advance the cursor", async () => {
+		const agentEvents: AgentEvent[] = [];
+		let binding = parseBreadboardSessionBindingData({
+			schemaVersion: "breadboard.session-binding.v4",
+			sessionId: "session-1",
+			previousSessionId: null,
+			replayConfigurationDigest: "sha256:replay",
+			cursor: { eventId: null, sequence: 0 },
+			ownedSubmissions: [],
+		});
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[
+					started,
+					wireEvent(3, "assistant.message.end", { text: "Read the existing file." }),
+					wireEvent(4, "session_control", { action: "observed" }),
+					wireEvent(5, "turn_start", {}),
+					wireEvent(6, "assistant.message.delta", { text: "Finished." }),
+					wireEvent(7, "assistant.message.end", { text: "Finished." }),
+					wireEvent(8, "turn_completed", {}),
+				],
+				[],
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted(cursor, owned) {
+				binding = advanceProjectionBinding(binding, cursor, owned);
+			},
+			async emitAgentEvent(event) {
+				agentEvents.push(event);
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+		try {
+			const result = await (await startBridgeStream(bridge, model, context)).result();
+			expect(result.stopReason).toBe("stop");
+			expect(result.content).toEqual([{ type: "text", text: "Finished." }]);
+			expect(
+				agentEvents.flatMap(event =>
+					event.type === "message_end" && event.message.role === "assistant" ? [event.message.content] : [],
+				),
+			).toEqual([[{ type: "text", text: "Read the existing file." }]]);
+		} finally {
+			await bridge.close();
+		}
+		expect(binding.cursor.sequence).toBe(8);
 	});
 
 	test("reuses the exact structured submission after an ambiguous failure without retrying automatically", async () => {

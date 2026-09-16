@@ -574,10 +574,7 @@ export class E4AgentStreamBridge {
 		return created;
 	}
 
-	#requestCancellation(
-		turnId: TurnId,
-		reason: "user_requested" | "timeout",
-	): Promise<CancellationOutcome> {
+	#requestCancellation(turnId: TurnId, reason: "user_requested" | "timeout"): Promise<CancellationOutcome> {
 		const state = this.#ensureCancellationRequest(turnId, reason);
 		if (state.accepted) return Promise.resolve(state.accepted);
 		if (state.inFlight) return state.inFlight;
@@ -1065,6 +1062,7 @@ export class E4AgentStreamBridge {
 					this.#appendText(sink, event.payload.text.slice(sink.messageText.length));
 				}
 				sink.pendingTextCompletion = event;
+				if (sink.messageText) this.#undurableSinks.add(sink);
 				return;
 			case "assistant_tool_call_started":
 				await this.#projectStreamingToolStart(sink, event);
@@ -1688,10 +1686,7 @@ export class E4AgentStreamBridge {
 		}
 	}
 
-	async #finishAbortedSink(
-		sink: TurnSink,
-		cancellation: Promise<CancellationOutcome> | undefined,
-	): Promise<void> {
+	async #finishAbortedSink(sink: TurnSink, cancellation: Promise<CancellationOutcome> | undefined): Promise<void> {
 		const deadline = Date.now() + ACTIVE_TURN_CLOSE_TIMEOUT_MS;
 		const permissionTeardown = sink.permissionTeardown;
 		const outcome =
@@ -1711,10 +1706,7 @@ export class E4AgentStreamBridge {
 		}
 	}
 
-	#trackCancellation(
-		sink: TurnSink,
-		reason: "user_requested" | "timeout",
-	): Promise<CancellationOutcome> | undefined {
+	#trackCancellation(sink: TurnSink, reason: "user_requested" | "timeout"): Promise<CancellationOutcome> | undefined {
 		if (sink.cancelRequested || sink.turnId === undefined) return undefined;
 		sink.cancelRequested = true;
 		return this.#requestCancellation(sink.turnId, reason);
@@ -1749,10 +1741,7 @@ export class E4AgentStreamBridge {
 		return teardown;
 	}
 
-	#cancelSink(
-		sink: TurnSink,
-		reason: "user_requested" | "timeout",
-	): Promise<CancellationOutcome> | undefined {
+	#cancelSink(sink: TurnSink, reason: "user_requested" | "timeout"): Promise<CancellationOutcome> | undefined {
 		const owner = sink.permissionOwner;
 		if (owner !== undefined) return this.#denyPermissionAndCancel(sink, owner);
 		return this.#trackCancellation(sink, reason);
