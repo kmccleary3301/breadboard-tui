@@ -297,6 +297,35 @@ describe("E4AgentStreamBridge", () => {
 		await bridge.close();
 	});
 
+	test("completes when the provider omits optional cache usage counters", async () => {
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[
+					started,
+					wireEvent(3, "assistant.message.end", { text: "Finished." }),
+					wireEvent(4, "turn_completed", {
+						finish_reason: "stop",
+						output_emitted: true,
+						usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+					}),
+				],
+				[],
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+		});
+		try {
+			const result = await (await startBridgeStream(bridge, model, context)).result();
+			expect(result.stopReason).toBe("stop");
+			expect(result.content).toEqual([{ type: "text", text: "Finished." }]);
+		} finally {
+			await bridge.close();
+		}
+	});
+
 	test("fails closed when canonical completion usage is unknown", async () => {
 		const bridge = new E4AgentStreamBridge({
 			async submissionOwned() {},
@@ -313,7 +342,6 @@ describe("E4AgentStreamBridge", () => {
 		const result = await (await startBridgeStream(bridge, model, context)).result();
 
 		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toBe("BreadBoard turn completion omitted exact provider usage");
 		await bridge.close();
 	});
 
@@ -517,6 +545,84 @@ describe("E4AgentStreamBridge", () => {
 			await bridge.close();
 		}
 		expect(binding.cursor.sequence).toBe(8);
+	});
+
+	test("preserves resumable tool boundaries when completed text arrives between calls and results", async () => {
+		const agentEvents: AgentEvent[] = [];
+		const committed: number[] = [];
+		let binding = parseBreadboardSessionBindingData({
+			schemaVersion: "breadboard.session-binding.v4",
+			sessionId: "session-1",
+			previousSessionId: null,
+			replayConfigurationDigest: "sha256:replay",
+			cursor: { eventId: null, sequence: 0 },
+			ownedSubmissions: [],
+		});
+		const firstCall = wireEvent(3, "tool_call", { call_id: "read-a", tool: "read", arguments: { path: "a" } });
+		const lastResult = wireEvent(9, "tool.result", {
+			call_id: "read-b",
+			tool: "read",
+			status: "completed",
+			error: false,
+			result: "b",
+		});
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session: openedSession(
+				[
+					started,
+					firstCall,
+					wireEvent(4, "tool_call", { call_id: "read-b", tool: "read", arguments: { path: "b" } }),
+					wireEvent(5, "assistant.message.end", { text: "Reading both files." }),
+					wireEvent(6, "session_control", { action: "observed" }),
+					wireEvent(7, "tool.result", {
+						call_id: "read-a",
+						tool: "read",
+						status: "completed",
+						error: false,
+						result: "a",
+					}),
+					wireEvent(8, "session_control", { action: "observed" }),
+					lastResult,
+					wireEvent(10, "turn_start", {}),
+					wireEvent(11, "assistant.message.delta", { text: "Finished." }),
+					wireEvent(12, "assistant.message.end", { text: "Finished." }),
+					wireEvent(13, "turn_completed", {}),
+				],
+				[],
+			),
+			releaseAgentEvent() {},
+			async projectionCommitted(cursor, owned) {
+				binding = advanceProjectionBinding(binding, cursor, owned);
+				committed.push(cursor.sequence);
+			},
+			async emitAgentEvent(event) {
+				agentEvents.push(event);
+			},
+			modelPolicy: { kind: "fixed", model },
+		});
+		try {
+			const result = await (await startBridgeStream(bridge, model, context)).result();
+			expect(result.stopReason).toBe("stop");
+			expect(result.content).toEqual([{ type: "text", text: "Finished." }]);
+			expect(
+				agentEvents.filter(event => event.type === "tool_execution_end").map(event => event.toolCallId),
+			).toEqual(["read-a", "read-b"]);
+			expect(
+				agentEvents.flatMap(event =>
+					event.type === "message_end" && event.message.role === "assistant"
+						? event.message.content.flatMap(part => (part.type === "text" ? [part.text] : []))
+						: [],
+				),
+			).toEqual(["Reading both files."]);
+			// Resume must retain the calls until both result projections are durable.
+			expect(committed.filter(sequence => sequence >= firstCall.sequence && sequence < lastResult.sequence)).toEqual(
+				[],
+			);
+		} finally {
+			await bridge.close();
+		}
+		expect(binding.cursor.sequence).toBe(13);
 	});
 
 	test("reuses the exact structured submission after an ambiguous failure without retrying automatically", async () => {

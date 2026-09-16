@@ -1352,6 +1352,7 @@ export class E4AgentStreamBridge {
 		if (sink.projectedToolResultIds.has(toolCallId)) return;
 		const toolCall = sink.toolCallsByCallId.get(toolCallId);
 		if (!toolCall) throw new Error("BreadBoard replay began mid-tool without the retained tool call");
+		if (sink.pendingTextCompletion) await this.#flushAssistantText(sink);
 		sink.projectedToolResultIds.add(toolCallId);
 		sink.streamedToolCallsByCallId.delete(toolCallId);
 		if (!this.#receipts.has(String(event.eventId))) {
@@ -1375,7 +1376,9 @@ export class E4AgentStreamBridge {
 			await this.#emit(event, "message_start", { type: "message_start", message }, sink);
 			await this.#emit(event, "message_end", { type: "message_end", message }, sink);
 		}
-		this.#undurableSinks.delete(sink);
+		if (!sink.messageText && sink.projectedToolCallIds.size === sink.projectedToolResultIds.size) {
+			this.#undurableSinks.delete(sink);
+		}
 		await this.#commit(event, sink.pendingProjectionKeys.splice(0));
 		sink.toolCallsByCallId.delete(toolCallId);
 	}
@@ -1466,7 +1469,9 @@ export class E4AgentStreamBridge {
 			await this.#emit(completion, "message_start", { type: "message_start", message }, sink);
 			await this.#emit(completion, "message_end", { type: "message_end", message }, sink);
 		}
-		this.#undurableSinks.delete(sink);
+		if (sink.projectedToolCallIds.size === sink.projectedToolResultIds.size) {
+			this.#undurableSinks.delete(sink);
+		}
 		await this.#commit(completion, sink.pendingProjectionKeys.splice(0));
 		sink.text = "";
 		sink.messageText = "";
@@ -1969,8 +1974,6 @@ function completionUsage(event: TurnCompletedEvent): Usage {
 		usage === null ||
 		usage.inputTokens === undefined ||
 		usage.outputTokens === undefined ||
-		usage.cacheReadTokens === undefined ||
-		usage.cacheWriteTokens === undefined ||
 		usage.totalTokens === undefined
 	) {
 		throw new Error("BreadBoard turn completion omitted exact provider usage");
@@ -1978,8 +1981,8 @@ function completionUsage(event: TurnCompletedEvent): Usage {
 	return {
 		input: usage.inputTokens,
 		output: usage.outputTokens,
-		cacheRead: usage.cacheReadTokens,
-		cacheWrite: usage.cacheWriteTokens,
+		cacheRead: usage.cacheReadTokens ?? 0,
+		cacheWrite: usage.cacheWriteTokens ?? 0,
 		totalTokens: usage.totalTokens,
 		...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
