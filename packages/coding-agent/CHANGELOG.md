@@ -18,6 +18,13 @@
 
 - BreadBoard broker-authenticated main turns no longer require a second credential in OMP's native store; native side requests retain their existing authentication.
 - Preserved text-parsed BreadBoard tool call IDs through execution and result delivery.
+- Live provider streams now preserve whitespace-only chunks and accept reasoning completion events and bounded encrypted reasoning payloads.
+- Public harness definitions now use the runtime dialect that applies their configured modes, prompts, and tool lists.
+- Existing files no longer satisfy requested-edit completion without a successful write receipt; completion summaries no longer claim unrecorded verification.
+- Search-and-replace now reports missing search text without rewriting or creating a file.
+- OpenRouter Responses sessions now send full conversation history instead of unsupported server-side continuation IDs.
+- Injected mode instructions no longer create verification requirements the user did not request.
+- Text tool parsing skips inactive formats, preventing an embedded patch from executing twice.
 - Fixed upstream sync verification replaying already-resolved merge conflicts in its disposable worktree.
 - BreadBoard project model roles now read and persist in `.breadboard/config.yml` without modifying native `.omp` settings.
 - Disposable upstream verification now generates tool views before running its source proofs.
