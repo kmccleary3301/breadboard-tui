@@ -26,7 +26,7 @@ const ECHILD = 10;
 const PROC_PIDTBSDINFO = 3;
 const PROC_PIDTBSDINFO_SIZE = 136;
 const BOOTSTRAP_FD = 3;
-const MAX_BOOTSTRAP_BYTES = 43;
+const MAX_BOOTSTRAP_BYTES = 4096;
 const MAX_ARGUMENTS = 64;
 const MAX_ENVIRONMENT_ENTRIES = 64;
 const MAX_C_STRING_BYTES = 64 * 1024;
@@ -67,7 +67,7 @@ export interface DarwinVerifiedSpawnOptions {
 	readonly argv: readonly string[];
 	/** Complete child environment. The parent environment is never inherited. */
 	readonly env: Readonly<Record<string, string>>;
-	/** At most one 43-byte base64url credential. This buffer is zeroed on every return path. */
+	/** Opaque UTF-8 launch-envelope bytes, bounded to 1..4096. This buffer is zeroed on every return path. */
 	readonly bootstrap: Uint8Array;
 	readonly bindIdentity: (pid: number, startToken: string) => Promise<void>;
 	readonly native?: DarwinVerifiedSpawnNative;
@@ -734,7 +734,7 @@ async function cleanupFailedSpawn(
 /**
  * Spawn an arm64 Mach-O stopped before user code, attest the kernel-loaded
  * CodeDirectory, resume it into the inherited-fd bootstrap gate, bind its
- * stable process token, and deliver fd3 bootstrap bytes as the final authority.
+ * stable process token, and deliver opaque fd3 launch-envelope bytes as the final authority.
  */
 export async function spawnDarwinVerified(options: DarwinVerifiedSpawnOptions): Promise<DarwinVerifiedProcess> {
 	if (options.bootstrap.byteLength === 0 || options.bootstrap.byteLength > MAX_BOOTSTRAP_BYTES) {

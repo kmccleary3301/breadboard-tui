@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Shared OMP authentication now passes the gateway bearer through the verified bootstrap descriptor, allowing macOS tool isolation without exposing credentials in the engine's startup environment.
 - BreadBoard broker-authenticated main turns no longer require a second credential in OMP's native store; native side requests retain their existing authentication.
 - Preserved text-parsed BreadBoard tool call IDs through execution and result delivery.
 - Live provider streams now preserve whitespace-only chunks and accept reasoning completion events and bounded encrypted reasoning payloads.

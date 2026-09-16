@@ -298,7 +298,6 @@ export function lifecycleChildEnvironment(
 	launchId: string,
 	engineStateRoot?: string,
 	rayRuntimeRoot?: string,
-	gateway?: BreadboardRunConfig["gateway"],
 ): Readonly<Record<string, string>> {
 	return Object.freeze({
 		PATH: "/usr/bin:/bin",
@@ -315,13 +314,34 @@ export function lifecycleChildEnvironment(
 		RAY_ROTATION_MAX_BYTES: "262144",
 		...(engineStateRoot === undefined ? {} : { BREADBOARD_ENGINE_STATE_ROOT: engineStateRoot }),
 		...(rayRuntimeRoot === undefined ? {} : { RAY_TMPDIR: rayRuntimeRoot }),
-		...(gateway === undefined
-			? {}
-			: {
-					BREADBOARD_OMP_GATEWAY_URL: gateway.url,
-					BREADBOARD_OMP_GATEWAY_TOKEN: gateway.token,
-				}),
 	});
+}
+
+const ENGINE_LAUNCH_BOOTSTRAP_SCHEMA = "bb.engine_launch_bootstrap.v2" as const;
+const ENGINE_LAUNCH_BOOTSTRAP_CREDENTIAL_BYTES = 43;
+const ENGINE_LAUNCH_BOOTSTRAP_MAX_BYTES = 4096;
+const BASE64URL_CREDENTIAL_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+function serializeEngineLaunchBootstrap(bootstrap: Buffer, gateway?: BreadboardRunConfig["gateway"]): Buffer {
+	if (bootstrap.byteLength !== ENGINE_LAUNCH_BOOTSTRAP_CREDENTIAL_BYTES)
+		throw new Error("engine launch bootstrap credential must contain exactly 43 bytes");
+	const bootstrapCredential = credentialText(bootstrap);
+	if (!BASE64URL_CREDENTIAL_PATTERN.test(bootstrapCredential))
+		throw new Error("engine launch bootstrap credential is not canonical base64url");
+	const envelope =
+		gateway === undefined
+			? { schemaVersion: ENGINE_LAUNCH_BOOTSTRAP_SCHEMA, bootstrapCredential }
+			: {
+					schemaVersion: ENGINE_LAUNCH_BOOTSTRAP_SCHEMA,
+					bootstrapCredential,
+					ompGateway: { url: gateway.url, token: gateway.token },
+				};
+	const encoded = Buffer.from(JSON.stringify(envelope), "utf8");
+	if (encoded.byteLength > ENGINE_LAUNCH_BOOTSTRAP_MAX_BYTES) {
+		encoded.fill(0);
+		throw new Error(`engine launch bootstrap envelope exceeds ${ENGINE_LAUNCH_BOOTSTRAP_MAX_BYTES} bytes`);
+	}
+	return encoded;
 }
 
 function mappedFailure(mode: BreadboardRunConfig["mode"], error: unknown, attempt = 0): LifecycleResult {
@@ -443,7 +463,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 	}
 
 	async #childEnvironment(launchId: string, rayRuntimeRoot: string): Promise<Readonly<Record<string, string>>> {
-		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot, this.#gateway);
+		return lifecycleChildEnvironment(launchId, await this.#runtimeCleanup.stateRoot(), rayRuntimeRoot);
 	}
 
 	async #spawnBundledVerified(
@@ -462,6 +482,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			| undefined;
 		let cleanupPersisted = false;
 		let cleanupIdentity: ExitedEngineIdentity | undefined;
+		let encodedBootstrap: Buffer | undefined;
 		try {
 			const runtimeRootPath = await launchRuntimeRootPath("bb-engine-runtime-", launchId);
 			extracted = await extractVerifiedEngineRuntimeBundle({
@@ -475,12 +496,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			const retained = extracted;
 			failedSpawnOwnership = { extracted: retained, rayRuntimeRoot: retainedRayRuntimeRoot };
+			const launchBootstrap = serializeEngineLaunchBootstrap(bootstrap, this.#gateway);
+			encodedBootstrap = launchBootstrap;
 			const verified = await spawnDarwinVerified({
 				executablePath: retained.executablePath,
 				executableBytes: retained.executableBytes,
 				argv: artifact.argv,
 				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
-				bootstrap,
+				bootstrap: launchBootstrap,
 				bindIdentity: async (pid, startToken) => {
 					await bindIdentity(pid, startToken);
 					cleanupIdentity = { launchId, pid, startToken };
@@ -609,6 +632,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			}
 			throw error;
 		} finally {
+			encodedBootstrap?.fill(0);
 			bootstrap.fill(0);
 			await extracted?.cleanup().catch(() => undefined);
 			if (rayRuntimeRoot !== undefined) {
@@ -635,6 +659,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 		let failedSpawnRayRuntimeRoot: string | undefined;
 		let cleanupPersisted = false;
 		let cleanupIdentity: ExitedEngineIdentity | undefined;
+		let encodedBootstrap: Buffer | undefined;
 		try {
 			source = await open(artifact.executablePath, constants.O_RDONLY | constants.O_NOFOLLOW);
 			const sourceMetadata = await source.stat();
@@ -677,12 +702,14 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			rayRuntimeRoot = await createPrivateLaunchDirectory("bb-ray-", launchId);
 			const retainedRayRuntimeRoot = rayRuntimeRoot;
 			failedSpawnRayRuntimeRoot = retainedRayRuntimeRoot;
+			const launchBootstrap = serializeEngineLaunchBootstrap(bootstrap, this.#gateway);
+			encodedBootstrap = launchBootstrap;
 			const verified = await spawnDarwinVerified({
 				executablePath: snapshotPath,
 				executableBytes,
 				argv: artifact.argv,
 				env: await this.#childEnvironment(launchId, retainedRayRuntimeRoot),
-				bootstrap,
+				bootstrap: launchBootstrap,
 				bindIdentity: async (pid, startToken) => {
 					await bindIdentity(pid, startToken);
 					cleanupIdentity = { launchId, pid, startToken };
@@ -787,6 +814,7 @@ class DefaultLifecycleProcessAdapter implements LifecycleProcessAdapter {
 			}
 			throw error;
 		} finally {
+			encodedBootstrap?.fill(0);
 			bootstrap.fill(0);
 			await Promise.allSettled([
 				source?.close(),

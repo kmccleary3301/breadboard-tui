@@ -45,6 +45,11 @@ const roots: string[] = [];
 const executableSha256 = `sha256:${"a".repeat(64)}` as const;
 const engineSourceSha256 = `sha256:${"b".repeat(64)}` as const;
 const backendCommit = "c".repeat(40);
+const TEST_BOOTSTRAP_CREDENTIAL = "A".repeat(43);
+const TEST_BOOTSTRAP_ENVELOPE = JSON.stringify({
+	schemaVersion: "bb.engine_launch_bootstrap.v2",
+	bootstrapCredential: TEST_BOOTSTRAP_CREDENTIAL,
+});
 const artifact: EngineArtifact = {
 	kind: "direct-executable",
 	executablePath: "/usr/bin/false",
@@ -311,6 +316,7 @@ async function pathExists(path: string): Promise<boolean> {
 async function exerciseRejectedCleanupPersistence(
 	artifact: EngineArtifact,
 	obstructRecordReadback = false,
+	gateway?: BreadboardRunConfig["gateway"],
 ): Promise<void> {
 	const authorityRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-fault-"));
 	roots.push(authorityRoot);
@@ -338,9 +344,10 @@ async function exerciseRejectedCleanupPersistence(
 				throw new Error("synthetic cleanup persistence failure");
 			},
 		},
+		gateway,
 	);
 	const bound = Promise.withResolvers<{ readonly pid: number; readonly startToken: string }>();
-	const bootstrap = Buffer.from("fixture\n", "utf8");
+	const bootstrap = Buffer.from(TEST_BOOTSTRAP_CREDENTIAL, "ascii");
 	const error = await adapter
 		.spawnVerified(artifact, launchId, bootstrap, async (pid, startToken) => {
 			bound.resolve({ pid, startToken });
@@ -376,7 +383,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 		await exerciseRejectedCleanupPersistence({
 			kind: "direct-executable",
 			executablePath: "/bin/sh",
-			argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+			argv: ["-c", `IFS= read -r value <&3; test "$value" = '${TEST_BOOTSTRAP_ENVELOPE}'`],
 			argvSha256: artifact.argvSha256,
 			executableSha256: executableDigest,
 			engineSourceSha256: executableDigest,
@@ -386,7 +393,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 			{
 				kind: "direct-executable",
 				executablePath: "/bin/sh",
-				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				argv: ["-c", `IFS= read -r value <&3; test "$value" = '${TEST_BOOTSTRAP_ENVELOPE}'`],
 				argvSha256: artifact.argvSha256,
 				executableSha256: executableDigest,
 				engineSourceSha256: executableDigest,
@@ -413,7 +420,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 			runtimeBundle: created.bundle,
 			executablePath: created.executablePath,
 			executableSizeBytes: created.executableSizeBytes,
-			argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+			argv: ["-c", `IFS= read -r value <&3; test "$value" = '${TEST_BOOTSTRAP_ENVELOPE}'`],
 			argvSha256: artifact.argvSha256,
 			executableSha256: created.executableSha256,
 			engineSourceSha256: created.bundle.sha256,
@@ -425,7 +432,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 				runtimeBundle: created.bundle,
 				executablePath: created.executablePath,
 				executableSizeBytes: created.executableSizeBytes,
-				argv: ["-c", 'IFS= read -r value <&3; test "$value" = fixture'],
+				argv: ["-c", `IFS= read -r value <&3; test "$value" = '${TEST_BOOTSTRAP_ENVELOPE}'`],
 				argvSha256: artifact.argvSha256,
 				executableSha256: created.executableSha256,
 				engineSourceSha256: created.bundle.sha256,
@@ -751,6 +758,12 @@ describe("LifecycleSupervisor mode authority", () => {
 	});
 
 	test("default child process environment is an exact minimal allowlist", () => {
+		expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
+			"BREADBOARD_OMP_GATEWAY_URL",
+		);
+		expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).not.toHaveProperty(
+			"BREADBOARD_OMP_GATEWAY_TOKEN",
+		);
 		process.env.BREADBOARD_HOSTILE_PARENT_SECRET = "must-not-cross";
 		try {
 			expect(lifecycleChildEnvironment("launch_environment_abcdefghijklmnopqrstuvwxyz")).toEqual({
