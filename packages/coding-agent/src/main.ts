@@ -2121,6 +2121,7 @@ export async function runRootCommand(
 					);
 					if (preparedBreadboardRuntime !== null) {
 						sessionOptions.mainStreamFn = preparedBreadboardRuntime.stream;
+						sessionOptions.mainStreamOwnsTurnLifecycle = true;
 						sessionOptions.model = preparedBreadboardRuntime.model;
 						sessionOptions.scopedModels = preparedBreadboardRuntime.models.map(model => ({ model }));
 					}

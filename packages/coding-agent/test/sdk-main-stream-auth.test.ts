@@ -32,10 +32,10 @@ function createFixture(): SessionFixture {
 	return { tempDir, authStorage, modelRegistry, model };
 }
 
-function createAssistantResponse(model: Model): AssistantMessage {
+function createAssistantResponse(model: Model, text = RESPONSE_TEXT): AssistantMessage {
 	return {
 		role: "assistant",
-		content: [{ type: "text", text: RESPONSE_TEXT }],
+		content: text ? [{ type: "text", text }] : [],
 		api: model.api,
 		provider: model.provider,
 		model: model.id,
@@ -52,9 +52,9 @@ function createAssistantResponse(model: Model): AssistantMessage {
 	};
 }
 
-function completedStream(model: Model): AssistantMessageEventStream {
+function completedStream(model: Model, text = RESPONSE_TEXT): AssistantMessageEventStream {
 	const stream = new AssistantMessageEventStream();
-	const response = createAssistantResponse(model);
+	const response = createAssistantResponse(model, text);
 	queueMicrotask(() => {
 		stream.push({ type: "start", partial: response });
 		stream.push({ type: "done", reason: "stop", message: response });
@@ -145,6 +145,96 @@ describe("createAgentSession mainStreamFn authentication ownership", () => {
 
 		try {
 			await expect(result.session.prompt("hello")).resolves.toBe(true);
+			assertCompletedResponse(result.session);
+		} finally {
+			await result.session.dispose();
+		}
+	});
+
+	it("does not resubmit an externally completed turn and accepts the next explicit prompt", async () => {
+		fixture = createFixture();
+		let submissions = 0;
+		const result = await createAgentSession({
+			...baseOptions(fixture),
+			mainStreamOwnsTurnLifecycle: true,
+			mainStreamFn: model => completedStream(model, ++submissions === 1 ? "" : RESPONSE_TEXT),
+		});
+
+		try {
+			await result.session.prompt("Complete the engine-owned task");
+			expect(submissions).toBe(1);
+			expect(result.session.isStreaming).toBe(false);
+			await result.session.prompt("Start a different task");
+			expect(submissions).toBe(2);
+			assertCompletedResponse(result.session);
+		} finally {
+			await result.session.dispose();
+		}
+	});
+
+	it("persists an external terminal error without retrying and accepts the next explicit prompt", async () => {
+		fixture = createFixture();
+		const engineFailure = "503 Service Unavailable from the engine";
+		let submissions = 0;
+		const result = await createAgentSession({
+			...baseOptions(fixture),
+			mainStreamOwnsTurnLifecycle: true,
+			mainStreamFn: model => {
+				if (++submissions > 1) return completedStream(model);
+				const response = createAssistantResponse(model, "");
+				response.stopReason = "error";
+				response.errorMessage = engineFailure;
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: response });
+					stream.push({ type: "error", reason: "error", error: response });
+				});
+				return stream;
+			},
+		});
+		const observedStops: AssistantMessage["stopReason"][] = [];
+		const terminalNotifications: boolean[] = [];
+		const unsubscribe = result.session.subscribe(event => {
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				observedStops.push(event.message.stopReason);
+			}
+			if (event.type === "agent_end") terminalNotifications.push(event.isTerminal === true);
+		});
+
+		try {
+			await result.session.prompt("Run the engine-owned task");
+			expect(submissions).toBe(1);
+			expect(observedStops).toEqual(["error"]);
+			expect(terminalNotifications).toEqual([true]);
+			const savedErrors = result.session.sessionManager
+				.getBranch()
+				.flatMap(entry =>
+					entry.type === "message" && entry.message.role === "assistant" && entry.message.stopReason === "error"
+						? [entry.message]
+						: [],
+				);
+			expect(savedErrors).toHaveLength(1);
+			expect(savedErrors[0]?.errorMessage).toBe(engineFailure);
+			await result.session.prompt("Start a different task after the failure");
+			expect(submissions).toBe(2);
+			assertCompletedResponse(result.session);
+		} finally {
+			unsubscribe();
+			await result.session.dispose();
+		}
+	});
+
+	it("retains empty-response recovery for a transport that does not own the turn lifecycle", async () => {
+		fixture = createFixture();
+		let requests = 0;
+		const result = await createAgentSession({
+			...baseOptions(fixture),
+			mainStreamFn: model => completedStream(model, ++requests === 1 ? "" : RESPONSE_TEXT),
+		});
+
+		try {
+			await result.session.prompt("Recover a native provider response");
+			expect(requests).toBe(2);
 			assertCompletedResponse(result.session);
 		} finally {
 			await result.session.dispose();

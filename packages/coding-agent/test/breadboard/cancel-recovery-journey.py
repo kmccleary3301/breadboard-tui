@@ -689,16 +689,32 @@ def f02a(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint
         "completed second turn",
         "completed",
     )
-    child.pump(1.0)
+    second_turn = next(turn for turn in second_terminal[1]["turns"] if turn["turn_id"] == second_submission["turnId"])
+    terminal = next(event for event in second_terminal[1]["terminal_event_envelopes"] if event["turn_id"] == second_turn["turn_id"])
+
+    def native_settled() -> Any:
+        snapshot = runner.binding_snapshot(roots["agent"])
+        state = runner.retained_state_snapshot(roots["agent"])
+        if state is not None and len(state[1]["turns"]) != 2:
+            raise RuntimeError("cancel and immediate new work admitted extra backend turns")
+        tail = child.screen.text().splitlines()[-8:]
+        return snapshot if (
+            snapshot is not None
+            and snapshot.data["cursor"]["sequence"] >= terminal["seq"]
+            and not snapshot.data["ownedSubmissions"]
+            and any(line.lstrip().startswith("bb  >") for line in tail)
+            and not any("working" in line.lower() for line in tail)
+        ) else None
+
+    child.wait_until(native_settled, 20, "durably projected second response and idle editor")
+    child.pump(0.5)
+    settled_binding = native_settled()
+    if settled_binding is None:
+        raise RuntimeError("second response did not remain settled")
+    facts = runner.transcript_facts(settled_binding.rows)
     value = capture(runner, output, "second-response", child, roots, endpoint)
     text = child.screen.text()
-    completed_turns = [
-        turn
-        for turn in second_terminal[1].get("turns", [])
-        if isinstance(turn, dict) and turn.get("terminal_resolution_committed") is True
-    ]
-    second_turn = completed_turns[-1]
-    screen_has_response = text.count(prompt) >= 2 and "previous submission cancellation is still resolving" not in text.lower()
+    completed_and_idle = facts["userTexts"] == [prompt, prompt] and facts["assistantStopReasons"][-1] == "stop"
     return {
         "matrix": "F02a",
         "firstSubmission": first_submission,
@@ -708,12 +724,12 @@ def f02a(runner: Any, child: Any, roots: dict[str, Path], output: Path, endpoint
         "visible": text,
         "durable": value,
         "resource": runner.process_descendants(child.pid),
-        "screenHasResponse": screen_has_response,
+        "newWorkCompletedAndIdle": completed_and_idle,
         "verdict": "pass"
         if second_submission.get("clientMessageId") != first_submission.get("clientMessageId")
         and second_submission.get("turnId") != first_submission.get("turnId")
         and second_turn.get("terminal_outcome") == "completed"
-        and screen_has_response
+        and completed_and_idle
         else "fail",
     }
 

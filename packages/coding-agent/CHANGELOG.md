@@ -27,6 +27,7 @@
 - Text tool parsing skips inactive formats, preventing an embedded patch from executing twice.
 - Preserved durable session cursors across completion-only assistant text and overlapping tool results, preventing coding turns from cancelling during projection.
 - Provider completions no longer fail solely because optional cache counters are absent.
+- Completed BreadBoard tasks no longer enter OMP's native empty-response recovery and submit the same task again; native-provider recovery remains unchanged.
 - Fixed upstream sync verification replaying already-resolved merge conflicts in its disposable worktree.
 - BreadBoard project model roles now read and persist in `.breadboard/config.yml` without modifying native `.omp` settings.
 - Disposable upstream verification now generates tool views before running its source proofs.

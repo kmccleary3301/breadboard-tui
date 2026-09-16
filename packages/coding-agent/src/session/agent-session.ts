@@ -729,6 +729,7 @@ export class AgentSession {
 	#modelRegistry: ModelRegistry;
 	/** Whether the external main stream owns primary-prompt authentication. */
 	#mainStreamManagesAuth = false;
+	#mainStreamOwnsTurnLifecycle: boolean;
 	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
 	#usagePreflightAbortControllers = new Set<AbortController>();
 	#queuedMessageDrainBlocked = false;
@@ -1232,6 +1233,7 @@ export class AgentSession {
 		this.settings = config.settings;
 		this.#modelRegistry = config.modelRegistry;
 		this.#mainStreamManagesAuth = config.mainStreamManagesAuth ?? false;
+		this.#mainStreamOwnsTurnLifecycle = config.mainStreamOwnsTurnLifecycle ?? false;
 		this.#extensionRoots =
 			config.extensionRoots ??
 			(() => ({
@@ -3317,6 +3319,18 @@ export class AgentSession {
 			// repeatedly on provider errors otherwise leaves no actionable trace
 			// outside the session transcript (issue #6177).
 			logProviderTurnError(msg);
+
+			if (this.#mainStreamOwnsTurnLifecycle) {
+				// The engine has already settled the logical task, including its tools.
+				// Native recovery or maintenance would submit that task again.
+				this.#lastSuccessfulYieldToolCallId = undefined;
+				await this.#recovery.persistTerminalEmptyErrorTurn(msg);
+				this.#recovery.resolveRetry();
+				this.#resetSessionStopContinuationState();
+				maintenanceRoute("external-turn-settled");
+				await emitAgentEndNotification();
+				return;
+			}
 
 			// Invalidate GitHub Copilot credentials on a hard auth failure (401, or an
 			// expired/revoked token) so stale tokens aren't reused on the next request.

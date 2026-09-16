@@ -460,6 +460,13 @@ export interface CreateAgentSessionOptions {
 	 * and compaction requests retain OMP's native settings-aware streams.
 	 */
 	mainStreamFn?: StreamFn;
+	/**
+	 * The main stream runs complete logical tasks, rather than individual model
+	 * requests. Its terminal result bypasses native retries, compaction and
+	 * post-turn continuations. Explicit subsequent prompts remain supported.
+	 * Defaults to false, including for externally authenticated transports.
+	 */
+	mainStreamOwnsTurnLifecycle?: boolean;
 
 	/** Custom tools to register (in addition to built-in tools). Accepts both CustomTool and ToolDefinition. */
 	customTools?: (CustomTool | ToolDefinition)[];
@@ -3773,6 +3780,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			skillsSettings: settings.getGroup("skills"),
 			modelRegistry,
 			mainStreamManagesAuth: options.mainStreamFn !== undefined,
+			mainStreamOwnsTurnLifecycle: options.mainStreamOwnsTurnLifecycle,
 			rebindModelAfterDiscovery: options.model === undefined || options.rebindModelAfterDiscovery === true,
 			toolRegistry,
 			reconcileBrowserMcpFilter: mcpManager
