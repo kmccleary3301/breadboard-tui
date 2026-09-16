@@ -2,9 +2,9 @@
 	"schemaVersion": "bb-omp.delta-manifest.v2",
 	"policySchemaVersion": "bb-omp.delta-policy.v1",
 	"upstream": {
-		"tag": "v18.1.15",
-		"commit": "a33cc26824e3c91edd9fa42d681f10dceb4ac2f0",
-		"tree": "ae4f520a44db6234088bccf76dfe15f26af77779"
+		"tag": "v18.2.2",
+		"commit": "60c9a115b2e8decc0f75825459362d14188a8bc0",
+		"tree": "aaeba635247ec3e4b0775848b9603cab4a2c0d33"
 	},
 	"paths": [
 		{
@@ -67,6 +67,16 @@
 			"layer": 1
 		},
 		{
+			"path": "crates/pi-edit/src/modes/sloppy/apply.rs",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "crates/pi-edit/tests/sloppy.rs",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "crates/pi-shell/BUILD.bazel",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -90,6 +100,13 @@
 			"path": "docs/conformance/p31/e4-canonical-tui-evidence.md",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "docs/environment-variables.md",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
 		},
 		{
 			"path": "docs/task-agent-discovery.md",
@@ -244,6 +261,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/activity/index.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/assets/branding/breadboard_icon_bb_v1.provenance.json",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -284,12 +306,32 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/breadboard/e4-observations.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/breadboard/engine-port.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/breadboard/engine-port.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/harness-lock-view.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/harness-port-client.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/harness-port.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -444,6 +486,16 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/breadboard/omp-auth-gateway.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/omp-auth-gateway.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/breadboard/product-settings.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -574,14 +626,19 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/commands/setup.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/coding-agent/src/config/model-registry.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/config/settings-schema.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/config/settings.ts",
@@ -622,13 +679,18 @@
 		},
 		{
 			"path": "packages/coding-agent/src/modes/components/agent-hub.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/components/agent-hub/activity-view.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/components/agent-hub/harness-view.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/components/agent-hub/messages-view.ts",
@@ -647,6 +709,11 @@
 		},
 		{
 			"path": "packages/coding-agent/src/modes/components/attachment-chips.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/components/breadboard-tool-renderers.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -711,7 +778,22 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/modes/components/settings-defs.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/components/settings-selector.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/modes/components/status-line/component.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/components/status-line/presets.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -729,6 +811,16 @@
 			"path": "packages/coding-agent/src/modes/components/tips.txt",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/components/tool-execution.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/components/transcript-container.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/components/user-message.ts",
@@ -756,9 +848,19 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/src/modes/controllers/command-controller.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/modes/controllers/event-controller.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/controllers/input-controller.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/controllers/selector-controller.ts",
@@ -779,6 +881,11 @@
 			"path": "packages/coding-agent/src/modes/macos-spelling.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/modes/prompt-action-autocomplete.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/session-teardown.ts",
@@ -871,6 +978,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/modes/theme/symbols.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/modes/theme/theme-class.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -887,8 +999,8 @@
 		},
 		{
 			"path": "packages/coding-agent/src/modes/types.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/utils/ui-helpers.ts",
@@ -911,17 +1023,17 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/product-identity.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/product-identity.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/sdk.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/session/agent-session-types.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -936,14 +1048,49 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/src/session/session-entries.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/session/session-maintenance.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/src/session/session-manager.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/session/session-stats.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/slash-commands/builtin-registry.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/slash-commands/builtin-session.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/slash-commands/harness.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/startup-prepaint-args.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/startup-prepaint-args.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/tools/ask.ts",
@@ -952,6 +1099,16 @@
 		},
 		{
 			"path": "packages/coding-agent/src/tools/hub/messaging.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/tui/hyperlink.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/utils/command-usage.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -976,12 +1133,32 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/activity-index.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/agent-hub-activate.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/test/agent-hub-ordering.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/agent-session-handoff.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/agent-session-stats.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/autolearn-controller.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1011,7 +1188,67 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/breadboard/cancel-recovery-journey.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/cancel_recovery_journey_test.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/e4-observation-notices.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/engine-port.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/everyday-interactions-journey.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/fixtures/codex_e4.lock.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/harness-lock-view.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/harness-palette.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/harness-port-client.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/harness-port-wiring.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/harness-view.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/breadboard/installed-product-journey.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/installed_product_journey_geometry_test.py",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1037,6 +1274,16 @@
 		},
 		{
 			"path": "packages/coding-agent/test/breadboard/research-compare-journey.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/responsiveness-baseline.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/responsiveness_baseline_error_frames_test.py",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1068,6 +1315,11 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/test/command-controller-new-session.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/composer-cache.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1076,6 +1328,16 @@
 			"path": "packages/coding-agent/test/fixtures/breadboard-drain-controller.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/flag-tables.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/helpers/interactive-mode-context.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/test/helpers/retry-ambiguous-replay.ts",
@@ -1088,14 +1350,24 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/test/input-controller-escape.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/input-controller-keybindings.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/coding-agent/test/interactive-mode-working-accent.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/test/interactive-terminal-e2e.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/test/irc-history.test.ts",
@@ -1143,6 +1415,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/modes/components/composer-shape-preview.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1151,6 +1428,11 @@
 			"path": "packages/coding-agent/test/modes/components/custom-editor.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/modes/components/effective-lock-fixture.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/test/modes/components/login-dialog.test.ts",
@@ -1173,6 +1455,21 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/modes/components/settings-defs-breadboard.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/modes/components/status-line-harness.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/modes/components/transcript-container.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/coding-agent/test/modes/components/user-message-keywords.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1184,6 +1481,11 @@
 		},
 		{
 			"path": "packages/coding-agent/test/modes/controllers/event-controller-abort-guard.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/modes/controllers/event-controller-superseded-agent-end.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1228,6 +1530,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/sdk-main-stream-auth.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/coding-agent/test/session-color.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1249,6 +1556,11 @@
 		},
 		{
 			"path": "packages/coding-agent/test/setup-wizard.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/slash-commands/harness.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1288,7 +1600,17 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/coding-agent/test/status-line-usage-refresh.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/coding-agent/test/status-line-usage.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/status-line-vcs-refresh.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1415,9 +1737,29 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/CHANGELOG.md",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/autocomplete.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/components/editor.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/tui/src/components/markdown.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/components/select-list.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/tui/src/desktop-notify.ts",
@@ -1430,9 +1772,49 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/src/tui.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/adaptive-render-backpressure.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/autocomplete.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/tui/test/desktop-notify.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/test/editor-autocomplete-actions.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/editor-text-assist.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/editor.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/history-frame-plan.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/input-render-scheduling.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/tui/test/markdown.test.ts",

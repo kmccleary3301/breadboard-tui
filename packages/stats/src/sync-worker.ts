@@ -1,6 +1,6 @@
 /**
  * Stateless parse worker for `syncAllSessions`. The main thread owns the
- * SQLite handle; workers receive `{ sessionFile, fromOffset }`, run
+ * SQLite handle; workers receive a session path, offset, and parser state, run
  * `parseSessionFile` (which is pure I/O + CPU, no DB), and post the
  * structured-clone-safe result back. One in-flight request per worker so
  * the main thread can fan jobs out 1:1 with the pool size.
@@ -13,9 +13,11 @@
 
 import { parentPort } from "node:worker_threads";
 import { consumeWorkerInbox } from "@oh-my-pi/pi-utils/worker-host";
-import { type ParseSessionResult, parseSessionFile } from "./parser";
+import { type ParseSessionResult, parseSessionFile, type SessionParserState } from "./parser";
 
-export type SyncWorkerRequest = { kind?: "parse"; sessionFile: string; fromOffset: number } | { kind: "ping" };
+export type SyncWorkerRequest =
+	| { kind?: "parse"; sessionFile: string; fromOffset: number; parserState?: SessionParserState; replay?: boolean }
+	| { kind: "ping" };
 
 export type SyncWorkerResponse =
 	| { ok: true; kind?: "parse"; result: ParseSessionResult }
@@ -32,7 +34,12 @@ const handleMessage = async (message: unknown): Promise<void> => {
 			port.postMessage({ ok: true, kind: "pong" } satisfies SyncWorkerResponse);
 			return;
 		}
-		const result = await parseSessionFile(request.sessionFile, request.fromOffset);
+		const result = await parseSessionFile(
+			request.sessionFile,
+			request.fromOffset,
+			request.parserState,
+			request.replay,
+		);
 		port.postMessage({ ok: true, result } satisfies SyncWorkerResponse);
 	} catch (err) {
 		const error = err instanceof Error ? (err.stack ?? err.message) : String(err);

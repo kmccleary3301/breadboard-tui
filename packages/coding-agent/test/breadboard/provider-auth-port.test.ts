@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from "bun:test";
+import type { Component } from "@oh-my-pi/pi-tui";
 import { createBreadboardModelRolePort } from "../../src/breadboard/model-role-port";
 import { createBreadboardProviderAuthPort } from "../../src/breadboard/provider-auth-adapter";
 import type {
@@ -94,9 +95,14 @@ function controllerContext(
 	statuses: string[],
 	onFocus?: (component: unknown) => void,
 ): InteractiveModeContext {
+	let focused: Component | null = null;
 	const ui = {
 		requestRender() {},
-		setFocus(component: unknown) {
+		getFocused() {
+			return focused;
+		},
+		setFocus(component: Component | null) {
+			focused = component;
 			onFocus?.(component);
 		},
 	};

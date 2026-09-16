@@ -336,9 +336,16 @@ export interface BreadboardRuntimeAuthority {
 
 export function resolveBreadboardStartupModelOverride(
 	explicitModel: Pick<Model, "provider" | "id"> | undefined,
+	requestedSelector: string | undefined,
 	configuredDefaultSelector: string | undefined,
 ): Pick<Model, "provider" | "id"> | undefined {
-	return explicitModel ?? exactModelRoute(configuredDefaultSelector);
+	const requestedModel = explicitModel ?? exactModelRoute(requestedSelector);
+	if (requestedSelector && !requestedModel) {
+		throw new Error(
+			`Cannot resolve requested BreadBoard model "${requestedSelector}". Use a qualified provider/model identifier.`,
+		);
+	}
+	return requestedModel ?? exactModelRoute(configuredDefaultSelector);
 }
 
 type ConnectedBreadboardEnginePort = Pick<
@@ -1069,7 +1076,8 @@ export async function prepareBreadboardRuntime(
 			? sessionManager && readBreadboardSessionBinding(sessionManager)
 			: undefined;
 	const startupModelOverride = resolveBreadboardStartupModelOverride(
-		authority.selectedModel ?? exactModelRoute(parsed.model),
+		authority.selectedModel,
+		parsed.model,
 		activeSettings.getModelRole("default"),
 	);
 	const requestedHarnessId = IS_BREADBOARD_PRODUCT

@@ -265,13 +265,26 @@ test("projects configured evidence routes into the public session model scope", 
 test("pins configured exact defaults into BreadBoard startup authority", () => {
 	const explicit = { provider: "mock", id: "reference" };
 
-	expect(resolveBreadboardStartupModelOverride(explicit, "cli_mock/reference")).toEqual(explicit);
-	expect(resolveBreadboardStartupModelOverride(undefined, "cli_mock/reference:high")).toEqual({
+	expect(resolveBreadboardStartupModelOverride(explicit, "reference", "cli_mock/reference")).toEqual(explicit);
+	expect(resolveBreadboardStartupModelOverride(undefined, undefined, "cli_mock/reference:high")).toEqual({
 		provider: "cli_mock",
 		id: "reference",
 	});
-	expect(resolveBreadboardStartupModelOverride(undefined, "cli_mock/*")).toBeUndefined();
-	expect(resolveBreadboardStartupModelOverride(undefined, undefined)).toBeUndefined();
+	expect(resolveBreadboardStartupModelOverride(undefined, undefined, "cli_mock/*")).toBeUndefined();
+	expect(resolveBreadboardStartupModelOverride(undefined, undefined, undefined)).toBeUndefined();
+});
+
+test("rejects an unresolved explicit startup model instead of selecting the default", () => {
+	expect(() =>
+		resolveBreadboardStartupModelOverride(undefined, "unregistered-extension-model", "mock/reference"),
+	).toThrow();
+});
+
+test("preserves an exact extension model route before native registration", () => {
+	expect(resolveBreadboardStartupModelOverride(undefined, "extension/exact-model", "mock/reference")).toEqual({
+		provider: "extension",
+		id: "exact-model",
+	});
 });
 
 test("pins explicit startup model and approval policy into the engine session request", () => {

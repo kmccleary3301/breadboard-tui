@@ -53,6 +53,10 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 						? "undefined"
 						: JSON.stringify(JSON.stringify(options.breadboardEngineTrustRoot)),
 			},
+			// Precompiled bytecode skips parsing the ~20 MB bundle at boot:
+			// `omp --version` 256 ms -> 30 ms on M4 Max (+52 MB binary).
+			// Bytecode rejects top-level await in the bundle graph.
+			bytecode: true,
 			minify: {
 				identifiers: options.minifyIdentifiers ?? false,
 				keepNames: true,

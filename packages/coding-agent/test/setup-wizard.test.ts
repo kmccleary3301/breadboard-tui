@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, mock, vi } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
+import Setup, { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	ALL_SCENES,
@@ -599,16 +599,16 @@ describe("setup wizard web search tab", () => {
 });
 
 describe("omp setup onboarding trigger", () => {
-	it("starts the normal interactive command with forced setup wizard", async () => {
-		let forceSetupWizard: boolean | undefined;
-		await runOnboardingSetup({
-			stdinIsTTY: true,
-			stdoutIsTTY: true,
-			runRoot: async (_parsed, _rawArgs, deps) => {
-				forceSetupWizard = deps?.forceSetupWizard;
-			},
+	it("does not treat launch option values as optional setup components", async () => {
+		const setup = new Setup(["--harness", "live.harness.yaml", "--model", "openai-codex/gpt-5.5"], {
+			bin: "bb",
+			version: "test",
+			commands: new Map(),
 		});
-		expect(forceSetupWizard).toBe(true);
+		const parsed = await setup.parse(Setup);
+		expect(parsed.args.component).toBeUndefined();
+		expect(parsed.flags.harness).toBe("live.harness.yaml");
+		expect(parsed.flags.model).toBe("openai-codex/gpt-5.5");
 	});
 
 	it("rejects onboarding setup without an interactive TTY", async () => {

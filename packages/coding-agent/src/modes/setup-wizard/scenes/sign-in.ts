@@ -10,6 +10,7 @@ import {
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
+import { captureBrowserSession } from "../../../utils/browser-session";
 import { authenticateProvider } from "../../../breadboard/provider-auth-login";
 import {
 	ProviderAuthError,
@@ -318,6 +319,7 @@ export class SignInTab implements SetupTab {
 				}
 				const identity = await authStorage.login(providerId as OAuthProvider, {
 					signal: this.#loginAbort.signal,
+					onBrowserSession: captureBrowserSession,
 					onAuth: info => {
 						this.#authUrl = info.url;
 						this.#authLaunchUrl = info.launchUrl && info.launchUrl !== info.url ? info.launchUrl : undefined;

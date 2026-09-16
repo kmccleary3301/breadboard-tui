@@ -226,7 +226,7 @@ function renderCompactSplash(
 	enlargedLogo: EnlargedLogo,
 	mode: ColorMode,
 ): string[] {
-	const art = height >= 14 ? enlargedLogo.lines : identity.logoArt;
+	const art = height >= 14 && enlargedLogo.width <= width ? enlargedLogo.lines : identity.logoArt;
 	const content = [...gradientLogo(art, phase, shine, palette, mode), "", theme.bold(identity.setupWordmark)];
 	const start = Math.max(0, Math.floor((height - content.length) / 2));
 	const lines: string[] = [];

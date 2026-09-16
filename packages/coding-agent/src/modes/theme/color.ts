@@ -1,4 +1,4 @@
-import { detectTerminalId, getTerminalInfo } from "@oh-my-pi/pi-tui";
+import { detectTerminalId, getTerminalInfo } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { type ColorLevel, detectColorLevel } from "@oh-my-pi/pi-utils/chalk";
 import type { ColorMode, ColorValue } from "./schema";
 

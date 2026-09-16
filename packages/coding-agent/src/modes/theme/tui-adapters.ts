@@ -5,12 +5,16 @@ import {
 	supportsLanguage as nativeSupportsLanguage,
 	warmHighlighter as nativeWarmHighlighter,
 } from "@oh-my-pi/pi-natives";
-import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme, SymbolTheme } from "@oh-my-pi/pi-tui";
+import type { EditorTheme } from "@oh-my-pi/pi-tui/components/editor";
+import type { MarkdownTheme } from "@oh-my-pi/pi-tui/components/markdown";
+import type { SelectListTheme } from "@oh-my-pi/pi-tui/components/select-list";
+import type { SettingsListTheme } from "@oh-my-pi/pi-tui/components/settings-list";
+import type { SymbolTheme } from "@oh-my-pi/pi-tui/symbols";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { resolveMermaidAscii } from "./mermaid-cache";
 import type { ColorMode } from "./schema";
 import type { SlashCommandIconName } from "./symbols";
-import { theme } from "./theme";
+import { ensureThemeSync, theme } from "./theme";
 import type { Theme } from "./theme-class";
 
 const MERMAID_COLOR_MODE_BY_THEME_MODE = {
@@ -181,6 +185,7 @@ export function setMarkdownMermaidRendering(enabled: boolean): void {
 }
 
 export function getMarkdownTheme(): MarkdownTheme {
+	ensureThemeSync();
 	if (cachedMarkdownTheme !== undefined && cachedMarkdownThemeRef === theme) {
 		return cachedMarkdownTheme;
 	}

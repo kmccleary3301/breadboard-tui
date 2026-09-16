@@ -1,14 +1,9 @@
-import {
-	type Component,
-	padding,
-	replaceTabs,
-	truncateToWidth,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "@oh-my-pi/pi-tui";
+import type { Component } from "@oh-my-pi/pi-tui/tui";
+import { padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui/utils";
 import type { HarnessSnapshot } from "../../breadboard/harness-port";
 import { posture, teamSize } from "../../breadboard/harness-lock-view";
-import { paintAnsi } from "../../modes/theme/color";
+import { colorToAnsi, paintAnsi } from "../../modes/theme/color";
+import { hexToOklch, oklchToHex, rgbToHex, type OKLCH } from "@oh-my-pi/pi-utils/color";
 import type { ColorMode } from "../../modes/theme/schema";
 import { theme } from "../../modes/theme/theme";
 import { sanitizeStatusText } from "../../modes/shared";
@@ -321,8 +316,9 @@ export class WelcomeComponent implements Component {
 			return [];
 		}
 		const dualContentWidth = boxWidth - 3; // 3 = │ + │ + │
-		const preferredLeftCol = 26;
-		const minLeftCol = 12; // logo width
+		const logoWidth = Math.max(...this.identity.logoArt.map(line => visibleWidth(line)));
+		const preferredLeftCol = Math.max(26, logoWidth + 2);
+		const minLeftCol = Math.max(12, logoWidth);
 		const minRightCol = 20;
 		// Dynamic model/provider labels are truncated inside the fixed column.
 		// Letting them influence the responsive breakpoint changes the box height
@@ -583,16 +579,57 @@ export class WelcomeComponent implements Component {
 /** Half-width of the shine highlight band, expressed in gradient-t units. */
 const SHINE_HALF_WIDTH = 0.18;
 
+const PALETTE_OKLCH_CACHE = new WeakMap<GradientPalette, readonly OKLCH[]>();
+
+function paletteOklch(palette: GradientPalette): readonly OKLCH[] {
+	const cached = PALETTE_OKLCH_CACHE.get(palette);
+	if (cached) return cached;
+	const resolved = palette.stops.map(stop => hexToOklch(rgbToHex({ r: stop[0], g: stop[1], b: stop[2] })));
+	PALETTE_OKLCH_CACHE.set(palette, resolved);
+	return resolved;
+}
+
+function interpolatePalette(t: number, palette: GradientPalette): OKLCH {
+	const stops = paletteOklch(palette);
+	const position = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+	const index = Math.min(stops.length - 2, Math.floor(position));
+	const fraction = position - index;
+	const start = stops[index]!;
+	const end = stops[index + 1]!;
+	let hueDelta = end.h - start.h;
+	if (hueDelta > 180) hueDelta -= 360;
+	if (hueDelta < -180) hueDelta += 360;
+	return {
+		l: start.l + (end.l - start.l) * fraction,
+		c: start.c + (end.c - start.c) * fraction,
+		h: (start.h + hueDelta * fraction + 360) % 360,
+	};
+}
+
+function gradientColor(t: number, shine: ShineConfig | undefined, palette: GradientPalette): string {
+	const color = interpolatePalette(t, palette);
+	if (shine && shine.strength > 0) {
+		const intensity = Math.max(0, 1 - Math.abs(t - shine.pos) / SHINE_HALF_WIDTH) * shine.strength;
+		if (intensity > 0) {
+			color.l += (1 - color.l) * intensity;
+			color.c *= 1 - intensity;
+		}
+	}
+	return oklchToHex(color);
+}
+
 export interface ShineConfig {
 	/** Overall opacity of the shine overlay, in [0, 1]. */
 	strength: number;
-	/** Center of the shine band along the diagonal, in [0, 1]. */
+	/** Center of the shine band along the horizontal wordmark, in [0, 1]. */
 	pos: number;
 }
 
 /**
- * Resolve the gradient SGR foreground escape for a normalized position `t`
- * (0..1) along the diagonal, compositing the optional sliding shine highlight.
+ * Resolve the gradient SGR foreground escape for a normalized horizontal
+ * position `t` (0..1), compositing the optional sliding shine highlight.
+ * The truecolor path uses OKLCH interpolation with the original BreadBoard
+ * palette; indexed modes use the frozen palette ramps.
  * Shared by {@link gradientLogo} and the setup splash so both encode identical
  * truecolor, indexed, basic-color, or plain output.
  */
@@ -605,31 +642,12 @@ export function gradientEscape(
 	if (mode === "none") return "";
 	const shineStrength = shine && shine.strength > 0 ? shine.strength : 0;
 	const shinePos = shine ? shine.pos : 0;
-	if (mode === "truecolor") {
-		const stops = palette.stops;
-		const seg = t * (stops.length - 1);
-		const i = Math.min(stops.length - 2, Math.floor(seg));
-		const f = seg - i;
-		const a = stops[i];
-		const b = stops[i + 1];
-		let r = a[0] + (b[0] - a[0]) * f;
-		let g = a[1] + (b[1] - a[1]) * f;
-		let bl = a[2] + (b[2] - a[2]) * f;
-		if (shineStrength > 0) {
-			const dist = Math.abs(t - shinePos);
-			const intensity = Math.max(0, 1 - dist / SHINE_HALF_WIDTH) * shineStrength;
-			if (intensity > 0) {
-				r += (255 - r) * intensity;
-				g += (255 - g) * intensity;
-				bl += (255 - bl) * intensity;
-			}
-		}
-		return `\x1b[38;2;${Math.round(r)};${Math.round(g)};${Math.round(bl)}m`;
-	}
+	if (mode === "truecolor") return colorToAnsi(gradientColor(t, shine, palette), mode);
 	const ramp = mode === "16color" ? palette.ramp16 : palette.ramp256;
-	let index = Math.min(ramp.length - 1, Math.max(0, Math.floor(t * (ramp.length - 1) + 0.5)));
+	const normalized = Math.max(0, Math.min(1, t));
+	let index = Math.min(ramp.length - 1, Math.max(0, Math.floor(normalized * (ramp.length - 1) + 0.5)));
 	if (shineStrength > 0) {
-		const dist = Math.abs(t - shinePos);
+		const dist = Math.abs(normalized - shinePos);
 		const intensity = Math.max(0, 1 - dist / SHINE_HALF_WIDTH) * shineStrength;
 		if (intensity > 0.5) index = ramp.length - 1;
 	}
@@ -638,10 +656,10 @@ export function gradientEscape(
 }
 
 /**
- * Apply a multi-stop diagonal gradient (top-left → bottom-right) plus an
- * optional sliding shine band across multi-line art. `phase` (0..1) shifts the
- * gradient along the diagonal, wrapping at 1. When `shine` is provided, a soft
- * white highlight is composited on top, centered at `shine.pos`.
+ * Apply a multi-stop horizontal gradient (left → right) plus an optional
+ * sliding shine band across the wordmark. `phase` (0..1) shifts the gradient
+ * along the row, wrapping at 1. When `shine` is provided, a soft white
+ * highlight is composited on top, centered at `shine.pos`.
  */
 export function gradientLogo(
 	lines: readonly string[],
@@ -651,12 +669,10 @@ export function gradientLogo(
 	mode: ColorMode = theme.getColorMode(),
 ): string[] {
 	if (mode === "none") return [...lines];
-	const rows = lines.length;
 	const cols = Math.max(...lines.map(line => line.length));
 	const xSpan = Math.max(1, cols - 1);
-	const ySpan = Math.max(1, rows - 1);
 	const normalizedPhase = ((phase % 1) + 1) % 1;
-	return lines.map((line, y) => {
+	return lines.map(line => {
 		let result = "";
 		for (let x = 0; x < line.length; x++) {
 			const char = line[x];
@@ -664,13 +680,11 @@ export function gradientLogo(
 				result += char;
 				continue;
 			}
-			// SVG's (0,0) → (1,1) gradient projects both normalized axes
-			// equally: top-right and bottom-left land on the purple midpoint.
-			const base = (x / xSpan + y / ySpan) / 2;
+			const base = x / xSpan;
 			const t = normalizedPhase === 0 ? base : (base + normalizedPhase) % 1;
 			result += paintAnsi(gradientEscape(t, shine, palette, mode), char);
 		}
-		return result;
+		return `\x1b[1m${result}\x1b[22m`;
 	});
 }
 

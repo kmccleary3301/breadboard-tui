@@ -2,12 +2,12 @@
 	"schemaVersion": "bb-omp.delta-policy.v1",
 	"classes": ["breadboard-owned", "upstream-owned", "generated", "manual-review"],
 	"upstream": {
-		"tag": "v18.1.15",
-		"commit": "a33cc26824e3c91edd9fa42d681f10dceb4ac2f0",
-		"tree": "ae4f520a44db6234088bccf76dfe15f26af77779"
+		"tag": "v18.2.2",
+		"commit": "60c9a115b2e8decc0f75825459362d14188a8bc0",
+		"tree": "aaeba635247ec3e4b0775848b9603cab4a2c0d33"
 	},
 	"budgets": {
-		"maxTotalChangedPaths": 325,
+		"maxTotalChangedPaths": 400,
 		"maxUpstreamEntrypointPaths": 13
 	},
 	"rules": [
@@ -16,6 +16,31 @@
 			"class": "breadboard-owned",
 			"description": "BreadBoard adapters, policy controls, provenance, and conformance evidence are downstream-owned.",
 			"patterns": [
+				"packages/coding-agent/src/activity/index.ts",
+				"packages/coding-agent/src/config/settings-schema.ts",
+				"packages/coding-agent/src/modes/components/agent-hub.ts",
+				"packages/coding-agent/src/modes/components/agent-hub/harness-view.ts",
+				"packages/coding-agent/src/modes/components/breadboard-tool-renderers.ts",
+				"packages/coding-agent/src/modes/components/settings-selector.ts",
+				"packages/coding-agent/src/modes/components/status-line/presets.ts",
+				"packages/coding-agent/src/modes/components/tool-execution.ts",
+				"packages/coding-agent/src/modes/controllers/command-controller.ts",
+				"packages/coding-agent/src/modes/theme/symbols.ts",
+				"packages/coding-agent/src/modes/types.ts",
+				"packages/coding-agent/src/session/session-entries.ts",
+				"packages/coding-agent/src/session/session-manager.ts",
+				"packages/coding-agent/src/slash-commands/builtin-registry.ts",
+				"packages/coding-agent/src/slash-commands/harness.ts",
+				"packages/coding-agent/test/activity-index.test.ts",
+				"packages/coding-agent/test/agent-hub-ordering.test.ts",
+				"packages/coding-agent/test/command-controller-new-session.test.ts",
+				"packages/coding-agent/test/flag-tables.test.ts",
+				"packages/coding-agent/test/interactive-terminal-e2e.test.ts",
+				"packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
+				"packages/coding-agent/test/modes/components/effective-lock-fixture.ts",
+				"packages/coding-agent/test/modes/components/settings-defs-breadboard.test.ts",
+				"packages/coding-agent/test/modes/components/status-line-harness.test.ts",
+				"packages/coding-agent/test/slash-commands/harness.test.ts",
 				".github/actions/setup-product-backend/action.yml",
 				".github/ISSUE_TEMPLATE/config.yml",
 				".github/SECURITY.md",
@@ -168,6 +193,7 @@
 			"class": "manual-review",
 			"description": "Package, lockfile, license/notice, Docker, executable entrypoint, and mixed downstream/upstream documentation boundaries require an owner and ordered layer.",
 			"patterns": [
+				"docs/environment-variables.md",
 				"docs/task-agent-discovery.md",
 				"docs/tools/eval.md",
 				"docs/tools/task.md",
@@ -328,6 +354,7 @@
 			"owner": "fork-runtime",
 			"layer": 3,
 			"patterns": [
+				"docs/environment-variables.md",
 				"packages/coding-agent/CHANGELOG.md",
 				"docs/task-agent-discovery.md",
 				"docs/tools/eval.md",
@@ -352,6 +379,10 @@
 	],
 	"adapters": {
 		"sdkImports": [
+			"packages/coding-agent/src/modes/components/agent-hub/harness-view.ts",
+			"packages/coding-agent/src/slash-commands/harness.ts",
+			"packages/coding-agent/test/interactive-terminal-e2e.test.ts",
+			"packages/coding-agent/test/slash-commands/harness.test.ts",
 			"packages/coding-agent/src/breadboard/**",
 			"packages/coding-agent/src/bb.ts",
 			"packages/coding-agent/src/product-entrypoint.test.ts",
@@ -374,6 +405,19 @@
 			"packages/coding-agent/test/retry-ambiguous-replay.test.ts"
 		],
 		"endpointAndSchemaLiterals": [
+			"packages/coding-agent/src/activity/index.ts",
+			"packages/coding-agent/src/config/settings-schema.ts",
+			"packages/coding-agent/src/slash-commands/builtin-registry.ts",
+			"packages/coding-agent/src/slash-commands/harness.ts",
+			"packages/coding-agent/test/activity-index.test.ts",
+			"packages/coding-agent/test/agent-hub-ordering.test.ts",
+			"packages/coding-agent/test/command-controller-new-session.test.ts",
+			"packages/coding-agent/test/flag-tables.test.ts",
+			"packages/coding-agent/test/interactive-terminal-e2e.test.ts",
+			"packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
+			"packages/coding-agent/test/modes/components/settings-defs-breadboard.test.ts",
+			"packages/coding-agent/test/modes/components/status-line-harness.test.ts",
+			"packages/coding-agent/test/slash-commands/harness.test.ts",
 			"packages/coding-agent/src/breadboard/**",
 			"packages/coding-agent/src/main.ts",
 			"packages/coding-agent/src/cli.ts",

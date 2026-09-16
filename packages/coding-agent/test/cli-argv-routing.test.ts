@@ -31,6 +31,18 @@ describe("resolveCliArgv routes subcommands hidden behind leading global flags",
 		});
 	});
 
+	test("setup preserves the launcher's harness and model", () => {
+		const resolved = resolveCliArgv(["--harness", "live.harness.yaml", "--model", "openai-codex/gpt-5.5", "setup"]);
+		if ("error" in resolved) throw new Error(resolved.error);
+		expect(resolved.argv[0]).toBe("setup");
+		expect(parseArgs(resolved.argv.slice(1))).toMatchObject({
+			harness: "live.harness.yaml",
+			model: "openai-codex/gpt-5.5",
+			messages: [],
+			unrecognizedFlags: [],
+		});
+	});
+
 	test("a value-consuming flag does not mistake its value for a subcommand", () => {
 		// `acp` here is the value of `--model`, not the subcommand, so this stays a
 		// launch prompt exactly as the launch parser would read it.

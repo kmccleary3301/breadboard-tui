@@ -17,13 +17,13 @@ The engine seam is the pinned `@breadboard/sdk` package. Direct imports from the
 Current product identity:
 
 - BreadBoard: `0.1.0-rc.7`
-- OMP: `18.1.15`
+- OMP: `18.2.2`, plus upstream main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`
 - `@breadboard/sdk`: `0.4.0`
 - SDK engine API range: `>=0.4.0 <0.5.0`
 
 ## Build
 
-Prerequisites: Bun `>=1.3.14` (the repository package manager and primary CI lane use Bun 1.4), the platform's OMP native addon, and a checkout of the exact backend commit recorded in `packages/coding-agent/breadboard-sdk-provenance.json`.
+Prerequisites: Bun `1.4.0` (the repository package manager and primary CI lane use Bun 1.4), the platform's OMP native addon, and a checkout of the exact backend commit recorded in `packages/coding-agent/breadboard-sdk-provenance.json`.
 
 ```sh
 bun install --frozen-lockfile
@@ -95,6 +95,8 @@ BREADBOARD_P30_BACKEND_ROOT=/path/to/pinned/breadboard \
 The fork audit compares the product tree with the exact upstream tag and rejects undeclared paths, inline product logic in upstream-owned entrypoints, dependency drift, provenance drift, and delta-budget overruns.
 
 ## Upstream convergence
+
+The current baseline is `v18.2.2`. The integration target is upstream main `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including the subsequent CJK character-boundary fix in sloppy edits. Those post-release changes remain part of the audited upstream-owned delta.
 
 Each stable OMP train follows one reviewable sequence:
 

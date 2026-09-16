@@ -6,18 +6,20 @@ import {
 	type BreadboardSessionBindingData,
 } from "@oh-my-pi/pi-coding-agent/breadboard/session-binding";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { Composer } from "@oh-my-pi/pi-coding-agent/modes/composer";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme, setSymbolPreset, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getSlashCommandTypeIcon } from "@oh-my-pi/pi-coding-agent/modes/theme/tui-adapters";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 import { asGlobalFetch } from "./helpers/fetch-mock";
+import { EFFECTIVE_HARNESS_SNAPSHOT } from "./modes/components/effective-lock-fixture";
 
 function plainRows(rows: readonly string[]): string[] {
 	return rows.map(row => Bun.stripANSI(row).trimEnd());
@@ -64,6 +66,83 @@ describe("libkitty end-to-end", () => {
 		authStorage?.close();
 		tempDir?.removeSync();
 		resetSettingsForTest();
+	});
+
+	it("updates visible slash icons when the symbol preset changes in either direction", async () => {
+		const originalPreset = theme.getSymbolPreset();
+		const modelRow = () => plainRows(term.getViewport()).find(row => /^[^A-Za-z0-9/]*model\s/.test(row));
+		try {
+			await mode.init({ suppressWelcomeIntro: true });
+			void mode.getUserInput();
+			await setSymbolPreset("nerd");
+			const icon = getSlashCommandTypeIcon("model");
+			if (!icon) throw new Error("Nerd Font model icon is missing");
+			term.sendInput("/model");
+			await term.waitForRender(() => modelRow()?.includes(icon) === true);
+			expect(modelRow()).toContain(icon);
+
+			mode.editor.setText("");
+			await setSymbolPreset("ascii");
+			term.sendInput("/model");
+			await term.waitForRender(() => {
+				const row = modelRow();
+				return row !== undefined && !row.includes(icon);
+			});
+			expect(modelRow()).not.toContain(icon);
+		} finally {
+			await setSymbolPreset(originalPreset);
+		}
+	});
+
+	it("keeps unrelated custom commands visible with an active harness", async () => {
+		const model = session.model;
+		if (!model) throw new Error("Expected fixture model");
+		mode.stop();
+		await session.dispose();
+		session = new AgentSession({
+			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
+			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+			customCommands: ["ps", "clean"].map(name => ({
+				path: path.join(tempDir.path(), `${name}.ts`),
+				resolvedPath: path.join(tempDir.path(), `${name}.ts`),
+				source: "project",
+				command: {
+					name,
+					description: `Custom ${name} command`,
+					execute() {
+						throw new Error("Autocomplete must not execute commands");
+					},
+				},
+			})),
+		});
+		term = new VirtualTerminal(120, 32);
+		mode = new InteractiveMode(
+			session,
+			"test",
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			new Composer({ terminal: term }),
+		);
+		mode.harnessPort = {
+			current: () => EFFECTIVE_HARNESS_SNAPSHOT,
+			refresh: async () => EFFECTIVE_HARNESS_SNAPSHOT,
+			subscribe: () => () => {},
+		};
+		await mode.init({ suppressWelcomeIntro: true });
+		void mode.getUserInput();
+		for (const name of ["ps", "clean"]) {
+			mode.editor.setText("");
+			term.sendInput(`/${name}`);
+			await term.waitForRender(() =>
+				plainRows(term.getViewport()).some(row => row.includes(`Custom ${name} command`)),
+			);
+			expect(plainRows(term.getViewport()).join("\n")).toContain(`Custom ${name} command`);
+		}
 	});
 
 	it("paints the submitted user message before any model reply", async () => {
@@ -392,5 +471,88 @@ describe("libkitty end-to-end", () => {
 		// Child parent path points to actual parent file
 		expect(childHeader?.parentSession).toBe(parentSessionFile);
 		expect(await Bun.file(parentSessionFile).exists()).toBe(true);
+	});
+
+	it("hides tool activity already retired to native scrollback when the real shortcut toggles", async () => {
+		const usage: Usage = {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const TOOL_MARKER = "RETIRED_TOOL_ACTIVITY_MARKER";
+		const callId = "retired-tool-call";
+		const toolCall: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "toolCall", id: callId, name: "bash", arguments: { command: `printf ${TOOL_MARKER}` } }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet",
+			usage,
+			stopReason: "toolUse",
+			timestamp: 1,
+		};
+		const toolResult: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: callId,
+			toolName: "bash",
+			content: [{ type: "text", text: TOOL_MARKER }],
+			isError: false,
+			timestamp: 2,
+		};
+		const assistantText = (text: string): AssistantMessage => ({
+			role: "assistant",
+			content: [{ type: "text", text }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet",
+			usage,
+			stopReason: "stop",
+			timestamp: 3,
+		});
+
+		term = new VirtualTerminal(120, 10);
+		const composer = new Composer({ terminal: term });
+		mode = new InteractiveMode(session, "test", undefined, () => {}, undefined, undefined, undefined, composer);
+		await mode.init({ suppressWelcomeIntro: true });
+		void mode.getUserInput();
+		await term.waitForRender();
+
+		// Tool visibility is a global input-controller action; it reads the live keybindings.
+		mode.keybindings.setUserBindings({ "app.tools.toggleVisibility": "alt+o" });
+		mode.renderSessionContext({
+			messages: [
+				toolCall,
+				toolResult,
+				...Array.from({ length: 12 }, (_, i) =>
+					assistantText(`Filler answer number ${i} occupying a transcript row.`),
+				),
+			],
+			models: {},
+			injectedTtsrRules: [],
+			mode: "none",
+		});
+
+		const committedRows = () => {
+			const { baseY } = term.getBufferPosition();
+			return plainRows(term.getScrollBuffer()).slice(0, baseY);
+		};
+		for (let i = 0; i < 20 && !committedRows().some(row => row.includes(TOOL_MARKER)); i++) {
+			mode.ui.requestRender(true);
+			await term.waitForRender();
+		}
+		expect(committedRows().some(row => row.includes(TOOL_MARKER))).toBe(true);
+
+		term.sendInput("LIVE_EDITOR_DRAFT");
+		await term.waitForRender(() => plainRows(term.getViewport()).some(row => row.includes("LIVE_EDITOR_DRAFT")));
+
+		// Alt+O is the configured app.tools.toggleVisibility binding from this test's keybinding manager.
+		term.sendInput("\x1bo");
+		await term.waitForRender(() => !plainRows(term.getScrollBuffer()).some(row => row.includes(TOOL_MARKER)));
+		expect(mode.hideToolActivity).toBe(true);
+		expect(plainRows(term.getScrollBuffer()).some(row => row.includes(TOOL_MARKER))).toBe(false);
+		expect(plainRows(term.getViewport()).some(row => row.includes("LIVE_EDITOR_DRAFT"))).toBe(true);
 	});
 });

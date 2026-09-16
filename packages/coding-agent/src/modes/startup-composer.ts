@@ -1,8 +1,6 @@
+import { scheduler } from "node:timers/promises";
 import { Text, type Terminal } from "@oh-my-pi/pi-tui";
 import { APP_NAME, logger } from "@oh-my-pi/pi-utils";
-import { getRecentSessions } from "../session/session-listing";
-import { computeDefaultSessionDir } from "../session/session-paths";
-import { FileSessionStorage } from "../session/session-storage";
 import type { LspServerInfo, RecentSession } from "./components/welcome";
 import { COMPOSER_DEFAULTS, Composer, type ComposerPreferences, type ComposerWelcomeUpdate } from "./composer";
 import {
@@ -38,6 +36,8 @@ interface PendingComposer {
 	readonly composer: Composer;
 	readonly cwd: string;
 	readonly cache: boolean;
+	/** Re-arm the bootstrap submit queue before deferred stdin is replayed at adoption. */
+	readonly captureStartupSubmissions: boolean;
 	recentSessions?: Promise<RecentSession[] | undefined>;
 }
 
@@ -48,16 +48,26 @@ export class ComposerLease {
 	readonly composer: Composer;
 	/** Recent-session rows already loading in parallel with the runtime module graph. */
 	readonly recentSessions?: Promise<RecentSession[] | undefined>;
+	readonly #captureStartupSubmissions: boolean;
 	#adopted = false;
 
-	constructor(composer: Composer, recentSessions?: Promise<RecentSession[] | undefined>) {
+	constructor(
+		composer: Composer,
+		recentSessions?: Promise<RecentSession[] | undefined>,
+		captureStartupSubmissions = false,
+	) {
 		this.composer = composer;
 		this.recentSessions = recentSessions;
+		this.#captureStartupSubmissions = captureStartupSubmissions;
 	}
 
 	/** Transfer terminal ownership exactly once. */
 	adopt(): void {
 		if (this.#adopted) return;
+		// InteractiveMode closes the submit gate in its constructor. Re-arm the
+		// startup-only queue before deferred stdin is replayed so an early Enter
+		// remains buffered instead of being dropped during that handoff.
+		if (this.#captureStartupSubmissions) this.composer.captureStartupSubmissions();
 		// Safety net: startup paths that never applied resolved settings must
 		// still hand InteractiveMode a raw-input terminal.
 		this.composer.enableInput();
@@ -112,16 +122,18 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 	}
 	composer.captureStartupSubmissions();
 	try {
-		composer.start({ clearScrollback: true });
+		composer.start({ clearScrollback: true, deferInput: true });
 	} catch (error) {
 		try {
 			composer.stop();
 		} catch {}
 		throw error;
 	}
-	const pending: PendingComposer = { composer, cwd, cache: useCache };
+	const pending: PendingComposer = { composer, cwd, cache: useCache, captureStartupSubmissions: true };
 	pendingComposer = pending;
-	pending.recentSessions = refreshRecentSessions(pending, options.recentSessions);
+	// Keep filesystem discovery out of the synchronous prepaint turn. Composer.start()
+	// has queued the first frame; recents can begin once the event loop yields.
+	pending.recentSessions = loadRecentSessionsAfterFirstFrame(pending, options.recentSessions);
 }
 
 export function hasPendingStartupComposer(): boolean {
@@ -132,7 +144,9 @@ export function hasPendingStartupComposer(): boolean {
 export function takeStartupComposerLease(): ComposerLease | undefined {
 	const pending = pendingComposer;
 	pendingComposer = undefined;
-	return pending ? new ComposerLease(pending.composer, pending.recentSessions) : undefined;
+	return pending
+		? new ComposerLease(pending.composer, pending.recentSessions, pending.captureStartupSubmissions)
+		: undefined;
 }
 
 /** Stop and forget any prepaint composer that never reached InteractiveMode. */
@@ -184,10 +198,11 @@ export function setStartupComposerLspServers(servers: LspServerInfo[]): void {
 	}
 }
 
-async function refreshRecentSessions(
+async function loadRecentSessionsAfterFirstFrame(
 	pending: PendingComposer,
 	loadOverride: (() => Promise<RecentSession[]>) | undefined,
 ): Promise<RecentSession[] | undefined> {
+	await scheduler.yield();
 	try {
 		const sessions = loadOverride ? await loadOverride() : await loadRecentSessions(pending.cwd);
 		if (pending.cache) {
@@ -206,6 +221,11 @@ async function refreshRecentSessions(
 }
 
 async function loadRecentSessions(cwd: string): Promise<RecentSession[]> {
+	const [{ getRecentSessions }, { computeDefaultSessionDir }, { FileSessionStorage }] = await Promise.all([
+		import("../session/session-listing"),
+		import("../session/session-paths"),
+		import("../session/session-storage"),
+	]);
 	const storage = new FileSessionStorage();
 	const dir = computeDefaultSessionDir(cwd, storage);
 	const list = await getRecentSessions(dir, 4, storage);
