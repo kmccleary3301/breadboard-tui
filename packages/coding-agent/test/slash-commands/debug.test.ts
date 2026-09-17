@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 
 function createRuntimeHarness() {
@@ -11,11 +11,11 @@ function createRuntimeHarness() {
 		showStatus,
 		showDebugSelector,
 		runtime: {
-			ctx: {
-				editor: { setText } as unknown as InteractiveModeContext["editor"],
+			ctx: createInteractiveModeContext({
+				editor: { setText },
 				showStatus,
 				showDebugSelector,
-			} as unknown as InteractiveModeContext,
+			}),
 		},
 	};
 }

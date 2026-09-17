@@ -104,7 +104,7 @@ import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
-import type { ResolvedModelRoleValue } from "../config/model-resolver";
+import { formatModelStringWithRouting, type ResolvedModelRoleValue } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import { buildServiceTierByFamily } from "../config/service-tier";
 import type { Settings, SkillsSettings } from "../config/settings";
@@ -346,6 +346,7 @@ import {
 	type PrewalkCoordinatorHost,
 	type PrewalkRestartResult,
 } from "./prewalk";
+import { nativeControlRestriction, type NativeControl } from "../breadboard/native-control-policy";
 import {
 	isAdvisorCard,
 	isDisplayableQueuedMessage,
@@ -370,7 +371,7 @@ import {
 	userTurnDraft,
 } from "./session-context";
 import { formatSessionDumpText } from "./session-dump-format";
-import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
+import { EPHEMERAL_MODEL_CHANGE_ROLE, type BranchSummaryEntry, type NewSessionOptions } from "./session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
 import {
 	COMPACTION_CHECK_NONE,
@@ -404,6 +405,11 @@ import { TtsrCoordinator, type TtsrCoordinatorHost } from "./ttsr-coordinator";
 const PLAN_MODE_REMINDER_MAX = 3;
 const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 const AGENT_START_POLICY_MAX_ATTEMPTS = 3;
+
+function assertNativeControlAllowed(control: NativeControl, externalTurnLifecycle: boolean): void {
+	const restriction = nativeControlRestriction(control, externalTurnLifecycle);
+	if (restriction !== undefined) throw new Error(restriction);
+}
 
 /** A failed preparation, not a provider failure: the ordinary input can still be restored. */
 class AgentStartPolicyChangedError extends Error {
@@ -776,6 +782,7 @@ export class AgentSession {
 	#modelRegistry: ModelRegistry;
 	/** Whether the external main stream owns primary-prompt authentication. */
 	#mainStreamManagesAuth = false;
+	#mainStreamSelectModel: AgentSessionConfig["mainStreamSelectModel"];
 	#mainStreamOwnsTurnLifecycle: boolean;
 	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
 	#usagePreflightAbortControllers = new Set<AbortController>();
@@ -1256,6 +1263,7 @@ export class AgentSession {
 	 * Arm prewalk outside the normal startup path so an explicit slash command starts immediately.
 	 */
 	armPrewalk(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
+		assertNativeControlAllowed("prewalk", this.#mainStreamOwnsTurnLifecycle);
 		return this.#prewalk.arm(target, thinkingLevel);
 	}
 
@@ -1266,11 +1274,13 @@ export class AgentSession {
 		target: Model,
 		targetThinkingLevel: ConfiguredThinkingLevel | undefined,
 	): Promise<PrewalkRestartResult> {
+		assertNativeControlAllowed("prewalk", this.#mainStreamOwnsTurnLifecycle);
 		return this.#prewalk.restart(source, sourceThinkingLevel, target, targetThinkingLevel);
 	}
 
 	/** Validate the active plan artifact and shape an `xd://propose` result for review-mode hosts. */
 	async preparePlanForReview(title: string): Promise<AgentToolResult<PlanApprovalDetails>> {
+		assertNativeControlAllowed("plan", this.#mainStreamOwnsTurnLifecycle);
 		const state = this.getPlanModeState();
 		if (!state?.enabled) {
 			throw new ToolError("Plan mode is not active.");
@@ -1310,6 +1320,7 @@ export class AgentSession {
 		this.memoryEnabled = config.memoryEnabled ?? true;
 		this.#modelRegistry = config.modelRegistry;
 		this.#mainStreamManagesAuth = config.mainStreamManagesAuth ?? false;
+		this.#mainStreamSelectModel = config.mainStreamSelectModel;
 		this.#mainStreamOwnsTurnLifecycle = config.mainStreamOwnsTurnLifecycle ?? false;
 		this.#extensionRoots =
 			config.extensionRoots ??
@@ -1574,7 +1585,7 @@ export class AgentSession {
 		this.agent.setProviderResponseInterceptor(this.#onResponse);
 		this.agent.setRawSseEventInterceptor(this.#onSseEvent);
 		this.agent.setOnTurnEnd(async (messages, signal, context) => {
-			if (signal?.aborted) return;
+			if (signal?.aborted || this.#mainStreamOwnsTurnLifecycle) return;
 			const rewindReport = this.#extractRewindReport(messages);
 			if (rewindReport) {
 				this.#pendingRewindReport = undefined;
@@ -1789,6 +1800,9 @@ export class AgentSession {
 		this.#goalRuntime = new GoalRuntime({
 			getState: () => this.#goalModeState,
 			setState: state => {
+				if (state !== undefined) {
+					assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
+				}
 				this.#goalModeState = state;
 			},
 			getCurrentUsage: () => {
@@ -1809,10 +1823,12 @@ export class AgentSession {
 				if (mode === "none") {
 					this.sessionManager.appendModeChange("none");
 				} else if (state) {
+					assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 					this.sessionManager.appendModeChange(mode, { goal: state.goal });
 				}
 			},
 			sendHiddenMessage: async message => {
+				assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 				await this.sendCustomMessage(
 					{
 						customType: message.customType,
@@ -1881,7 +1897,7 @@ export class AgentSession {
 			sessionId: () => this.sessionId,
 		};
 		this.#advisors = new SessionAdvisors(advisorsHost, {
-			enabled: this.settings.get("advisor.enabled"),
+			enabled: !this.#mainStreamOwnsTurnLifecycle && this.settings.get("advisor.enabled"),
 			tools: config.advisorTools,
 			createGrepTool: config.advisorCreateGrepTool,
 			createEditTool: config.advisorCreateEditTool,
@@ -3902,6 +3918,9 @@ export class AgentSession {
 		request: ScheduledAgentContinueRequest,
 		coalescedSources: Set<string>,
 	): Promise<AgentContinueOutcome> {
+		if (this.#mainStreamOwnsTurnLifecycle) {
+			return { status: "skipped", reason: "session-unavailable" };
+		}
 		try {
 			const reverted = await this.#recovery.maybeRestoreRetryFallbackPrimary();
 			if (signal.aborted || this.#isDisposed) {
@@ -4632,8 +4651,7 @@ export class AgentSession {
 		// Keep every live advisor's provider identity in lockstep with the primary's
 		// across every session-boundary transition — including branch paths that
 		// skip conversation restore — so advisors never emit the previous
-		// conversation's session id/metadata (issue #6625). Guarded because this
-		// runs once during construction before the advisor controller exists.
+		// session's credentials or prompt-cache identity.
 		if (this.#advisors) this.#advisors.refreshProviderIdentity();
 	}
 
@@ -4649,7 +4667,7 @@ export class AgentSession {
 
 	/** Run one abortable auto-learn capture outside the primary agent loop. */
 	async runAutolearnCapture(capture: (signal: AbortSignal) => Promise<void>): Promise<void> {
-		if (this.#autolearnCaptureTask || this.#isDisposed) return;
+		if (this.#mainStreamOwnsTurnLifecycle || this.#autolearnCaptureTask || this.#isDisposed) return;
 		const controller = new AbortController();
 		this.#autolearnCaptureAbortController = controller;
 		const task = (async () => {
@@ -5069,6 +5087,7 @@ export class AgentSession {
 	}
 
 	freshSession(): FreshSessionResult | undefined {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		if (this.isStreaming) return undefined;
 		const previousSessionId = this.sessionId;
 		const closedProviderSessions = this.#providerSessionState.size;
@@ -5103,6 +5122,7 @@ export class AgentSession {
 	 * streaming or a foreground bash/python execution is in flight.
 	 */
 	async resetSessionContext(): Promise<ResetSessionContextResult | undefined> {
+		assertNativeControlAllowed("context", this.#mainStreamOwnsTurnLifecycle);
 		using _transition = this.#beginSessionTransition();
 		// Refuse while a response streams OR a foreground user bash/python
 		// execution is in flight: those complete via recordBashResult()/
@@ -5188,6 +5208,10 @@ export class AgentSession {
 	// Read-only State Access
 	// =========================================================================
 
+	/** Whether an external BreadBoard stream owns turn settlement and continuation. */
+	get mainStreamOwnsTurnLifecycle(): boolean {
+		return this.#mainStreamOwnsTurnLifecycle;
+	}
 	/** Full agent state */
 	get state(): AgentState {
 		return this.agent.state;
@@ -5508,24 +5532,27 @@ export class AgentSession {
 		return this.#tools.getAllToolNames();
 	}
 
-	/** Full metadata for every registered tool, including source provenance (backs `getAllTools()`). */
-	getAllToolInfos(): ToolInfo[] {
-		return this.#tools.getAllToolInfos();
-	}
-
 	/** Installs and activates the ephemeral vibe tool set. */
 	activateVibeTools(baseToolNames: string[]): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		return this.#tools.activateVibeTools(baseToolNames);
 	}
 
 	/** Uninstalls vibe tools and activates the replacement set. */
 	deactivateVibeTools(nextToolNames: string[]): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		return this.#tools.deactivateVibeTools(nextToolNames);
 	}
 
 	/** Removes vibe tools without restoring a source-session snapshot. */
 	removeVibeToolsPreservingActive(): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		return this.#tools.removeVibeToolsPreservingActive();
+	}
+
+	/** Full metadata for every registered tool, including source provenance (backs `getAllTools()`). */
+	getAllToolInfos(): ToolInfo[] {
+		return this.#tools.getAllToolInfos();
 	}
 
 	#resolveActiveEditMode(): EditMode {
@@ -5592,6 +5619,7 @@ export class AgentSession {
 
 	/** Applies the external-thinking setting to the private scratchpad tool immediately. */
 	setThinkToolEnabled(enabled: boolean): Promise<boolean> {
+		assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
 		return this.#tools.setThinkToolEnabled(enabled);
 	}
 
@@ -5602,6 +5630,11 @@ export class AgentSession {
 
 	/** Starts a new local rollout-memory generation and cancels its predecessor. */
 	beginLocalMemoryStartup(): AbortSignal {
+		if (this.#mainStreamOwnsTurnLifecycle) {
+			const signal = new AbortController();
+			signal.abort();
+			return signal.signal;
+		}
 		return this.#memory.beginLocalMemoryStartup();
 	}
 
@@ -5612,7 +5645,7 @@ export class AgentSession {
 
 	/** Apply the backend; cwd rebinding can skip Mnemopi auto-retention while still draining writes. */
 	applyMemoryBackend(options: { retainMnemopi?: boolean } = {}): Promise<void> {
-		if (!this.memoryEnabled) return Promise.resolve();
+		if (!this.memoryEnabled || this.#mainStreamOwnsTurnLifecycle) return Promise.resolve();
 		return this.#memory.applyMemoryBackend(options);
 	}
 
@@ -5642,16 +5675,19 @@ export class AgentSession {
 	}
 	/** Strip image content from the current branch and persist the rewrite. */
 	dropImages(): Promise<{ removed: number }> {
+		assertNativeControlAllowed("context", this.#mainStreamOwnsTurnLifecycle);
 		return this.#maintenance.dropImages();
 	}
 
 	/** Reduce stored context with the selected shake strategy. */
 	shake(mode: ShakeMode, opts: { config?: ShakeConfig; signal?: AbortSignal } = {}): Promise<ShakeResult> {
+		assertNativeControlAllowed("compaction", this.#mainStreamOwnsTurnLifecycle);
 		return this.#maintenance.shake(mode, opts);
 	}
 
 	/** Compact the active session history. */
 	compact(customInstructions?: string, options?: CompactOptions): Promise<CompactionResult> {
+		assertNativeControlAllowed("compaction", this.#mainStreamOwnsTurnLifecycle);
 		return this.#maintenance.compact(customInstructions, options);
 	}
 
@@ -5662,19 +5698,14 @@ export class AgentSession {
 
 	/** Trigger idle compaction through the automatic maintenance flow. */
 	async runIdleCompaction(): Promise<void> {
-		// A pending async wake means the session is waiting, not idle: a
-		// background job (bash/task) owned by this agent re-wakes the loop when it
-		// completes, and the async-result delivery continues the run. Idle
-		// compaction is a stop-time pass like the todo reminder and session_stop
-		// hook — defer it until the session is fully idle so the resumed turn
-		// keeps its context (the async settle, or the threshold path, compacts if
-		// still needed).
+		if (this.#mainStreamOwnsTurnLifecycle) return;
 		if (this.#hasPendingAsyncWake()) return;
 		await this.#maintenance.runIdleCompaction();
 	}
 
 	/** Toggle automatic compaction. `persist` saves it to global config; the default applies a session-scoped override. */
 	setAutoCompactionEnabled(enabled: boolean, persist = false): void {
+		assertNativeControlAllowed("compaction", this.#mainStreamOwnsTurnLifecycle);
 		this.#maintenance.setAutoCompactionEnabled(enabled, persist);
 	}
 
@@ -5814,6 +5845,9 @@ export class AgentSession {
 	}
 
 	setPlanModeState(state: PlanModeState | undefined): void {
+		if (state?.enabled) {
+			assertNativeControlAllowed("plan", this.#mainStreamOwnsTurnLifecycle);
+		}
 		this.#planModeState = state;
 		if (state?.enabled) {
 			this.#planReferenceSent = false;
@@ -5821,8 +5855,6 @@ export class AgentSession {
 		} else {
 			this.#planModeReminderCount = 0;
 			this.#planModeReminderAwaitingProgress = false;
-			// Drop any unconsumed forced decision so a post-plan execution turn
-			// does not inherit a stale `required` tool choice.
 			this.#toolChoiceQueue.removeByLabel("plan-mode-decision");
 		}
 	}
@@ -5832,6 +5864,9 @@ export class AgentSession {
 	}
 
 	setGoalModeState(state: GoalModeState | undefined): void {
+		if (state?.enabled) {
+			assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
+		}
 		this.#goalModeState = state;
 	}
 
@@ -5840,6 +5875,9 @@ export class AgentSession {
 	}
 
 	setVibeModeState(state: VibeModeState | undefined): void {
+		if (state?.enabled) {
+			assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
+		}
 		this.#vibeModeState = state;
 		if (state?.enabled) return;
 
@@ -5880,6 +5918,9 @@ export class AgentSession {
 	}
 
 	setPlanReferencePath(path: string): void {
+		if (path) {
+			assertNativeControlAllowed("plan", this.#mainStreamOwnsTurnLifecycle);
+		}
 		this.#planReferencePath = path;
 	}
 
@@ -5981,6 +6022,7 @@ export class AgentSession {
 	 * Inject the plan mode context message into the conversation history.
 	 */
 	async sendPlanModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside" }): Promise<void> {
+		assertNativeControlAllowed("plan", this.#mainStreamOwnsTurnLifecycle);
 		const message = await this.#buildPlanModeMessage();
 		if (!message) return;
 		await this.sendCustomMessage(
@@ -5995,6 +6037,7 @@ export class AgentSession {
 	}
 
 	async sendGoalModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside" }): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		const message = this.#buildGoalModeMessage();
 		if (!message) return;
 		await this.sendCustomMessage(
@@ -6010,6 +6053,7 @@ export class AgentSession {
 	}
 
 	async sendVibeModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside" }): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		const message = this.#buildVibeModeMessage();
 		if (!message) return;
 		await this.sendCustomMessage(
@@ -6263,7 +6307,11 @@ export class AgentSession {
 	}
 
 	#magicKeywordEnabled(keyword: "orchestrate" | "ultrathink" | "workflow"): boolean {
-		return this.settings.get("magicKeywords.enabled") && this.settings.get(`magicKeywords.${keyword}`);
+		return (
+			!this.#mainStreamOwnsTurnLifecycle &&
+			this.settings.get("magicKeywords.enabled") &&
+			this.settings.get(`magicKeywords.${keyword}`)
+		);
 	}
 
 	#createMagicKeywordNotices(text: string): CustomMessage[] {
@@ -6332,6 +6380,9 @@ export class AgentSession {
 	 * the ACP agent) use this to know whether to expect an `agent_end` event.
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<boolean> {
+		if (options?.synthetic || options?.attribution === "agent") {
+			assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
+		}
 		return this.#admitSubmission(() => this.#prompt(text, options));
 	}
 
@@ -6418,6 +6469,7 @@ export class AgentSession {
 
 		// If streaming, queue via steer()/followUp()/aside based on option
 		if (this.isStreaming) {
+			assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 			const streamingBehavior = options?.streamingBehavior;
 			if (!streamingBehavior) {
 				// Busy because the agent owns a turn: that turn supersedes the interrupted
@@ -6444,6 +6496,7 @@ export class AgentSession {
 		const hasPendingUserDirective = this.#toolChoiceQueue.inspect().includes("user-force");
 		const activeModel = this.agent.state.model;
 		const externalThinkingToolChoice =
+			!this.#mainStreamOwnsTurnLifecycle &&
 			!options?.synthetic &&
 			!hasPendingUserDirective &&
 			this.settings.get("externalThinking") &&
@@ -6477,6 +6530,7 @@ export class AgentSession {
 		// await sits between this check and #beginInFlight, so the winner's
 		// in-flight increment is visible to every later re-check.
 		if (this.isStreaming) {
+			assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 			const streamingBehavior = options?.streamingBehavior;
 			if (!streamingBehavior) {
 				outcome.sessionClaimed = this.agent.state.isStreaming;
@@ -6581,6 +6635,7 @@ export class AgentSession {
 			queueOnly?: boolean;
 		},
 	): Promise<boolean> {
+		assertNativeControlAllowed("context", this.#mainStreamOwnsTurnLifecycle);
 		return this.#admitSubmission(() => this.#promptCustomMessage(message, options));
 	}
 
@@ -6825,8 +6880,10 @@ export class AgentSession {
 		const generation = this.#promptGeneration;
 		this.#promptSequence++;
 		try {
-			await this.#recovery.maybeRestoreRetryFallbackPrimary();
-			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
+			if (!this.#mainStreamOwnsTurnLifecycle) {
+				await this.#recovery.maybeRestoreRetryFallbackPrimary();
+				if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
+			}
 			// Flush any pending bash messages before the new prompt
 			await this.#bash.flushPending();
 			this.#eval.flushPending();
@@ -6941,7 +6998,7 @@ export class AgentSession {
 			// non-auto sessions are skipped. Never blocks the turn — failures fall
 			// back to a concrete level inside the helper.
 			const isUserTurn = message.role === "user" || (message.role === "custom" && isUserInvokedSkillPrompt(message));
-			if (this.isAutoThinking && isUserTurn) {
+			if (!this.#mainStreamOwnsTurnLifecycle && this.isAutoThinking && isUserTurn) {
 				await this.#models.applyAutoThinkingLevel(expandedText, generation);
 				if (this.#promptGeneration !== generation) {
 					return false;
@@ -6961,7 +7018,9 @@ export class AgentSession {
 			if (maintenanceMessages !== messages && previewXdevMountNotice?.notice) {
 				maintenanceMessages.splice(xdevMountNoticeIndex, 0, previewXdevMountNotice.notice);
 			}
-			await this.#maintenance.runPrePromptCompactionIfNeeded(maintenanceMessages);
+			if (!this.#mainStreamOwnsTurnLifecycle) {
+				await this.#maintenance.runPrePromptCompactionIfNeeded(maintenanceMessages);
+			}
 			if (this.#promptGeneration !== generation) {
 				return false;
 			}
@@ -7016,7 +7075,11 @@ export class AgentSession {
 				this.#planReferenceSent = true;
 			}
 			try {
-				await this.#recovery.promptAgentWithIdleRetry(messages, agentPromptOptions);
+				if (this.#mainStreamOwnsTurnLifecycle) {
+					await this.agent.prompt(messages, agentPromptOptions);
+				} else {
+					await this.#recovery.promptAgentWithIdleRetry(messages, agentPromptOptions);
+				}
 			} finally {
 				this.#stats.setPendingSnapshot(undefined);
 			}
@@ -7191,6 +7254,7 @@ export class AgentSession {
 	 * Queue a steering message to interrupt the agent mid-run.
 	 */
 	async steer(text: string, images?: ImageContent[], options?: SteerOptions): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		if (text.startsWith("/")) {
 			this.#throwIfExtensionCommand(text);
 		}
@@ -7213,6 +7277,7 @@ export class AgentSession {
 	 * flipping advisor auto-resume.
 	 */
 	async followUp(text: string, images?: ImageContent[], options?: FollowUpOptions): Promise<void> {
+		assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		if (text.startsWith("/")) {
 			this.#throwIfExtensionCommand(text);
 		}
@@ -7622,6 +7687,7 @@ export class AgentSession {
 			acceptTerminalEmptyStop?: boolean;
 		},
 	): Promise<boolean> {
+		if (options?.triggerTurn) assertNativeControlAllowed("automation", this.#mainStreamOwnsTurnLifecycle);
 		return this.#admitSubmission(() => this.#sendCustomMessage(message, options));
 	}
 
@@ -8314,6 +8380,9 @@ export class AgentSession {
 	 * @returns true if completed, false if cancelled by hook
 	 */
 	async newSession(options?: NewSessionOptions): Promise<boolean> {
+		if (options?.transition !== "harnessSwitch") {
+			assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
+		}
 		using _transition = this.#beginSessionTransition();
 		this.#assertVibeSessionTransitionAllowed("start a new session");
 		const previousSessionFile = this.sessionFile;
@@ -8356,7 +8425,9 @@ export class AgentSession {
 				}
 				await this.sessionManager.newSession({
 					...options,
-					additionalDirectories: this.settings.get("workspace.additionalDirectories"),
+					additionalDirectories: this.#mainStreamOwnsTurnLifecycle
+						? []
+						: this.settings.get("workspace.additionalDirectories"),
 				});
 				this.#bash.markSessionTransition(bashTransition);
 				// The new session owns the transcript from here, so the previous
@@ -8379,8 +8450,10 @@ export class AgentSession {
 			// post-/new turns keep sending the previous session's StablePrefix, and
 			// #syncAppendOnlyContext only re-runs on model or setting changes.
 			this.agent.appendOnlyContext?.invalidateForModelChange();
-			this.#memory.rekeyForCurrentSessionId();
-			await this.#memory.resetContextForNewTranscript();
+			if (!this.#mainStreamOwnsTurnLifecycle) {
+				this.#memory.rekeyForCurrentSessionId();
+				await this.#memory.resetContextForNewTranscript();
+			}
 			this.#pendingNextTurnMessages = [];
 			// The abort above may have skipped the loop's final aside poll (issue: stranded
 			// asides survive an aborted turn by design so a resumed session can still see
@@ -8446,6 +8519,7 @@ export class AgentSession {
 	 * @returns true if completed, false if cancelled by hook or not persisting
 	 */
 	async fork(): Promise<boolean> {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		using _transition = this.#beginSessionTransition();
 		this.#assertVibeSessionTransitionAllowed("fork the session");
 		const previousSessionFile = this.sessionFile;
@@ -8524,6 +8598,7 @@ export class AgentSession {
 
 	/** Move the active session and artifacts after enforcing mode transition invariants. */
 	async moveSession(newCwd: string, targetSessionDir?: string): Promise<void> {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		this.#assertVibeSessionTransitionAllowed("move the session");
 		await this.sessionManager.moveTo(newCwd, targetSessionDir);
 	}
@@ -8550,6 +8625,13 @@ export class AgentSession {
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {
+		if (
+			this.#mainStreamOwnsTurnLifecycle ||
+			role.trim().toLowerCase() !== "default" ||
+			options?.thinkingLevel !== undefined
+		) {
+			assertNativeControlAllowed("model-roles", this.#mainStreamOwnsTurnLifecycle);
+		}
 		return this.#models.setModel(model, role, options);
 	}
 
@@ -8559,12 +8641,44 @@ export class AgentSession {
 		thinkingLevel?: ConfiguredThinkingLevel,
 		options?: { ephemeral?: boolean },
 	): Promise<void> {
+		if (thinkingLevel !== undefined) {
+			assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
+		}
+		if (this.#mainStreamOwnsTurnLifecycle) return this.#setExternalModelTemporary(model, options);
 		return this.#models.setModelTemporary(model, thinkingLevel, options);
 	}
 
+	async #setExternalModelTemporary(model: Model, options?: { ephemeral?: boolean }): Promise<void> {
+		const previousEditMode = this.#tools.resolveActiveEditMode();
+		await this.#setModelWithProviderSessionReset(model);
+		this.#modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(model));
+		this.#recovery.clearActiveRetryFallback();
+		this.sessionManager.appendModelChange(
+			`${model.provider}/${model.id}`,
+			options?.ephemeral ? EPHEMERAL_MODEL_CHANGE_ROLE : "temporary",
+		);
+		this.settings.getStorage()?.recordModelUsage(`${model.provider}/${model.id}`);
+		await this.#tools.syncAfterModelChange(previousEditMode);
+	}
+
 	/** Cycles the scoped model set, or all available models when no scope exists. */
-	cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
-		return this.#models.cycleModel(direction);
+	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
+		if (!this.#mainStreamOwnsTurnLifecycle) return this.#models.cycleModel(direction);
+		const models = this.scopedModels;
+		if (models.length <= 1) return undefined;
+		const current = this.model;
+		const index = models.findIndex(
+			entry => entry.model.provider === current?.provider && entry.model.id === current?.id,
+		);
+		const nextIndex =
+			index < 0
+				? direction === "forward"
+					? 0
+					: models.length - 1
+				: (index + (direction === "forward" ? 1 : models.length - 1)) % models.length;
+		const model = models[nextIndex].model;
+		await this.setModelTemporary(model);
+		return { model, thinkingLevel: undefined, isScoped: true };
 	}
 
 	/** Resolves configured role models and the currently active role index. */
@@ -8574,6 +8688,7 @@ export class AgentSession {
 
 	/** Applies a resolved role model without changing global settings. */
 	applyRoleModel(entry: ResolvedRoleModel): Promise<void> {
+		assertNativeControlAllowed("model-roles", this.#mainStreamOwnsTurnLifecycle);
 		return this.#models.applyRoleModel(entry);
 	}
 
@@ -8582,6 +8697,7 @@ export class AgentSession {
 		roleOrder: readonly string[],
 		direction: "forward" | "backward" = "forward",
 	): Promise<RoleModelCycleResult | undefined> {
+		assertNativeControlAllowed("model-roles", this.#mainStreamOwnsTurnLifecycle);
 		return this.#models.cycleRoleModels(roleOrder, direction);
 	}
 
@@ -8592,11 +8708,13 @@ export class AgentSession {
 
 	/** Selects the session thinking level and optionally persists it as the default. */
 	setThinkingLevel(level: ConfiguredThinkingLevel | undefined, persist: boolean = false): void {
+		assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
 		this.#models.setThinkingLevel(level, persist);
 	}
 
 	/** Advances through the thinking selectors supported by the active model. */
 	cycleThinkingLevel(): ConfiguredThinkingLevel | undefined {
+		assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
 		return this.#models.cycleThinkingLevel();
 	}
 
@@ -8612,16 +8730,19 @@ export class AgentSession {
 
 	/** Sets or clears one model family's live service tier. */
 	setServiceTierFamily(family: ServiceTierFamily, tier: ServiceTier | undefined): void {
+		assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
 		this.#models.setServiceTierFamily(family, tier);
 	}
 
 	/** Enables or disables priority service for the active model family. */
 	setFastMode(enabled: boolean): boolean {
+		assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
 		return this.#models.setFastMode(enabled);
 	}
 
 	/** Toggles priority service for the active model family. */
 	toggleFastMode(): boolean {
+		assertNativeControlAllowed("thinking", this.#mainStreamOwnsTurnLifecycle);
 		return this.#models.toggleFastMode();
 	}
 
@@ -8641,6 +8762,7 @@ export class AgentSession {
 	 * model learns the skills without a prompt-prefix rewrite.
 	 */
 	async setSkillful(enabled: boolean): Promise<boolean> {
+		assertNativeControlAllowed("context", this.#mainStreamOwnsTurnLifecycle);
 		if (enabled === this.settings.get("skillful")) return enabled;
 		this.settings.override("skillful", enabled);
 		if (this.agent.state.messages.length === 0) {
@@ -8747,6 +8869,7 @@ export class AgentSession {
 	 * @returns The handoff document text, or undefined if cancelled/failed
 	 */
 	handoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined> {
+		assertNativeControlAllowed("compaction", this.#mainStreamOwnsTurnLifecycle);
 		return this.#maintenance.handoff(customInstructions, options);
 	}
 
@@ -8975,7 +9098,14 @@ export class AgentSession {
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
 		const currentModel = this.model;
 		const isChanging = !currentModel || !modelsAreEqual(currentModel, model);
-		if (currentModel) {
+		if (this.#mainStreamOwnsTurnLifecycle) {
+			if (isChanging) {
+				if (!this.#mainStreamSelectModel) {
+					throw new Error("BreadBoard owns model selection, but no model-selection hook is configured");
+				}
+				await this.#mainStreamSelectModel(model);
+			}
+		} else if (currentModel) {
 			this.#closeProviderSessionsForModelSwitch(currentModel, model);
 			if (isChanging) {
 				this.#clearInheritedProviderPromptCacheKey();
@@ -9493,6 +9623,7 @@ export class AgentSession {
 			preserveLocalCwd?: boolean;
 		},
 	): Promise<boolean> {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		using _transition = this.#beginSessionTransition();
 		const previousSessionFile = this.sessionManager.getSessionFile();
 		const switchingToDifferentSession = previousSessionFile
@@ -9860,6 +9991,7 @@ export class AgentSession {
 		selectedImages: ImageContent[];
 		cancelled: boolean;
 	}> {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		using _transition = this.#beginSessionTransition();
 		const previousSessionFile = this.sessionFile;
 		const selectedEntry = this.sessionManager.getEntry(entryId);
@@ -9968,6 +10100,7 @@ export class AgentSession {
 		leafId: string,
 		sessionId: string,
 	): Promise<{ cancelled: boolean; sessionFile: string | undefined }> {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		using _transition = this.#beginSessionTransition();
 		const previousSessionFile = this.sessionFile;
 		if (!this.sessionManager.getSessionFile()) {
@@ -10160,6 +10293,7 @@ export class AgentSession {
 		 */
 		askReanswerCommitted?: boolean;
 	}> {
+		assertNativeControlAllowed("native-session-transition", this.#mainStreamOwnsTurnLifecycle);
 		using _transition = this.#beginSessionTransition();
 		await this.#bash.flushPending();
 		const oldLeafId = this.sessionManager.getLeafId();
@@ -10666,6 +10800,7 @@ export class AgentSession {
 	 * Returns false while streaming or when the credential is no longer available.
 	 */
 	pinCurrentProviderOAuthAccount(credentialId: number): boolean {
+		assertNativeControlAllowed("provider-state", this.#mainStreamOwnsTurnLifecycle);
 		const provider = this.model?.provider;
 		if (!provider || this.isStreaming) return false;
 		return this.#modelRegistry.authStorage.pinSessionOAuthAccount(provider, this.sessionId, credentialId);
@@ -10678,6 +10813,7 @@ export class AgentSession {
 	 * outcomes — inspect the returned `code`.
 	 */
 	async redeemResetCredit(target: ResetCreditTarget, signal?: AbortSignal): Promise<ResetCreditRedeemOutcome> {
+		assertNativeControlAllowed("provider-state", this.#mainStreamOwnsTurnLifecycle);
 		return this.#modelRegistry.authStorage.redeemResetCredit({
 			target,
 			baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
@@ -10913,6 +11049,7 @@ export class AgentSession {
 	 * instead of double-spending.
 	 */
 	async #maybeAutoRedeemCodexReset(activeBlockUnblockAtMs?: number): Promise<boolean> {
+		if (this.#mainStreamOwnsTurnLifecycle) return false;
 		const coordinator = this.#codexResetCoordinator;
 		const cfg = this.settings.getGroup("codexResets");
 		const model = this.model;
@@ -11155,6 +11292,7 @@ export class AgentSession {
 	 * @returns true when the advisor is actively running after the call.
 	 */
 	setAdvisorEnabled(enabled: boolean): boolean {
+		if (enabled) assertNativeControlAllowed("advisor", this.#mainStreamOwnsTurnLifecycle);
 		return this.#advisors.setAdvisorEnabled(enabled);
 	}
 
@@ -11232,6 +11370,7 @@ export class AgentSession {
 	 * @returns true when the advisor is actively running after the call.
 	 */
 	toggleAdvisorEnabled(): boolean {
+		assertNativeControlAllowed("advisor", this.#mainStreamOwnsTurnLifecycle);
 		return this.#advisors.toggleAdvisorEnabled();
 	}
 
@@ -11248,6 +11387,7 @@ export class AgentSession {
 		sharedInstructions: string | undefined,
 		sharedMaxNotesPerUpdate?: number,
 	): number {
+		assertNativeControlAllowed("advisor", this.#mainStreamOwnsTurnLifecycle);
 		return this.#advisors.applyAdvisorConfigs(advisors, sharedInstructions, sharedMaxNotesPerUpdate);
 	}
 

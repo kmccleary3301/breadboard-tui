@@ -12,7 +12,7 @@ import { WebSearchTab } from "./web-search";
  */
 class ProvidersSceneController implements SetupSceneController {
 	title = "Set up your providers";
-	subtitle = "Sign in and pick a web search provider. Press Esc when you're done.";
+	readonly subtitle: string;
 
 	#tabs: SetupTab[];
 	#tabBar: TabBar;
@@ -20,7 +20,11 @@ class ProvidersSceneController implements SetupSceneController {
 	#tabRowCount = 1;
 
 	constructor(host: SetupSceneHost) {
-		this.#tabs = [new SignInTab(host), new WebSearchTab(host)];
+		const external = host.ctx.session.mainStreamOwnsTurnLifecycle;
+		this.subtitle = external
+			? "Sign in to your model providers. Press Esc when you're done."
+			: "Sign in and pick a web search provider. Press Esc when you're done.";
+		this.#tabs = external ? [new SignInTab(host)] : [new SignInTab(host), new WebSearchTab(host)];
 		this.#tabBar = new TabBar(
 			"Providers",
 			this.#tabs.map(tab => ({ id: tab.id, label: tab.label })),

@@ -106,6 +106,7 @@ export function createProductionLifecycleSupervisor(
 	return new LifecycleSupervisor(config, {
 		...dependencies,
 		store,
+		storeOwnership: "owned",
 		process: createDefaultLifecycleProcessAdapter(
 			new URL(endpoint),
 			{

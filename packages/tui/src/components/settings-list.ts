@@ -632,7 +632,8 @@ export class SettingsList implements Component {
 		lines.push("");
 		const selectedItem = this.#filteredItems[this.#selectedIndex];
 		const descLines: string[] = [];
-		if (selectedItem && !selectedItem.heading) {
+		// Heading-only lists still need to explain why their controls are unavailable.
+		if (selectedItem) {
 			if (selectedItem.warning) {
 				const warningStyle = this.#theme.warning ?? this.#theme.description;
 				const mark = this.#theme.warningMark ? `${this.#theme.warningMark} ` : "";

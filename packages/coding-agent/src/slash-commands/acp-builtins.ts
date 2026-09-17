@@ -1,4 +1,5 @@
 import type { AvailableCommand } from "@oh-my-pi/pi-utils/acp";
+import { nativeCommandRestriction } from "../breadboard/native-control-policy";
 import { BUILTIN_SLASH_COMMANDS_INTERNAL, lookupBuiltinSlashCommand } from "./builtin-registry";
 import { parseSlashCommand } from "./helpers/parse";
 import type { AcpBuiltinSlashCommandResult, SlashCommandRuntime } from "./types";
@@ -64,6 +65,11 @@ export async function executeAcpBuiltinSlashCommand(
 	if (!parsed) return false;
 	const command = lookupBuiltinSlashCommand(parsed.name);
 	if (!command?.handle) return false;
+	const restriction = nativeCommandRestriction(command.name, runtime.session.mainStreamOwnsTurnLifecycle, parsed.args);
+	if (restriction) {
+		await runtime.output(restriction);
+		return { consumed: true };
+	}
 	const result = await command.handle(parsed, runtime);
 	if (result === undefined) return { consumed: true };
 	return result;

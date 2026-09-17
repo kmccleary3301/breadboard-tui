@@ -224,6 +224,109 @@ describe("createAgentSession mainStreamFn authentication ownership", () => {
 		}
 	});
 
+	it("keeps saved native background work inactive while external prompts complete", async () => {
+		fixture = createFixture();
+		let memoryRequests = 0;
+		const memoryServer = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () => {
+				memoryRequests++;
+				return new Response("Unexpected native memory request", { status: 503 });
+			},
+		});
+		let session: AgentSession | undefined;
+		let submissions = 0;
+		try {
+			const result = await createAgentSession({
+				...baseOptions(fixture),
+				model: { ...fixture.model, contextWindow: 128 },
+				settings: Settings.isolated({
+					"advisor.enabled": true,
+					"async.enabled": false,
+					"todo.enabled": false,
+					"compaction.enabled": true,
+					"compaction.reserveTokens": 32,
+					"compaction.keepRecentTokens": 16,
+					defaultThinkingLevel: "auto",
+					"memory.backend": "hindsight",
+					"hindsight.apiUrl": memoryServer.url.href,
+					"autolearn.enabled": true,
+				}),
+				mainStreamOwnsTurnLifecycle: true,
+				mainStreamFn: model => {
+					submissions++;
+					return completedStream(model);
+				},
+			});
+			session = result.session;
+			expect(session.isAutoThinking).toBe(false);
+			expect(session.isAdvisorActive()).toBe(false);
+			await session.prompt("External context is engine-owned. ".repeat(100));
+			await session.prompt("Continue with a new explicit request.");
+			expect(submissions).toBe(2);
+			expect(memoryRequests).toBe(0);
+			expect(session.sessionManager.getBranch().filter(entry => entry.type === "compaction")).toEqual([]);
+			assertCompletedResponse(session);
+		} finally {
+			await session?.dispose();
+			memoryServer.stop(true);
+		}
+	});
+
+	it("rejects native advisor and continuation APIs before admitting another turn", async () => {
+		fixture = createFixture();
+		let submissions = 0;
+		const { session } = await createAgentSession({
+			...baseOptions(fixture),
+			mainStreamOwnsTurnLifecycle: true,
+			mainStreamFn: model => {
+				submissions++;
+				return completedStream(model);
+			},
+		});
+		try {
+			expect(() => session.setAdvisorEnabled(true)).toThrow(/BreadBoard/);
+			await expect(session.followUp("Do not enqueue this")).rejects.toThrow(/BreadBoard/);
+			await expect(session.prompt("Do not resume this", { synthetic: true })).rejects.toThrow(/BreadBoard/);
+			expect(session.isAdvisorEnabled()).toBe(false);
+			expect(submissions).toBe(0);
+			await session.prompt("A normal explicit request remains supported.");
+			expect(submissions).toBe(1);
+			assertCompletedResponse(session);
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("retains the current request model when external model selection fails", async () => {
+		fixture = createFixture();
+		const observedModels: string[] = [];
+		const { session } = await createAgentSession({
+			...baseOptions(fixture),
+			mainStreamOwnsTurnLifecycle: true,
+			mainStreamSelectModel: async () => {
+				throw new Error("Engine rejected model selection");
+			},
+			mainStreamFn: model => {
+				observedModels.push(model.id);
+				return completedStream(model);
+			},
+		});
+		try {
+			const currentModel = session.model;
+			if (!currentModel) throw new Error("Expected an active model");
+			await expect(session.setModelTemporary({ ...fixture.model, id: "rejected-target" })).rejects.toThrow(
+				"Engine rejected model selection",
+			);
+			expect(session.model?.id).toBe(currentModel.id);
+			await session.prompt("Use the unchanged model.");
+			expect(observedModels).toEqual([currentModel.id]);
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("retains empty-response recovery for a transport that does not own the turn lifecycle", async () => {
 		fixture = createFixture();
 		let requests = 0;

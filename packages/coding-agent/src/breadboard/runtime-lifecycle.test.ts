@@ -210,6 +210,9 @@ function runtimeHarness(
 					capturedBridgeOptions = bridgeOptions;
 					return {
 						stream: inertStream,
+						async selectModel() {
+							throw new Error("model selection not used by lifecycle fixture");
+						},
 						start() {},
 						async close() {
 							lifecycle.push("bridge");
@@ -480,6 +483,9 @@ describe("connected BreadBoard runtime lifecycle", () => {
 		let registeredCleanup: (() => Promise<void>) | undefined;
 		const prepared = (label: string, stream: StreamFn): PreparedBreadboardRuntime => ({
 			providerAuth,
+			async setSessionModel() {
+				throw new Error("model selection not used by recovery fixture");
+			},
 			stream,
 			sessionId: snapshot.sessionId,
 			model,

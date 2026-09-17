@@ -10,6 +10,7 @@ import {
 import { executablePathSha256 } from "./run-config";
 
 const roots: string[] = [];
+const stores: LocalAuthorityStore[] = [];
 const endpoint = "http://127.0.0.1:7777";
 const ownerCredential = Buffer.from("owner_credential_abcdefghijklmnopqrstuvwxyz012345", "ascii");
 
@@ -17,6 +18,14 @@ async function temporaryRoot(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), "omp-lifecycle-store-"));
 	roots.push(root);
 	return root;
+}
+function ownedStore(
+	root: string,
+	seams: ConstructorParameters<typeof LocalAuthorityStore>[1] = {},
+): LocalAuthorityStore {
+	const store = new LocalAuthorityStore(root, seams);
+	stores.push(store);
+	return store;
 }
 
 function record(generation = 1) {
@@ -40,13 +49,14 @@ function record(generation = 1) {
 }
 
 afterEach(async () => {
+	await Promise.all(stores.splice(0).map(store => store.close()));
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
 describe("LocalAuthorityStore", () => {
 	test("creates a user-only root and separate durable public/secret records", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		const committed = await store.withExclusiveLock(endpoint, () =>
 			store.commit(endpoint, null, record(), { ownerCredential }),
 		);
@@ -72,7 +82,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("persists one strict control attempt and its drain binding across authority rotation", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root, { now: () => 1_784_373_178_000 });
+		const store = ownedStore(root, { now: () => 1_784_373_178_000 });
 		const committed = await store.withExclusiveLock(endpoint, () =>
 			store.commit(endpoint, null, record(), { ownerCredential }),
 		);
@@ -168,7 +178,7 @@ describe("LocalAuthorityStore", () => {
 	});
 	test("atomically converges concurrent replacements of one expired begin requester", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		const committed = await store.withExclusiveLock(endpoint, () =>
 			store.commit(endpoint, null, record(), { ownerCredential }),
 		);
@@ -244,7 +254,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("enforces generation CAS and retires only the current generation", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		await store.withExclusiveLock(endpoint, async () => {
 			const first = await store.commit(endpoint, null, record(), { ownerCredential });
 			await expect(store.commit(endpoint, null, record(2), { ownerCredential })).rejects.toMatchObject({
@@ -266,7 +276,7 @@ describe("LocalAuthorityStore", () => {
 	test("keeps the public generation fail-closed when retirement is interrupted", async () => {
 		const root = await temporaryRoot();
 		let interrupt = false;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			beforeAtomicRename: (_from, to) => {
 				if (interrupt && to.includes(".authority.retired.")) throw new Error("synthetic retirement interruption");
 			},
@@ -287,7 +297,7 @@ describe("LocalAuthorityStore", () => {
 	test("retires the public record before secret cleanup and removes the orphan on restart", async () => {
 		const root = await temporaryRoot();
 		let interruptCleanup = false;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			beforeUnlink: path => {
 				if (interruptCleanup && path.includes(".secret.")) throw new Error("synthetic secret cleanup interruption");
 			},
@@ -302,7 +312,7 @@ describe("LocalAuthorityStore", () => {
 		expect(await store.readCurrent(endpoint)).toBeNull();
 		expect((await readdir(root)).some(name => name === current.ownerCredentialRef)).toBe(true);
 
-		const restarted = new LocalAuthorityStore(root);
+		const restarted = ownedStore(root);
 		const claim = await restarted.withExclusiveLock(endpoint, () => restarted.claimStart(endpoint));
 		expect(claim.kind).toBe("claimed");
 		expect((await readdir(root)).some(name => name.includes(".secret."))).toBe(false);
@@ -311,7 +321,7 @@ describe("LocalAuthorityStore", () => {
 	test("quarantines malformed current records without using their PID", async () => {
 		const root = await temporaryRoot();
 		let initialized = false;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			beforeAtomicRename: (_from, to) => {
 				if (to.includes("authority.invalid")) initialized = true;
 			},
@@ -331,7 +341,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("pure status probe rejects malformed state without quarantine or mutation", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		await store.initialize();
 		const key = LocalAuthorityStore.endpointKey(endpoint);
 		await writeFile(join(root, `${key}.authority.json`), '{"pid":999999}\n', { mode: 0o600 });
@@ -342,7 +352,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("rejects no-follow and root ownership/permission integrity failures", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		await store.initialize();
 		const key = LocalAuthorityStore.endpointKey(endpoint);
 		const target = join(root, "outside.json");
@@ -352,14 +362,14 @@ describe("LocalAuthorityStore", () => {
 		await rm(join(root, `${key}.authority.json`));
 		await chmod(root, 0o755);
 		await expect(store.initialize()).rejects.toMatchObject({ code: "root_integrity" });
-		const wrongOwner = new LocalAuthorityStore(root, { uid: () => 99_999 });
+		const wrongOwner = ownedStore(root, { uid: () => 99_999 });
 		await expect(wrongOwner.initialize()).rejects.toMatchObject({ code: "root_integrity" });
 	});
 
 	test("rejects an unsafe pre-existing root without repairing its mode", async () => {
 		const root = await temporaryRoot();
 		await chmod(root, 0o755);
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		await expect(store.initialize()).rejects.toMatchObject({ code: "root_integrity" });
 		expect((await lstat(root)).mode & 0o777).toBe(0o755);
 	});
@@ -368,7 +378,7 @@ describe("LocalAuthorityStore", () => {
 		const root = await temporaryRoot();
 		const key = LocalAuthorityStore.endpointKey(endpoint);
 		let replaced = false;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			beforeLockIdentityCheck: async lockPath => {
 				if (replaced) return;
 				replaced = true;
@@ -383,7 +393,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("removes an unreferenced secret when public record commit fails", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			beforeAtomicRename: (_from, to) => {
 				if (to.endsWith(".authority.json")) throw new Error("synthetic public commit failure");
 			},
@@ -399,7 +409,7 @@ describe("LocalAuthorityStore", () => {
 		const displaced = `${root}.displaced`;
 		roots.push(displaced);
 		let replaced = false;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			beforeAtomicRename: async () => {
 				if (replaced) return;
 				replaced = true;
@@ -415,7 +425,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("rejects a persisted start claim with a truncated process identity", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		await store.withExclusiveLock(endpoint, async () => {
 			const claimed = await store.claimStart(endpoint);
 			if (claimed.kind !== "claimed") throw new Error("expected claimed start");
@@ -433,7 +443,7 @@ describe("LocalAuthorityStore", () => {
 		const root = await temporaryRoot();
 		let random = 0;
 		const enginePid = 4321;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			randomId: () => `token_${String(++random).padStart(20, "0")}`,
 			processStartToken: () => "starter-process-token",
 			isLockOwnerAlive: async owner => owner.pid === enginePid,
@@ -484,7 +494,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("wipes both decoded pending credentials when their verifier mismatches", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		const bootstrapCredential = Buffer.alloc(32, 29);
 		const pendingOwnerCredential = Buffer.from("pending_owner_credential_abcdefghijklmnopqrstuvwxyz", "ascii");
 		const prepared = await store.withExclusiveLock(endpoint, async () => {
@@ -530,7 +540,7 @@ describe("LocalAuthorityStore", () => {
 
 	test("uses a stable Darwin process-start identity for live start claims", async () => {
 		const root = await temporaryRoot();
-		const store = new LocalAuthorityStore(root);
+		const store = ownedStore(root);
 		const first = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
 		expect(first.kind).toBe("claimed");
 		const second = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
@@ -543,7 +553,7 @@ describe("LocalAuthorityStore", () => {
 	test("OS lock serializes contenders and start-claim recovery is generation safe", async () => {
 		const root = await temporaryRoot();
 		let random = 0;
-		const store = new LocalAuthorityStore(root, {
+		const store = ownedStore(root, {
 			randomId: () => `token_${String(++random).padStart(20, "0")}`,
 			processStartToken: () => "current-start-token",
 			isLockOwnerAlive: async () => false,
@@ -585,5 +595,14 @@ describe("LocalAuthorityStore", () => {
 		});
 		const names = await readdir(root);
 		expect(names.some(name => name.includes(".starting.dead."))).toBe(true);
+	});
+
+	test("closes one pinned root after concurrent initialization and rejects later use", async () => {
+		const root = await temporaryRoot();
+		const store = ownedStore(root);
+		await Promise.all([store.initialize(), store.initialize(), store.initialize()]);
+		await store.close();
+		await store.close();
+		await expect(store.initialize()).rejects.toMatchObject({ code: "closed" });
 	});
 });

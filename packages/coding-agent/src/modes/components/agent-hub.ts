@@ -41,6 +41,7 @@ import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { registerPersistedSubagents } from "../../registry/persisted-agents";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
+import { nativeControlRestriction } from "../../breadboard/native-control-policy";
 import { shortenPath, truncateToWidth } from "../../tools/render-utils";
 import { formatLocalDateTimeWithOffset } from "../../utils/local-date";
 import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
@@ -164,6 +165,8 @@ export interface AgentHubDeps {
 	expandKeys?: KeyId[];
 	/** BreadBoard harness snapshot for the read-only harness hub section. */
 	harnessPort?: HarnessPort;
+	/** Current external turn-lifecycle ownership for native subagent mutations. */
+	mainStreamOwnsTurnLifecycle: boolean;
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
 	/** Current main session file; used to seed parked historical subagents after restart. */
@@ -274,6 +277,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#proseOnlyThinking: (() => boolean) | undefined;
 	#expandKeys: KeyId[];
 	#focusAgent: ((id: string) => Promise<void>) | undefined;
+	#mainStreamOwnsTurnLifecycle: boolean;
 
 	// Fullscreen transcript overlay opened by openChat(), if any.
 	#transcriptOverlay: OverlayHandle | undefined;
@@ -312,6 +316,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		this.#proseOnlyThinking = deps.proseOnlyThinking;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
+		this.#mainStreamOwnsTurnLifecycle = deps.mainStreamOwnsTurnLifecycle === true;
 		this.#harnessPort = deps.harnessPort;
 		this.#harness = new HarnessView({
 			getSnapshot: () => this.#harnessPort?.current() ?? null,
@@ -324,10 +329,11 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			irc: this.#irc,
 			remote: this.#remote,
 			renderTabs: () => this.#sectionTabs(),
-			requestRender: this.#requestRender,
 			onDone: this.#onDone,
 			switchSection: () => this.#switchSection("activity"),
 			managePeer: (action, peer) => this.#manageMessagePeer(action, peer),
+			requestRender: this.#requestRender,
+			mutationRestriction: () => this.#nativeMutationRestriction(),
 		});
 
 		this.#unsubscribers.push(this.#registry.onChange(() => this.#scheduleDataChange()));
@@ -509,6 +515,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			proseOnlyThinking: this.#proseOnlyThinking,
 			expandKeys: this.#expandKeys,
 			hubKeys: this.#hubKeys,
+			mainStreamOwnsTurnLifecycle: this.#mainStreamOwnsTurnLifecycle,
 			requestRender: this.#requestRender,
 			onClose: () => this.#closeTranscriptOverlay(viewer),
 			onHubClose: () => {
@@ -875,6 +882,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 
 	#footer(showingNarrowDetails: boolean, availableWidth: number): string {
 		const nextView = this.#viewMode === "roster" ? "by parent" : "flat";
+		const canManage = !this.#nativeMutationRestriction();
 		const filter =
 			this.#agentFilter.length > 0 ? `/${this.#agentFilter}${this.#agentFilterEditing ? "▌" : ""}  ·  ` : "";
 		if (showingNarrowDetails) {
@@ -884,11 +892,14 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			);
 		}
 		if (availableWidth < 96) {
-			return theme.fg("dim", `${filter}j/k:select  Enter:open  t:${nextView}  Tab:details  r/x:manage  Esc:close`);
+			return theme.fg(
+				"dim",
+				`${filter}j/k:select  Enter:open  t:${nextView}  Tab:details  ${canManage ? "r/x:manage" : "read-only"}  Esc:close`,
+			);
 		}
 		return theme.fg(
 			"dim",
-			`${filter}1:agents  2:activity  j/k/wheel:select  PgUp/PgDn:details  Enter/click:open  t:${nextView}  r:revive  x:kill  Esc:close`,
+			`${filter}1:agents  2:activity  j/k/wheel:select  PgUp/PgDn:details  Enter/click:open  t:${nextView}  ${canManage ? "r:revive  x:kill" : "read-only"}  Esc:close`,
 		);
 	}
 
@@ -909,11 +920,20 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 					hitRows.push(undefined);
 				}
 			} else {
-				const emptyState = [
-					`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("No agents in this session")}`,
-					theme.fg("dim", "Finished, parked, and killed subagents remain with the session that created them."),
-					theme.fg("dim", "Resume that session with omp-dev --continue, or spawn a task here."),
-				];
+				const emptyState = this.#mainStreamOwnsTurnLifecycle
+					? [
+							`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("BreadBoard-owned session")}`,
+							theme.fg("dim", "Native agent launch and management have no BreadBoard route."),
+							theme.fg("dim", "Use /harness to inspect the active configuration."),
+						]
+					: [
+							`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("No agents in this session")}`,
+							theme.fg(
+								"dim",
+								"Finished, parked, and killed subagents remain with the session that created them.",
+							),
+							theme.fg("dim", "Resume that session with omp-dev --continue, or spawn a task here."),
+						];
 				for (const line of emptyState.slice(0, budget)) {
 					lines.push(line);
 					hitRows.push(undefined);
@@ -1530,7 +1550,13 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		}
 	}
 
+	#nativeMutationRestriction(): string | undefined {
+		return nativeControlRestriction("subagents", this.#mainStreamOwnsTurnLifecycle);
+	}
+
 	#manageMessagePeer(action: "r" | "x", peer: string): string | undefined {
+		const restriction = this.#nativeMutationRestriction();
+		if (restriction) return restriction;
 		const index = this.#rows.findIndex(ref => ref.id === peer);
 		if (index < 0) return `Agent ${peer} is no longer registered`;
 		this.#selectedRow = index;
@@ -1548,7 +1574,14 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#activateAgent(ref: AgentRef): void {
 		this.#notice = undefined;
 		const focusAgent = this.#focusAgent;
-		// Aborted agents and advisor refs are read-only transcripts with no
+		if (focusAgent && !this.#remote && ref.kind !== "advisor" && ref.status !== "aborted") {
+			const restriction = this.#nativeMutationRestriction();
+			if (restriction) {
+				this.#notice = restriction;
+				this.#requestRender();
+				return;
+			}
+		}
 		// revivable session; open the in-hub viewer instead of failing ensureLive.
 		if (ref.kind === "advisor" || ref.status === "aborted" || this.#remote || !focusAgent) {
 			this.openChat(ref.id);
@@ -1566,6 +1599,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	#reviveSelected(): void {
+		const restriction = this.#nativeMutationRestriction();
+		if (restriction) {
+			this.#notice = restriction;
+			this.#requestRender();
+			return;
+		}
 		const ref = this.#rows[this.#selectedRow];
 		if (!ref) return;
 		if (ref.kind === "advisor") {
@@ -1595,6 +1634,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	}
 
 	#killSelected(): void {
+		const restriction = this.#nativeMutationRestriction();
+		if (restriction) {
+			this.#notice = restriction;
+			this.#requestRender();
+			return;
+		}
 		const ref = this.#rows[this.#selectedRow];
 		if (!ref) return;
 		if (ref.kind === "advisor") {

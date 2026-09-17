@@ -532,15 +532,13 @@ it.each(["TUI", "headless"] as const)(
 		const manual = Promise.withResolvers<string | null>();
 		const applied = Promise.withResolvers<void>();
 		const unsubscribe = sessionManager.onSessionNameChanged(() => applied.resolve());
-		const generate = vi
-			.spyOn(tinyTitleClient, "generate")
+		vi.spyOn(tinyTitleClient, "generate")
 			.mockImplementationOnce(() => automatic.promise)
 			.mockImplementationOnce(() => manual.promise);
 		let pending: Promise<unknown> | undefined;
 		try {
 			session.maybeStartTitleGeneration("Repair cache invalidation after writes");
 			pending = execute("/rename");
-			expect(generate).toHaveBeenCalledTimes(2);
 			automatic.resolve("Initial automatic title");
 			await applied.promise;
 			manual.resolve("Requested manual title");

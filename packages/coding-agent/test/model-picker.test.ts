@@ -44,17 +44,20 @@ interface RegistryOverrides {
 
 interface PickerHarness {
 	picker: ModelPickerComponent;
-	onPick: Mock<(model: Model, selector: string, meta: { overContext: boolean }) => void>;
+	onPick: Mock<(model: Model, selector: string, meta: { overContext: boolean }) => void | Promise<void>>;
 	onPickRole: Mock<(entry: ResolvedRoleModel) => void>;
 	onCancel: Mock<() => void>;
 }
 
 function createPicker(options: {
 	models: Model[] | (() => Model[]);
+	mainStreamOwnsTurnLifecycle: boolean;
+	scopedModels?: Model[];
 	scoped?: boolean;
 	settings?: Settings;
 	registry?: RegistryOverrides;
-	picker?: ModelPickerOptions;
+	onPick?: (model: Model, selector: string, meta: { overContext: boolean }) => void | Promise<void>;
+	picker?: Omit<ModelPickerOptions, "mainStreamOwnsTurnLifecycle">;
 }): PickerHarness {
 	installTestTheme();
 	const modelsFn = typeof options.models === "function" ? options.models : () => options.models as Model[];
@@ -66,16 +69,25 @@ function createPicker(options: {
 		getAll: modelsFn,
 	} as unknown as ModelRegistry;
 	const ui = { requestRender: vi.fn(), terminal: { rows: 40 } } as unknown as TUI;
-	const onPick = vi.fn();
+	const onPick: Mock<(model: Model, selector: string, meta: { overContext: boolean }) => void | Promise<void>> = vi.fn(
+		options.onPick,
+	);
 	const onPickRole = vi.fn();
 	const onCancel = vi.fn();
 	const picker = new ModelPickerComponent(
 		ui,
 		settings,
 		registry,
-		options.scoped ? modelsFn().map(model => ({ model })) : [],
+		options.scopedModels
+			? options.scopedModels.map(model => ({ model }))
+			: options.scoped
+				? modelsFn().map(model => ({ model }))
+				: [],
 		{ onPick, onPickRole, onCancel },
-		options.picker ?? {},
+		{
+			mainStreamOwnsTurnLifecycle: options.mainStreamOwnsTurnLifecycle,
+			...options.picker,
+		},
 	);
 	return { picker, onPick, onPickRole, onCancel };
 }
@@ -88,6 +100,7 @@ describe("ModelPicker", () => {
 		const small = makeModel("test", "a-small", 4096);
 		const large = makeModel("test", "b-large", 128_000);
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models: [small, large],
 			scoped: true,
 			picker: { currentContextTokens: 6000 },
@@ -110,6 +123,7 @@ describe("ModelPicker", () => {
 		const small = makeModel("test", "a-small", 4096);
 		const large = makeModel("test", "b-large", 128_000);
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models: [small, large],
 			scoped: true,
 			picker: { currentContextTokens: 6000 },
@@ -127,6 +141,7 @@ describe("ModelPicker", () => {
 		const refreshGate = Promise.withResolvers<void>();
 		const refresh = vi.fn(() => refreshGate.promise);
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models: [cached],
 			registry: { refresh },
 		});
@@ -145,6 +160,7 @@ describe("ModelPicker", () => {
 		let available = [modelBb, modelCc];
 		const refreshGate = Promise.withResolvers<void>();
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models: () => available,
 			registry: { refresh: () => refreshGate.promise },
 		});
@@ -162,6 +178,7 @@ describe("ModelPicker", () => {
 	test("highlights and preselects the session's current model", () => {
 		const models = [makeModel("test", "aa-model"), makeModel("test", "bb-model"), makeModel("test", "cc-model")];
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models,
 			scoped: true,
 			picker: { currentSelector: "test/bb-model" },
@@ -178,6 +195,7 @@ describe("ModelPicker", () => {
 	test("search jumps to the first result when choices through the current model change", () => {
 		const models = [makeModel("test", "aa-unrelated"), makeModel("test", "bb-match"), makeModel("test", "cc-match")];
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models,
 			scoped: true,
 			picker: { currentSelector: "test/cc-match" },
@@ -192,6 +210,7 @@ describe("ModelPicker", () => {
 	test("search keeps the selection when every choice through it stays unchanged", () => {
 		const models = [makeModel("test", "aa-shared"), makeModel("test", "bb-shared"), makeModel("test", "cc-shared")];
 		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models,
 			scoped: true,
 			picker: { currentSelector: "test/cc-shared" },
@@ -211,6 +230,7 @@ describe("ModelPicker", () => {
 			{ role: "slow", model: slow, explicitThinkingLevel: false },
 		];
 		const { picker, onPick, onPickRole } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
 			models: [smol, slow],
 			scoped: true,
 			picker: {
@@ -234,8 +254,99 @@ describe("ModelPicker", () => {
 		expect(onPick).not.toHaveBeenCalled();
 	});
 
+	test("external picker uses only the engine scope and ignores native role controls", () => {
+		const native = makeModel("native", "native-only");
+		const engine = makeModel("engine", "engine-model");
+		const { picker, onPick, onPickRole } = createPicker({
+			mainStreamOwnsTurnLifecycle: true,
+			models: [native, engine],
+			scopedModels: [engine],
+			settings: Settings.isolated({
+				modelRoles: { default: "native/native-only", smol: "native/native-only" },
+			}),
+			picker: {
+				quickRoles: [{ role: "smol", model: native, explicitThinkingLevel: false }],
+				quickRoleOrder: ["smol"],
+				currentQuickRole: "smol",
+			},
+		});
+
+		const rendered = normalize(picker.render(220));
+		expect(rendered).toContain("engine-model");
+		expect(rendered).not.toContain("native-only");
+		expect(rendered).not.toContain("quick roles");
+		expect(rendered).not.toContain("default");
+
+		picker.handleInput("\n");
+		expect(onPick.mock.calls[0]?.[0]).toBe(engine);
+		expect(onPickRole).not.toHaveBeenCalled();
+	});
+	test("blocks repeated external picks while owner selection is pending", async () => {
+		const engine = makeModel("engine", "engine-model");
+		const selection = Promise.withResolvers<void>();
+		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: true,
+			models: [engine],
+			scopedModels: [engine],
+			onPick: () => selection.promise,
+		});
+
+		picker.handleInput("\n");
+		picker.handleInput("\n");
+
+		expect(onPick).toHaveBeenCalledTimes(1);
+		expect(normalize(picker.render(220))).toContain("selection pending");
+
+		selection.resolve();
+		await selection.promise;
+	});
+	test("shows rejected external selection and permits another choice", async () => {
+		const first = makeModel("engine", "first-model");
+		const second = makeModel("engine", "second-model");
+		const selection = Promise.withResolvers<void>();
+		let attempts = 0;
+		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: true,
+			models: [first, second],
+			scopedModels: [first, second],
+			onPick: () => {
+				attempts += 1;
+				return attempts === 1 ? selection.promise : undefined;
+			},
+		});
+
+		picker.handleInput("\n");
+		selection.reject(new Error("owner rejected model"));
+		await selection.promise.catch(() => undefined);
+		expect(normalize(picker.render(220))).toContain("owner rejected model");
+
+		picker.handleInput(DOWN);
+		picker.handleInput("\n");
+		expect(onPick).toHaveBeenCalledTimes(2);
+	});
+	test("external picks do not flag over-context models or request native compaction", () => {
+		const small = makeModel("engine", "small-model", 4096);
+		const { picker, onPick } = createPicker({
+			mainStreamOwnsTurnLifecycle: true,
+			models: [small],
+			scopedModels: [small],
+			picker: { currentContextTokens: 6000 },
+		});
+
+		const rendered = normalize(picker.render(220));
+		expect(rendered).not.toContain("compacts with current model");
+		expect(rendered).not.toContain("context>");
+
+		picker.handleInput("\n");
+		expect(onPick.mock.calls[0]?.[2]).toEqual({ overContext: false });
+	});
+
 	test("Esc clears an active query first, then cancels", () => {
-		const { picker, onCancel } = createPicker({ models: [makeModel("test", "test-model")], scoped: true });
+		const { picker, onCancel } = createPicker({
+			mainStreamOwnsTurnLifecycle: false,
+			models: [makeModel("test", "test-model")],
+			scoped: true,
+		});
 
 		picker.handleInput("q");
 		picker.handleInput(ESC);

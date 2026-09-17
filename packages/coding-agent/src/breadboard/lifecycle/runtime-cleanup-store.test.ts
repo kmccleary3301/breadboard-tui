@@ -6,6 +6,7 @@ import { removePrivateEngineRuntimeTree } from "./engine-runtime-bundle";
 import { LocalAuthorityStore } from "./local-authority-store";
 import { RuntimeCleanupStore, RuntimeCleanupStoreError, type RuntimeCleanupStoreSeams } from "./runtime-cleanup-store";
 
+const stores: LocalAuthorityStore[] = [];
 const roots: string[] = [];
 const identity = {
 	launchId: "l".repeat(43),
@@ -29,6 +30,7 @@ function cleanupStore(
 	seams: RuntimeCleanupStoreSeams = {},
 ): RuntimeCleanupStore {
 	const authority = new LocalAuthorityStore(root);
+	stores.push(authority);
 	return new RuntimeCleanupStore(
 		{
 			stateRootPath: join(root, stateRootRelativePath),
@@ -65,6 +67,7 @@ async function fixture(seams: RuntimeCleanupStoreSeams = {}): Promise<{
 }
 
 afterEach(async () => {
+	await Promise.all(stores.splice(0).map(store => store.close()));
 	await Promise.all(roots.splice(0).map(root => removePrivateEngineRuntimeTree(root)));
 });
 

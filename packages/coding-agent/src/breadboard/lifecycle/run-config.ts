@@ -153,6 +153,8 @@ const SELECTED_CONFIG_FIELDS = new Set([
 	"requestTimeoutMs",
 	"ownerExitPolicy",
 	"sessionConfigPath",
+	// Harness UI preferences share this namespace, but are not engine identity inputs.
+	"harness",
 ]);
 const SELECTED_ENGINE_SELECTION_FIELDS = ["engineMode", "baseUrl", "auth", "tls", "engineArtifact"] as const;
 const ENGINE_SELECTION_ENVIRONMENT_FIELDS = [

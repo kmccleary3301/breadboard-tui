@@ -439,7 +439,7 @@ async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSla
 		if (parsed.name === "model") {
 			const model = parsed.args.trim();
 			if (!model) {
-				runtime.ctx.showStatus("Usage: /model <model>");
+				runtime.ctx.showModelSelector();
 				return true;
 			}
 			if (!port.setSessionModel) throw new Error("/model unavailable: no BreadBoard engine control route");
@@ -480,7 +480,8 @@ export async function executeHarnessSlashCommand(
 	if (!parsed) return false;
 	const snapshot = runtime.ctx.harnessPort?.current() ?? null;
 	const settings = readHarnessPaletteSettings(runtime.ctx.settings);
-	const specs = materializeHarnessCommands(snapshot, settings);
+	// Hiding unavailable commands is presentation only; direct invocation must still reject.
+	const specs = materializeHarnessCommands(snapshot, { ...settings, unsupportedCommands: "dim" });
 	if (parsed.name === "harness") {
 		const { verb, rest } = parseSubcommand(parsed.args);
 		if (!verb) {

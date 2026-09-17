@@ -52,6 +52,7 @@ import { getComposerShapeOptions } from "./composer-shape-registry";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
 import { handleInputOrEscape, PluginSettingsComponent } from "./plugin-settings";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
+import { nativeSettingRestriction, nativeSettingsGroupRestriction } from "../../breadboard/native-control-policy";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "./status-line/presets";
 
@@ -562,6 +563,8 @@ export interface SettingsRuntimeContext {
 	requestRender?: () => void;
 	/** Effective BreadBoard harness lock used by read-only policy rows. */
 	harness?: HarnessSnapshot | null;
+	/** Effective session ownership used to hide native groups that cannot affect the engine. */
+	mainStreamOwnsTurnLifecycle: boolean;
 	/** Live status renderer for composer-shape previews (the session's status line). */
 	composerPreviewStatus?: ComposerPreviewStatusSource;
 }
@@ -593,6 +596,24 @@ export interface SettingsCallbacks {
 	onCancel: () => void;
 }
 
+class UnavailableSettingsPanel implements Component {
+	constructor(
+		private readonly reason: string,
+		private readonly onClose: () => void,
+	) {}
+
+	render(width: number): readonly string[] {
+		return [
+			theme.bold(theme.fg("warning", "Extensions · unavailable")),
+			truncateToWidth(theme.fg("muted", this.reason), width),
+		];
+	}
+
+	handleInput(data: string): void {
+		if (data === "\x1b" || matchesKey(data, "escape")) this.onClose();
+	}
+}
+
 /**
  * Main tabbed settings selector component.
  * Uses declarative settings definitions from settings-defs.ts.
@@ -602,6 +623,7 @@ export class SettingsSelectorComponent implements Component {
 	#currentList: SettingsList | null = null;
 	#searchList: SettingsList | null = null;
 	#pluginComponent: PluginSettingsComponent | null = null;
+	#pluginUnavailable: UnavailableSettingsPanel | null = null;
 	#currentTabId: SettingTab | "plugins" = "appearance";
 	#preSearchTabId: SettingTab | "plugins" = "appearance";
 	#searchQuery = "";
@@ -662,6 +684,7 @@ export class SettingsSelectorComponent implements Component {
 		this.#currentList = null;
 		this.#searchList = null;
 		this.#pluginComponent = null;
+		this.#pluginUnavailable = null;
 		build();
 	}
 
@@ -727,6 +750,8 @@ export class SettingsSelectorComponent implements Component {
 			// SettingsList pads itself to viewport + blank + 3 description rows.
 			list.setMaxVisible(contentRows - 4);
 			contentLines = list.render(innerWidth);
+		} else if (this.#pluginUnavailable) {
+			contentLines = this.#pluginUnavailable.render(innerWidth);
 		} else if (this.#pluginComponent) {
 			contentLines = this.#pluginComponent.render(innerWidth);
 		} else {
@@ -965,10 +990,16 @@ export class SettingsSelectorComponent implements Component {
 		if (def) this.#tabBar.setActiveById(def.tab);
 	}
 
+	#settingRestriction(def: SettingDef): string | undefined {
+		return nativeSettingRestriction(def.path, def.group, this.context.mainStreamOwnsTurnLifecycle);
+	}
+
 	/** Value-change dispatch for the search result list (any tab's setting). */
 	#onSearchSettingChange(path: SettingPath, newValue: string): void {
 		const def = getSettingDef(path);
 		if (!def) return;
+		const restriction = this.#settingRestriction(def);
+		if (restriction) return;
 		if (def.type === "boolean") {
 			const boolValue = newValue === "true";
 			settings.set(path, boolValue as never);
@@ -994,6 +1025,7 @@ export class SettingsSelectorComponent implements Component {
 		if (def.condition && !def.condition()) {
 			return null;
 		}
+		if (this.#settingRestriction(def)) return null;
 
 		const currentValue = this.#getCurrentValue(def);
 		const item = {
@@ -1271,6 +1303,8 @@ export class SettingsSelectorComponent implements Component {
 			initial,
 			def.ordered,
 			value => {
+				const restriction = this.#settingRestriction(def);
+				if (restriction) return;
 				settings.set(def.path, value as never);
 				this.callbacks.onChange(def.path, value);
 			},
@@ -1306,6 +1340,9 @@ export class SettingsSelectorComponent implements Component {
 	 * Set a setting value, handling type conversion.
 	 */
 	#setSettingValue(path: SettingPath, value: string): void {
+		const definition = getSettingDef(path);
+		const restriction = definition ? this.#settingRestriction(definition) : undefined;
+		if (restriction) throw new Error(restriction);
 		const currentValue = settings.get(path);
 		const schemaType = getType(path);
 		if (path === "compaction.thresholdPercent" && value === "default") {
@@ -1355,6 +1392,8 @@ export class SettingsSelectorComponent implements Component {
 			(id, newValue) => {
 				const def = defs.find(d => d.path === id);
 				if (!def) return;
+				const restriction = this.#settingRestriction(def);
+				if (restriction) return;
 
 				const path = def.path;
 
@@ -1393,9 +1432,24 @@ export class SettingsSelectorComponent implements Component {
 		const items: SettingItem[] = [];
 		let lastGroup: string | undefined;
 		for (const def of defs) {
+			if (def.condition && !def.condition()) continue;
+			const restriction = this.#settingRestriction(def);
+			if (restriction) {
+				if (def.group !== lastGroup || items.at(-1)?.id !== `__heading:${def.group}:unavailable`) {
+					items.push({
+						id: `__heading:${def.group}:unavailable`,
+						label: `${def.group} · unavailable`,
+						description: restriction,
+						currentValue: "",
+						heading: true,
+					});
+				}
+				lastGroup = def.group;
+				continue;
+			}
 			const item = this.#defToItem(def);
 			if (!item) continue;
-			if (def.group && def.group !== lastGroup) {
+			if (def.group && (def.group !== lastGroup || items.at(-1)?.id === `__heading:${def.group}:unavailable`)) {
 				items.push({ id: `__heading:${def.group}`, label: def.group, currentValue: "", heading: true });
 				lastGroup = def.group;
 			}
@@ -1436,6 +1490,11 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	#showPluginsTab(): void {
+		const restriction = nativeSettingsGroupRestriction("Extensions", this.context.mainStreamOwnsTurnLifecycle);
+		if (restriction) {
+			this.#pluginUnavailable = new UnavailableSettingsPanel(restriction, () => this.callbacks.onCancel());
+			return;
+		}
 		this.#pluginComponent = new PluginSettingsComponent(this.context.cwd, {
 			onClose: () => this.callbacks.onCancel(),
 			onPluginChanged: () => this.callbacks.onPluginsChanged?.(),
@@ -1497,6 +1556,8 @@ export class SettingsSelectorComponent implements Component {
 
 		if (this.#currentList) {
 			this.#currentList.handleInput(data);
+		} else if (this.#pluginUnavailable) {
+			this.#pluginUnavailable.handleInput(data);
 		} else if (this.#pluginComponent) {
 			this.#pluginComponent.handleInput(data);
 		}

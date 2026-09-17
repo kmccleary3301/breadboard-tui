@@ -13,6 +13,7 @@ import {
 import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, logger, Snowflake, sanitizeText } from "@oh-my-pi/pi-utils";
 import { BreadboardSessionTransitionError } from "../../breadboard/session-binding";
+import { nativeControlRestriction } from "../../breadboard/native-control-policy";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type BashResult, isPersistentShellCdCommand } from "../../exec/bash-executor";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
@@ -1028,6 +1029,14 @@ export class CommandController {
 	}
 
 	async #runNewSessionFlow(options?: NewSessionOptions, label: string = "New session started"): Promise<boolean> {
+		const restriction = nativeControlRestriction(
+			"native-session-transition",
+			this.ctx.session.mainStreamOwnsTurnLifecycle,
+		);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return false;
+		}
 		this.ctx.clearTransientSessionUi();
 
 		if (this.ctx.session.isCompacting) {
@@ -1065,7 +1074,6 @@ export class CommandController {
 		this.ctx.ui.requestRender(true, { clearScrollback: true });
 		return true;
 	}
-
 
 	async handleClearCommand(): Promise<void> {
 		await this.#runNewSessionFlow();

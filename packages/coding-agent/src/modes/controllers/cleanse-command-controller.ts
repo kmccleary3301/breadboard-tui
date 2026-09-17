@@ -6,6 +6,7 @@
 import { runCleanse } from "../../cleanse";
 import type { CleanseCheckerDescriptor } from "../../cleanse/checkers";
 import type { CleanseTargetChoice } from "../../cleanse/types";
+import { nativeCommandRestriction } from "../../breadboard/native-control-policy";
 import { CleansePanelComponent } from "../components/cleanse-panel";
 import type { InteractiveModeContext } from "../types";
 
@@ -56,6 +57,11 @@ export class CleanseCommandController {
 	}
 
 	async start(args: string): Promise<void> {
+		const restriction = nativeCommandRestriction("cleanse", this.ctx.session.mainStreamOwnsTurnLifecycle, args);
+		if (restriction) {
+			this.ctx.showStatus(restriction);
+			return;
+		}
 		if (this.#active) {
 			this.ctx.showStatus("A /cleanse run is already active — Esc cancels it.");
 			return;

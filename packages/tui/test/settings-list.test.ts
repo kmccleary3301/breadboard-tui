@@ -255,6 +255,23 @@ describe("SettingsList", () => {
 		]);
 	});
 
+	it("explains heading-only controls without making them interactive", () => {
+		const description = "Requires a host task route";
+		const changes: Array<[string, string]> = [];
+		const list = new SettingsList(
+			[{ id: "__heading:tasks", label: "Tasks", description, currentValue: "", heading: true }],
+			5,
+			testTheme,
+			(id, value) => changes.push([id, value]),
+			() => {},
+		);
+		expect(list.render(80).join("\n")).toContain(description);
+		expect(list.getSelectedItem()).toBeUndefined();
+		list.handleInput("\n");
+		list.handleInput(" ");
+		expect(changes).toEqual([]);
+	});
+
 	it("excludes heading rows from search results", () => {
 		const list = new SettingsList(
 			[

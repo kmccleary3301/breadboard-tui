@@ -42,6 +42,7 @@ export interface AgentHubMessagesViewDeps {
 	onDone: () => void;
 	switchSection: () => void;
 	managePeer: (action: "r" | "x", peer: string) => string | undefined;
+	mutationRestriction?: () => string | undefined;
 }
 
 export class AgentHubMessagesView {
@@ -53,6 +54,7 @@ export class AgentHubMessagesView {
 	#onDone: () => void;
 	#switchSection: () => void;
 	#managePeer: (action: "r" | "x", peer: string) => string | undefined;
+	#mutationRestriction: () => string | undefined;
 	#hitRows: Array<number | undefined> = [];
 	#disposed = false;
 
@@ -65,6 +67,7 @@ export class AgentHubMessagesView {
 		this.#onDone = deps.onDone;
 		this.#switchSection = deps.switchSection;
 		this.#managePeer = deps.managePeer;
+		this.#mutationRestriction = deps.mutationRestriction ?? (() => undefined);
 		this.#refreshMessages();
 		if (this.#remote) void this.#refreshRemoteMessages();
 	}
@@ -439,6 +442,12 @@ export class AgentHubMessagesView {
 			return;
 		}
 		if (keyData === "c") {
+			const restriction = this.#mutationRestriction();
+			if (restriction) {
+				this.#messageNotice = restriction;
+				this.#requestRender();
+				return;
+			}
 			this.#ensureComposableConversations();
 			if (this.#conversations.length === 0) {
 				this.#messageNotice = "No agents available to message";
@@ -453,6 +462,12 @@ export class AgentHubMessagesView {
 			return;
 		}
 		if (keyData === "R") {
+			const restriction = this.#mutationRestriction();
+			if (restriction) {
+				this.#messageNotice = restriction;
+				this.#requestRender();
+				return;
+			}
 			const conversation = this.#conversations[this.#selectedConversationRow];
 			this.#messageReplyTo = conversation?.messages[this.#selectedMessageRow]?.id;
 			this.#messageComposing = Boolean(conversation);
@@ -462,6 +477,12 @@ export class AgentHubMessagesView {
 			return;
 		}
 		if (keyData === "r" || keyData === "x") {
+			const restriction = this.#mutationRestriction();
+			if (restriction) {
+				this.#messageNotice = restriction;
+				this.#requestRender();
+				return;
+			}
 			this.#manageConversationPeer(keyData);
 		}
 	}
@@ -489,6 +510,12 @@ export class AgentHubMessagesView {
 	}
 
 	#manageConversationPeer(action: "r" | "x"): void {
+		const restriction = this.#mutationRestriction();
+		if (restriction) {
+			this.#messageNotice = restriction;
+			this.#requestRender();
+			return;
+		}
 		const peer = this.#conversationPeer();
 		if (!peer) {
 			this.#messageNotice = "This conversation has no single Main-session peer to manage";
@@ -501,6 +528,12 @@ export class AgentHubMessagesView {
 	}
 
 	async #submitMessage(): Promise<void> {
+		const restriction = this.#mutationRestriction();
+		if (restriction) {
+			this.#messageNotice = restriction;
+			this.#requestRender();
+			return;
+		}
 		const body = this.#messageDraft.trim();
 		if (!body) return;
 		this.#ensureComposableConversations();

@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { listAllSessions, resolveResumableSession } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { computeDefaultSessionDir } from "@oh-my-pi/pi-coding-agent/session/session-paths";
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { getConfigRootDir, refreshDirsFromEnv, setAgentDir } from "@oh-my-pi/pi-utils";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 let tempDir: string;
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -47,23 +47,22 @@ function createRuntime(cwd = tempDir, sessionDir = tempDir) {
 	const handleResumeSession = vi.fn(async () => {});
 	const showError = vi.fn();
 	const setText = vi.fn();
+	const ctx = createInteractiveModeContext({
+		editor: { setText },
+		showSessionSelector,
+		handleResumeSession,
+		showError,
+		sessionManager: {
+			getCwd: () => cwd,
+			getSessionDir: () => sessionDir,
+		},
+	});
 	return {
 		showSessionSelector,
 		handleResumeSession,
 		showError,
 		setText,
-		runtime: {
-			ctx: {
-				editor: { setText } as unknown as InteractiveModeContext["editor"],
-				showSessionSelector,
-				handleResumeSession,
-				showError,
-				sessionManager: {
-					getCwd: () => cwd,
-					getSessionDir: () => sessionDir,
-				},
-			} as unknown as InteractiveModeContext,
-		},
+		runtime: { ctx },
 	};
 }
 

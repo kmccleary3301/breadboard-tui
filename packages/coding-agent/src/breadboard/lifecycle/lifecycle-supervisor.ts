@@ -62,6 +62,11 @@ export interface SpawnedEngineProcess {
 	waitForExit(timeoutMs: number): Promise<boolean>;
 }
 
+/**
+ * OS identity observation only proves that the recorded process still exists;
+ * `alive` does not imply runnable or foreground, and cannot attribute a stop
+ * signal to terminal job control.
+ */
 export type ProcessObservation =
 	| { readonly kind: "alive"; readonly startToken: string }
 	| { readonly kind: "dead" }
@@ -146,6 +151,8 @@ function createReadyRequestFetch(requestFetch: typeof fetch, proof: ReadyRequest
 
 export interface LifecycleSupervisorDependencies {
 	readonly store?: LocalAuthorityStore;
+	/** Owned stores are closed when this supervisor has no remaining lifecycle context; borrowed stores remain caller-owned. */
+	readonly storeOwnership?: "owned" | "borrowed";
 	readonly process?: LifecycleProcessAdapter;
 	readonly createClient: (config: {
 		readonly baseUrl: string;
@@ -1443,10 +1450,13 @@ class ConnectOnlyModeStrategy extends ModeStrategy {
 
 class LocalOwnedModeStrategy extends ModeStrategy {
 	readonly #store: LocalAuthorityStore;
+	readonly #ownsStore: boolean;
 	readonly #process: LifecycleProcessAdapter;
 	readonly #restartStarts: number[] = [];
 	readonly #plannedProcesses = new WeakSet<SpawnedEngineProcess>();
 	readonly #endpointAbsent: (client: LifecycleE4Client) => Promise<boolean | "ambiguous">;
+	#storeClosePromise: Promise<void> | undefined;
+	#disposedCloseResult: LifecycleResult | undefined;
 	#detachedClosePhase: "detach-pending" | "release-pending" | undefined;
 	#releaseReplayClient: BoundLifecycleE4Client | undefined;
 	#hardSignalCommitActive = false;
@@ -1461,6 +1471,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		if (!config.endpoint) throw new Error("local-owned requires one endpoint");
 		if (!dependencies.process) throw new Error("local-owned requires a process adapter");
 		this.#store = dependencies.store;
+		this.#ownsStore = dependencies.storeOwnership === "owned";
 		this.#process = dependencies.process;
 		this.#endpointAbsent =
 			dependencies.endpointAbsent ??
@@ -1477,6 +1488,11 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				}
 			});
 		this.#restartOnUnexpectedChildExit = dependencies.restartOnUnexpectedChildExit;
+	}
+	async #closeOwnedStore(): Promise<void> {
+		if (!this.#ownsStore) return;
+		this.#storeClosePromise ??= this.#store.close();
+		await this.#storeClosePromise;
 	}
 	override abortRequiresQuiescence(): boolean {
 		return this.#hardSignalCommitActive;
@@ -1790,10 +1806,18 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			claim.executableSha256 !== artifact.executableSha256 ||
 			claim.executablePathSha256 !== engineArtifactLocationSha256(artifact) ||
 			claim.argvSha256 !== artifact.argvSha256 ||
-			claim.servedBackendCommit !== artifact.servedBackendCommit ||
-			claim.gatewayIdentity !== this.config.gateway?.identity
+			claim.engineArtifactSha256 !== artifact.engineSourceSha256 ||
+			claim.servedBackendCommit !== artifact.servedBackendCommit
 		)
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
+		if (claim.gatewayIdentity !== this.config.gateway?.identity) {
+			const observation = await this.#process.observe(claim.enginePid);
+			if (observation.kind === "alive" && observation.startToken === claim.engineProcessStartToken)
+				return lifecycleFailure("local-owned", "ownership-conflict", "ownership_conflict", attempt);
+			if (observation.kind !== "alive")
+				return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
+			return lifecycleFailure("local-owned", "identity-changed", "process_identity_unavailable", attempt);
+		}
 		const control = await this.#process.controlFor(claim.enginePid, claim.engineProcessStartToken);
 		if (!control) {
 			let observation = await this.#process.observe(claim.enginePid);
@@ -1915,8 +1939,12 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 					kind: "stopped",
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },
 				};
-			if (!this.#recordMatchesConfig(record))
+			if (!this.#recordMatchesConfig(record)) {
+				const observation = await this.#process.observe(record.pid);
+				if (this.#isLiveGatewayOwnershipConflict(record, observation))
+					return lifecycleFailure("local-owned", "ownership-conflict", "ownership_conflict");
 				return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
+			}
 			const observation = await this.#process.observe(record.pid);
 			if (observation.kind === "dead")
 				return {
@@ -1963,8 +1991,11 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			if (!retired) return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable", attempt);
 			return await this.#connectAttempt(attempt);
 		}
-		if (!this.#recordMatchesConfig(record))
+		if (!this.#recordMatchesConfig(record)) {
+			if (this.#isLiveGatewayOwnershipConflict(record, observation))
+				return lifecycleFailure("local-owned", "ownership-conflict", "ownership_conflict", attempt);
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
+		}
 		if (observation.kind !== "alive" || observation.startToken !== record.osProcessStartToken) {
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		}
@@ -2307,6 +2338,10 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		return await this.restartAfterConfirmedDeath();
 	}
 	#recordMatchesConfig(record: LocalAuthorityRecord): boolean {
+		return this.#recordMatchesConfigIdentity(record, true);
+	}
+
+	#recordMatchesConfigIdentity(record: LocalAuthorityRecord, includeGatewayIdentity: boolean): boolean {
 		const artifact = this.config.engineArtifact;
 		return (
 			artifact !== undefined &&
@@ -2315,7 +2350,21 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			record.argvSha256 === artifact.argvSha256 &&
 			record.engineArtifactSha256 === artifact.engineSourceSha256 &&
 			record.servedBackendCommit === artifact.servedBackendCommit &&
-			record.gatewayIdentity === this.config.gateway?.identity
+			(!includeGatewayIdentity || record.gatewayIdentity === this.config.gateway?.identity)
+		);
+	}
+
+	/**
+	 * A live, exact-start-token authority with only the ephemeral gateway identity
+	 * changed belongs to the other invocation. It is occupied, not an identity
+	 * discontinuity: do not handshake, adopt, or mutate its authority.
+	 */
+	#isLiveGatewayOwnershipConflict(record: LocalAuthorityRecord, observation: ProcessObservation): boolean {
+		return (
+			observation.kind === "alive" &&
+			observation.startToken === record.osProcessStartToken &&
+			record.gatewayIdentity !== this.config.gateway?.identity &&
+			this.#recordMatchesConfigIdentity(record, false)
 		);
 	}
 
@@ -3059,6 +3108,9 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 				};
 			}
 			if (!this.#recordMatchesConfig(record)) {
+				const observation = await this.#process.observe(record.pid);
+				if (this.#isLiveGatewayOwnershipConflict(record, observation))
+					return lifecycleFailure("local-owned", "ownership-conflict", "ownership_conflict");
 				return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
 			}
 			if ((await this.#process.observe(record.pid)).kind === "dead") {
@@ -3162,45 +3214,60 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async close(options: StopOptions): Promise<LifecycleResult> {
+		if (this.#disposedCloseResult) return this.#disposedCloseResult;
 		await this.#settleChildRecovery();
 		const context = this.context;
 		const policy = context?.effectiveExitPolicy ?? context?.record?.ownerExitPolicy ?? this.config.ownerExitPolicy;
-		if (policy !== "detached") return await this.stop(options);
-		if (!context || context.ownerCredential === undefined || context.ownerGeneration === undefined) {
-			return lifecycleFailure("local-owned", "failed", "endpoint_unreachable");
-		}
-		if (this.#detachedClosePhase === undefined) {
-			this.transition("detaching-client");
-			this.stopLeaseRenewal();
-			this.#detachedClosePhase = "detach-pending";
-		}
-		try {
-			if (this.#detachedClosePhase === "detach-pending") {
-				await this.#retryAmbiguousControlRequest(signal =>
-					context.client.detachClient({
-						registrationId: context.registration.registrationId,
-						registrationGeneration: context.registration.registrationGeneration,
-						clientInstanceId: context.clientInstanceId,
-						registrationCredential: context.registrationCredential,
-						signal,
-					}),
-				);
-				this.#detachedClosePhase = "release-pending";
+		let result: LifecycleResult;
+		if (policy !== "detached") {
+			try {
+				result = await this.stop(options);
+			} catch (error) {
+				if (this.#ownsStore && this.context === undefined) await this.#closeOwnedStore();
+				throw error;
 			}
-			if (!(await this.#releaseOwnerForDetachedClose(context))) {
-				this.#clearDetachedClose(context);
-				return lifecycleFailure("local-owned", "identity-changed", "identity_changed");
+		} else if (!context || context.ownerCredential === undefined || context.ownerGeneration === undefined) {
+			result = lifecycleFailure("local-owned", "failed", "endpoint_unreachable");
+		} else {
+			if (this.#detachedClosePhase === undefined) {
+				this.transition("detaching-client");
+				this.stopLeaseRenewal();
+				this.#detachedClosePhase = "detach-pending";
 			}
-			this.#clearDetachedClose(context);
-			this.transition("detached");
-			return {
-				kind: "detached",
-				state: lifecycleState("local-owned", "detached") as LifecycleState & { readonly name: "detached" },
-			};
-		} catch (error) {
-			if (!this.#isAmbiguousControlRequest(error)) this.#clearDetachedClose(context);
-			return mappedFailure("local-owned", error);
+			try {
+				if (this.#detachedClosePhase === "detach-pending") {
+					await this.#retryAmbiguousControlRequest(signal =>
+						context.client.detachClient({
+							registrationId: context.registration.registrationId,
+							registrationGeneration: context.registration.registrationGeneration,
+							clientInstanceId: context.clientInstanceId,
+							registrationCredential: context.registrationCredential,
+							signal,
+						}),
+					);
+					this.#detachedClosePhase = "release-pending";
+				}
+				if (!(await this.#releaseOwnerForDetachedClose(context))) {
+					this.#clearDetachedClose(context);
+					result = lifecycleFailure("local-owned", "identity-changed", "identity_changed");
+				} else {
+					this.#clearDetachedClose(context);
+					this.transition("detached");
+					result = {
+						kind: "detached",
+						state: lifecycleState("local-owned", "detached") as LifecycleState & { readonly name: "detached" },
+					};
+				}
+			} catch (error) {
+				if (!this.#isAmbiguousControlRequest(error)) this.#clearDetachedClose(context);
+				result = mappedFailure("local-owned", error);
+			}
 		}
+		if (this.#ownsStore && this.context === undefined) {
+			await this.#closeOwnedStore();
+			this.#disposedCloseResult = result;
+		}
+		return result;
 	}
 
 	override async update(): Promise<LifecycleResult> {

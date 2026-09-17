@@ -15,6 +15,7 @@ import { BUILTIN_MARKETPLACE_SLASH_COMMANDS, reloadTuiPluginState } from "./buil
 import { BUILTIN_MODE_SLASH_COMMANDS } from "./builtin-modes";
 import { BUILTIN_SESSION_SLASH_COMMANDS } from "./builtin-session";
 import { BUILTIN_HARNESS_SLASH_COMMANDS, executeHarnessSlashCommand } from "./harness";
+import { nativeCommandAvailabilityRestriction, nativeCommandRestriction } from "../breadboard/native-control-policy";
 import { parseSlashCommand } from "./helpers/parse";
 import type {
 	BuiltinSlashCommand,
@@ -105,7 +106,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<TuiBuiltinSlashCommand> = BUI
 );
 
 export function buildTuiBuiltinSlashCommands(runtime: TuiSlashCommandRuntime): ReadonlyArray<TuiBuiltinSlashCommand> {
-	return BUILTIN_SLASH_COMMAND_DEFS.map(cmd => materializeTuiBuiltinSlashCommand(cmd, runtime));
+	const commands = BUILTIN_SLASH_COMMAND_DEFS.filter(
+		command =>
+			nativeCommandAvailabilityRestriction(command.name, runtime.ctx.session.mainStreamOwnsTurnLifecycle) ===
+			undefined,
+	);
+	return commands.map(cmd => materializeTuiBuiltinSlashCommand(cmd, runtime));
 }
 
 /**
@@ -128,9 +134,23 @@ export async function executeBuiltinSlashCommand(
 ): Promise<string | boolean> {
 	const parsed = parseSlashCommand(text);
 	if (!parsed) return false;
-	const harnessResult = await executeHarnessSlashCommand(text, runtime);
-	if (harnessResult !== false) return harnessResult;
 	const command = BUILTIN_SLASH_COMMAND_LOOKUP.get(parsed.name);
+	const restriction = nativeCommandRestriction(
+		command?.name ?? parsed.name,
+		runtime.ctx.session.mainStreamOwnsTurnLifecycle,
+		parsed.args,
+	);
+	if (restriction) {
+		runtime.ctx.showStatus(restriction);
+		runtime.ctx.editor.setText("");
+		return true;
+	}
+	if (runtime.ctx.harnessPort || parsed.name === "harness") {
+		const harnessText =
+			command && command.name !== parsed.name ? `/${command.name}${parsed.args ? ` ${parsed.args}` : ""}` : text;
+		const harnessResult = await executeHarnessSlashCommand(harnessText, runtime);
+		if (harnessResult !== false) return harnessResult;
+	}
 	if (!command) return false;
 	if (parsed.args.length > 0 && !command.allowArgs) {
 		return false;

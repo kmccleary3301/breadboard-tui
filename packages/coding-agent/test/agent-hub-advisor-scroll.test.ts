@@ -159,6 +159,7 @@ function makeViewer(file: string, remote?: AgentHubRemote, ui?: TUI) {
 		requestRender: () => {},
 		onClose: () => {},
 		onHubClose: () => {},
+		mainStreamOwnsTurnLifecycle: false,
 	});
 }
 

@@ -16,6 +16,7 @@ import {
 } from "../../advisor";
 import { authenticateProvider } from "../../breadboard/provider-auth-login";
 import { type AuthCredentialView, ProviderAuthError, type ProviderAuthPort } from "../../breadboard/provider-auth-port";
+import { nativeControlRestriction, nativeSettingRestriction } from "../../breadboard/native-control-policy";
 import { reset as resetCapabilities } from "../../capability";
 import { showGitOverlay } from "../../cli/git-tui";
 import {
@@ -23,6 +24,7 @@ import {
 	resolveAdvisorRoleSelection,
 	resolveModelRoleValue,
 } from "../../config/model-resolver";
+import { getAllSettingDefs } from "../components/settings-defs";
 import { getRoleInfo } from "../../config/model-roles";
 import { settings } from "../../config/settings";
 import type { disableProvider as DisableProvider, enableProvider as EnableProvider } from "../../discovery";
@@ -275,10 +277,11 @@ export class SelectorController {
 					),
 					cwd: getProjectDir(),
 					model: this.ctx.session.model,
-					imageBudget: this.ctx.ui.imageBudget,
-					requestRender: () => this.ctx.ui.requestRender(),
 					composerPreviewStatus: this.ctx.statusLine,
 					harness: this.ctx.harnessPort?.current() ?? null,
+					imageBudget: this.ctx.ui.imageBudget,
+					requestRender: () => this.ctx.ui.requestRender(),
+					mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
 				},
 				{
 					onChange: (id, value) => this.handleSettingChange(id, value),
@@ -495,6 +498,11 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
+		const restriction = nativeControlRestriction("native-tools", this.ctx.session.mainStreamOwnsTurnLifecycle);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return;
+		}
 		const dashboard = await ExtensionDashboard.create({
 			cwd: getProjectDir(),
 			settings: this.ctx.settings,
@@ -550,6 +558,11 @@ export class SelectorController {
 	 * sidebar, agent rows, and chip strips that dive into the model browser.
 	 */
 	async showAgentsDashboard(): Promise<void> {
+		const restriction = nativeControlRestriction("subagents", this.ctx.session.mainStreamOwnsTurnLifecycle);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return;
+		}
 		const activeModel = this.ctx.session.model;
 		const activeModelPattern = activeModel ? `${activeModel.provider}/${activeModel.id}` : undefined;
 		const defaultModelPattern = this.ctx.settings.getModelRole("default");
@@ -583,6 +596,15 @@ export class SelectorController {
 	 * This handles side effects and session-specific settings.
 	 */
 	handleSettingChange(id: string, value: unknown): void {
+		const definition = getAllSettingDefs().find(def => def.path === id);
+		const restriction =
+			definition === undefined
+				? undefined
+				: nativeSettingRestriction(definition.path, definition.group, this.ctx.session.mainStreamOwnsTurnLifecycle);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return;
+		}
 		// Discovery provider toggles
 		if (id.startsWith("discovery.")) {
 			const providerId = id.replace("discovery.", "");
@@ -943,12 +965,18 @@ export class SelectorController {
 		compactFirst: boolean,
 	): Promise<void> {
 		const apply = async () => {
-			const level = thinkingLevel ?? this.ctx.session.resolveTemporaryModelThinkingLevel(model);
+			const level = this.ctx.session.mainStreamOwnsTurnLifecycle
+				? undefined
+				: (thinkingLevel ?? this.ctx.session.resolveTemporaryModelThinkingLevel(model));
 			await this.ctx.session.setModelTemporary(model, level);
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
-			const roleSelectorHint = this.ctx.keybindings.getKeys("app.model.select")[0] ?? "Alt+M";
-			this.ctx.showStatus(`Session-only model: ${selector}. Use ${roleSelectorHint} or /model for roles.`);
+			if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
+				this.ctx.showStatus(`Engine model: ${selector}.`);
+			} else {
+				const roleSelectorHint = this.ctx.keybindings.getKeys("app.model.select")[0] ?? "Alt+M";
+				this.ctx.showStatus(`Session-only model: ${selector}. Use ${roleSelectorHint} or /model for roles.`);
+			}
 		};
 		if (!compactFirst) {
 			await apply();
@@ -995,6 +1023,11 @@ export class SelectorController {
 			this.ctx.session.scopedModels,
 			{
 				onPick: async (model, selector, { overContext }) => {
+					if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
+						await this.#applySessionModel(model, selector, undefined, false);
+						done();
+						return;
+					}
 					try {
 						// Over-context pick: close the picker first so the compaction
 						// loader is visible.
@@ -1021,27 +1054,34 @@ export class SelectorController {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}
 				},
-				onPickTask: (_model, selector) => {
-					// Session-only: layer the Task override onto the runtime settings
-					// layer so it is never persisted, mirroring the session-model pick.
-					this.ctx.settings.override("task.agentModelOverrides", {
-						...this.ctx.settings.get("task.agentModelOverrides"),
-						task: selector,
-					});
-					this.ctx.showStatus(`Task subagent model (session-only): ${selector}. Use /agents to persist.`);
-					done();
-				},
+				onPickTask: this.ctx.session.mainStreamOwnsTurnLifecycle
+					? undefined
+					: (_model, selector) => {
+							// Session-only: layer the Task override onto the runtime settings
+							// layer so it is never persisted, mirroring the session-model pick.
+							this.ctx.settings.override("task.agentModelOverrides", {
+								...this.ctx.settings.get("task.agentModelOverrides"),
+								task: selector,
+							});
+							this.ctx.showStatus(`Task subagent model (session-only): ${selector}. Use /agents to persist.`);
+							done();
+						},
 				onCancel: done,
 			},
 			{
+				mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
 				currentContextTokens,
 				currentSelector,
-				taskModeKeys: this.ctx.keybindings.getKeys("app.model.selectTemporary"),
+				taskModeKeys: this.ctx.session.mainStreamOwnsTurnLifecycle
+					? undefined
+					: this.ctx.keybindings.getKeys("app.model.selectTemporary"),
 				taskModeKeyLabel: this.ctx.keybindings.getDisplayString("app.model.selectTemporary") || "alt+p",
 				taskSelector,
-				quickRoles: quickRoleCycle?.models,
-				quickRoleOrder,
-				currentQuickRole: quickRoleCycle?.models[quickRoleCycle.currentIndex]?.role,
+				quickRoles: this.ctx.session.mainStreamOwnsTurnLifecycle ? undefined : quickRoleCycle?.models,
+				quickRoleOrder: this.ctx.session.mainStreamOwnsTurnLifecycle ? undefined : quickRoleOrder,
+				currentQuickRole: this.ctx.session.mainStreamOwnsTurnLifecycle
+					? undefined
+					: quickRoleCycle?.models[quickRoleCycle.currentIndex]?.role,
 			},
 		);
 		const overlayHandle = this.ctx.ui.showOverlay(picker, {
@@ -1079,7 +1119,23 @@ export class SelectorController {
 			this.ctx.session.modelRegistry,
 			this.ctx.session.scopedModels,
 			{
+				onSelectModel: async (model, selector) => {
+					try {
+						await this.#applySessionModel(model, selector, undefined, false);
+						done();
+					} catch (error) {
+						this.ctx.showError(error instanceof Error ? error.message : String(error));
+					}
+				},
 				onAssign: async (model, role, thinkingLevel, selector, scope?: ModelRoleSelectionScope) => {
+					const restriction = nativeControlRestriction(
+						"model-roles",
+						this.ctx.session.mainStreamOwnsTurnLifecycle,
+					);
+					if (restriction) {
+						this.ctx.showWarning(restriction);
+						return false;
+					}
 					const releaseDefaultMutation = role === "default" ? await this.#acquireDefaultRoleMutation() : undefined;
 					const configuredStorage = this.ctx.settings.get("modelRoleStorage");
 					const targetScope = configuredStorage === "project" ? (scope ?? "project") : "global";
@@ -1166,6 +1222,14 @@ export class SelectorController {
 					}
 				},
 				onUnassign: async (role, scope?: ModelRoleSelectionScope) => {
+					const restriction = nativeControlRestriction(
+						"model-roles",
+						this.ctx.session.mainStreamOwnsTurnLifecycle,
+					);
+					if (restriction) {
+						this.ctx.showWarning(restriction);
+						return;
+					}
 					const releaseDefaultMutation = role === "default" ? await this.#acquireDefaultRoleMutation() : undefined;
 					const configuredStorage = this.ctx.settings.get("modelRoleStorage");
 					const targetScope = configuredStorage === "project" ? (scope ?? "project") : "global";
@@ -1245,6 +1309,14 @@ export class SelectorController {
 					}
 				},
 				onFallbackChainChange: (role, chain) => {
+					const restriction = nativeControlRestriction(
+						"model-roles",
+						this.ctx.session.mainStreamOwnsTurnLifecycle,
+					);
+					if (restriction) {
+						this.ctx.showWarning(restriction);
+						return;
+					}
 					try {
 						const chains = { ...this.ctx.settings.get("retry.fallbackChains") };
 						if (chain.length === 0) {
@@ -1269,6 +1341,14 @@ export class SelectorController {
 					void this.#loginThenReopenModelHub(providerId);
 				},
 				onCycleOrderChange: order => {
+					const restriction = nativeControlRestriction(
+						"model-roles",
+						this.ctx.session.mainStreamOwnsTurnLifecycle,
+					);
+					if (restriction) {
+						this.ctx.showWarning(restriction);
+						return;
+					}
 					try {
 						this.ctx.settings.set("cycleOrder", order);
 						this.ctx.showStatus(
@@ -1281,6 +1361,7 @@ export class SelectorController {
 				onCancel: () => done(),
 			},
 			{
+				mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
 				initialProviderId: hubOptions.initialProviderId,
 			},
 		);
@@ -1383,6 +1464,14 @@ export class SelectorController {
 	}
 
 	showUserMessageSelector(): void {
+		const restriction = nativeControlRestriction(
+			"native-session-transition",
+			this.ctx.session.mainStreamOwnsTurnLifecycle,
+		);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return;
+		}
 		const entries = this.ctx.sessionManager.getBranch().filter(isTranscriptEntry);
 		if (entries.length === 0) {
 			this.ctx.showStatus("No messages to branch from");
@@ -1569,6 +1658,14 @@ export class SelectorController {
 	}
 
 	showTreeSelector(): void {
+		const restriction = nativeControlRestriction(
+			"native-session-transition",
+			this.ctx.session.mainStreamOwnsTurnLifecycle,
+		);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return;
+		}
 		const tree = this.ctx.sessionManager.getTree();
 		const realLeafId = this.ctx.sessionManager.getLeafId();
 
@@ -1836,6 +1933,14 @@ export class SelectorController {
 	}
 
 	async showSessionSelector(source?: ForeignSessionSource): Promise<void> {
+		const restriction = nativeControlRestriction(
+			"native-session-transition",
+			this.ctx.session.mainStreamOwnsTurnLifecycle,
+		);
+		if (restriction) {
+			this.ctx.showWarning(restriction);
+			return;
+		}
 		let sessions: SessionInfo[];
 		let onSelectSession: (session: SessionInfo) => Promise<boolean>;
 		let selectorOptions: SessionSelectorOptions;
@@ -2780,6 +2885,7 @@ export class SelectorController {
 			isBuiltInTool: name => this.ctx.session.hasBuiltInTool(name),
 			getMessageRenderer: type => this.ctx.session.extensionRunner?.getMessageRenderer(type),
 			cwd: this.ctx.sessionManager.getCwd(),
+			mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
 			harnessPort: this.ctx.harnessPort,
 			hideThinkingBlock: () => this.ctx.effectiveHideThinkingBlock,
 			proseOnlyThinking: () => this.ctx.proseOnlyThinking,

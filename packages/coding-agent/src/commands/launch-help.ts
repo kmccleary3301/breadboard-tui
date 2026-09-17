@@ -1,8 +1,9 @@
 import { Args, type CommandMetadata, Flags } from "@oh-my-pi/pi-utils/cli";
-import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+import { APP_NAME, CONFIG_DIR_NAME, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 import { CLI_THINKING_LEVELS } from "../cli/thinking-levels";
 import { SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
 import { ACTIVE_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
+import { nativeStartupFlagRestriction } from "../breadboard/native-control-policy";
 
 const PRODUCT_NAME = ACTIVE_PRODUCT_IDENTITY.shortDisplayName;
 
@@ -129,3 +130,20 @@ export const launchHelp = {
 		`# Export a session file to HTML\n  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl`,
 	],
 } satisfies CommandMetadata;
+
+if (IS_BREADBOARD_PRODUCT) {
+	for (const [name, flag] of Object.entries(launchHelp.flags)) {
+		const restriction = nativeStartupFlagRestriction(`--${name}`, true);
+		if (restriction) flag.description = `Unavailable: ${restriction}`;
+	}
+	launchHelp.flags["approval-mode"].description =
+		"Engine permission override: yolo; always-ask and write are unavailable (configure the harness instead)";
+	launchHelp.flags["no-session"].description =
+		"Do not save the frontend transcript; BreadBoard engine journals remain durable";
+	launchHelp.examples = [
+		`# Interactive mode in the selected workspace\n  ${APP_NAME}`,
+		`# Choose a harness and an engine model\n  ${APP_NAME} --harness path/to/config.yaml --model provider/model`,
+		`# Run the supported setup flow\n  ${APP_NAME} setup`,
+		`# Export a saved frontend transcript\n  ${APP_NAME} --export path/to/session.jsonl`,
+	];
+}

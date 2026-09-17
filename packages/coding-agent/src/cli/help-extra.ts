@@ -1,8 +1,23 @@
 import "@oh-my-pi/pi-utils/env";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+import { APP_NAME, CONFIG_DIR_NAME, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 
 export function getExtraHelpText(): string {
+	if (IS_BREADBOARD_PRODUCT) {
+		return `${chalk.bold("BreadBoard execution:")}
+  The active harness and engine define the main model, prompts, tools and turn lifecycle.
+  Use /harness to inspect the verified configuration and /model to select an engine model.
+  Native OMP task agents, prewalk, plan enforcement, compaction and advisor controls
+  have no BreadBoard host route. Unavailable launch flags are marked above.
+  Theme, composer, display, authentication and title helpers remain frontend-owned.
+
+${chalk.bold("Configuration:")}
+  BREADBOARD_OMP_AGENT_DIR   - Reference an existing OMP authentication store
+  PI_CODING_AGENT_DIR       - Frontend session and settings directory
+  BREADBOARD_CONFIG_DIR     - BreadBoard configuration and native cache directory
+  OMP_PROFILE              - Named frontend profile
+  Native helper preferences do not configure engine workers or tools.`;
+	}
 	return `${chalk.bold("Environment Variables:")}
   ${chalk.dim("# Core Providers")}
   ANTHROPIC_API_KEY          - Anthropic Claude models

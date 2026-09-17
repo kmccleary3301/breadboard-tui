@@ -61,6 +61,7 @@ import { reset as resetCapabilities } from "../capability";
 import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
 import { createHarnessPort, requireHarnessResultData, resolveHarness } from "../breadboard/harness-port-client";
 import type { HarnessPort } from "../breadboard/harness-port";
+import { resolveBreadboardBackendModel } from "../breadboard/runtime";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
 import { CollabController } from "../collab/controller";
@@ -125,6 +126,7 @@ import type { SessionContext } from "../session/session-context";
 import { getRecentSessions } from "../session/session-listing";
 import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
+import { nativeCommandAvailabilityRestriction } from "../breadboard/native-control-policy";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
 import { formatDuration } from "../slash-commands/helpers/format";
@@ -1135,13 +1137,24 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.settings = session.settings;
 		this.#harnessClient = harnessClient;
 		this.#switchHarnessSession = switchHarnessSession;
+		const setHarnessSessionModel = setSessionModel
+			? async (selector: string): Promise<void> => {
+					const selected = resolveBreadboardBackendModel(selector, {
+						getAll: () => this.session.scopedModels.map(entry => entry.model),
+					});
+					const thinkingLevel = this.session.mainStreamOwnsTurnLifecycle
+						? undefined
+						: this.session.resolveTemporaryModelThinkingLevel(selected);
+					await this.session.setModelTemporary(selected, thinkingLevel);
+				}
+			: undefined;
 		this.harnessPort =
 			harnessClient && harnessId && breadboardSessionId
 				? createHarnessPort({
 						client: harnessClient,
 						sessionId: breadboardSessionId,
 						harnessId,
-						setSessionModel,
+						setSessionModel: setHarnessSessionModel,
 					})
 				: undefined;
 		const preferences = {
@@ -1823,10 +1836,13 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		const dynamicCommands = new Map(
-			harnessCommandsAsSlashCommands(snapshot, readHarnessPaletteSettings(this.settings)).map(command => [
-				command.name,
-				command,
-			]),
+			harnessCommandsAsSlashCommands(snapshot, readHarnessPaletteSettings(this.settings))
+				.filter(
+					command =>
+						nativeCommandAvailabilityRestriction(command.name, this.session.mainStreamOwnsTurnLifecycle) ===
+						undefined,
+				)
+				.map(command => [command.name, command]),
 		);
 		const namesToReplace = new Set<string>([
 			...HARNESS_PALETTE_BASE_NAMES,

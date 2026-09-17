@@ -25,6 +25,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import { nativeControlRestriction, nativeStartupRestriction } from "./breadboard/native-control-policy";
 import { resolveBreadboardOmpAgentDir, startBreadboardOmpGateway } from "./breadboard/omp-auth-gateway";
 import {
 	applyCliApiKeyOverride,
@@ -1280,6 +1281,14 @@ export async function buildSessionOptions(
 	modelRegistry: ModelRegistry,
 	activeSettings: Settings,
 ): Promise<CreateAgentSessionOptions> {
+	const externalTurnLifecycle = !startupBreadboardModeIsOff(
+		parsed,
+		activeSettings,
+		parsed.cwd ?? getProjectDir(),
+		IS_BREADBOARD_PRODUCT,
+	);
+	const restriction = nativeStartupRestriction(parsed, externalTurnLifecycle);
+	if (restriction) throw new Error(restriction);
 	const options: CreateAgentSessionOptions = {
 		cwd: parsed.cwd ?? getProjectDir(),
 		autoApprove: parsed.autoApprove ?? false,
@@ -1290,7 +1299,7 @@ export async function buildSessionOptions(
 	}
 	const cliDirs = parsed.addDir ?? [];
 	const settingsDirs = activeSettings.get("workspace.additionalDirectories");
-	if (cliDirs.length > 0 || settingsDirs.length > 0) {
+	if (!externalTurnLifecycle && (cliDirs.length > 0 || settingsDirs.length > 0)) {
 		options.additionalDirectories = [...new Set([...cliDirs, ...settingsDirs])];
 	}
 	if (parsed.maxTime !== undefined) {
@@ -1354,6 +1363,10 @@ export async function buildSessionOptions(
 			settings: activeSettings,
 			preferences: modelMatchPreferences,
 		});
+		const thinkingRestriction = nativeControlRestriction("thinking", externalTurnLifecycle);
+		if (resolved.thinkingLevel !== undefined && thinkingRestriction) {
+			throw new Error(`--model: ${thinkingRestriction}`);
+		}
 		if (resolved.warning) {
 			process.stderr.write(`${chalk.yellow(`Warning: ${resolved.warning}`)}\n`);
 		}
@@ -1452,7 +1465,7 @@ export async function buildSessionOptions(
 		: explicitPrewalk
 			? true
 			: !restoringSession && activeSettings.get("prewalk.enabled");
-	if (prewalkEnabled) {
+	if (!externalTurnLifecycle && prewalkEnabled) {
 		const target = parsed.prewalkInto ?? DEFAULT_PREWALK_TARGET;
 		let targetPatterns: string[];
 
@@ -1652,6 +1665,7 @@ export async function buildSessionOptions(
 			options.disableExtensionDiscovery = true;
 		}
 	}
+	if (externalTurnLifecycle) delete options.thinkingLevel;
 
 	return options;
 }
@@ -1799,6 +1813,14 @@ export async function runRootCommand(
 		}
 
 		const settingsInstance = await settingsPromise;
+		const breadboardProductModeSelected = !startupBreadboardModeIsOff(
+			parsedArgs,
+			settingsInstance,
+			cwd,
+			IS_BREADBOARD_PRODUCT,
+		);
+		const startupRestriction = nativeStartupRestriction(parsedArgs, breadboardProductModeSelected);
+		if (startupRestriction) throw new Error(startupRestriction);
 		if (parsedArgs.approvalMode) {
 			// Runtime override (not persisted): every settings.get("tools.approvalMode") downstream
 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
@@ -2131,7 +2153,7 @@ export async function runRootCommand(
 			await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
 		}
 
-		if (resolveStartupNetworkPolicy().backgroundUpdates) {
+		if (!breadboardProductModeSelected && resolveStartupNetworkPolicy().backgroundUpdates) {
 			scheduleMarketplaceAutoUpdate({
 				autoUpdate: settingsInstance.get("marketplace.autoUpdate"),
 				resolveActiveProjectRegistryPath,
@@ -2164,12 +2186,6 @@ export async function runRootCommand(
 
 		// Product sessions bind credentials through the BreadBoard broker. Reject
 		// the native override before AuthStorage can observe the supplied secret.
-		const breadboardProductModeSelected = !startupBreadboardModeIsOff(
-			parsedArgs,
-			settingsInstance,
-			cwd,
-			IS_BREADBOARD_PRODUCT,
-		);
 		if (parsedArgs.apiKey) {
 			try {
 				applyCliApiKeyOverride(authStorage, {
@@ -2343,6 +2359,9 @@ export async function runRootCommand(
 					if (preparedBreadboardRuntime !== null) {
 						sessionOptions.mainStreamFn = preparedBreadboardRuntime.stream;
 						sessionOptions.mainStreamOwnsTurnLifecycle = true;
+						const runtime = preparedBreadboardRuntime;
+						sessionOptions.mainStreamSelectModel = model =>
+							runtime.setSessionModel(`${model.provider}/${model.id}`);
 						sessionOptions.model = preparedBreadboardRuntime.model;
 						sessionOptions.scopedModels = preparedBreadboardRuntime.models.map(model => ({ model }));
 					}
@@ -2453,7 +2472,7 @@ export async function runRootCommand(
 			// empty (issue #9220). Fire-and-forget: the prompt must never block on the
 			// background pass.
 			const configuredScope = parsedArgs.models ?? settingsInstance.get("enabledModels");
-			if (isInteractive && configuredScope.length > 0) {
+			if (isInteractive && configuredScope.length > 0 && !session.mainStreamOwnsTurnLifecycle) {
 				void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(error =>
 					logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
 				);
@@ -2512,6 +2531,7 @@ export async function runRootCommand(
 				const startupLease = takeStartupComposerLease();
 				const breadboardRuntime = preparedBreadboardRuntime;
 				try {
+					const switchHarnessSession = breadboardRuntime?.switchHarnessSession;
 					stopStartupWatchdog();
 					logger.endTiming();
 					await (deps.runInteractiveMode ?? runInteractiveMode)(
@@ -2542,7 +2562,16 @@ export async function runRootCommand(
 									harnessClient: breadboardRuntime.harnessClient,
 									harnessId: breadboardRuntime.harnessId,
 									setSessionModel: breadboardRuntime.setSessionModel,
-									switchHarnessSession: breadboardRuntime.switchHarnessSession,
+									switchHarnessSession: switchHarnessSession
+										? async (configPath, lockId, transition) => {
+												const switched = await switchHarnessSession(configPath, lockId, transition);
+												if (switched) {
+													session.setScopedModels(breadboardRuntime.models.map(model => ({ model })));
+													await session.setModelTemporary(breadboardRuntime.model);
+												}
+												return switched;
+											}
+										: undefined,
 									sessionId: () => breadboardRuntime.sessionId,
 								}
 							: undefined,

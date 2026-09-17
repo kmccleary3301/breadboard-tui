@@ -95,6 +95,7 @@ export function createSessionStub(
 		sessionManager,
 		settings: sessionSettings,
 		isStreaming: false,
+		mainStreamOwnsTurnLifecycle: false,
 		isCompacting: false,
 		isAborting: false,
 		isRetrying: false,

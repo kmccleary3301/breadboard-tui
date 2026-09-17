@@ -10,6 +10,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { CollabQrCodeComponent } from "@oh-my-pi/pi-coding-agent/slash-commands/helpers/collab-qrcode";
 import { Text, visibleWidth } from "@oh-my-pi/pi-tui";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 beforeAll(async () => {
 	resetSettingsForTest();
@@ -45,23 +46,20 @@ async function createRuntimeHarness(options?: { collabHost?: NonNullable<Interac
 	const showStatus = vi.fn();
 	const showError = vi.fn();
 	const present = vi.fn();
-	const settingsGet = vi.fn((key: string) => {
-		if (key === "collab.relayUrl") return "wss://relay.example.com";
-		if (key === "collab.webUrl") return "";
-		return "";
-	});
-	const ctx = {
+	const ctx = createInteractiveModeContext({
 		editor: { setText },
 		showStatus,
 		showError,
 		present,
-		settings: { get: settingsGet },
+		settings: Settings.isolated({
+			"collab.relayUrl": "wss://relay.example.com",
+			"collab.webUrl": "",
+		}),
 		session: { registerSessionChangeCallback: () => () => {} },
 		sessionManager: { getSessionId: () => "sess-qrcode" },
 		statusLine: { setCollabStatus: () => {}, invalidate: () => {} },
 		ui: { requestRender: () => {} },
-		collabHost: undefined,
-	} as unknown as InteractiveModeContext;
+	});
 	// `/collab` starts rooms through the controller, which builds a real CollabHost.
 	ctx.collabController = new CollabController(ctx);
 	if (options?.collabHost) {
@@ -74,7 +72,7 @@ async function createRuntimeHarness(options?: { collabHost?: NonNullable<Interac
 		showStatus,
 		showError,
 		present,
-		runtime: { ctx } as BuiltinSlashCommandRuntime,
+		runtime: { ctx } satisfies BuiltinSlashCommandRuntime,
 	};
 }
 

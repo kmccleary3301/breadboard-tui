@@ -47,6 +47,7 @@ function createSelector(): SettingsSelectorComponent {
 			availableThemes: ["dark"],
 			providers: [],
 			cwd: process.cwd(),
+			mainStreamOwnsTurnLifecycle: false,
 		},
 		{
 			onChange: () => {},

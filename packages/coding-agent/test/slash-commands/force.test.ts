@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { seedModels } from "@oh-my-pi/pi-catalog/compat/providers";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { buildNamedToolChoice } from "@oh-my-pi/pi-coding-agent/utils/tool-choice";
 
@@ -12,12 +12,12 @@ function createRuntimeHarness(overrides?: { setForcedToolChoice?: (toolName: str
 	const showStatus = vi.fn();
 	const showError = vi.fn();
 
-	const ctx = {
-		editor: { setText } as unknown as InteractiveModeContext["editor"],
-		session: { setForcedToolChoice } as unknown as InteractiveModeContext["session"],
+	const ctx = createInteractiveModeContext({
+		editor: { setText },
+		session: { setForcedToolChoice },
 		showStatus,
 		showError,
-	} as unknown as InteractiveModeContext;
+	});
 
 	return {
 		runtime: {

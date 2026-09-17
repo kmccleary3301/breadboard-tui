@@ -91,11 +91,19 @@ describe("component escape bindings", () => {
 		} as unknown as TUI;
 		const onCancel = vi.fn();
 
-		const hub = new ModelHubComponent(ui, settings, modelRegistry, [{ model, thinkingLevel: "off" }], {
-			onAssign: () => {},
-			onUnassign: () => {},
-			onCancel,
-		});
+		const hub = new ModelHubComponent(
+			ui,
+			settings,
+			modelRegistry,
+			[{ model, thinkingLevel: "off" }],
+			{
+				onAssign: () => {},
+				onSelectModel: () => {},
+				onUnassign: () => {},
+				onCancel,
+			},
+			{ mainStreamOwnsTurnLifecycle: false },
+		);
 
 		hub.handleInput("\x1b");
 		expect(onCancel).not.toHaveBeenCalled();

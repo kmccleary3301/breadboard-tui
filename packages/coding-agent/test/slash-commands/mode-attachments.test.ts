@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "bun:test";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
-import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 type Attachments = Pick<SubmittedUserInput, "images" | "imageLinks">;
 
@@ -14,6 +15,7 @@ function createHarness(
 	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
 	const handleGuidedGoalCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
 	let editorText = "";
+	let imageLinks: (string | undefined)[] | undefined;
 	const editor = {
 		onSubmit: undefined as undefined | ((text: string) => Promise<void>),
 		addToHistory: vi.fn(),
@@ -26,8 +28,8 @@ function createHarness(
 			editorText = text;
 		},
 		pendingImages: [oldImage],
-		pendingImageLinks: ["file:///old.png"] as (string | undefined)[],
-		imageLinks: undefined as (string | undefined)[] | undefined,
+		pendingImageLinks: ["file:///old.png"],
+		imageLinks,
 		clearDraft() {
 			editorText = "";
 			this.pendingImages = [];
@@ -36,15 +38,16 @@ function createHarness(
 		},
 	};
 	const showError = vi.fn();
-	const ctx = {
+	const replacementBlob = {
+		hash: "0".repeat(64),
+		path: "file:///replacement",
+		displayPath: "file:///replacement.png",
+		get ref() {
+			return `blob:sha256:${this.hash}`;
+		},
+	};
+	const ctx = createInteractiveModeContext({
 		editor,
-		planModeEnabled: false,
-		planModePaused: false,
-		vibeModeEnabled: false,
-		goalModeEnabled: false,
-		goalModePaused: false,
-		skillCommands: new Map(),
-		fileSlashCommands: new Set(),
 		session: {
 			isStreaming: false,
 			isCompacting: false,
@@ -58,9 +61,11 @@ function createHarness(
 			},
 		},
 		sessionManager: {
-			putBlob: vi.fn(async () => ({ displayPath: "file:///replacement.png" })),
+			putBlob: vi.fn(async () => replacementBlob),
 		},
 		focusedAgentId: undefined,
+		skillCommands: new Map(),
+		fileSlashCommands: new Set<string>(),
 		collabGuest: undefined,
 		ui: { requestRender: vi.fn() },
 		compactionQueuedMessages: [],
@@ -72,11 +77,14 @@ function createHarness(
 		handleVibeModeCommand,
 		handleGoalModeCommand,
 		handleGuidedGoalCommand,
-	} as unknown as InteractiveModeContext;
+	});
 	const controller = new InputController(ctx);
 	controller.setupEditorSubmitHandler();
+	const onSubmit = ctx.editor.onSubmit;
+	if (!onSubmit) throw new Error("expected editor submit handler");
 	return {
-		editor,
+		editor: ctx.editor,
+		submit: async (text: string) => onSubmit(text),
 		showError,
 		handlePlanModeCommand,
 		handleVibeModeCommand,
@@ -90,7 +98,7 @@ describe("mode command attachments", () => {
 		const replacements: ImageContent[] = [{ type: "image", data: "bmV3", mimeType: "image/jpeg" }];
 		const harness = createHarness({ images: replacements });
 
-		await harness.editor.onSubmit?.("/plan inspect this");
+		await harness.submit("/plan inspect this");
 
 		const input = harness.handlePlanModeCommand.mock.calls[0]?.[1];
 		expect(input?.images).toBe(replacements);
@@ -102,7 +110,7 @@ describe("mode command attachments", () => {
 	it("does not submit images removed by an extension", async () => {
 		const harness = createHarness({ images: [] });
 
-		await harness.editor.onSubmit?.("/goal keep this private");
+		await harness.submit("/goal keep this private");
 
 		expect(harness.handleGoalModeCommand).toHaveBeenCalledWith("keep this private", undefined);
 		expect(harness.editor.pendingImages).toEqual([]);
@@ -112,7 +120,7 @@ describe("mode command attachments", () => {
 	it("preserves source links when an extension leaves attachments unchanged", async () => {
 		const harness = createHarness({});
 
-		await harness.editor.onSubmit?.("/vibe inspect this [Image #1]");
+		await harness.submit("/vibe inspect this [Image #1]");
 
 		expect(harness.handleVibeModeCommand).toHaveBeenCalledWith(
 			"inspect this [Image #1]",
@@ -125,7 +133,7 @@ describe("mode command attachments", () => {
 		const harness = createHarness({});
 		harness.handleGoalModeCommand.mockResolvedValueOnce(false);
 
-		await harness.editor.onSubmit?.("/goal show [Image #1]");
+		await harness.submit("/goal show [Image #1]");
 
 		expect(harness.editor.pendingImages).toHaveLength(1);
 		expect(harness.editor.pendingImageLinks).toEqual(["file:///old.png"]);
@@ -134,8 +142,7 @@ describe("mode command attachments", () => {
 	it("detaches submitted images before awaiting input extensions", async () => {
 		const inputResult = Promise.withResolvers<{ images?: ImageContent[] }>();
 		const harness = createHarness(inputResult.promise);
-		const submission = harness.editor.onSubmit?.("/plan inspect this [Image #1]");
-		if (!submission) throw new Error("expected editor submit handler");
+		const submission = harness.submit("/plan inspect this [Image #1]");
 
 		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
 		harness.editor.setText("later draft");
@@ -152,8 +159,7 @@ describe("mode command attachments", () => {
 	it("preserves later images when an extension rewrites input into a mode command", async () => {
 		const inputResult = Promise.withResolvers<{ images?: ImageContent[]; text?: string }>();
 		const harness = createHarness(inputResult.promise);
-		const submission = harness.editor.onSubmit?.("inspect this");
-		if (!submission) throw new Error("expected editor submit handler");
+		const submission = harness.submit("inspect this");
 
 		const laterImage: ImageContent = { type: "image", data: "bmV3", mimeType: "image/png" };
 		harness.editor.setText("later draft");
@@ -171,8 +177,7 @@ describe("mode command attachments", () => {
 	it("restores a failed mode command without overwriting a later draft", async () => {
 		const failedPlan = createHarness({});
 		failedPlan.handlePlanModeCommand.mockRejectedValueOnce(new Error("plan setup failed"));
-		const planSubmission = failedPlan.editor.onSubmit?.("/plan inspect this [Image #1]");
-		if (!planSubmission) throw new Error("expected editor submit handler");
+		const planSubmission = failedPlan.submit("/plan inspect this [Image #1]");
 
 		await planSubmission;
 		expect(failedPlan.editor.getText()).toBe("/plan inspect this [Image #1]");
@@ -188,8 +193,7 @@ describe("mode command attachments", () => {
 			failedVibe.editor.pendingImageLinks = ["file:///later.png"];
 			throw new Error("vibe setup failed");
 		});
-		const vibeSubmission = failedVibe.editor.onSubmit?.("/vibe inspect this [Image #1]");
-		if (!vibeSubmission) throw new Error("expected editor submit handler");
+		const vibeSubmission = failedVibe.submit("/vibe inspect this [Image #1]");
 
 		await vibeSubmission;
 		expect(failedVibe.editor.getText()).toBe("later draft");

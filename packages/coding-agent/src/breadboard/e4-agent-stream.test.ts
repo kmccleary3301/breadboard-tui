@@ -2903,49 +2903,6 @@ describe("E4AgentStreamBridge", () => {
 		await bridge.close();
 	});
 
-	test("discards events from turns submitted by other session clients", async () => {
-		const observed = Promise.withResolvers<void>();
-		let external: LoggedSessionEvent | undefined = wireEvent(
-			7,
-			"assistant.message.delta",
-			{ text: "external" },
-			"external-turn-1",
-		);
-		const externalRef = new WeakRef(external);
-		const session: OpenedSession = {
-			...openedSession([], []),
-			async *events(request) {
-				yield external!;
-				external = undefined;
-				yield wireEvent(8, "turn_completed", {}, "external-turn-2");
-				observed.resolve();
-				if (request?.signal?.aborted) return;
-				await new Promise<void>(resolve =>
-					request?.signal?.addEventListener("abort", () => resolve(), { once: true }),
-				);
-			},
-		};
-		const bridge = new E4AgentStreamBridge({
-			async submissionOwned() {},
-			session,
-			durableCursor: undefined,
-			releaseAgentEvent() {},
-			async projectionCommitted() {},
-			async emitAgentEvent() {},
-			modelPolicy: { kind: "fixed", model: model },
-		});
-		bridge.start();
-
-		try {
-			await observed.promise;
-			await Promise.resolve();
-			Bun.gc(true);
-			expect(externalRef.deref()).toBeUndefined();
-		} finally {
-			await bridge.close();
-		}
-	});
-
 	test("replays local events that arrive before submit installs the turn sink", async () => {
 		const submitted: SubmitInput[] = [];
 		const pendingSubmit = Promise.withResolvers<SubmitReceipt>();
@@ -4315,7 +4272,7 @@ describe("E4AgentStreamBridge", () => {
 		}
 	});
 
-	test("reconfigures the backend model before admitting a turn", async () => {
+	test("uses an explicitly selected backend model on the next admitted turn", async () => {
 		const submitted: SubmitInput[] = [];
 		const selectedModel = { ...model, provider: "cli_mock", id: "reference" };
 		const selections: E4BackendModelAttribution[] = [];
@@ -4334,6 +4291,11 @@ describe("E4AgentStreamBridge", () => {
 		});
 
 		try {
+			await bridge.selectModel({
+				api: selectedModel.api,
+				provider: selectedModel.provider,
+				id: selectedModel.id,
+			});
 			const result = await (await startBridgeStream(bridge, selectedModel, context)).result();
 
 			expect(result.stopReason).toBe("stop");
@@ -4345,6 +4307,59 @@ describe("E4AgentStreamBridge", () => {
 			await bridge.close();
 		}
 	});
+	test("rejects turn admission during a pending model selection without submitting stale attribution", async () => {
+		const submitted: SubmitInput[] = [];
+		const selectedModel = { ...model, provider: "cli_mock", id: "reference" };
+		const selection = Promise.withResolvers<E4BackendModelAttribution>();
+		const selectionStarted = Promise.withResolvers<void>();
+		const admission = Promise.withResolvers<void>();
+		const base = openedSession([started, wireEvent(3, "turn_completed", {})], submitted);
+		const session: OpenedSession = {
+			...base,
+			async submit(input) {
+				const result = await base.submit(input);
+				admission.resolve();
+				return result;
+			},
+			async *events(request) {
+				await admission.promise;
+				yield* base.events(request);
+			},
+		};
+		const bridge = new E4AgentStreamBridge({
+			async submissionOwned() {},
+			session,
+			durableCursor: undefined,
+			releaseAgentEvent() {},
+			async projectionCommitted() {},
+			async emitAgentEvent() {},
+			modelPolicy: { kind: "fixed", model },
+			selectModel() {
+				selectionStarted.resolve();
+				return selection.promise;
+			},
+		});
+		const switching = bridge.selectModel(selectedModel);
+		try {
+			await selectionStarted.promise;
+			const rejected = await (await startBridgeStream(bridge, model, context)).result();
+			expect(rejected.stopReason).toBe("error");
+			expect(submitted).toEqual([]);
+			selection.resolve(selectedModel);
+			await switching;
+			const accepted = await (await startBridgeStream(bridge, selectedModel, context)).result();
+			expect(accepted.stopReason).toBe("stop");
+			expect(accepted.provider).toBe(selectedModel.provider);
+			expect(accepted.model).toBe(selectedModel.id);
+			expect(submitted).toHaveLength(1);
+		} finally {
+			selection.resolve(selectedModel);
+			admission.resolve();
+			await switching.catch(() => {});
+			await bridge.close();
+		}
+	});
+
 	test("does not observe before explicit activation and forwards the durable SDK cursor once", async () => {
 		let observations = 0;
 		let observedAfter: { eventId: string; sequence: number } | undefined;

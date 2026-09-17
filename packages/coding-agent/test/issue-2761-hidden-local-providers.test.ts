@@ -70,11 +70,12 @@ function createHub(registry: ModelRegistry): ModelHubComponent {
 	const ui = { requestRender: () => {}, terminal: { rows: 40 } } as unknown as TUI;
 	const callbacks: ModelHubCallbacks = {
 		onAssign: () => {},
+		onSelectModel: () => {},
 		onUnassign: () => {},
 		onLoginRequest: () => {},
 		onCancel: () => {},
 	};
-	const hub = new ModelHubComponent(ui, settings, registry, [], callbacks);
+	const hub = new ModelHubComponent(ui, settings, registry, [], callbacks, { mainStreamOwnsTurnLifecycle: false });
 	openHubs.push(hub);
 	return hub;
 }

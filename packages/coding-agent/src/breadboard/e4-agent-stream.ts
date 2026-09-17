@@ -350,6 +350,7 @@ export class E4AgentStreamBridge {
 	>();
 	#activeModel: E4BackendModelAttribution | undefined;
 	#modelSelectionBarrier = Promise.resolve();
+	#pendingModelSelections = 0;
 	#started = false;
 	#closed = false;
 	#observeFailure: Error | undefined;
@@ -773,6 +774,57 @@ export class E4AgentStreamBridge {
 		}
 	}
 
+	async selectModel(model: E4BackendModelAttribution): Promise<E4BackendModelAttribution> {
+		if (this.#closed || this.#observeFailure) {
+			throw this.#observeFailure ?? new Error("BreadBoard E4 bridge is closed");
+		}
+		this.#pendingModelSelections++;
+		const selection = this.#modelSelectionBarrier.then(() => this.#selectBackendModel(model));
+		this.#modelSelectionBarrier = selection.then(
+			() => {},
+			() => {},
+		);
+		return selection.finally(() => {
+			this.#pendingModelSelections--;
+		});
+	}
+
+	async #selectBackendModel(selectedModel: E4BackendModelAttribution): Promise<E4BackendModelAttribution> {
+		if (this.#closed || this.#observeFailure) {
+			throw this.#observeFailure ?? new Error("BreadBoard E4 bridge is closed");
+		}
+		const current = this.#activeModel;
+		if (
+			current &&
+			current.api === selectedModel.api &&
+			current.provider === selectedModel.provider &&
+			current.id === selectedModel.id
+		) {
+			return current;
+		}
+		if (this.#sinks.size > 0 || this.#submittingSinks.size > 0) {
+			throw new Error("BreadBoard cannot change model while a turn is in flight");
+		}
+		if (!this.#selectModel) {
+			throw new Error(
+				`BreadBoard E4 session uses ${current?.provider}/${current?.id} (${current?.api}), but OMP selected ${selectedModel.provider}/${selectedModel.id} (${selectedModel.api}); E4 does not support per-turn model selection`,
+			);
+		}
+		const selected = await this.#selectModel(selectedModel);
+		if (this.#closed || this.#observeFailure) {
+			throw this.#observeFailure ?? new Error("BreadBoard E4 bridge is closed");
+		}
+		if (
+			selected.api !== selectedModel.api ||
+			selected.provider !== selectedModel.provider ||
+			selected.id !== selectedModel.id
+		) {
+			throw new Error("BreadBoard backend selected a different model than requested");
+		}
+		this.#activeModel = selected;
+		return selected;
+	}
+
 	async #startTurn(
 		model: Model,
 		context: Context,
@@ -787,6 +839,10 @@ export class E4AgentStreamBridge {
 				"error",
 				this.#observeFailure ? this.#observeFailureProjectionEventId : undefined,
 			);
+			return;
+		}
+		if (this.#pendingModelSelections > 0) {
+			this.#pushStandaloneError(stream, model, "BreadBoard model selection is still in progress", "error");
 			return;
 		}
 		if (this.#terminalCursor) {
@@ -806,42 +862,16 @@ export class E4AgentStreamBridge {
 		}
 		if (backendModel.api !== model.api || backendModel.provider !== model.provider || backendModel.id !== model.id) {
 			const selectedModel = { api: model.api, provider: model.provider, id: model.id };
-			const selection = this.#modelSelectionBarrier.then(async () => {
-				const current = this.#activeModel;
-				if (
-					current &&
-					current.api === selectedModel.api &&
-					current.provider === selectedModel.provider &&
-					current.id === selectedModel.id
-				) {
-					return current;
-				}
-				if (!this.#selectModel) {
-					throw new Error(
-						`BreadBoard E4 session uses ${current?.provider}/${current?.id} (${current?.api}), but OMP selected ${model.provider}/${model.id} (${model.api}); E4 does not support per-turn model selection`,
-					);
-				}
-				const selected = await this.#selectModel(selectedModel);
-				if (
-					selected.api !== selectedModel.api ||
-					selected.provider !== selectedModel.provider ||
-					selected.id !== selectedModel.id
-				) {
-					throw new Error("BreadBoard backend selected a different model than requested");
-				}
-				this.#activeModel = selected;
-				return selected;
-			});
-			this.#modelSelectionBarrier = selection.then(
-				() => {},
-				() => {},
-			);
 			try {
-				backendModel = await selection;
+				backendModel = await this.selectModel(selectedModel);
 			} catch (error) {
 				this.#pushStandaloneError(stream, model, safeErrorMessage(error), "error");
 				return;
 			}
+		}
+		if (this.#pendingModelSelections > 0 || this.#activeModel !== backendModel) {
+			this.#pushStandaloneError(stream, model, "BreadBoard model changed before turn admission", "error");
+			return;
 		}
 		const sink = this.#newSink(backendModel, stream);
 		this.#submittingSinks.add(sink);

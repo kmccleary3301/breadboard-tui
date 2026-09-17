@@ -9,9 +9,35 @@
  * flags.
  */
 import { describe, expect, test } from "bun:test";
+import * as path from "node:path";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
 
+async function runBreadboardCli(
+	args: readonly string[],
+): Promise<{ readonly exitCode: number; readonly stderr: string }> {
+	const child = Bun.spawn([process.execPath, "src/bb.ts", ...args], {
+		cwd: path.resolve(import.meta.dir, ".."),
+		env: { ...Bun.env, BREADBOARD_PRODUCT: "1" },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await new Response(child.stdout).text();
+	const stderr = await new Response(child.stderr).text();
+	return { exitCode: await child.exited, stderr };
+}
+
+describe("BreadBoard product CLI rejects native agent commands", () => {
+	test("rejects cleanse, commit, and compress before they fall through to launch", async () => {
+		const cases = [["cleanse"], ["commit"], ["compress"], ["--cwd", "/tmp", "cleanse"]] as const;
+		const results = await Promise.all(cases.map(args => runBreadboardCli(args)));
+		for (const [index, result] of results.entries()) {
+			expect(result.exitCode).toBe(1);
+			expect(result.stderr).toContain(`\`${cases[index]?.at(-1)}\``);
+			expect(result.stderr).toContain("unavailable in BreadBoard product mode");
+		}
+	});
+});
 describe("resolveCliArgv routes subcommands hidden behind leading global flags", () => {
 	test("`--approval-mode=yolo acp` dispatches the acp subcommand with the flag preserved", () => {
 		expect(resolveCliArgv(["--approval-mode=yolo", "acp"])).toEqual({

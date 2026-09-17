@@ -20,7 +20,8 @@ const REMEDIATION_BY_REASON: Readonly<Record<string, string>> = {
 	engine_artifact_mismatch: "Reinstall or reselect the verified engine artifact.",
 	authority_record_invalid: "Inspect the quarantined local authority record before retrying.",
 	authority_store_unavailable: "Repair the user-scoped lifecycle store ownership and permissions.",
-	ownership_conflict: "Use local-external explicitly or wait for the current owner lease.",
+	ownership_conflict:
+		"A live BreadBoard owner controls this engine. Resume it if suspended or exit it cleanly before relaunching; use local-external explicitly for an externally managed engine.",
 	identity_changed: "Do not control this process; verify the engine instance and relaunch.",
 	owner_lease_expired: "Re-establish exact owner identity in a new lifecycle attempt.",
 	registration_conflict: "Create a new invocation and client registration.",

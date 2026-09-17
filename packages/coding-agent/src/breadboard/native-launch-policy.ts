@@ -24,6 +24,6 @@ export function resolveNativeLaunchPolicy(
 		exitCode: 2,
 		message:
 			`BreadBoard launch error [unsupported_native_mode]: ${surface} is a native OMP surface and cannot use ` +
-			"a BreadBoard engine selection; omit --engine-mode/--engine-url or use --engine-mode off.",
+			"a BreadBoard engine selection; use the interactive host or explicitly select --engine-mode off.",
 	};
 }

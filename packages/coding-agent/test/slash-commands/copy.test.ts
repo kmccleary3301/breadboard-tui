@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
 import * as opener from "@oh-my-pi/pi-coding-agent/utils/open";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 function assistantText(text: string): AgentMessage {
 	return { role: "assistant", content: [{ type: "text", text }] } as unknown as AgentMessage;
@@ -21,20 +21,19 @@ function createRuntimeHarness(messages: AgentMessage[]) {
 	const showStatus = vi.fn();
 	const showWarning = vi.fn();
 	const showCopySelector = vi.fn();
+	const ctx = createInteractiveModeContext({
+		session: { messages },
+		editor: { setText },
+		showStatus,
+		showWarning,
+		showCopySelector,
+	});
 	return {
 		setText,
 		showStatus,
 		showWarning,
 		showCopySelector,
-		runtime: {
-			ctx: {
-				session: { messages },
-				editor: { setText },
-				showStatus,
-				showWarning,
-				showCopySelector,
-			} as unknown as InteractiveModeContext,
-		},
+		runtime: { ctx },
 	};
 }
 

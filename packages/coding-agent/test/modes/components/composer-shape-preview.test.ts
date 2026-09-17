@@ -286,6 +286,7 @@ describe("composer shape preview", () => {
 				availableThemes: ["dark", "light"],
 				providers: [],
 				cwd: process.cwd(),
+				mainStreamOwnsTurnLifecycle: false,
 			},
 			{
 				onChange: () => {},

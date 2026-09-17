@@ -38,6 +38,22 @@ function configError(run: () => unknown): BreadboardRunConfigError {
 }
 
 describe("parseSelectedBreadboardConfig", () => {
+	test("harness preferences do not change engine ownership identity", () => {
+		const selected = { engineMode: "local-external", baseUrl: "http://127.0.0.1:7777" };
+		const original = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig: parseSelectedBreadboardConfig(selected),
+		});
+		const withHarnessPreferences = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig: parseSelectedBreadboardConfig({
+				...selected,
+				harness: { default: "project.harness.yaml", paletteHeader: false, unsupportedCommands: "hide" },
+			}),
+		});
+		expect(withHarnessPreferences.configDigest).toBe(original.configDigest);
+	});
+
 	test("preserves supported own enumerable settings", () => {
 		const selected = {
 			engineMode: "local-external",

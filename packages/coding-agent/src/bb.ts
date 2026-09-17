@@ -13,6 +13,7 @@ if (!Bun.isMainThread && parentPort && isWorkerHostSelector(workerArg)) {
 
 async function main(): Promise<void> {
 	process.env.BREADBOARD_PRODUCT = "1";
+	const metadataOnly = ["--version", "-v", "--help", "-h", "help", "--license"].includes(process.argv[2] ?? "");
 	let stopStartupComposer: (() => void) | undefined;
 	if (Bun.isMainThread && !process.env.PI_TIMING && process.stdin.isTTY === true && process.stdout.isTTY === true) {
 		const startupPrepaint = parseStartupPrepaintArgs(process.argv.slice(2));
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
 	// Product setting defaults must precede the shared CLI, not the first paint.
 	// Deferring their module graph lets the cached composer paint while it loads.
 	try {
-		await activateBreadboardProduct();
+		if (!metadataOnly) await activateBreadboardProduct();
 	} catch (error) {
 		stopStartupComposer?.();
 		throw error;

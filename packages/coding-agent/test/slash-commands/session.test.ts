@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 function createRuntimeHarness(options?: {
 	handleSessionCommand?: InteractiveModeContext["handleSessionCommand"];
@@ -25,28 +26,27 @@ function createRuntimeHarness(options?: {
 			return;
 		});
 
+	const ctx = createInteractiveModeContext({
+		editor: { setText },
+		handleSessionCommand,
+		handleSessionDeleteCommand,
+		usesProviderAuthBroker: () => options?.usesBroker === true,
+		session: {
+			async listCurrentProviderOAuthAccounts() {
+				throw new Error("product pin must not read native accounts");
+			},
+			pinCurrentProviderOAuthAccount() {
+				throw new Error("product pin must not mutate native session pinning");
+			},
+		},
+		showSessionPinSelector,
+	});
 	return {
 		setText,
 		handleSessionCommand,
 		handleSessionDeleteCommand,
 		showSessionPinSelector,
-		runtime: {
-			ctx: {
-				editor: { setText } as unknown as InteractiveModeContext["editor"],
-				handleSessionCommand,
-				handleSessionDeleteCommand,
-				usesProviderAuthBroker: () => options?.usesBroker === true,
-				session: {
-					async listCurrentProviderOAuthAccounts() {
-						throw new Error("product pin must not read native accounts");
-					},
-					pinCurrentProviderOAuthAccount() {
-						throw new Error("product pin must not mutate native session pinning");
-					},
-				} as unknown as InteractiveModeContext["session"],
-				showSessionPinSelector,
-			} as InteractiveModeContext,
-		},
+		runtime: { ctx },
 	};
 }
 

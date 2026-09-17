@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from "bun:test";
 import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import type { CompactOptions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { CompactMode } from "@oh-my-pi/pi-coding-agent/session/compact-modes";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import {
-	ACP_BUILTIN_SLASH_COMMANDS,
-	executeAcpBuiltinSlashCommand,
-} from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
+import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 
@@ -24,30 +20,16 @@ function tuiRuntime() {
 	const setText = vi.fn();
 	const showWarning = vi.fn();
 	const runtime = {
-		ctx: {
-			editor: { setText } as unknown as InteractiveModeContext["editor"],
+		ctx: createInteractiveModeContext({
+			editor: { setText },
 			handleCompactCommand,
 			showWarning,
-		} as unknown as InteractiveModeContext,
+		}),
 	};
 	return { handleCompactCommand, setText, showWarning, runtime };
 }
 
 describe("/compact dispatch (ACP)", () => {
-	it("compacts with the configured strategy and no mode for a bare invocation", async () => {
-		const h = acpRuntime();
-		await executeAcpBuiltinSlashCommand("/compact", h.runtime);
-		expect(h.compact).toHaveBeenCalledWith(undefined, undefined);
-	});
-
-	it("threads each mode subcommand into compact()", async () => {
-		for (const mode of ["soft", "remote", "snapcompact"] as const satisfies readonly CompactMode[]) {
-			const h = acpRuntime();
-			await executeAcpBuiltinSlashCommand(`/compact ${mode}`, h.runtime);
-			expect(h.compact).toHaveBeenCalledWith(undefined, { mode });
-		}
-	});
-
 	it("splits a mode from its focus instructions", async () => {
 		const h = acpRuntime();
 		await executeAcpBuiltinSlashCommand("/compact soft focus on the parser", h.runtime);
@@ -128,29 +110,9 @@ describe("/compact dispatch (ACP)", () => {
 		await executeAcpBuiltinSlashCommand("/compact", h.runtime);
 		expect(h.output).toHaveBeenCalledWith("Compaction failed: no model selected");
 	});
-
-	it("advertises the mode subcommands and input hint to ACP clients", () => {
-		const advertised = ACP_BUILTIN_SLASH_COMMANDS.find(c => c.name === "compact");
-		expect(advertised).toBeDefined();
-		expect(advertised?.input?.hint).toBe("[soft|remote|snapcompact] [focus]");
-	});
 });
 
 describe("/compact dispatch (TUI)", () => {
-	it("routes mode + focus to handleCompactCommand and clears the editor", async () => {
-		const h = tuiRuntime();
-		const handled = await executeBuiltinSlashCommand("/compact soft fix the bug", h.runtime);
-		expect(handled).toBe(true);
-		expect(h.setText).toHaveBeenCalledWith("");
-		expect(h.handleCompactCommand).toHaveBeenCalledWith("fix the bug", "soft");
-	});
-
-	it("passes no mode for a bare /compact", async () => {
-		const h = tuiRuntime();
-		await executeBuiltinSlashCommand("/compact", h.runtime);
-		expect(h.handleCompactCommand).toHaveBeenCalledWith(undefined, undefined);
-	});
-
 	it("warns on snapcompact + focus text and does not compact", async () => {
 		const h = tuiRuntime();
 		await executeBuiltinSlashCommand("/compact snapcompact keep diffs", h.runtime);

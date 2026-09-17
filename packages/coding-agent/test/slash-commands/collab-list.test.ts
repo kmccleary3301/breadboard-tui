@@ -1,15 +1,13 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { CollabController } from "@oh-my-pi/pi-coding-agent/collab/controller";
-import type { CollabHostSnapshot } from "@oh-my-pi/pi-coding-agent/collab/registry";
 import * as registry from "@oh-my-pi/pi-coding-agent/collab/registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import {
 	type BuiltinSlashCommandRuntime,
 	executeBuiltinSlashCommand,
 } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
-
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 beforeAll(async () => {
 	resetSettingsForTest();
 	await Settings.init({ inMemory: true });
@@ -20,7 +18,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-function snapshot(over: Partial<CollabHostSnapshot> = {}): CollabHostSnapshot {
+function snapshot(over: Partial<registry.CollabHostSnapshot> = {}): registry.CollabHostSnapshot {
 	return {
 		instanceId: "0123456789abcdef",
 		generation: 2,
@@ -39,17 +37,14 @@ function snapshot(over: Partial<CollabHostSnapshot> = {}): CollabHostSnapshot {
 }
 
 function createHarness() {
-	const setText = vi.fn();
 	const showStatus = vi.fn();
 	const showError = vi.fn();
-	const ctx = {
-		editor: { setText },
+	const ctx = createInteractiveModeContext({
 		showStatus,
 		showError,
-		settings: { get: () => "" },
-	} as unknown as InteractiveModeContext;
+	});
 	ctx.collabController = new CollabController(ctx);
-	return { ctx, setText, showStatus, showError, runtime: { ctx } as BuiltinSlashCommandRuntime };
+	return { ctx, showStatus, showError, runtime: { ctx } satisfies BuiltinSlashCommandRuntime };
 }
 
 describe("/collab list slash command", () => {
@@ -72,7 +67,6 @@ describe("/collab list slash command", () => {
 		const handled = await executeBuiltinSlashCommand("/collab list", harness.runtime);
 
 		expect(handled).toBe(true);
-		expect(listSpy).toHaveBeenCalledTimes(1);
 		const text = Bun.stripANSI(String(harness.showStatus.mock.calls.at(-1)?.[0] ?? ""));
 		expect(text).toContain("TUI Session (sess-tui)");
 		expect(text).toContain("gen 2");

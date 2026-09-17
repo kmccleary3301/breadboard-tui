@@ -48,6 +48,7 @@ function createSelector(onCancel: () => void = () => {}): SettingsSelectorCompon
 			availableThemes: ["dark"],
 			providers: [],
 			cwd: process.cwd(),
+			mainStreamOwnsTurnLifecycle: false,
 		},
 		{
 			onChange: () => {},

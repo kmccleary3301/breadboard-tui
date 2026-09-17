@@ -14,8 +14,16 @@ const MAX_VISIBLE_MODELS = 10;
 const BROWSER_FRAME_ROWS = 5;
 
 class ModelSceneController implements SetupSceneController {
-	title = "Choose your default model";
-	subtitle = "Search configured models and save the model used for new sessions.";
+	get title(): string {
+		return this.host.ctx.session.mainStreamOwnsTurnLifecycle
+			? "Choose your engine model"
+			: "Choose your default model";
+	}
+	get subtitle(): string {
+		return this.host.ctx.session.mainStreamOwnsTurnLifecycle
+			? "Select the model for this BreadBoard session."
+			: "Search configured models and save the model used for new sessions.";
+	}
 	#browser: ModelBrowser;
 	#status: string | undefined;
 	#selecting = false;
@@ -59,7 +67,13 @@ class ModelSceneController implements SetupSceneController {
 
 	render(width: number, maxLines?: number): readonly string[] {
 		const lines = [
-			this.#status ?? theme.fg("muted", "Type to search. Enter saves the highlighted model as your default."),
+			this.#status ??
+				theme.fg(
+					"muted",
+					this.host.ctx.session.mainStreamOwnsTurnLifecycle
+						? "Type to search. Enter selects the highlighted engine model."
+						: "Type to search. Enter saves the highlighted model as your default.",
+				),
 			"",
 		];
 		const budget = maxLines === undefined ? MAX_VISIBLE_MODELS : maxLines - lines.length - BROWSER_FRAME_ROWS;
@@ -71,8 +85,11 @@ class ModelSceneController implements SetupSceneController {
 
 	#syncModels(): void {
 		const registry = this.host.ctx.session.modelRegistry;
-		const available = registry.getAvailable();
-		const roles = resolveRoleAssignments(this.host.ctx.settings, registry.getAll(), available);
+		const external = this.host.ctx.session.mainStreamOwnsTurnLifecycle;
+		const available = external
+			? this.host.ctx.session.scopedModels.map(entry => entry.model)
+			: registry.getAvailable();
+		const roles = external ? {} : resolveRoleAssignments(this.host.ctx.settings, registry.getAll(), available);
 		const storage = this.host.ctx.settings.getStorage();
 		const items = buildBrowserItems(available);
 		sortModelItems(items, { roles, mruOrder: storage?.getModelUsageOrder() ?? [] });
@@ -91,7 +108,9 @@ class ModelSceneController implements SetupSceneController {
 
 	async #refreshModels(): Promise<void> {
 		try {
-			await this.host.ctx.session.modelRegistry.refresh("online-if-uncached");
+			if (!this.host.ctx.session.mainStreamOwnsTurnLifecycle) {
+				await this.host.ctx.session.modelRegistry.refresh("online-if-uncached");
+			}
 			if (this.#disposed) return;
 			this.#syncModels();
 			this.#status = undefined;
@@ -106,15 +125,24 @@ class ModelSceneController implements SetupSceneController {
 	async #select(model: Model, selector: string): Promise<void> {
 		if (this.#selecting) return;
 		this.#selecting = true;
-		this.#status = theme.fg("muted", `Saving ${selector} as the default model…`);
+		this.#status = theme.fg(
+			"muted",
+			this.host.ctx.session.mainStreamOwnsTurnLifecycle
+				? `Selecting ${selector} for this engine session…`
+				: `Saving ${selector} as the default model…`,
+		);
 		this.host.requestRender();
 		try {
-			const projectScope = this.host.ctx.settings.get("modelRoleStorage") === "project";
-			await this.host.ctx.session.setModel(model, "default", { selector, persist: !projectScope });
-			if (projectScope) {
-				this.host.ctx.settings.setProjectModelRole("default", selector);
+			if (this.host.ctx.session.mainStreamOwnsTurnLifecycle) {
+				await this.host.ctx.session.setModelTemporary(model);
+			} else {
+				const projectScope = this.host.ctx.settings.get("modelRoleStorage") === "project";
+				await this.host.ctx.session.setModel(model, "default", { selector, persist: !projectScope });
+				if (projectScope) {
+					this.host.ctx.settings.setProjectModelRole("default", selector);
+				}
+				await this.host.ctx.settings.flush();
 			}
-			await this.host.ctx.settings.flush();
 			if (!this.#disposed) this.host.finish("done");
 		} catch (error) {
 			if (this.#disposed) return;
@@ -125,10 +153,10 @@ class ModelSceneController implements SetupSceneController {
 	}
 }
 
-/** Setup step that assigns one available model to the persisted default role. */
+/** Setup step for the active engine model or the native persisted default role. */
 export const modelSetupScene: SetupScene = {
 	id: "model",
-	title: "Choose your default model",
+	title: "Choose your model",
 	minVersion: 1,
 	mount: host => new ModelSceneController(host),
 };

@@ -29,6 +29,7 @@ import { matchesSelectDown, matchesSelectUp } from "../utils/keybinding-matchers
 import type { AgentHubRemote } from "./agent-hub";
 import { ChatTranscriptBuilder } from "./chat-transcript-builder";
 import { DynamicBorder } from "./dynamic-border";
+import { nativeControlRestriction } from "../../breadboard/native-control-policy";
 import { sanitizeErrorLine } from "./error-block";
 import { formatContextUsage } from "./status-line/context-thresholds";
 
@@ -59,6 +60,8 @@ export interface AgentTranscriptViewerDeps {
 	onClose: () => void;
 	/** Close this viewer AND the hub (hub-toggle keys). */
 	onHubClose: () => void;
+	/** Whether BreadBoard owns the main turn lifecycle. */
+	mainStreamOwnsTurnLifecycle: boolean;
 }
 
 /** How often to re-stat a file-backed transcript for growth (advisor/live tail). */
@@ -177,10 +180,12 @@ export class AgentTranscriptViewer implements Component {
 		this.#pollTimer.unref?.();
 	}
 
-	/** Advisor and aborted-agent transcripts are read-only. */
+	/** Advisor, aborted-agent, and externally-owned transcripts are read-only. */
 	get #sendable(): boolean {
 		const ref = this.deps.registry.get(this.deps.agentId);
-		if (!ref || ref.kind === "advisor" || ref.status === "aborted") return false;
+		if (!ref || ref.kind === "advisor" || ref.status === "aborted" || this.deps.mainStreamOwnsTurnLifecycle) {
+			return false;
+		}
 		return Boolean(this.deps.remote || this.deps.lifecycle);
 	}
 
@@ -512,10 +517,15 @@ export class AgentTranscriptViewer implements Component {
 	}
 
 	#submit(text: string): void {
+		const restriction = nativeControlRestriction("subagents", this.deps.mainStreamOwnsTurnLifecycle);
+		if (restriction) {
+			this.#notice = restriction;
+			this.deps.requestRender();
+			return;
+		}
 		const trimmed = text.trim();
 		this.#editor?.setText("");
 		if (!trimmed) return;
-		this.#notice = undefined;
 		const id = this.deps.agentId;
 		if (this.deps.remote) {
 			this.deps.remote.chat(id, trimmed);

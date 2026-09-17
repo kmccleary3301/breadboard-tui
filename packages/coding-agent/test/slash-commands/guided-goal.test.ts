@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "bun:test";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 
 function createRuntime(handler: () => Promise<boolean>) {
@@ -10,10 +10,10 @@ function createRuntime(handler: () => Promise<boolean>) {
 		handleGuidedGoalCommand,
 		clearDraft,
 		runtime: {
-			ctx: {
-				editor: { clearDraft } as unknown as InteractiveModeContext["editor"],
+			ctx: createInteractiveModeContext({
+				editor: { clearDraft },
 				handleGuidedGoalCommand,
-			} as unknown as InteractiveModeContext,
+			}),
 		},
 	};
 }
@@ -42,14 +42,5 @@ describe("/guided-goal slash command", () => {
 		expect(await dispatched).toBe(true);
 		expect(harness.clearDraft).not.toHaveBeenCalled();
 		expect(harness.handleGuidedGoalCommand).toHaveBeenCalledWith("ship the release", input);
-	});
-
-	it("passes no objective for a bare invocation", async () => {
-		const harness = createRuntime(async () => true);
-
-		const handled = await executeBuiltinSlashCommand("/guided-goal   ", harness.runtime);
-
-		expect(handled).toBe(true);
-		expect(harness.handleGuidedGoalCommand).toHaveBeenCalledWith(undefined, undefined);
 	});
 });

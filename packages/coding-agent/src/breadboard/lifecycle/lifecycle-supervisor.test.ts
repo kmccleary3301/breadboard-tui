@@ -41,6 +41,7 @@ import {
 } from "./run-config";
 import { RuntimeCleanupReconciliationError, RuntimeCleanupStoreError } from "./runtime-cleanup-store";
 
+const stores: LocalAuthorityStore[] = [];
 const roots: string[] = [];
 const executableSha256 = `sha256:${"a".repeat(64)}` as const;
 const engineSourceSha256 = `sha256:${"b".repeat(64)}` as const;
@@ -76,6 +77,7 @@ const TEST_LIFECYCLE_DEFAULTS = {
 	resolveRemoteSecurity: async () => ({}),
 	stateChanged: () => {},
 	restartOnUnexpectedChildExit: true,
+	storeOwnership: "borrowed",
 	process: {
 		spawnVerified: async () => {
 			throw new Error("test lifecycle process adapter not configured");
@@ -273,7 +275,16 @@ async function temporaryStore(
 ): Promise<LocalAuthorityStore> {
 	const root = await mkdtemp(join(tmpdir(), "omp-supervisor-"));
 	roots.push(root);
-	return new LocalAuthorityStore(root, seams);
+	return ownedStore(root, seams);
+}
+
+function ownedStore(
+	root: string,
+	seams: ConstructorParameters<typeof LocalAuthorityStore>[1] = {},
+): LocalAuthorityStore {
+	const store = new LocalAuthorityStore(root, seams);
+	stores.push(store);
+	return store;
 }
 
 interface CleanupRecordRootPaths {
@@ -320,7 +331,7 @@ async function exerciseRejectedCleanupPersistence(
 ): Promise<void> {
 	const authorityRoot = await mkdtemp(join(tmpdir(), "omp-spawn-cleanup-fault-"));
 	roots.push(authorityRoot);
-	const authority = new LocalAuthorityStore(authorityRoot);
+	const authority = ownedStore(authorityRoot);
 	const stateRootRelativePath = join("engine-state", "fault-endpoint");
 	const launchId = "f".repeat(43);
 	const cleanupRecordPath = join(authorityRoot, stateRootRelativePath, "runtime-cleanup", `${launchId}.json`);
@@ -374,6 +385,7 @@ async function exerciseRejectedCleanupPersistence(
 	else expect(await readdir(join(authorityRoot, stateRootRelativePath, "runtime-cleanup"))).toEqual([]);
 }
 afterEach(async () => {
+	await Promise.all(stores.splice(0).map(store => store.close()));
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
@@ -447,7 +459,7 @@ describe.skipIf(process.platform !== "darwin")("DefaultLifecycleProcessAdapter p
 		const authorityRoot = await mkdtemp(join(tmpdir(), "omp-dead-engine-cleanup-"));
 		roots.push(authorityRoot);
 		const stateRootRelativePath = join("engine-state", "dead-engine");
-		const authority = new LocalAuthorityStore(authorityRoot);
+		const authority = ownedStore(authorityRoot);
 		const adapter = createDefaultLifecycleProcessAdapter(new URL("http://127.0.0.1:9099"), {
 			stateRootPath: join(authorityRoot, stateRootRelativePath),
 			ensure: relativePath =>
@@ -1543,6 +1555,236 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls.slice(0, 2)).toEqual(["acquire-owner", "register:local-owned"]);
 		expect((await store.readCurrent(endpoint))?.pid).toBe(enginePid);
 	});
+	test("refuses a live bound pending claim with gateway-only drift without reading or mutating it", async () => {
+		const process = processHarness();
+		let enginePid = 0;
+		const store = await temporaryStore({ isLockOwnerAlive: async owner => owner.pid === enginePid });
+		const ownerConfig: BreadboardRunConfig = {
+			...resolved("local-owned"),
+			gateway: {
+				url: "http://127.0.0.1:40126",
+				token: "gateway-token-owner",
+				identity: `sha256:${"f".repeat(64)}` as const,
+			},
+		};
+		const endpoint = ownerConfig.endpoint as string;
+		const configuredArtifact = ownerConfig.engineArtifact as EngineArtifact;
+		const launchId = "launch_gateway_pending_abcdefghijklmnopqrstuv";
+		const pendingBootstrap = Buffer.alloc(32, 14);
+		await store.withExclusiveLock(endpoint, async () => {
+			const claimed = await store.claimStart(endpoint);
+			if (claimed.kind !== "claimed") throw new Error("expected claimed start");
+			const prepared = await store.prepareStartClaim(
+				endpoint,
+				claimed.claim.token,
+				{
+					launchId,
+					executableSha256: configuredArtifact.executableSha256,
+					executablePathSha256: executablePathSha256(configuredArtifact.executablePath),
+					argvSha256: configuredArtifact.argvSha256,
+					engineArtifactSha256: configuredArtifact.engineSourceSha256,
+					servedBackendCommit: configuredArtifact.servedBackendCommit,
+					gatewayIdentity: ownerConfig.gateway?.identity,
+				},
+				{ bootstrapCredential: pendingBootstrap, ownerCredential: Buffer.from("p".repeat(43), "ascii") },
+			);
+			const transfer = Buffer.from(pendingBootstrap);
+			const child = await process.adapter.spawnVerified(
+				configuredArtifact,
+				launchId,
+				transfer,
+				async (pid, startToken) => {
+					await store.bindStartClaimProcess(endpoint, prepared.token, pid, startToken);
+				},
+			);
+			if ("kind" in child) throw new Error("expected bound spawned process");
+			transfer.fill(0);
+			enginePid = child.pid;
+		});
+		pendingBootstrap.fill(0);
+
+		const before = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
+		if (before.kind !== "recoverable") throw new Error("expected recoverable pending claim");
+		const beforeSecret = await store.readPendingSecret(before.claim);
+		const originalReadPendingSecret = store.readPendingSecret.bind(store);
+		let pendingSecretReads = 0;
+		store.readPendingSecret = async claim => {
+			pendingSecretReads++;
+			return await originalReadPendingSecret(claim);
+		};
+		let observations = 0;
+		let controlCalls = 0;
+		const processAdapter: LifecycleProcessAdapter = {
+			...process.adapter,
+			observe: async pid => {
+				observations++;
+				return await process.adapter.observe(pid);
+			},
+			controlFor: async (pid, startToken) => {
+				controlCalls++;
+				return await process.adapter.controlFor(pid, startToken);
+			},
+		};
+		let handshakes = 0;
+		const replacement = new LifecycleSupervisor(
+			{
+				...ownerConfig,
+				gateway: {
+					url: ownerConfig.gateway?.url ?? "",
+					token: "gateway-token-replacement",
+					identity: `sha256:${"0".repeat(64)}` as const,
+				},
+			},
+			{
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: processAdapter,
+				createClient: () => {
+					handshakes++;
+					throw new Error("gateway-only refusal must not handshake");
+				},
+			},
+		);
+
+		const result = await replacement.connect();
+		expect(result).toMatchObject({
+			kind: "failure",
+			state: { name: "ownership-conflict", reason: "ownership_conflict" },
+		});
+		expect({ observations, controlCalls, pendingSecretReads, handshakes }).toEqual({
+			observations: 1,
+			controlCalls: 0,
+			pendingSecretReads: 0,
+			handshakes: 0,
+		});
+		expect(await store.readCurrent(endpoint)).toBeNull();
+		const after = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
+		expect(after).toMatchObject({ kind: "recoverable", claim: before.claim });
+		if (after.kind === "recoverable") {
+			const afterSecret = await originalReadPendingSecret(after.claim);
+			expect(afterSecret.bootstrapCredential).toEqual(beforeSecret.bootstrapCredential);
+			expect(afterSecret.ownerCredential).toEqual(beforeSecret.ownerCredential);
+			afterSecret.bootstrapCredential.fill(0);
+			afterSecret.ownerCredential.fill(0);
+		}
+		beforeSecret.bootstrapCredential.fill(0);
+		beforeSecret.ownerCredential.fill(0);
+		expect(process.cleanups).toEqual([]);
+		expect(process.preparedCleanups).toEqual([]);
+	});
+
+	test("rejects a bound gateway-mismatched claim when its process start token changed", async () => {
+		const process = processHarness();
+		let enginePid = 0;
+		const store = await temporaryStore({ isLockOwnerAlive: async owner => owner.pid === enginePid });
+		const ownerConfig: BreadboardRunConfig = {
+			...resolved("local-owned"),
+			gateway: {
+				url: "http://127.0.0.1:40127",
+				token: "gateway-token-owner",
+				identity: `sha256:${"1".repeat(64)}` as const,
+			},
+		};
+		const endpoint = ownerConfig.endpoint as string;
+		const configuredArtifact = ownerConfig.engineArtifact as EngineArtifact;
+		const launchId = "launch_gateway_token_changed_abcdefghijkl";
+		const pendingBootstrap = Buffer.alloc(32, 15);
+		await store.withExclusiveLock(endpoint, async () => {
+			const claimed = await store.claimStart(endpoint);
+			if (claimed.kind !== "claimed") throw new Error("expected claimed start");
+			const prepared = await store.prepareStartClaim(
+				endpoint,
+				claimed.claim.token,
+				{
+					launchId,
+					executableSha256: configuredArtifact.executableSha256,
+					executablePathSha256: executablePathSha256(configuredArtifact.executablePath),
+					argvSha256: configuredArtifact.argvSha256,
+					engineArtifactSha256: configuredArtifact.engineSourceSha256,
+					servedBackendCommit: configuredArtifact.servedBackendCommit,
+					gatewayIdentity: ownerConfig.gateway?.identity,
+				},
+				{ bootstrapCredential: pendingBootstrap, ownerCredential: Buffer.from("q".repeat(43), "ascii") },
+			);
+			const transfer = Buffer.from(pendingBootstrap);
+			const child = await process.adapter.spawnVerified(
+				configuredArtifact,
+				launchId,
+				transfer,
+				async (pid, startToken) => {
+					await store.bindStartClaimProcess(endpoint, prepared.token, pid, startToken);
+				},
+			);
+			if ("kind" in child) throw new Error("expected bound spawned process");
+			transfer.fill(0);
+			enginePid = child.pid;
+		});
+		pendingBootstrap.fill(0);
+		process.rotateIdentity(enginePid);
+
+		const before = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
+		if (before.kind !== "recoverable") throw new Error("expected recoverable pending claim");
+		const beforeSecret = await store.readPendingSecret(before.claim);
+		const originalReadPendingSecret = store.readPendingSecret.bind(store);
+		let pendingSecretReads = 0;
+		store.readPendingSecret = async claim => {
+			pendingSecretReads++;
+			return await originalReadPendingSecret(claim);
+		};
+		let controlCalls = 0;
+		const processAdapter: LifecycleProcessAdapter = {
+			...process.adapter,
+			controlFor: async (pid, startToken) => {
+				controlCalls++;
+				return await process.adapter.controlFor(pid, startToken);
+			},
+		};
+		let handshakes = 0;
+		const replacement = new LifecycleSupervisor(
+			{
+				...ownerConfig,
+				gateway: {
+					url: ownerConfig.gateway?.url ?? "",
+					token: "gateway-token-replacement",
+					identity: `sha256:${"2".repeat(64)}` as const,
+				},
+			},
+			{
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: processAdapter,
+				createClient: () => {
+					handshakes++;
+					throw new Error("identity mismatch must not handshake");
+				},
+			},
+		);
+
+		const result = await replacement.connect();
+		expect(result).toMatchObject({
+			kind: "failure",
+			state: { name: "identity-changed", reason: "process_identity_unavailable" },
+		});
+		expect({ controlCalls, pendingSecretReads, handshakes }).toEqual({
+			controlCalls: 0,
+			pendingSecretReads: 0,
+			handshakes: 0,
+		});
+		expect(await store.readCurrent(endpoint)).toBeNull();
+		const after = await store.withExclusiveLock(endpoint, () => store.claimStart(endpoint));
+		expect(after).toMatchObject({ kind: "recoverable", claim: before.claim });
+		if (after.kind === "recoverable") {
+			const afterSecret = await originalReadPendingSecret(after.claim);
+			expect(afterSecret.bootstrapCredential).toEqual(beforeSecret.bootstrapCredential);
+			expect(afterSecret.ownerCredential).toEqual(beforeSecret.ownerCredential);
+			afterSecret.bootstrapCredential.fill(0);
+			afterSecret.ownerCredential.fill(0);
+		}
+		beforeSecret.bootstrapCredential.fill(0);
+		beforeSecret.ownerCredential.fill(0);
+		expect(process.cleanups).toEqual([]);
+		expect(process.preparedCleanups).toEqual([]);
+	});
 	test("retires a dead starter's durable unbound claim after confirmed endpoint absence and starts once", async () => {
 		const process = processHarness();
 		const store = await temporaryStore({ isLockOwnerAlive: async () => false });
@@ -1784,8 +2026,62 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			process: process.adapter,
 			createClient: clientFactory(process, calls),
 		});
-		expect((await adopter.connect()).state.reason).toBe("identity_changed");
+		expect((await adopter.connect()).state.reason).toBe("ownership_conflict");
 		expect(calls).toEqual([]);
+	});
+	test("refuses a live authority owned by another gateway without control, retirement, or adoption", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const firstConfig: BreadboardRunConfig = {
+			...resolved("local-owned", "attached"),
+			gateway: {
+				url: "http://127.0.0.1:40125",
+				token: "gateway-token-owner",
+				identity: `sha256:${"d".repeat(64)}` as const,
+			},
+		};
+		const owner = new LifecycleSupervisor(firstConfig, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await owner.connect()).kind).toBe("ready");
+		const beforeRecord = await store.readCurrent(firstConfig.endpoint as string);
+		const beforeCalls = [...calls];
+		const beforeEvents = [...process.events];
+		const replacement = new LifecycleSupervisor(
+			{
+				...firstConfig,
+				gateway: {
+					url: "http://127.0.0.1:40125",
+					token: "gateway-token-replacement",
+					identity: `sha256:${"e".repeat(64)}` as const,
+				},
+			},
+			{
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: process.adapter,
+				createClient: clientFactory(process, calls),
+			},
+		);
+
+		const result = await replacement.connect();
+		expect(result).toMatchObject({
+			kind: "failure",
+			state: { name: "ownership-conflict", reason: "ownership_conflict" },
+		});
+		expect(presentLifecycle(result).remediation).toContain("Resume it if suspended");
+		expect(await replacement.stop({ consumerClosed: true })).toMatchObject({
+			kind: "failure",
+			state: { name: "ownership-conflict", reason: "ownership_conflict" },
+		});
+		expect(await store.readCurrent(firstConfig.endpoint as string)).toEqual(beforeRecord);
+		expect(calls).toEqual(beforeCalls);
+		expect(process.events).toEqual(beforeEvents);
+		owner.abort();
 	});
 	test("retires dead authority before comparing a new gateway fingerprint", async () => {
 		const store = await temporaryStore();

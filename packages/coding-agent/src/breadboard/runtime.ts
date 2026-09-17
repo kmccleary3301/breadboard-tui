@@ -129,7 +129,7 @@ export function resolveNativeSurfaceEngineSelection(
 		selectedConfig,
 	});
 	if (!explicitSelection) {
-		return isBreadboardProduct ? {} : { engineMode: "off" };
+		return { engineMode: isBreadboardProduct ? "local-owned" : "off" };
 	}
 	try {
 		const effective = resolveBreadboardRunConfig({
@@ -300,7 +300,7 @@ export interface PreparedBreadboardRuntime {
 	readonly harnessClient?: BreadboardClient;
 	readonly harnessId?: string;
 	/** Apply the model control through the lifecycle-aware engine port. */
-	readonly setSessionModel?: (model: string) => Promise<void>;
+	readonly setSessionModel: (model: string) => Promise<void>;
 	readonly stream: StreamFn;
 	readonly sessionId: string;
 	readonly model: Model;
@@ -321,6 +321,7 @@ export interface PreparedBreadboardRuntime {
 
 interface BreadboardRuntimeBridge {
 	readonly stream: StreamFn;
+	readonly selectModel: (model: E4BackendModelAttribution) => Promise<E4BackendModelAttribution>;
 	start(): void;
 	close(): Promise<void>;
 }
@@ -719,6 +720,7 @@ export async function prepareConnectedBreadboardRuntime(
 			resumeBinding !== undefined,
 		);
 		const model = resolveBreadboardBackendModel(snapshot.model, catalogRegistry);
+		let activeModel = model;
 		const selectModel = async (selected: E4BackendModelAttribution): Promise<E4BackendModelAttribution> => {
 			const selector = `${selected.provider}/${selected.id}`;
 			const expected = catalogModels.find(
@@ -768,6 +770,7 @@ export async function prepareConnectedBreadboardRuntime(
 			const e4Bridge = new E4AgentStreamBridge(bridgeOptions);
 			bridge = {
 				stream: e4Bridge.stream,
+				selectModel: model => e4Bridge.selectModel(model),
 				start: () => e4Bridge.start(),
 				close: async () => {
 					const result = await e4Bridge.close();
@@ -779,6 +782,37 @@ export async function prepareConnectedBreadboardRuntime(
 		}
 		const runtimeBridge = bridge;
 		if (!runtimeBridge) throw new Error("BreadBoard runtime bridge was not created");
+		const setSessionModel = async (selector: string): Promise<void> => {
+			const requested = resolveBreadboardBackendModel(selector, catalogRegistry);
+			const expected = catalogModels.find(
+				candidate =>
+					candidate.api === requested.api &&
+					candidate.provider === requested.provider &&
+					candidate.id === requested.id,
+			);
+			if (!expected) {
+				throw new BreadboardModelAuthorityError(
+					"unresolved_backend_model",
+					`BreadBoard model ${selector} is outside the configured session catalog.`,
+				);
+			}
+			const confirmed = await runtimeBridge.selectModel({
+				api: expected.api,
+				provider: expected.provider,
+				id: expected.id,
+			});
+			if (
+				confirmed.api !== expected.api ||
+				confirmed.provider !== expected.provider ||
+				confirmed.id !== expected.id
+			) {
+				throw new BreadboardModelAuthorityError(
+					"unresolved_backend_model",
+					`BreadBoard engine did not retain selected model ${expected.provider}/${expected.id}.`,
+				);
+			}
+			activeModel = expected;
+		};
 		throwIfLifecycleFailed();
 		cancelCleanup = (options.registerCleanup ?? (cleanup => postmortem.register("breadboard-runtime", cleanup)))(
 			closePreparedRuntime,
@@ -818,13 +852,15 @@ export async function prepareConnectedBreadboardRuntime(
 		return {
 			stream: runtimeBridge.stream,
 			harnessClient: options.engine.harnessClient,
-			harnessId: options.harnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH,
-			setSessionModel: model => options.engine.setSessionModel(opened!.sessionId, model),
+			harnessId: options.harnessId,
+			setSessionModel,
 			providerAuth: options.exposeProviderAuth === false ? undefined : options.engine.providerAuth,
 			nativeAuthStorage: options.exposeProviderAuth === false ? options.nativeAuthStorage : undefined,
 			sessionId: initialBinding.sessionId,
 			models: catalogModels,
-			model,
+			get model() {
+				return activeModel;
+			},
 			activate,
 			start,
 			close: closePreparedRuntime,

@@ -139,6 +139,7 @@ export interface LocalAuthorityStoreSeams {
 }
 
 export type AuthorityStoreErrorCode =
+	| "closed"
 	| "root_integrity"
 	| "record_integrity"
 	| "authority_record_invalid"
@@ -745,6 +746,10 @@ export class LocalAuthorityStore {
 	readonly #sleep: (milliseconds: number) => Promise<void>;
 	#rootIdentity: RootIdentity | undefined;
 	#rootDescriptor: FileHandle | undefined;
+	#pinPromise: Promise<void> | undefined;
+	#initializePromise: Promise<void> | undefined;
+	#closePromise: Promise<void> | undefined;
+	#closed = false;
 
 	constructor(
 		readonly root: string,
@@ -778,6 +783,26 @@ export class LocalAuthorityStore {
 
 	static endpointKey(endpoint: string): string {
 		return endpointKey(endpoint);
+	}
+
+	async close(): Promise<void> {
+		if (this.#closePromise) return this.#closePromise;
+		this.#closed = true;
+		this.#closePromise = (async () => {
+			const initialization = this.#initializePromise;
+			if (initialization) await initialization.catch(() => undefined);
+			const pin = this.#pinPromise;
+			if (pin) await pin.catch(() => undefined);
+			const descriptor = this.#rootDescriptor;
+			this.#rootDescriptor = undefined;
+			this.#rootIdentity = undefined;
+			await descriptor?.close();
+		})();
+		return this.#closePromise;
+	}
+
+	#assertOpen(): void {
+		if (this.#closed) throw new LocalAuthorityStoreError("closed", "authority store is closed");
 	}
 
 	async ensurePrivateDirectory(relativePath: string): Promise<string> {
@@ -896,6 +921,7 @@ export class LocalAuthorityStore {
 	}
 
 	async #assertRootIdentity(): Promise<void> {
+		this.#assertOpen();
 		const descriptor = this.#rootDescriptor;
 		const identity = this.#rootIdentity;
 		if (!descriptor || !identity)
@@ -915,6 +941,7 @@ export class LocalAuthorityStore {
 	}
 
 	async #readOnlyRootAvailable(): Promise<boolean> {
+		this.#assertOpen();
 		if (this.#rootDescriptor) {
 			await this.#assertRootIdentity();
 			return true;
@@ -929,10 +956,23 @@ export class LocalAuthorityStore {
 	}
 
 	async initialize(): Promise<void> {
+		this.#assertOpen();
 		if (this.#rootDescriptor) {
 			await this.#assertRootIdentity();
 			return;
 		}
+		const pending = this.#initializePromise;
+		if (pending) return pending;
+		const initialization = this.#initializeRoot();
+		this.#initializePromise = initialization;
+		try {
+			await initialization;
+		} finally {
+			if (this.#initializePromise === initialization) this.#initializePromise = undefined;
+		}
+	}
+
+	async #initializeRoot(): Promise<void> {
 		const createdPath = await mkdir(this.root, { recursive: true, mode: 0o700 });
 		let metadata = await lstat(this.root);
 		if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== this.#uid()) {
@@ -953,6 +993,19 @@ export class LocalAuthorityStore {
 	}
 
 	async #pinRoot(): Promise<void> {
+		if (this.#rootDescriptor) return;
+		const pending = this.#pinPromise;
+		if (pending) return pending;
+		const pin = this.#pinRootOnce();
+		this.#pinPromise = pin;
+		try {
+			await pin;
+		} finally {
+			if (this.#pinPromise === pin) this.#pinPromise = undefined;
+		}
+	}
+
+	async #pinRootOnce(): Promise<void> {
 		const descriptor = await open(this.root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
 		try {
 			const metadata = await descriptor.stat();
@@ -969,6 +1022,7 @@ export class LocalAuthorityStore {
 	}
 
 	#rootFd(): number {
+		this.#assertOpen();
 		if (!this.#rootDescriptor)
 			throw new LocalAuthorityStoreError("root_integrity", "authority root descriptor is not pinned");
 		return this.#rootDescriptor.fd;

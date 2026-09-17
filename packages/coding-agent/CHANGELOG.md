@@ -6,18 +6,25 @@
 
 - Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
 - Added shared OMP subscription authentication for attached local BreadBoard engines through an authenticated loopback inference gateway, retaining BreadBoard tools and permissions without copying provider credentials.
+- Added a caller-workspace launcher with separate per-project runtime state and workspace-contained harness resources; conflicting project resources are never overwritten.
 
 ### Changed
 
 - Integrated official OMP main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including v18.2.2 and its subsequent CJK edit fix, while retaining BreadBoard execution and shared subscription authentication.
+- BreadBoard-owned sessions now gate unsupported native subagent, prewalk, plan, compaction, advisor, automation, and tool controls while preserving frontend presentation and scoped helpers.
 - The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.
-- Unconfigured downstream-product task sessions default to four concurrent subagents, one delegation level, and a 30-minute per-subagent wall clock. Explicit settings still override these bounds, and OMP retains its existing 32/two-level/unlimited defaults.
+- Native task defaults in downstream builds are four concurrent subagents, one delegation level, and a 30-minute wall clock. These settings do not provide a BreadBoard subagent execution route; native OMP retains its existing defaults.
 - The welcome screen exposes `/login` and `/model`, including on narrow terminals.
 - Streaming Markdown reuses fixed ANSI styles to reduce rendering overhead without changing terminal output.
 - Restored the original stacked BreadBoard wordmark and red/magenta/blue gradient.
 
 ### Fixed
 
+- Engine model selection now owns picker, setup, command, and model-cycle changes; native helper-role settings do not configure engine workers.
+- Live owners with a different per-launch gateway identity are reported as ownership conflicts, without controlling or replacing the existing process.
+- Lifecycle-owned authority stores now release pinned filesystem handles deterministically while borrowed stores retain their caller's lifetime.
+- Raw BreadBoard launches no longer fall back to native print or protocol execution; unsupported startup flags and foreign-history imports are rejected explicitly.
+- Product help and heading-only settings panels now explain unavailable controls without advertising native execution routes.
 - Missing source-side harness lock files no longer hide the selected configuration or disable model selection. Unverified configuration details remain explicitly marked and cannot enable lock-gated capabilities.
 - Harness command overrides preserve native aliases and metadata; the welcome screen abbreviates generation hashes while the Harness inspector retains full hashes.
 - Standalone builds preserve ESM semantics so bundled `import.meta.resolve` calls work with Bun 1.4; bytecode acceleration is disabled for this compatibility boundary.

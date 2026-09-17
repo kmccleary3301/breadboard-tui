@@ -50,6 +50,7 @@ function makeHub(agents: AgentRegistry, overrides: Partial<AgentHubDeps> = {}) {
 		settings: Settings.isolated(),
 		observers: new SessionObserverRegistry(),
 		hubKeys: [],
+		mainStreamOwnsTurnLifecycle: false,
 		onDone: () => {},
 		requestRender: () => {},
 		registry: agents,
@@ -319,6 +320,7 @@ describe("Agent hub row ordering", () => {
 		const hub = new AgentHubOverlayComponent({
 			observers,
 			hubKeys: [],
+			mainStreamOwnsTurnLifecycle: false,
 			onDone: () => {},
 			requestRender: () => {},
 			registry: agents,
@@ -374,6 +376,7 @@ describe("Agent hub row ordering", () => {
 		const hub = new AgentHubOverlayComponent({
 			observers,
 			hubKeys: [],
+			mainStreamOwnsTurnLifecycle: false,
 			onDone: () => {},
 			requestRender: () => {},
 			registry: agents,
