@@ -111,7 +111,11 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 			this.ctx.ui.requestRender();
 			return this.#done.promise;
 		}
-		if (isReducedMotionEnabled(this.options.reduceMotion)) {
+		if (
+			isReducedMotionEnabled(this.options.reduceMotion) ||
+			this.ctx.ui.terminal.columns < 56 ||
+			this.ctx.ui.terminal.rows < 18
+		) {
 			this.#mountSceneController("scene");
 		} else {
 			this.#phase = "splash";

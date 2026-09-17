@@ -39,7 +39,10 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 
 	run(): Promise<void> {
-		const reduceMotion = isReducedMotionEnabled(this.options.reduceMotion);
+		const reduceMotion =
+			isReducedMotionEnabled(this.options.reduceMotion) ||
+			this.ctx.ui.terminal.columns < 56 ||
+			this.ctx.ui.terminal.rows < 18;
 		this.#phaseStartedAt = this.#now() - (reduceMotion ? this.#durationMs : 0);
 		this.ctx.ui.requestRender();
 		if (reduceMotion) {
@@ -71,8 +74,10 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 
 	render(width: number): readonly string[] {
-		const elapsedMs = isReducedMotionEnabled(this.options.reduceMotion)
-			? this.#durationMs
+		const staticFrame =
+			isReducedMotionEnabled(this.options.reduceMotion) || width < 56 || this.ctx.ui.terminal.rows < 18;
+		const elapsedMs = staticFrame
+			? SETUP_SPLASH_MS
 			: Math.min(this.#durationMs, Math.max(0, this.#now() - this.#phaseStartedAt));
 		return renderSetupSplash(
 			Math.max(1, width),

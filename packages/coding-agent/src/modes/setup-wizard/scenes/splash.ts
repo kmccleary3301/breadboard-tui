@@ -1,145 +1,182 @@
-import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { GradientPalette, ProductAppearance, ProductIdentity } from "../../../product-identity";
-import { gradientEscape, gradientLogo, type ShineConfig } from "../../components/welcome";
+import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import type { ProductAppearance, ProductIdentity } from "../../../product-identity";
+import { gradientEscape, gradientLogo } from "../../components/welcome";
 import { paintAnsi } from "../../theme/color";
 import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
 
-export const SETUP_SPLASH_MS = 2600;
+export const SETUP_SPLASH_MS = 2200;
 export const SETUP_TICK_MS = 33;
 
-interface EnlargedLogo {
+interface Logo {
 	readonly lines: readonly string[];
 	readonly width: number;
-	readonly height: number;
 }
 
-const enlargedLogos = new WeakMap<ProductIdentity, EnlargedLogo>();
+const enlargedLogos = new WeakMap<ProductIdentity, Logo>();
 
-/** Brand mark at 2x, memoized by immutable identity rather than rebuilt per animation frame. */
-function getEnlargedLogo(identity: ProductIdentity): EnlargedLogo {
+/** Scale the pixels represented by half blocks, not the glyphs themselves. */
+function getEnlargedLogo(identity: ProductIdentity): Logo {
 	const cached = enlargedLogos.get(identity);
 	if (cached) return cached;
 	const lines = identity.logoArt.flatMap(line => {
-		let wide = "";
+		let upper = "";
+		let lower = "";
 		for (const char of line) {
-			wide += char === " " ? "  " : `${char}${char}`;
+			upper += char === "▄" ? "  " : char === "▀" ? "██" : char.repeat(2);
+			lower += char === "▀" ? "  " : char === "▄" ? "██" : char.repeat(2);
 		}
-		return [wide, wide];
+		return [upper, lower];
 	});
-	const enlarged = Object.freeze({
-		lines: Object.freeze(lines),
-		width: Math.max(...lines.map(line => visibleWidth(line))),
-		height: lines.length,
-	});
-	enlargedLogos.set(identity, enlarged);
-	return enlarged;
+	const logo = { lines, width: Math.max(...lines.map(line => visibleWidth(line))) };
+	enlargedLogos.set(identity, logo);
+	return logo;
 }
 
-/** Full scene needs comfortable room; below this we drop to a centered mark. */
-const MIN_SCENE_WIDTH = 56;
-const MIN_SCENE_HEIGHT = 22;
+interface Point {
+	readonly x: number;
+	readonly y: number;
+}
+interface Rectangle {
+	readonly left: number;
+	readonly right: number;
+	readonly top: number;
+	readonly bottom: number;
+}
 
+const SNAKE_GLYPHS = ["━", "┃", "╭", "╮", "╯", "╰", "●"] as const;
 const SKIP_HINT = "press enter to skip";
 
-/** Density ramp for the rippling water, lightest → heaviest. */
-const WATER_RAMP = [
-	{ min: 0.62, char: "█" },
-	{ min: 0.5, char: "▓" },
-	{ min: 0.36, char: "▒" },
-	{ min: 0.24, char: "░" },
-];
-
-function clampLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
-}
-
-function centerLine(line: string, width: number): string {
-	const lineWidth = visibleWidth(line);
-	if (lineWidth >= width) return truncateToWidth(line, width);
-	const left = Math.floor((width - lineWidth) / 2);
-	return padding(left) + line + padding(width - left - lineWidth);
-}
-
-function starAt(x: number, y: number, frame: number): string {
-	const hash = (x * 73856093) ^ (y * 19349663) ^ (frame * 83492791);
-	const bucket = Math.abs(hash) % 97;
-	if (bucket === 0) return theme.fg("accent", "✦");
-	if (bucket === 1) return theme.fg("muted", "·");
-	return " ";
-}
-
-export function renderStarfield(width: number, height: number, frame: number): string[] {
-	const lines: string[] = [];
-	for (let y = 0; y < height; y++) {
-		let line = "";
-		for (let x = 0; x < width; x++) {
-			line += starAt(x, y, frame >> 3);
+/** A continuous clockwise spiral stops before touching the protected wordmark. */
+function spiralRoute(width: number, height: number, protectedArea: Rectangle): Point[] {
+	if (width < 56 || height < 18) return [];
+	let left = 2;
+	let right = width - 3;
+	let top = 1;
+	let bottom = height - 4;
+	let x = left;
+	let y = top;
+	const points: Point[] = [{ x, y }];
+	const insetX = Math.max(4, Math.floor((protectedArea.left - left) / 2));
+	const insetY = Math.max(2, Math.floor((protectedArea.top - top) / 2));
+	const walkTo = (targetX: number, targetY: number): boolean => {
+		const dx = Math.sign(targetX - x);
+		const dy = Math.sign(targetY - y);
+		while (x !== targetX || y !== targetY) {
+			const nextX = x + dx;
+			const nextY = y + dy;
+			if (
+				nextX >= protectedArea.left &&
+				nextX <= protectedArea.right &&
+				nextY >= protectedArea.top &&
+				nextY <= protectedArea.bottom
+			)
+				return false;
+			x = nextX;
+			y = nextY;
+			points.push({ x, y });
 		}
-		lines.push(line);
+		return true;
+	};
+	while (left < right && top < bottom) {
+		if (!walkTo(right, y)) break;
+		top += insetY;
+		if (top >= bottom || !walkTo(x, bottom)) break;
+		right -= insetX;
+		if (left >= right || !walkTo(left, y)) break;
+		bottom -= insetY;
+		if (top >= bottom || !walkTo(x, top)) break;
+		left += insetX;
 	}
-	return lines;
+	return points;
 }
 
-/** Continuous diagonal gradient position (bottom-left → top-right) across the whole screen. */
-function screenGradientT(x: number, y: number, width: number, height: number, phase: number): number {
-	const span = Math.max(1, width + height - 1);
-	const base = (x + (height - 1 - y)) / span;
-	return (((base + phase) % 1) + 1) % 1;
+function connector(points: readonly Point[], index: number): number {
+	const point = points[index];
+	const before = points[index - 1] ?? point;
+	const after = points[index + 1] ?? point;
+	if (before.y === after.y) return 0;
+	if (before.x === after.x) return 1;
+	const left = before.x < point.x || after.x < point.x;
+	const down = before.y > point.y || after.y > point.y;
+	return left ? (down ? 3 : 4) : down ? 2 : 5;
 }
 
-/** Twinkling sparkle for the upper "sky". Returns a styled glyph, or null for empty space. */
-function skyGlyph(x: number, y: number, frame: number): string | null {
-	const hash = (x * 73856093) ^ (y * 19349663) ^ (frame * 83492791);
-	const bucket = Math.abs(hash) % 150;
-	if (bucket === 0) return theme.fg("accent", "✦");
-	if (bucket === 1) return theme.fg("border", "✧");
-	if (bucket === 2) return theme.fg("border", "·");
-	return null;
+interface SplashScene {
+	readonly width: number;
+	readonly height: number;
+	readonly appearance: ProductAppearance;
+	readonly mode: ColorMode;
+	readonly cells: string[][];
+	readonly route: readonly Point[];
+	readonly connectors: readonly number[];
+	readonly trail: readonly (readonly string[])[];
+	readonly tailLength: number;
+	previousStart: number;
+	previousEnd: number;
 }
 
-/** Static value-jitter in [0,1) that softens the water's threshold banding. */
-function waterJitter(x: number, y: number): number {
-	let h = Math.imul(x, 374761393) + Math.imul(y, 668265263);
-	h = Math.imul(h ^ (h >>> 13), 1274126177);
-	h ^= h >>> 16;
-	return (h >>> 0) / 4294967296;
-}
+// Keep only the current viewport per identity; resize replaces rather than accumulates scenes.
+const scenes = new WeakMap<ProductIdentity, SplashScene>();
 
-/**
- * Rippling water amplitude in [0,1] at (x, y): three travelling sine waves
- * interfere, then a radial edge falloff and a downward fade concentrate the
- * ripples beneath the mark and dissolve them toward the edges/bottom. `t`
- * advances each tick, so the surface drifts.
- */
-function waterAmplitude(
-	x: number,
-	y: number,
-	cx: number,
-	waterTop: number,
-	waterHeight: number,
+function createScene(
 	width: number,
-	t: number,
-): number {
-	const dx = (x - cx) / 2;
-	const dy = y - waterTop;
-	const dist = Math.sqrt(dx * dx + dy * dy);
-	const wave =
-		0.5 * Math.sin(dist * 0.55 - t) +
-		0.3 * Math.sin(x * 0.22 + y * 0.45 - t * 0.7) +
-		0.2 * Math.sin(Math.abs(dx) * 0.8 + dy * 0.5 - t * 1.4);
-	const level = 0.5 + 0.5 * wave;
-	const edge = Math.max(0, 1 - Math.abs(x - cx) / (width * 0.5));
-	const fade = Math.max(0, 1 - (dy / Math.max(1, waterHeight)) * 0.55);
-	return level * edge ** 0.7 * fade;
+	height: number,
+	identity: ProductIdentity,
+	appearance: ProductAppearance,
+	mode: ColorMode,
+): SplashScene {
+	const enlarged = getEnlargedLogo(identity);
+	const art = width >= 100 && height >= 30 && enlarged.width <= width - 16 ? enlarged.lines : identity.logoArt;
+	const artWidth = Math.max(...art.map(line => visibleWidth(line)));
+	const palette = identity.gradientPalettes[appearance];
+	const content =
+		artWidth <= width && height >= art.length + 5
+			? [...gradientLogo(art, 0, undefined, palette, mode), "", identity.setupWordmark]
+			: [truncateToWidth(identity.setupWordmark, width)];
+	const contentWidth = Math.max(...content.map(line => visibleWidth(line)));
+	const logoTop = Math.max(0, Math.floor((height - 2 - content.length) / 2));
+	const logoLeft = Math.floor((width - contentWidth) / 2);
+	const cells = Array.from({ length: height }, () => Array.from({ length: width }, () => " "));
+	const placeLine = (text: string, y: number): void => {
+		const line = truncateToWidth(text, width);
+		const lineWidth = visibleWidth(line);
+		if (!lineWidth) return;
+		const x = Math.floor((width - lineWidth) / 2);
+		cells[y][x] = line;
+		for (let column = x + 1; column < x + lineWidth; column++) cells[y][column] = "";
+	};
+	content.forEach((line, row) => placeLine(line, logoTop + row));
+	if (height > 2) placeLine(paintAnsi(mode === "none" ? "" : "\x1b[2m", SKIP_HINT), height - 2);
+	const route = spiralRoute(width, height, {
+		left: logoLeft - 3,
+		right: logoLeft + contentWidth + 2,
+		top: logoTop - 2,
+		bottom: logoTop + content.length + 1,
+	});
+	const tailLength = Math.min(140, Math.max(32, Math.floor(route.length / 5)));
+	const colors = Array.from(
+		{ length: tailLength },
+		(_, age) =>
+			gradientEscape(age / (tailLength - 1), undefined, palette, mode) +
+			(mode !== "none" && age > tailLength * 0.6 ? "\x1b[2m" : ""),
+	);
+	return {
+		width,
+		height,
+		appearance,
+		mode,
+		cells,
+		route,
+		connectors: route.map((_, index) => connector(route, index)),
+		trail: SNAKE_GLYPHS.map(glyph => colors.map(color => paintAnsi(color, glyph))),
+		tailLength,
+		previousStart: 0,
+		previousEnd: -1,
+	};
 }
 
-/**
- * Animated identity splash: the selected brand mark rises out of a rippling,
- * gradient-lit water surface under a faint twinkling starfield. The mark and
- * water share one continuous gradient so the sweep reads across the scene.
- */
+/** One finite light trail coils around an unchanged, centered product wordmark. */
 export function renderSetupSplash(
 	width: number,
 	height: number,
@@ -150,90 +187,39 @@ export function renderSetupSplash(
 ): string[] {
 	const w = Math.max(1, width);
 	const h = Math.max(1, height);
+	let scene = scenes.get(identity);
+	if (!scene || scene.width !== w || scene.height !== h || scene.appearance !== appearance || scene.mode !== mode) {
+		scene = createScene(w, h, identity, appearance, mode);
+		scenes.set(identity, scene);
+	}
+	for (let index = scene.previousStart; index <= scene.previousEnd; index++) {
+		const point = scene.route[index];
+		scene.cells[point.y][point.x] = " ";
+	}
 	const progress = Math.max(0, Math.min(1, elapsedMs / SETUP_SPLASH_MS));
-	const enlargedLogo = getEnlargedLogo(identity);
-	const palette = identity.gradientPalettes[appearance];
-	const phase = progress * 1.8;
-	const shine: ShineConfig = { pos: (progress * 2.5) % 1, strength: Math.max(0, 1 - progress * 0.35) };
-
-	if (w < MIN_SCENE_WIDTH || h < MIN_SCENE_HEIGHT) {
-		return renderCompactSplash(w, h, phase, shine, identity, palette, enlargedLogo, mode);
+	const head = Math.floor(progress * (scene.route.length + scene.tailLength));
+	const start = Math.max(0, head - scene.tailLength + 1);
+	const end = Math.min(head, scene.route.length - 1);
+	for (let index = start; index <= end; index++) {
+		const point = scene.route[index];
+		const glyph = index === head ? 6 : scene.connectors[index];
+		scene.cells[point.y][point.x] = scene.trail[glyph][head - index];
 	}
-
-	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
-	const cx = Math.floor(w / 2);
-	const surfaceTime = frame * 0.13;
-
-	// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
-	const cells: string[][] = Array.from({ length: h }, () => new Array<string>(w).fill(" "));
-	const put = (x: number, y: number, glyph: string): void => {
-		if (y >= 0 && y < h && x >= 0 && x < w) cells[y][x] = glyph;
-	};
-
-	const hx = Math.floor((w - enlargedLogo.width) / 2);
-	const hy = Math.max(2, Math.floor(h * 0.16));
-	const waterTop = hy + enlargedLogo.height;
-	const waterHeight = Math.max(1, h - waterTop);
-
-	// 1. rippling water surface (shares the screen-wide gradient with the mark)
-	for (let y = waterTop; y < h; y++) {
-		for (let x = 0; x < w; x++) {
-			const amp = waterAmplitude(x, y, cx, waterTop, waterHeight, w, surfaceTime) + (waterJitter(x, y) - 0.5) * 0.06;
-			const cell = WATER_RAMP.find(step => amp > step.min);
-			if (cell) {
-				const color = gradientEscape(screenGradientT(x, y, w, h, phase), shine, palette, mode);
-				put(x, y, paintAnsi(color, cell.char));
-			}
-		}
-	}
-	// 2. twinkling starfield in the sky above the water
-	for (let y = 0; y < waterTop - 1; y++) {
-		for (let x = 0; x < w; x++) {
-			const star = skyGlyph(x, y, frame >> 3);
-			if (star) put(x, y, star);
-		}
-	}
-	// 3. hero — the brand mark with the live gradient + shine sweep
-	enlargedLogo.lines.forEach((line, row) => {
-		let col = 0;
-		for (const ch of line) {
-			if (ch !== " ") {
-				const color = gradientEscape(screenGradientT(hx + col, hy + row, w, h, phase), shine, palette, mode);
-				put(hx + col, hy + row, paintAnsi(color, ch));
-			}
-			col++;
-		}
-	});
-	// 4. skip hint on a cleared strip at the bottom so it stays legible over the water
-	const hintWidth = visibleWidth(SKIP_HINT);
-	const hintStart = Math.floor((w - hintWidth) / 2);
-	const hintRow = h - 1;
-	for (let x = hintStart - 1; x <= hintStart + hintWidth; x++) put(x, hintRow, " ");
-	let col = hintStart;
-	for (const ch of SKIP_HINT) put(col++, hintRow, ch === " " ? " " : theme.fg("dim", ch));
-
-	return cells.map(row => row.join(""));
+	scene.previousStart = start;
+	scene.previousEnd = end;
+	return scene.cells.map(row => row.join(""));
 }
 
-/** Centered fallback for windows too small to hold the full scene. */
-function renderCompactSplash(
-	width: number,
-	height: number,
-	phase: number,
-	shine: ShineConfig,
-	identity: ProductIdentity,
-	palette: GradientPalette,
-	enlargedLogo: EnlargedLogo,
-	mode: ColorMode,
-): string[] {
-	const art = height >= 14 && enlargedLogo.width <= width ? enlargedLogo.lines : identity.logoArt;
-	const content = [...gradientLogo(art, phase, shine, palette, mode), "", theme.bold(identity.setupWordmark)];
-	const start = Math.max(0, Math.floor((height - content.length) / 2));
+export function renderStarfield(width: number, height: number, frame: number): string[] {
 	const lines: string[] = [];
 	for (let y = 0; y < height; y++) {
-		const item = content[y - start];
-		lines.push(clampLine(item !== undefined ? centerLine(item, width) : "", width));
+		let line = "";
+		for (let x = 0; x < width; x++) {
+			const hash = (x * 73856093) ^ (y * 19349663) ^ ((frame >> 3) * 83492791);
+			const bucket = Math.abs(hash) % 97;
+			line += bucket === 0 ? theme.fg("accent", "✦") : bucket === 1 ? theme.fg("muted", "·") : " ";
+		}
+		lines.push(line);
 	}
-	if (height > 2) lines[height - 2] = clampLine(centerLine(theme.fg("dim", SKIP_HINT), width), width);
 	return lines;
 }

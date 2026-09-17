@@ -28,31 +28,9 @@ function stripFrame(lines: readonly string[]): string[] {
 	return lines.map(line => Bun.stripANSI(line));
 }
 
-function enlargedLogo(identity: ProductIdentity): string[] {
-	return identity.logoArt.flatMap(line => {
-		const wide = [...line].map(char => (char === " " ? "  " : `${char}${char}`)).join("");
-		return [wide, wide];
-	});
-}
-
 function assertFrameGeometry(lines: readonly string[], width: number, height: number): void {
 	expect(lines).toHaveLength(height);
 	for (const line of lines) expect(visibleWidth(line)).toBe(width);
-}
-
-function assertFullHero(lines: readonly string[], width: number, height: number, identity: ProductIdentity): void {
-	const plain = stripFrame(lines);
-	const logo = enlargedLogo(identity);
-	const logoWidth = Math.max(...logo.map(line => visibleWidth(line)));
-	const left = Math.floor((width - logoWidth) / 2);
-	const top = Math.max(2, Math.floor(height * 0.16));
-	for (let row = 0; row < logo.length; row++) {
-		const actual = [...(plain[top + row] ?? "")];
-		for (let col = 0; col < (logo[row]?.length ?? 0); col++) {
-			const expected = logo[row]?.[col];
-			if (expected !== " ") expect(actual[left + col]).toBe(expected);
-		}
-	}
 }
 
 function assertNoNativeIdentity(text: string): void {
@@ -71,7 +49,7 @@ describe("setup identity renderers", () => {
 			);
 			for (const frame of frames) {
 				assertFrameGeometry(frame, 80, 30);
-				assertFullHero(frame, 80, 30, identity);
+				for (const row of identity.logoArt) expect(stripFrame(frame).join("\n")).toContain(row);
 			}
 			expect(frames[0]?.join("\n")).not.toBe(frames[1]?.join("\n"));
 			expect(frames[1]?.join("\n")).not.toBe(frames[2]?.join("\n"));
@@ -79,15 +57,14 @@ describe("setup identity renderers", () => {
 	);
 
 	it.each([OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY])(
-		"renders compact enlarged and original art with the $id wordmark",
+		"keeps the original $id art in compact viewports",
 		identity => {
 			for (const height of [16, 10]) {
 				const frame = renderSetupSplash(60, height, 700, identity, "dark", "truecolor");
 				assertFrameGeometry(frame, 60, height);
 				const text = stripFrame(frame).join("\n");
 				expect(text).toContain(identity.setupWordmark);
-				const expectedArt = height >= 14 ? enlargedLogo(identity) : identity.logoArt;
-				for (const row of expectedArt) expect(text).toContain(row.trim());
+				for (const row of identity.logoArt) expect(text).toContain(row.trim());
 			}
 		},
 	);
@@ -97,6 +74,53 @@ describe("setup identity renderers", () => {
 		assertFrameGeometry(frame, 48, 16);
 		const text = stripFrame(frame).join("\n");
 		for (const row of BREADBOARD_PRODUCT_IDENTITY.logoArt) expect(text).toContain(row.trim());
+	});
+
+	it("scales half-block pixels instead of duplicating their glyphs", () => {
+		const identity: ProductIdentity = { ...BREADBOARD_PRODUCT_IDENTITY, logoArt: ["█▀▄"] };
+		const frame = stripFrame(renderSetupSplash(120, 36, SETUP_SPLASH_MS, identity, "dark", "none"));
+		const top = frame.findIndex(line => line.trim() === "████");
+		expect(top).toBeGreaterThanOrEqual(0);
+		expect(frame[top + 1]?.trim()).toBe("██  ██");
+	});
+
+	it("keeps the moving trail connected and clears it on completion and resize", () => {
+		const snake = new Set(["━", "┃", "╭", "╮", "╯", "╰", "●"]);
+		for (const elapsed of [250, 650, 1100, 1650]) {
+			const frame = stripFrame(renderSetupSplash(120, 36, elapsed, BREADBOARD_PRODUCT_IDENTITY, "dark", "none"));
+			assertFrameGeometry(frame, 120, 36);
+			const positions = new Set<number>();
+			frame.forEach((line, y) =>
+				[...line].forEach((char, x) => {
+					if (snake.has(char)) positions.add(y * 120 + x);
+				}),
+			);
+			const first = positions.values().next().value;
+			if (first === undefined) throw new Error("animated trail missing");
+			const pending = [first];
+			const visited = new Set<number>();
+			while (pending.length > 0) {
+				const cell = pending.pop();
+				if (cell === undefined || visited.has(cell)) continue;
+				visited.add(cell);
+				for (const neighbor of [cell - 1, cell + 1, cell - 120, cell + 120]) {
+					if (positions.has(neighbor) && !visited.has(neighbor)) pending.push(neighbor);
+				}
+			}
+			expect(visited.size).toBe(positions.size);
+		}
+		for (const [width, height] of [
+			[80, 24],
+			[32, 10],
+			[120, 36],
+			[1, 1],
+		]) {
+			const frame = stripFrame(
+				renderSetupSplash(width, height, SETUP_SPLASH_MS, BREADBOARD_PRODUCT_IDENTITY, "dark", "none"),
+			);
+			assertFrameGeometry(frame, width, height);
+			expect([...frame.join("")].some(char => snake.has(char))).toBe(false);
+		}
 	});
 
 	it("keeps product setup frames free of native identity while preserving native copy", () => {
