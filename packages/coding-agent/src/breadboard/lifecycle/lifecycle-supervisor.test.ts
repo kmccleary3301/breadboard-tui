@@ -1787,6 +1787,56 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect((await adopter.connect()).state.reason).toBe("identity_changed");
 		expect(calls).toEqual([]);
 	});
+	test("retires dead authority before comparing a new gateway fingerprint", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const firstConfig: BreadboardRunConfig = {
+			...resolved("local-owned", "detached"),
+			gateway: {
+				url: "http://127.0.0.1:40123",
+				token: "gateway-token-original",
+				identity: `sha256:${"a".repeat(64)}` as const,
+			},
+		};
+		const first = new LifecycleSupervisor(firstConfig, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		expect((await first.connect()).kind).toBe("ready");
+		const deadPid = process.current().pid;
+		process.dead.add(deadPid);
+		calls.length = 0;
+
+		const successor = new LifecycleSupervisor(
+			{
+				...firstConfig,
+				gateway: {
+					url: "http://127.0.0.1:40123",
+					token: "gateway-token-replaced",
+					identity: `sha256:${"b".repeat(64)}` as const,
+				},
+			},
+			{
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: process.adapter,
+				endpointAbsent: async () => true,
+				createClient: clientFactory(process, calls),
+			},
+		);
+
+		expect((await successor.connect()).kind).toBe("ready");
+		expect(process.spawnCount()).toBe(2);
+		expect(process.cleanups).toContainEqual({
+			launchId: expect.any(String),
+			pid: deadPid,
+			startToken: `darwin:${deadPid}:1`,
+		});
+		expect((await store.readCurrent("http://127.0.0.1:7777"))?.gatewayIdentity).toBe(`sha256:${"b".repeat(64)}`);
+	});
 
 	test("persists only the gateway fingerprint, never its bearer, in public authority state", async () => {
 		const store = await temporaryStore();

@@ -1951,8 +1951,6 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	}
 
 	async #adoptOrRecover(record: LocalAuthorityRecord, attempt: number, recoverDead = true): Promise<LifecycleResult> {
-		if (!this.#recordMatchesConfig(record))
-			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		const observation = await this.#process.observe(record.pid);
 		if (observation.kind === "dead") {
 			if (!recoverDead) {
@@ -1965,6 +1963,8 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			if (!retired) return lifecycleFailure("local-owned", "recovery-needed", "endpoint_unreachable", attempt);
 			return await this.#connectAttempt(attempt);
 		}
+		if (!this.#recordMatchesConfig(record))
+			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		if (observation.kind !== "alive" || observation.startToken !== record.osProcessStartToken) {
 			return lifecycleFailure("local-owned", "identity-changed", "identity_changed", attempt);
 		}
