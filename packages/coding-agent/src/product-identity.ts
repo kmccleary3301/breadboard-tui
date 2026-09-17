@@ -99,7 +99,7 @@ export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	composerFrameLabel: "Framed Rules",
 	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",
 	logoArt: BREADBOARD_LOGO,
-	compactLogo: Object.freeze({ unicode: "bb", nerd: "bb", ascii: "bb" }),
+	compactLogo: Object.freeze({ unicode: "ƁB", nerd: "bb", ascii: "bb" }),
 	gradientPalettes: Object.freeze({ dark: BREADBOARD_GRADIENT, light: BREADBOARD_GRADIENT }),
 	defaultThemes: Object.freeze({ dark: "breadboard", light: "breadboard-light" }),
 });
