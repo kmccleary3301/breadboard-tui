@@ -151,6 +151,14 @@ function panelFields(snapshot: HarnessSnapshot, panel: HarnessPanel): readonly H
 				{ label: "Name", path: "profile.name", value: snapshot.name },
 				{ label: "Harness", path: "harness", value: snapshot.harnessId },
 				{ label: "Lock hash", path: "lock_hash", value: snapshot.lockHash },
+				{
+					label: "Configuration details",
+					path: "configuration_details",
+					value:
+						snapshot.lock === null
+							? "Unavailable: source lock is missing or does not match this session"
+							: "Verified against session lock",
+				},
 				{ label: "Generation", path: "generation", value: snapshot.generation },
 				{ label: "Mode", path: "mode", value: snapshot.mode },
 				...panelEffectiveRows(lock, panel),

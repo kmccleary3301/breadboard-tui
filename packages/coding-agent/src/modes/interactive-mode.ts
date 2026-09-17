@@ -1838,7 +1838,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		for (const command of this.#staticSlashCommands) {
 			const replacement = dynamicCommands.get(command.name);
 			if (replacement) {
-				this.#pendingSlashCommands.push({ ...replacement, icon: command.icon });
+				this.#pendingSlashCommands.push({ ...command, ...replacement, icon: command.icon });
 				dynamicCommands.delete(command.name);
 			} else if (!namesToReplace.has(command.name)) {
 				this.#pendingSlashCommands.push(command);

@@ -128,7 +128,8 @@ export function materializeHarnessCommands(
 	const lock = snapshot.lock ?? {};
 	const specs: HarnessCommandSpec[] = [{ name: "harness", source: "harness", enabled: true }];
 	for (const [name, source] of LOCK_COMMANDS) {
-		const enabledByLock = isStaticPanelCommand(name) || lockFieldPresent(lock, source);
+		// Model selection is a live engine control, not a source-lock capability.
+		const enabledByLock = name === "model" || isStaticPanelCommand(name) || lockFieldPresent(lock, source);
 		const hostAvailable = NO_HOST_IMPLEMENTATION[name] !== true;
 		const enabled = enabledByLock && hostAvailable;
 		const reason = enabled ? undefined : !enabledByLock ? noHostReason(source, name) : "no host implementation";
@@ -405,11 +406,7 @@ async function harnessDiff(runtime: TuiSlashCommandRuntime, args: string): Promi
 	return true;
 }
 
-async function executeDynamicCommand(
-	parsed: ParsedSlashCommand,
-	runtime: TuiSlashCommandRuntime,
-	snapshot: HarnessSnapshot,
-): Promise<boolean> {
+async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<boolean> {
 	const port = runtime.ctx.harnessPort;
 	if (parsed.name === "plan" || parsed.name === "todo") return false;
 	if (isStaticPanelCommand(parsed.name)) {
@@ -528,7 +525,7 @@ export async function executeHarnessSlashCommand(
 		return true;
 	}
 	if (!snapshot) return true;
-	return executeDynamicCommand(parsed, runtime, snapshot);
+	return executeDynamicCommand(parsed, runtime);
 }
 
 export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [

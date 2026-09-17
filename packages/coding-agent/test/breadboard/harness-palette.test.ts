@@ -31,6 +31,13 @@ function snapshot(lock: Readonly<Record<string, unknown>>): HarnessSnapshot {
 }
 
 describe("lock-derived harness palette", () => {
+	test("keeps model selection available without granting unverified harness capabilities", () => {
+		const commands = materializeHarnessCommands({ ...snapshot({}), lock: null, verifiedIdentity: null }, settings);
+		expect(commands.find(command => command.name === "model")?.enabled).toBe(true);
+		expect(commands.find(command => command.name === "plan")?.enabled).toBe(false);
+		expect(commands.find(command => command.name === "mode")?.enabled).toBe(false);
+	});
+
 	test("maps the real lock to the expected enabled command set and reasons", () => {
 		const commands = materializeHarnessCommands(snapshot(lockFixture), settings);
 		const enabled = new Set(commands.filter(command => command.enabled).map(command => command.name));

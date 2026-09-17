@@ -129,18 +129,19 @@ function parseHarnessId(harness: PublicData, fallback: string): string {
 function parseSnapshot(
 	harnessResult: PublicResult,
 	explainResult: PublicResult,
-	lockResult: PublicResult,
+	lockResult: PublicResult | null,
 	session: SessionSummary,
 	harnessFallback: string,
 	now: () => number,
 ): HarnessSnapshot {
 	const harnessData = dataRecord(harnessResult, "harness.get", "definition");
 	const explainData = publicData(explainResult, "harness.explain");
-	const lockData = dataRecord(lockResult, "harness_lock.get", "lock");
+	const lockData = lockResult === null ? null : dataRecord(lockResult, "harness_lock.get", "lock");
 	const harnessId = parseHarnessId(harnessData, harnessFallback);
 	const lockHash = nullableString(session.effective_lock_hash, "session effective_lock_hash");
-	const lockGraphHash = nullableString(lockData.graph_hash, "harness lock graph_hash");
-	const verifiedIdentity = lockHash !== null && lockGraphHash === lockHash ? { harnessId, lockHash } : null;
+	const lockGraphHash = nullableString(lockData?.graph_hash, "harness lock graph_hash");
+	const verifiedIdentity =
+		lockHash !== null && lockData !== null && lockGraphHash === lockHash ? { harnessId, lockHash } : null;
 	const generation = nullableString(session.generation_id, "session generation_id");
 	return Object.freeze({
 		harnessId,
@@ -150,7 +151,7 @@ function parseSnapshot(
 		generation,
 		mode: nullableString(session.mode, "session mode"),
 		lock: verifiedIdentity === null ? null : lockData,
-		provenance: verifiedIdentity === null ? {} : parseProvenance(explainData, lockData),
+		provenance: verifiedIdentity === null || lockData === null ? {} : parseProvenance(explainData, lockData),
 		loadedAt: now(),
 	});
 }
@@ -185,6 +186,9 @@ export function createHarnessPort(options: CreateHarnessPortOptions): HarnessPor
 				);
 			}),
 			options.client.getHarnessLock(lockPathForHarness(harnessId)).catch(error => {
+				// A source-side lock file is optional; the running session still has its own lock hash.
+				// Do not hide its selected configuration or claim the source lock was verified.
+				if (error instanceof ApiError && error.status === 404) return null;
 				throw new Error(
 					`BreadBoard harness_lock.get failed: ${error instanceof Error ? error.message : String(error)}`,
 					{ cause: error },

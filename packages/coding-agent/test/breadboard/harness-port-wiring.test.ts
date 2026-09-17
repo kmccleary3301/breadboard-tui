@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { PublicResult } from "@breadboard/sdk";
-import type { BreadboardClient, SessionSummary } from "@breadboard/sdk/engine";
+import { ApiError, type BreadboardClient, type SessionSummary } from "@breadboard/sdk/engine";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { resetSettingsForTest, Settings } from "../../src/config/settings";
 import { Composer } from "../../src/modes/composer";
@@ -128,11 +128,13 @@ describe("InteractiveMode BreadBoard harness wiring", () => {
 		expect(sessionIds).toEqual([ENGINE_SESSION_ID]);
 		expect(ENGINE_SESSION_ID).not.toBe(session.sessionManager.getSessionId());
 	});
-	test("propagates the live snapshot to status and welcome identity", async () => {
+	test("shows the selected harness without claiming verification when its source lock is missing", async () => {
 		const client = {
 			getHarness: async () => envelope({ path: HARNESS_ID, definition }),
 			explainHarness: async () => envelope({ fields: [] }),
-			getHarnessLock: async () => envelope({ path: "daily_driver.v1.lock.json", lock }),
+			getHarnessLock: async () => {
+				throw new ApiError("path_unavailable: path is unavailable", 404, {});
+			},
 			getSession: async () => sessionSummary,
 		} as unknown as BreadboardClient;
 		const composer = new Composer({ terminal: new VirtualTerminal(120, 32) });
@@ -161,5 +163,6 @@ describe("InteractiveMode BreadBoard harness wiring", () => {
 		const welcome = Bun.stripANSI(mode.composer.welcome?.render(120).join("\n") ?? "");
 		expect(status).toContain("Daily Driver");
 		expect(welcome).toContain("Harness Daily Driver");
+		expect(welcome).toContain("details unverified");
 	});
 });

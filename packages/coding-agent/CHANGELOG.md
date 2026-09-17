@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- Missing source-side harness lock files no longer hide the selected configuration or disable model selection. Unverified configuration details remain explicitly marked and cannot enable lock-gated capabilities.
+- Harness command overrides preserve native aliases and metadata; the welcome screen abbreviates generation hashes while the Harness inspector retains full hashes.
 - Standalone builds preserve ESM semantics so bundled `import.meta.resolve` calls work with Bun 1.4; bytecode acceleration is disabled for this compatibility boundary.
 - Owned engines now bind to the configured local endpoint instead of always using port 9099.
 - Slash-menu icons now update immediately when switching symbol presets; harness overrides retain native menu ordering without hiding unrelated custom commands.

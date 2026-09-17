@@ -162,6 +162,25 @@ describe("createHarnessPort", () => {
 		expect(snapshot?.provenance).toEqual({});
 	});
 
+	test("keeps configuration identity visible when the optional source lock file is absent", async () => {
+		const client = clientFor([]);
+		client.getHarnessLock = async () => {
+			throw new ApiError("path_unavailable: path is unavailable", 404, {
+				error: { error_code: "path_unavailable", message: "path is unavailable" },
+			});
+		};
+		const port = createHarnessPort({ client, sessionId: "session-1", harnessId: "daily_driver.v1.yaml" });
+
+		const snapshot = await port.refresh("session-open");
+
+		expect(snapshot?.harnessId).toBe("daily_driver.v1.yaml");
+		expect(snapshot?.name).toBe("Daily Driver");
+		expect(snapshot?.lockHash).toBe(session.effective_lock_hash);
+		expect(snapshot?.verifiedIdentity).toBeNull();
+		expect(snapshot?.lock).toBeNull();
+		expect(snapshot?.provenance).toEqual({});
+	});
+
 	test("does not notify when a refresh returns the same effective snapshot", async () => {
 		let notifications = 0;
 		const port = createHarnessPort({

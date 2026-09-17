@@ -414,13 +414,19 @@ export class WelcomeComponent implements Component {
 			const identityParts = [`Harness ${sanitizeStatusText(harness.name)}`];
 			const detailParts: string[] = [];
 			if (harness.mode !== null) detailParts.push(sanitizeStatusText(harness.mode));
-			if (harness.generation !== null) detailParts.push(`g${sanitizeStatusText(harness.generation)}`);
+			if (harness.generation !== null) {
+				const generation = sanitizeStatusText(harness.generation)
+					.replace(/^sha256:/, "")
+					.slice(0, 8);
+				detailParts.push(`g${generation}`);
+			}
 			if (detailParts.length > 0) identityParts[0] += ` (${detailParts.join(", ")})`;
 			const lock = harness.lock;
 			const size = teamSize(lock);
 			if (size !== undefined) identityParts.push(`team ${size}`);
 			const postureParts = posture(lock);
 			if (postureParts.length > 0) identityParts.push(...postureParts);
+			if (lock === null) identityParts.push("details unverified");
 			identityParts.push("/harness");
 			harnessIdentity = identityParts.join(" · ");
 		}
