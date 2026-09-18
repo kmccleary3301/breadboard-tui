@@ -1992,6 +1992,7 @@ export async function runRootCommand(
 					providerAuthPort: preparedSetup.providerAuth,
 					nativeAuthStorage: preparedSetup.nativeAuthStorage ?? authStorage,
 					playWelcomeIntro: false,
+					skipSplash: true,
 				});
 				return;
 			} finally {

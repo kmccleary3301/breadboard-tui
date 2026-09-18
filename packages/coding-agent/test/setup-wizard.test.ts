@@ -277,6 +277,34 @@ describe("setup wizard persistence", () => {
 	});
 });
 
+it("routes the first input into the scene when explicit setup skips its splash", () => {
+	const received: string[] = [];
+	const scene: SetupScene = {
+		id: "direct-entry",
+		title: "Direct entry",
+		minVersion: 1,
+		mount: () => ({
+			title: "Direct entry",
+			render: () => [],
+			handleInput: data => received.push(data),
+			invalidate: () => {},
+		}),
+	};
+	const component = new SetupWizardComponent(createTestSetupWizardContext(), [scene], {
+		identity: OMP_PRODUCT_IDENTITY,
+		reduceMotion: false,
+		skipSplash: true,
+		now: () => 0,
+	});
+	try {
+		void component.run();
+		component.handleInput("\r");
+		expect(received).toEqual(["\r"]);
+	} finally {
+		component.dispose();
+	}
+});
+
 describe("setup wizard reduced motion", () => {
 	it("shows the first scene immediately and skips decorative timers and outro", async () => {
 		const interval = vi.spyOn(globalThis, "setInterval");

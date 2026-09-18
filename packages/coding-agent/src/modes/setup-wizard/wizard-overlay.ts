@@ -37,6 +37,7 @@ export interface SetupWizardComponentOptions {
 	readonly nativeAuthStorage?: AuthStorage;
 	readonly now?: () => number;
 	readonly reduceMotion?: boolean;
+	readonly skipSplash?: boolean;
 }
 
 function currentAppearance(): ProductAppearance {
@@ -117,6 +118,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 			return this.#done.promise;
 		}
 		if (
+			this.options.skipSplash ||
 			isReducedMotionEnabled(this.options.reduceMotion) ||
 			this.ctx.ui.terminal.columns < 56 ||
 			this.ctx.ui.terminal.rows < 18

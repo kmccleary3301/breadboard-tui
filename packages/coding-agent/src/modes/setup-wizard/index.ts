@@ -82,6 +82,7 @@ export async function markSetupWizardComplete(
 export interface RunSetupWizardOptions {
 	markComplete?: boolean;
 	playWelcomeIntro?: boolean;
+	skipSplash?: boolean;
 	providerAuthPort?: ProviderAuthPort;
 	nativeAuthStorage?: AuthStorage;
 	identity?: ProductIdentity;
@@ -133,6 +134,7 @@ export async function runSetupWizard(
 		identity: options.identity ?? ACTIVE_PRODUCT_IDENTITY,
 		...(options.providerAuthPort ? { providerAuthPort: options.providerAuthPort } : {}),
 		nativeAuthStorage: options.nativeAuthStorage,
+		skipSplash: options.skipSplash,
 		...(options.now ? { now: options.now } : {}),
 	});
 	const overlay = ctx.ui.showOverlay(component, {
