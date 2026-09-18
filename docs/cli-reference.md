@@ -256,7 +256,7 @@ Run `omp <command> --help` for each command's own flags and examples.
 
 In the BreadBoard distribution, `bb setup` (or `bb-omp setup` through the local
 launcher) configures providers, the default model, and presentation preferences
-without a decorative splash, coding session, or workspace checkpoint. Local-owned
+with its original snake-and-logo animation, without a coding session or workspace checkpoint. Local-owned
 setup requires attached ownership and uses a separate temporary engine, leaving
 an existing coding engine untouched. Completion and cancellation close that
 temporary engine.
