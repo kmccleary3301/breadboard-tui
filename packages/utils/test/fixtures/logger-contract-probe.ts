@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getLogPath, refreshDirsFromEnv } from "../../src/dirs";
 import * as logger from "../../src/logger";
 
 const scenario = process.argv[2];
@@ -107,6 +108,14 @@ switch (scenario) {
 		logger.info("mode-default", { mode: "default" });
 		disableTransports();
 		break;
+	case "product-default": {
+		process.env.BREADBOARD_CONFIG_DIR = primaryDir;
+		refreshDirsFromEnv();
+		logger.info("mode-product", { product: "active" });
+		writeResult({ advertisedPath: getLogPath() });
+		disableTransports();
+		break;
+	}
 	case "file-only":
 		logger.setTransports({ console: false, file: primaryDir });
 		logger.info("mode-file", { mode: "file" });

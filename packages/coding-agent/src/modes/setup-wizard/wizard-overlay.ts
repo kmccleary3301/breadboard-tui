@@ -14,10 +14,15 @@ import type { ProductAppearance, ProductIdentity } from "../../product-identity"
 import { isReducedMotionEnabled } from "../../utils/reduced-motion";
 import { gradientLogo } from "../components/welcome";
 import { theme } from "../theme/theme";
-import type { InteractiveModeContext } from "../types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
-import type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
+import type {
+	SetupScene,
+	SetupSceneController,
+	SetupSceneHost,
+	SetupSceneResult,
+	SetupWizardContext,
+} from "./scenes/types";
 
 type WizardPhase = "splash" | "transition" | "scene" | "outro" | "done";
 
@@ -91,7 +96,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	readonly #now: () => number;
 
 	constructor(
-		readonly ctx: InteractiveModeContext,
+		readonly ctx: SetupWizardContext,
 		readonly scenes: readonly SetupScene[],
 		private readonly options: SetupWizardComponentOptions,
 	) {

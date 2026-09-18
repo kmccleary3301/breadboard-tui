@@ -15,12 +15,10 @@ const BROWSER_FRAME_ROWS = 5;
 
 class ModelSceneController implements SetupSceneController {
 	get title(): string {
-		return this.host.ctx.session.mainStreamOwnsTurnLifecycle
-			? "Choose your engine model"
-			: "Choose your default model";
+		return this.host.ctx.modelSelection.mode === "session" ? "Choose your engine model" : "Choose your default model";
 	}
 	get subtitle(): string {
-		return this.host.ctx.session.mainStreamOwnsTurnLifecycle
+		return this.host.ctx.modelSelection.mode === "session"
 			? "Select the model for this BreadBoard session."
 			: "Search configured models and save the model used for new sessions.";
 	}
@@ -70,7 +68,7 @@ class ModelSceneController implements SetupSceneController {
 			this.#status ??
 				theme.fg(
 					"muted",
-					this.host.ctx.session.mainStreamOwnsTurnLifecycle
+					this.host.ctx.modelSelection.mode === "session"
 						? "Type to search. Enter selects the highlighted engine model."
 						: "Type to search. Enter saves the highlighted model as your default.",
 				),
@@ -84,11 +82,9 @@ class ModelSceneController implements SetupSceneController {
 	}
 
 	#syncModels(): void {
-		const registry = this.host.ctx.session.modelRegistry;
-		const external = this.host.ctx.session.mainStreamOwnsTurnLifecycle;
-		const available = external
-			? this.host.ctx.session.scopedModels.map(entry => entry.model)
-			: registry.getAvailable();
+		const registry = this.host.ctx.modelRegistry;
+		const external = this.host.ctx.modelSelection.mode === "session";
+		const available = this.host.ctx.modelSelection.availableModels();
 		const roles = external ? {} : resolveRoleAssignments(this.host.ctx.settings, registry.getAll(), available);
 		const storage = this.host.ctx.settings.getStorage();
 		const items = buildBrowserItems(available);
@@ -98,7 +94,7 @@ class ModelSceneController implements SetupSceneController {
 		this.#browser.setPerfStats(storage?.getModelPerf() ?? new Map());
 		this.#browser.setItems(items);
 
-		const current = this.host.ctx.session.model;
+		const current = this.host.ctx.modelSelection.currentModel;
 		if (current) {
 			const selector = `${current.provider}/${current.id}`;
 			this.#browser.setCurrentSelector(selector);
@@ -108,9 +104,7 @@ class ModelSceneController implements SetupSceneController {
 
 	async #refreshModels(): Promise<void> {
 		try {
-			if (!this.host.ctx.session.mainStreamOwnsTurnLifecycle) {
-				await this.host.ctx.session.modelRegistry.refresh("online-if-uncached");
-			}
+			await this.host.ctx.modelSelection.refresh();
 			if (this.#disposed) return;
 			this.#syncModels();
 			this.#status = undefined;
@@ -127,22 +121,13 @@ class ModelSceneController implements SetupSceneController {
 		this.#selecting = true;
 		this.#status = theme.fg(
 			"muted",
-			this.host.ctx.session.mainStreamOwnsTurnLifecycle
+			this.host.ctx.modelSelection.mode === "session"
 				? `Selecting ${selector} for this engine session…`
 				: `Saving ${selector} as the default model…`,
 		);
 		this.host.requestRender();
 		try {
-			if (this.host.ctx.session.mainStreamOwnsTurnLifecycle) {
-				await this.host.ctx.session.setModelTemporary(model);
-			} else {
-				const projectScope = this.host.ctx.settings.get("modelRoleStorage") === "project";
-				await this.host.ctx.session.setModel(model, "default", { selector, persist: !projectScope });
-				if (projectScope) {
-					this.host.ctx.settings.setProjectModelRole("default", selector);
-				}
-				await this.host.ctx.settings.flush();
-			}
+			await this.host.ctx.modelSelection.select(model, selector);
 			if (!this.#disposed) this.host.finish("done");
 		} catch (error) {
 			if (this.#disposed) return;

@@ -9,10 +9,16 @@ import { glyphSetupScene } from "./scenes/glyph";
 import { modelSetupScene } from "./scenes/model";
 import { providersSetupScene } from "./scenes/providers";
 import { themeSetupScene } from "./scenes/theme";
-import type { SetupScene } from "./scenes/types";
+import type { SetupScene, SetupWizardContext } from "./scenes/types";
 import { SetupWizardComponent } from "./wizard-overlay";
 
-export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
+export type {
+	SetupScene,
+	SetupSceneController,
+	SetupSceneHost,
+	SetupSceneResult,
+	SetupWizardContext,
+} from "./scenes/types";
 
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
@@ -42,7 +48,7 @@ function setupSkipEnvEnabled(value: string | undefined): boolean {
 export async function selectSetupScenes(
 	storedVersion: number,
 	scenes: readonly SetupScene[],
-	ctx?: InteractiveModeContext,
+	ctx?: SetupWizardContext,
 	options: SetupSceneSelectionOptions = {},
 ): Promise<SetupScene[]> {
 	const isTTY = options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
@@ -81,9 +87,44 @@ export interface RunSetupWizardOptions {
 	identity?: ProductIdentity;
 	now?: () => number;
 }
+/**
+ * Adapt the live interactive session to the setup-only dependency surface.
+ * Setup scenes never need the rest of InteractiveMode, while ordinary in-session
+ * setup keeps its existing engine/native model-selection behavior.
+ */
+export function createInteractiveSetupContext(ctx: InteractiveModeContext): SetupWizardContext {
+	const engineOwned = ctx.session.mainStreamOwnsTurnLifecycle;
+	return {
+		ui: ctx.ui,
+		settings: ctx.settings,
+		modelRegistry: ctx.session.modelRegistry,
+		modelSelection: {
+			mode: engineOwned ? "session" : "default",
+			get currentModel() {
+				return ctx.session.model;
+			},
+			availableModels: () =>
+				engineOwned ? ctx.session.scopedModels.map(entry => entry.model) : ctx.session.modelRegistry.getAvailable(),
+			refresh: engineOwned ? async () => {} : () => ctx.session.modelRegistry.refresh("online-if-uncached"),
+			select: async (model, selector) => {
+				if (engineOwned) {
+					await ctx.session.setModelTemporary(model);
+					return;
+				}
+				const projectScope = ctx.settings.get("modelRoleStorage") === "project";
+				await ctx.session.setModel(model, "default", { selector, persist: !projectScope });
+				if (projectScope) ctx.settings.setProjectModelRole("default", selector);
+				await ctx.settings.flush();
+			},
+		},
+		statusLine: ctx.statusLine,
+		openInBrowser: ctx.openInBrowser.bind(ctx),
+		playWelcomeIntro: ctx.playWelcomeIntro.bind(ctx),
+	};
+}
 
 export async function runSetupWizard(
-	ctx: InteractiveModeContext,
+	ctx: SetupWizardContext,
 	scenes: readonly SetupScene[] = ALL_SCENES,
 	options: RunSetupWizardOptions = {},
 ): Promise<void> {
@@ -112,6 +153,6 @@ export async function runSetupWizard(
 		overlay.hide();
 	}
 	if (options.playWelcomeIntro !== false) {
-		ctx.playWelcomeIntro();
+		ctx.playWelcomeIntro?.();
 	}
 }

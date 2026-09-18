@@ -615,9 +615,15 @@ export function getLogsDir(): string {
 	return dirs.rootSubdir("logs", "state");
 }
 
-/** Get this process's dated log path (~/.omp/logs/omp.YYYY-MM-DD.PID.log). */
+function formatLocalDate(date: Date): string {
+	return (
+		`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-` + String(date.getDate()).padStart(2, "0")
+	);
+}
+
+/** Get this process's dated log path using the active product and local calendar date. */
 export function getLogPath(date = new Date(), pid = process.pid): string {
-	return path.join(getLogsDir(), `${APP_NAME}.${date.toISOString().slice(0, 10)}.${pid}.log`);
+	return path.join(getLogsDir(), `${APP_NAME}.${formatLocalDate(date)}.${pid}.log`);
 }
 
 /**

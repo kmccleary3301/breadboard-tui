@@ -20,7 +20,7 @@ class ProvidersSceneController implements SetupSceneController {
 	#tabRowCount = 1;
 
 	constructor(host: SetupSceneHost) {
-		const external = host.ctx.session.mainStreamOwnsTurnLifecycle;
+		const external = host.ctx.modelSelection.mode === "session";
 		this.subtitle = external
 			? "Sign in to your model providers. Press Esc when you're done."
 			: "Sign in and pick a web search provider. Press Esc when you're done.";

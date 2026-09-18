@@ -123,7 +123,7 @@ export class SignInTab implements SetupTab {
 			if (host.nativeAuthStorage) {
 				this.#authStorage = host.nativeAuthStorage;
 			} else if (host.identity.id === OMP_PRODUCT_IDENTITY.id) {
-				this.#authStorage = host.ctx.session.modelRegistry.authStorage;
+				this.#authStorage = host.ctx.modelRegistry.authStorage;
 			} else {
 				this.#productAuthUnavailable = true;
 			}
@@ -343,7 +343,7 @@ export class SignInTab implements SetupTab {
 						this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }, signal),
 				});
 				accountLabel = identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined;
-				await this.host.ctx.session.modelRegistry.refreshProvider(providerId, "online");
+				await this.host.ctx.modelRegistry.refreshProvider(providerId, "online");
 			}
 			if (this.#disposed) return;
 			const account = accountLabel ? ` as ${accountLabel}` : "";

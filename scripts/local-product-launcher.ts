@@ -141,6 +141,7 @@ exec /usr/bin/env -i \\
   COLORTERM="\${COLORTERM:-truecolor}" \\
   LANG="\${LANG:-en_US.UTF-8}" \\
   USER="\${USER:-}" LOGNAME="\${LOGNAME:-}" \\
+  PI_DEBUG_STARTUP="\${PI_DEBUG_STARTUP:-}" \\
   TMPDIR="$project/temp/" OMP_SKIP_SETUP=1 \\
   BREADBOARD_CONFIG_DIR="$project/config" PI_CODING_AGENT_DIR="$project/agent" \\
   BREADBOARD_API_URL="http://127.0.0.1:$port" \\

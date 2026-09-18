@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock, vi } from "bun:test";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { AuthStorage, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import Setup, { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -10,6 +10,8 @@ import {
 	runSetupWizard,
 	type SetupScene,
 	type SetupSceneHost,
+	type SetupSceneResult,
+	type SetupWizardContext,
 	selectSetupScenes,
 } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard";
 import { providersSetupScene } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/providers";
@@ -17,18 +19,80 @@ import { themeSetupScene } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/sc
 import { WebSearchTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/web-search";
 import { SetupWizardComponent } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/wizard-overlay";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { OMP_PRODUCT_IDENTITY } from "@oh-my-pi/pi-coding-agent/product-identity";
 import { SEARCH_PROVIDER_OPTIONS, SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
+import type { Component, TUI } from "@oh-my-pi/pi-tui";
 
-function fakeContextWithConfiguredModel(): InteractiveModeContext {
+function createTestSetupWizardContext(options?: {
+	settings?: Settings;
+	configuredModel?: Model;
+	availableModels?: readonly Model[];
+	mode?: "default" | "session";
+	rows?: number;
+	select?: (model: Model, selector: string) => Promise<void>;
+	refresh?: () => Promise<void>;
+	openInBrowser?: (url: string) => void;
+	playWelcomeIntro?: () => void;
+	authStorage?: Pick<AuthStorage, "has" | "hasAuth" | "getCredentialOrigin">;
+	showOverlay?: (component: SetupWizardComponent) => { hide: () => void };
+	setFocus?: (component: Component | null) => void;
+	requestRender?: () => void;
+	invalidate?: () => void;
+}): SetupWizardContext {
+	const settings = options?.settings ?? Settings.isolated();
+	const available = options?.availableModels ?? (options?.configuredModel ? [options.configuredModel] : []);
+	const authStorage = (options?.authStorage ?? {
+		has: () => false,
+		hasAuth: () => false,
+		getCredentialOrigin: () => undefined,
+	}) as AuthStorage;
+
+	const ui = {
+		terminal: { rows: options?.rows ?? 24 },
+		showOverlay: options?.showOverlay ?? ((_comp: SetupWizardComponent) => ({ hide: () => {} })),
+		setFocus: options?.setFocus ?? (() => {}),
+		requestRender: options?.requestRender ?? (() => {}),
+		invalidate: options?.invalidate ?? (() => {}),
+	} as unknown as TUI;
+
 	return {
-		session: {
-			modelRegistry: {
-				getAvailable: () => [{ provider: "configured", id: "model" }],
-			},
+		ui,
+		settings,
+		modelRegistry: {
+			authStorage,
+			getAvailable: () => [...available],
+			getAll: () => [...available],
+			refresh: async () => {},
+			refreshProvider: async () => {},
 		},
-	} as unknown as InteractiveModeContext;
+		modelSelection: {
+			mode: options?.mode ?? "default",
+			currentModel: options?.configuredModel,
+			availableModels: () => available,
+			refresh: options?.refresh ?? (async () => {}),
+			select: options?.select ?? (async () => {}),
+		},
+		openInBrowser: options?.openInBrowser ?? (() => {}),
+		playWelcomeIntro: options?.playWelcomeIntro,
+	};
+}
+
+function fakeContextWithConfiguredModel(): SetupWizardContext {
+	const model: Model = buildModel({
+		id: "model",
+		name: "Configured Model",
+		api: "openai-completions",
+		provider: "configured",
+		baseUrl: "http://127.0.0.1:8000/v1",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 8000,
+		maxTokens: 2000,
+	});
+	return createTestSetupWizardContext({
+		configuredModel: model,
+	});
 }
 
 function testScene(id: string, minVersion: number, shouldRun?: () => boolean): SetupScene {
@@ -128,44 +192,29 @@ describe("setup wizard model selection", () => {
 		maxTokens: 32_000,
 	});
 
-	async function pickModelDuringSetup(settings: Settings): Promise<string> {
+	it("discovers an uncached model and activates it through the picker", async () => {
 		await initTheme(false, "unicode", false, "titanium", "dark");
-		let available: Model[] = [];
+		const available: Model[] = [];
+		const selected: string[] = [];
 		const finished = Promise.withResolvers<string>();
-		const setModel = mock(
-			async (
-				selected: Model,
-				role: string,
-				options?: { selector?: string; persist?: boolean },
-			): Promise<{ switched: boolean }> => {
-				if (options?.persist) {
-					settings.setModelRole(role, options.selector ?? `${selected.provider}/${selected.id}`);
-				}
-				return { switched: true };
-			},
-		);
-		const host = {
+		const host: SetupSceneHost = {
 			identity: OMP_PRODUCT_IDENTITY,
-			ctx: {
-				settings,
-				session: {
-					model: undefined,
-					modelRegistry: {
-						getAvailable: () => available,
-						getAll: () => available,
-						refresh: async (strategy: string) => {
-							if (strategy === "online-if-uncached") available = [CUSTOM_MODEL];
-						},
-					},
-					setModel,
+			ctx: createTestSetupWizardContext({
+				settings: Settings.isolated(),
+				rows: 30,
+				availableModels: available,
+				refresh: async () => {
+					available.push(CUSTOM_MODEL);
 				},
-				ui: { terminal: { rows: 30 } },
-			},
+				select: async (_model, selector) => {
+					selected.push(selector);
+				},
+			}),
 			requestRender: () => {},
-			finish: (next: string) => finished.resolve(next),
+			finish: (next: SetupSceneResult) => finished.resolve(next),
 			setFocus: () => {},
 			restoreFocus: () => {},
-		} as unknown as SetupSceneHost;
+		};
 		const scene = ALL_SCENES.find(candidate => candidate.id === "model");
 		expect(scene).toBeDefined();
 
@@ -174,27 +223,9 @@ describe("setup wizard model selection", () => {
 		await controller.onMount?.();
 		expect(controller.render?.(120).join("\n")).toContain("minimax-m3");
 		controller.handleInput?.("\r");
-		return finished.promise;
-	}
-
-	it("discovers and saves an uncached custom model as the global default", async () => {
-		const settings = Settings.isolated();
-
-		const result = await pickModelDuringSetup(settings);
-
-		expect(result).toBe("done");
-		expect(settings.getGlobalModelRole("default")).toBe("spark/minimax-m3");
-		expect(settings.getProjectModelRole("default")).toBeUndefined();
-	});
-
-	it("saves to the project layer under project role storage", async () => {
-		const settings = Settings.isolated({ modelRoleStorage: "project" });
-
-		const result = await pickModelDuringSetup(settings);
-
-		expect(result).toBe("done");
-		expect(settings.getProjectModelRole("default")).toBe("spark/minimax-m3");
-		expect(settings.getGlobalModelRole("default")).toBeUndefined();
+		expect(await finished.promise).toBe("done");
+		expect(selected).toEqual(["spark/minimax-m3"]);
+		controller.dispose?.();
 	});
 });
 
@@ -223,19 +254,16 @@ describe("setup wizard persistence", () => {
 				invalidate: () => {},
 			}),
 		};
-		const ctx = {
+		const ctx = createTestSetupWizardContext({
 			settings,
 			playWelcomeIntro,
-			ui: {
-				terminal: { rows: 24 },
-				showOverlay: (nextComponent: SetupWizardComponent) => {
-					component = nextComponent;
-					return { hide: hideOverlay };
-				},
-				setFocus,
-				requestRender,
+			showOverlay: (nextComponent: SetupWizardComponent) => {
+				component = nextComponent;
+				return { hide: hideOverlay };
 			},
-		} as unknown as InteractiveModeContext;
+			setFocus,
+			requestRender,
+		});
 
 		const pending = runSetupWizard(ctx, [scene], { markComplete: false, playWelcomeIntro: false });
 		component?.handleInput?.("\n");
@@ -266,14 +294,7 @@ describe("setup wizard reduced motion", () => {
 				};
 			},
 		};
-		const ctx = {
-			settings: Settings.isolated(),
-			ui: {
-				terminal: { rows: 24 },
-				setFocus: () => {},
-				requestRender: () => {},
-			},
-		} as unknown as InteractiveModeContext;
+		const ctx = createTestSetupWizardContext({ rows: 24 });
 		const component = new SetupWizardComponent(ctx, [scene], {
 			identity: OMP_PRODUCT_IDENTITY,
 			reduceMotion: true,
@@ -307,14 +328,7 @@ describe("setup wizard mouse routing", () => {
 				invalidate: () => {},
 			}),
 		};
-		const ctx = {
-			settings: Settings.isolated(),
-			ui: {
-				terminal: { rows: 24 },
-				setFocus: () => {},
-				requestRender: () => {},
-			},
-		} as unknown as InteractiveModeContext;
+		const ctx = createTestSetupWizardContext({ rows: 24 });
 		const component = new SetupWizardComponent(ctx, [scene], { identity: OMP_PRODUCT_IDENTITY });
 		try {
 			void component.run();
@@ -356,14 +370,7 @@ describe("setup wizard mouse routing", () => {
 				invalidate: () => {},
 			}),
 		};
-		const ctx = {
-			settings: Settings.isolated(),
-			ui: {
-				terminal: { rows: 24 },
-				setFocus: () => {},
-				requestRender: () => {},
-			},
-		} as unknown as InteractiveModeContext;
+		const ctx = createTestSetupWizardContext({ rows: 24 });
 		const component = new SetupWizardComponent(ctx, [scene], { identity: OMP_PRODUCT_IDENTITY });
 		try {
 			void component.run();
@@ -391,26 +398,15 @@ describe("setup wizard mouse routing", () => {
 	});
 });
 describe("setup wizard short terminals", () => {
-	function shortTerminalCtx(rows: number): InteractiveModeContext {
-		return {
-			settings: Settings.isolated(),
-			ui: {
-				terminal: { rows },
-				setFocus: () => {},
-				requestRender: () => {},
-				invalidate: () => {},
+	function shortTerminalCtx(rows: number): SetupWizardContext {
+		return createTestSetupWizardContext({
+			rows,
+			authStorage: {
+				has: () => false,
+				hasAuth: () => false,
+				getCredentialOrigin: () => undefined,
 			},
-			session: {
-				modelRegistry: {
-					authStorage: {
-						has: () => false,
-						hasAuth: () => false,
-						getCredentialOrigin: () => undefined,
-					},
-				},
-			},
-			openInBrowser: () => {},
-		} as unknown as InteractiveModeContext;
+		});
 	}
 
 	/**
@@ -477,18 +473,13 @@ describe("setup wizard theme previews", () => {
 		expect(setupScene).toBeDefined();
 
 		const host = {
-			ctx: {
-				settings,
-				ui: {
-					invalidate: () => {},
-					requestRender: () => {},
-				},
-			},
+			ctx: createTestSetupWizardContext({ settings }),
+			identity: OMP_PRODUCT_IDENTITY,
 			requestRender: () => {},
 			finish: () => {},
 			setFocus: () => {},
 			restoreFocus: () => {},
-		} as unknown as SetupSceneHost;
+		};
 
 		const controller = setupScene!.mount(host);
 		controller.handleInput?.("5");
@@ -511,17 +502,15 @@ describe("setup wizard glyph scene", () => {
 
 		let finished = false;
 		const host = {
-			ctx: {
-				settings,
-				ui: { invalidate: () => {}, requestRender: () => {} },
-			},
+			ctx: createTestSetupWizardContext({ settings }),
+			identity: OMP_PRODUCT_IDENTITY,
 			requestRender: () => {},
 			finish: () => {
 				finished = true;
 			},
 			setFocus: () => {},
 			restoreFocus: () => {},
-		} as unknown as SetupSceneHost;
+		};
 
 		const controller = scene!.mount(host);
 		// Row "1" is now Nerd Font (it must lead the list).
@@ -544,16 +533,21 @@ describe("setup wizard web search tab", () => {
 
 	it("persists the highlighted provider as the head of the web search order", async () => {
 		const settings = Settings.isolated();
-		const host = {
-			ctx: {
+		const host: SetupSceneHost = {
+			identity: OMP_PRODUCT_IDENTITY,
+			ctx: createTestSetupWizardContext({
 				settings,
-				session: { modelRegistry: { authStorage: { hasAuth: () => false } } },
-			},
+				authStorage: {
+					has: () => false,
+					hasAuth: () => false,
+					getCredentialOrigin: () => undefined,
+				},
+			}),
 			requestRender: () => {},
 			finish: () => {},
 			setFocus: () => {},
 			restoreFocus: () => {},
-		} as unknown as SetupSceneHost;
+		};
 
 		const tab = new WebSearchTab(host);
 		tab.handleInput("\x1b[B"); // move off "auto" to the next provider
@@ -570,17 +564,21 @@ describe("setup wizard web search tab", () => {
 
 	it("can select the last provider in the setup TUI list", async () => {
 		const settings = Settings.isolated();
-		const host = {
-			ctx: {
+		const host: SetupSceneHost = {
+			identity: OMP_PRODUCT_IDENTITY,
+			ctx: createTestSetupWizardContext({
 				settings,
-				session: { modelRegistry: { authStorage: { hasAuth: () => false } } },
-			},
+				authStorage: {
+					has: () => false,
+					hasAuth: () => false,
+					getCredentialOrigin: () => undefined,
+				},
+			}),
 			requestRender: () => {},
 			finish: () => {},
 			setFocus: () => {},
 			restoreFocus: () => {},
-		} as unknown as SetupSceneHost;
-
+		};
 		const tab = new WebSearchTab(host);
 		for (let i = 1; i < SEARCH_PROVIDER_OPTIONS.length; i++) {
 			tab.handleInput("\x1b[B");

@@ -5,6 +5,7 @@
  * assembly live here so the CLI entry point only coordinates startup.
  */
 import * as fsSync from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
@@ -92,11 +93,11 @@ export class BreadboardLifecycleStartupError extends Error {
 }
 
 export type BreadboardLifecycleFailureResult = EngineLifecycleFailureResult;
-
 async function resolveEffectiveBreadboardRunConfig(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
 	activeSettings: Settings,
 	workspacePath: string,
+	endpointOverride?: string,
 ) {
 	const selectedConfig = parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard"));
 	return await resolveProductBreadboardRunConfig({
@@ -104,6 +105,7 @@ async function resolveEffectiveBreadboardRunConfig(
 		selectedConfig,
 		workspacePath,
 		isBreadboardProduct: IS_BREADBOARD_PRODUCT,
+		...(endpointOverride === undefined ? {} : { endpointOverride }),
 	});
 }
 
@@ -1088,6 +1090,137 @@ export function createRecoverableBreadboardRuntime(
 		},
 		close,
 	});
+}
+
+async function allocateSetupLoopbackEndpoint(): Promise<string> {
+	const server = net.createServer();
+	await new Promise<void>((resolve, reject) => {
+		const onError = (error: Error) => {
+			server.off("listening", onListening);
+			reject(error);
+		};
+		const onListening = () => {
+			server.off("error", onError);
+			resolve();
+		};
+		server.once("error", onError);
+		server.once("listening", onListening);
+		server.listen(0, "127.0.0.1");
+	});
+	const address = server.address();
+	const port = typeof address === "object" && address !== null ? address.port : undefined;
+	await new Promise<void>(resolve => server.close(() => resolve()));
+	if (port === undefined) throw new Error("BreadBoard setup could not allocate a loopback endpoint");
+	return `http://127.0.0.1:${port}`;
+}
+
+export interface BreadboardSetupAuthority {
+	readonly startOmpGateway?: () => BreadboardOmpGateway;
+	readonly nativeAuthStorage?: AuthStorage;
+}
+
+export interface PreparedBreadboardSetup {
+	readonly providerAuth?: ProviderAuthPort;
+	readonly nativeAuthStorage?: AuthStorage;
+	readonly models: readonly Model[];
+	refreshModels(): Promise<readonly Model[]>;
+	close(): Promise<void>;
+}
+
+/**
+ * Connect only the BreadBoard control plane needed by explicit setup. Unlike
+ * {@link prepareBreadboardRuntime}, this path never opens an E4 coding session,
+ * creates a turn, or registers a workspace checkpoint.
+ */
+export async function prepareBreadboardSetup(
+	parsed: Pick<Args, "engineMode" | "engineUrl" | "harness">,
+	modelRegistry: BreadboardModelRegistry,
+	activeSettings: Settings = settings,
+	authority?: BreadboardSetupAuthority,
+): Promise<PreparedBreadboardSetup | null> {
+	const workspacePath = fsSync.realpathSync(getProjectDir());
+	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
+	let config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
+	if (authority?.startOmpGateway && (config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")) {
+		throw new Error("BREADBOARD_OMP_AGENT_DIR requires an attached local-owned BreadBoard engine");
+	}
+	if (config.mode === "local-owned") {
+		if (config.ownerExitPolicy !== "attached") {
+			throw new Error("Explicit setup requires an attached local-owned BreadBoard engine");
+		}
+		const endpoint = await allocateSetupLoopbackEndpoint();
+		config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath, endpoint);
+	}
+	if (config.mode === "off") return null;
+
+	const gateway = authority?.startOmpGateway?.();
+	const lifecycleConfig = gateway === undefined ? config : Object.freeze({ ...config, gateway: gateway.binding });
+
+	let engine: BreadboardEnginePort;
+	try {
+		const connected = await connectCanonicalBreadboardEnginePort(lifecycleConfig, {
+			onLateSessionCloseError: error => {
+				logger.warn("BreadBoard setup engine cleanup failed", { error: String(error) });
+			},
+		});
+		if (connected.kind !== "ready") {
+			throw new BreadboardLifecycleStartupError(connected.result);
+		}
+		engine = connected.port;
+	} catch (error) {
+		try {
+			await gateway?.close();
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], "BreadBoard setup startup and gateway cleanup failed");
+		}
+		throw error;
+	}
+
+	let closePromise: Promise<void> | undefined;
+	const close = (): Promise<void> => {
+		closePromise ??= (async () => {
+			try {
+				await engine.close();
+			} finally {
+				await gateway?.close();
+			}
+		})();
+		return closePromise;
+	};
+
+	try {
+		const requestedHarnessId = IS_BREADBOARD_PRODUCT
+			? (parsed.harness ?? configuredHarnessId(activeSettings))
+			: config.sessionConfigPath;
+		const catalogConfigPath =
+			requestedHarnessId && engine.harnessClient && !requestedHarnessId.endsWith(".lock.json")
+				? await resolveHarnessId(engine.harnessClient, requestedHarnessId)
+				: (requestedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH);
+		const loadCatalogModels = async (): Promise<readonly Model[]> => {
+			const catalog = await engine.getModelCatalog(catalogConfigPath);
+			return resolveBreadboardCatalogModels(catalog, modelRegistry);
+		};
+		let currentModels = await loadCatalogModels();
+		return {
+			providerAuth: gateway !== undefined ? undefined : engine.providerAuth,
+			nativeAuthStorage: gateway !== undefined ? authority?.nativeAuthStorage : undefined,
+			get models() {
+				return currentModels;
+			},
+			async refreshModels() {
+				currentModels = await loadCatalogModels();
+				return currentModels;
+			},
+			close,
+		};
+	} catch (error) {
+		try {
+			await close();
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], "BreadBoard setup startup and cleanup failed");
+		}
+		throw error;
+	}
 }
 
 export async function prepareBreadboardRuntime(

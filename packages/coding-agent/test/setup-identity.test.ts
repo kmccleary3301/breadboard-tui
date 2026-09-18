@@ -5,16 +5,20 @@ import { getWelcomeTips, renderWelcomeTip } from "@oh-my-pi/pi-coding-agent/mode
 import { ALL_SCENES } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard";
 import { renderSetupOutro } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/splash";
-import type { SetupScene, SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
+import type {
+	SetupScene,
+	SetupSceneHost,
+	SetupWizardContext,
+} from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
 import { SetupWizardComponent } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/wizard-overlay";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
 	OMP_PRODUCT_IDENTITY,
 	type ProductIdentity,
 } from "@oh-my-pi/pi-coding-agent/product-identity";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
 	await initTheme(false, "unicode", false, "titanium", "light");
@@ -146,14 +150,36 @@ describe("setup identity renderers", () => {
 	});
 });
 
-function wizardContext(rows: number): InteractiveModeContext {
+function wizardContext(rows: number): SetupWizardContext {
+	const settings = Settings.isolated();
 	return {
 		ui: {
 			terminal: { rows },
 			requestRender: () => {},
 			setFocus: () => {},
+			invalidate: () => {},
+		} as unknown as TUI,
+		settings,
+		modelRegistry: {
+			authStorage: {
+				has: () => false,
+				hasAuth: () => false,
+				getCredentialOrigin: () => undefined,
+			} as unknown as AuthStorage,
+			getAvailable: () => [],
+			getAll: () => [],
+			refresh: async () => {},
+			refreshProvider: async () => {},
 		},
-	} as unknown as InteractiveModeContext;
+		modelSelection: {
+			mode: "default",
+			currentModel: undefined,
+			availableModels: () => [],
+			refresh: async () => {},
+			select: async () => {},
+		},
+		openInBrowser: () => {},
+	};
 }
 
 function identityScene(): SetupScene {
@@ -209,25 +235,42 @@ describe("SetupWizardComponent identity boundary", () => {
 
 function modelHost(identity: ProductIdentity): SetupSceneHost {
 	const settings = Settings.isolated();
+	const ctx: SetupWizardContext = {
+		settings,
+		ui: {
+			terminal: { rows: 30 },
+			requestRender: () => {},
+			setFocus: () => {},
+			invalidate: () => {},
+		} as unknown as TUI,
+		modelRegistry: {
+			authStorage: {
+				has: () => false,
+				hasAuth: () => false,
+				getCredentialOrigin: () => undefined,
+			} as unknown as AuthStorage,
+			getAvailable: () => [],
+			getAll: () => [],
+			refresh: async () => {},
+			refreshProvider: async () => {},
+		},
+		modelSelection: {
+			mode: "default",
+			currentModel: undefined,
+			availableModels: () => [],
+			refresh: async () => {},
+			select: async () => {},
+		},
+		openInBrowser: () => {},
+	};
 	return {
 		identity,
-		ctx: {
-			settings,
-			session: {
-				model: undefined,
-				modelRegistry: {
-					getAvailable: () => [],
-					getAll: () => [],
-					refresh: async () => {},
-				},
-			},
-			ui: { terminal: { rows: 30 } },
-		},
+		ctx,
 		requestRender: () => {},
 		finish: () => {},
 		setFocus: () => {},
 		restoreFocus: () => {},
-	} as unknown as SetupSceneHost;
+	};
 }
 
 describe("setup remediation identity", () => {

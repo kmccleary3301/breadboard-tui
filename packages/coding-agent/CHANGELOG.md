@@ -20,6 +20,9 @@
 
 ### Fixed
 
+- Explicit BreadBoard setup now uses a separate metadata-only engine without creating a coding session or workspace checkpoint; completing or cancelling setup releases its owned resources.
+- Setup saves the default model for future sessions while in-session engine model changes remain temporary.
+- Startup diagnostics identify engine preparation, point to the actual product logfile, and accept `PI_DEBUG_STARTUP` through the local launcher.
 - Engine model selection now owns picker, setup, command, and model-cycle changes; native helper-role settings do not configure engine workers.
 - Live owners with a different per-launch gateway identity are reported as ownership conflicts, without controlling or replacing the existing process.
 - Lifecycle-owned authority stores now release pinned filesystem handles deterministically while borrowed stores retain their caller's lifetime.

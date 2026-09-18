@@ -113,7 +113,7 @@ export class WebSearchTab implements SetupTab {
 			let ready = false;
 			try {
 				const provider = await getSearchProvider(id);
-				ready = await provider.isExplicitlyAvailable(this.host.ctx.session.modelRegistry.authStorage);
+				ready = await provider.isExplicitlyAvailable(this.host.ctx.modelRegistry.authStorage);
 			} catch {
 				ready = false;
 			}

@@ -36,6 +36,7 @@ import {
 	formatBreadboardStartupError,
 	type PreparedBreadboardRuntime,
 	prepareBreadboardRuntime,
+	prepareBreadboardSetup,
 	rejectBreadboardSessionTransition,
 	resolveNativeSurfaceEngineSelection,
 	startupBreadboardModeIsOff,
@@ -88,7 +89,9 @@ import type { PrintModeOptions } from "./modes/print-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
 import type * as SetupWizardModule from "./modes/setup-wizard";
-import type { SetupScene } from "./modes/setup-wizard";
+import type { SetupScene, SetupWizardContext } from "./modes/setup-wizard";
+import { ProcessTerminal, TUI } from "@oh-my-pi/pi-tui";
+import { openPath } from "./utils/open";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
 import {
 	applyStartupComposerPreferences,
@@ -660,12 +663,17 @@ async function runInteractiveMode(
 				? await import("./modes/setup-wizard")
 				: undefined;
 		setupScenes = setupWizard
-			? await setupWizard.selectSetupScenes(storedSetupVersion, setupWizard.ALL_SCENES, mode, {
-					resuming,
-					isTTY: process.stdin.isTTY && process.stdout.isTTY,
-					setupWizardEnabled: settings.get("startup.setupWizard"),
-					force: forceSetupWizard,
-				})
+			? await setupWizard.selectSetupScenes(
+					storedSetupVersion,
+					setupWizard.ALL_SCENES,
+					setupWizard.createInteractiveSetupContext(mode),
+					{
+						resuming,
+						isTTY: process.stdin.isTTY && process.stdout.isTTY,
+						setupWizardEnabled: settings.get("startup.setupWizard"),
+						force: forceSetupWizard,
+					},
+				)
 			: [];
 		playStartupSplash = showStartupSplash && setupScenes.length === 0;
 
@@ -684,7 +692,7 @@ async function runInteractiveMode(
 		}
 
 		if (setupWizard && setupScenes.length > 0) {
-			await setupWizard.runSetupWizard(mode, setupScenes, {
+			await setupWizard.runSetupWizard(setupWizard.createInteractiveSetupContext(mode), setupScenes, {
 				providerAuthPort: breadboard?.providerAuth,
 				nativeAuthStorage: breadboard?.nativeAuthStorage,
 			});
@@ -1678,6 +1686,7 @@ interface RunRootCommandDependencies {
 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
 	runInteractiveMode?: typeof runInteractiveMode;
 	prepareBreadboardRuntime?: typeof prepareBreadboardRuntime;
+	prepareBreadboardSetup?: typeof prepareBreadboardSetup;
 	settings?: Settings;
 	forceSetupWizard?: boolean;
 }
@@ -1872,6 +1881,128 @@ export async function runRootCommand(
 
 		// Initialize discovery system with settings for provider persistence
 		logger.time("initializeWithSettings", initializeWithSettings, settingsInstance);
+
+		if (deps.forceSetupWizard === true && breadboardProductModeSelected) {
+			const restriction = nativeStartupRestriction(parsedArgs, true);
+			if (restriction) throw new Error(restriction);
+			stopPendingStartupComposer();
+			const setupWizard = await logger.time("setup:load", () => import("./modes/setup-wizard"));
+			await logger.time(
+				"setup:initTheme",
+				initTheme,
+				isInteractive,
+				settingsInstance.get("symbolPreset"),
+				settingsInstance.get("colorBlindMode"),
+				settingsInstance.isConfigured("theme.dark") ? settingsInstance.get("theme.dark") : undefined,
+				settingsInstance.isConfigured("theme.light") ? settingsInstance.get("theme.light") : undefined,
+			);
+			const ui = new TUI(new ProcessTerminal());
+			let preparation: ReturnType<typeof prepareBreadboardSetup> | undefined;
+			let signalled = false;
+			let cleanupPromise: Promise<void> | undefined;
+			const cleanup = (): Promise<void> => {
+				cleanupPromise ??= (async () => {
+					try {
+						ui.stop();
+					} finally {
+						try {
+							await (await preparation)?.close();
+						} finally {
+							stopThemeWatcher();
+						}
+					}
+				})();
+				return cleanupPromise;
+			};
+			const onSignal = (exitCode: number) => {
+				signalled = true;
+				stopStartupWatchdog();
+				void cleanup().then(
+					() => process.exit(exitCode),
+					error => {
+						logger.error("BreadBoard setup cleanup failed", { error });
+						process.exit(1);
+					},
+				);
+			};
+			const onInterrupt = () => onSignal(130);
+			const onTerminate = () => onSignal(143);
+			process.on("SIGINT", onInterrupt);
+			process.on("SIGTERM", onTerminate);
+			try {
+				preparation = logger.time("prepareBreadboardSetup", () =>
+					(deps.prepareBreadboardSetup ?? prepareBreadboardSetup)(parsedArgs, modelRegistry, settingsInstance, {
+						startOmpGateway:
+							ompAgentDir === undefined
+								? undefined
+								: () => startBreadboardOmpGateway(authStorage, modelRegistry),
+						nativeAuthStorage: authStorage,
+					}),
+				);
+				const preparedSetup = await preparation;
+				if (signalled) return;
+				if (!preparedSetup) throw new Error("BreadBoard setup requires an enabled engine");
+				const catalogModels = [...preparedSetup.models];
+				const requestedModel = resolveCliModel({
+					cliProvider: parsedArgs.provider,
+					cliModel: parsedArgs.model,
+					modelRegistry: { getAll: () => catalogModels, getAvailable: () => catalogModels },
+					settings: settingsInstance,
+					preferences: getModelMatchPreferences(settingsInstance),
+				});
+				if (requestedModel.error) throw new Error(requestedModel.error);
+				const thinkingRestriction = nativeControlRestriction("thinking", true);
+				if (requestedModel.thinkingLevel !== undefined && thinkingRestriction) {
+					throw new Error(`--model: ${thinkingRestriction}`);
+				}
+				if (requestedModel.warning) logger.warn(requestedModel.warning);
+				stopStartupWatchdog();
+				logger.endTiming();
+				ui.start();
+				const standaloneCtx: SetupWizardContext = {
+					ui,
+					settings: settingsInstance,
+					modelRegistry,
+					modelSelection: {
+						mode: "default",
+						get currentModel() {
+							if (requestedModel.model) return requestedModel.model;
+							return resolveModelRoleValue(settingsInstance.getModelRole("default"), [...preparedSetup.models], {
+								settings: settingsInstance,
+								matchPreferences: getModelMatchPreferences(settingsInstance),
+							}).model;
+						},
+						availableModels: () => preparedSetup.models,
+						refresh: async () => {
+							await modelRegistry.refresh("online-if-uncached");
+							await preparedSetup.refreshModels();
+						},
+						select: async (_model, selector) => {
+							if (settingsInstance.get("modelRoleStorage") === "project") {
+								settingsInstance.setProjectModelRole("default", selector);
+							} else {
+								settingsInstance.setModelRole("default", selector);
+							}
+							await settingsInstance.flush();
+						},
+					},
+					openInBrowser: openPath,
+				};
+				await setupWizard.runSetupWizard(standaloneCtx, setupWizard.ALL_SCENES, {
+					providerAuthPort: preparedSetup.providerAuth,
+					nativeAuthStorage: preparedSetup.nativeAuthStorage ?? authStorage,
+					playWelcomeIntro: false,
+				});
+				return;
+			} finally {
+				try {
+					await cleanup();
+				} finally {
+					process.removeListener("SIGINT", onInterrupt);
+					process.removeListener("SIGTERM", onTerminate);
+				}
+			}
+		}
 
 		// Apply model role overrides from CLI args or env vars (ephemeral, not persisted)
 		const smolModel = parsedArgs.smol ?? $env.PI_SMOL_MODEL;
@@ -2327,7 +2458,9 @@ export async function runRootCommand(
 			const breadboardPermissionHandler = createBreadboardPermissionHandler(() => breadboardUIContext);
 			if (isInteractive) {
 				try {
-					preparedBreadboardRuntime = await (deps.prepareBreadboardRuntime ?? prepareBreadboardRuntime)(
+					preparedBreadboardRuntime = await logger.time(
+						"prepareBreadboardRuntime",
+						deps.prepareBreadboardRuntime ?? prepareBreadboardRuntime,
 						parsedArgs,
 						async (event, idempotencyKey) => {
 							const agentSession = breadboardAgentSession;

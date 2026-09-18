@@ -251,3 +251,18 @@ Run `omp <command> --help` for each command's own flags and examples.
 > reachable through related mechanisms (the `plugin` command, the `/join` slash
 > command, and so on). The table lists each as it is registered in
 > `packages/coding-agent/src/cli-commands.ts`.
+
+### BreadBoard setup
+
+In the BreadBoard distribution, `bb setup` (or `bb-omp setup` through the local
+launcher) configures providers, the default model, and presentation preferences
+without opening a coding session or creating a workspace checkpoint. Local-owned
+setup requires attached ownership and uses a separate temporary engine, leaving
+an existing coding engine untouched. Completion and cancellation close that
+temporary engine.
+
+The chosen default model applies to future sessions; changing the model inside
+an existing BreadBoard session remains temporary. `--model` and `--provider`
+preselect the requested model, and `--harness` selects its engine catalog.
+For startup diagnostics through the launcher, run `PI_DEBUG_STARTUP=1 bb-omp setup`.
+The watchdog reports the active phase and the actual `bb.<date>.<pid>.log` path.

@@ -2,12 +2,74 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
 import { ProviderAuthError, type ProviderAuthPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SignInTab } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/sign-in";
-import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
+import type { SetupSceneHost, SetupWizardContext } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "@oh-my-pi/pi-coding-agent/product-identity";
 import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
-import type { Component } from "@oh-my-pi/pi-tui";
+import type { Component, TUI } from "@oh-my-pi/pi-tui";
+
+function createSignInHost(options: {
+	identity: typeof OMP_PRODUCT_IDENTITY | typeof BREADBOARD_PRODUCT_IDENTITY;
+	nativeAuthStorage?: AuthStorage;
+	providerAuthPort?: ProviderAuthPort;
+	authStorage?: AuthStorage;
+	modelRegistryAuthStorageGetter?: () => AuthStorage;
+	openInBrowser?: (url: string) => void;
+	setFocus?: (component: Component | null) => void;
+}): SetupSceneHost {
+	const settings = Settings.isolated();
+	const modelRegistry: SetupWizardContext["modelRegistry"] = {
+		get authStorage(): AuthStorage {
+			if (options.modelRegistryAuthStorageGetter) {
+				return options.modelRegistryAuthStorageGetter();
+			}
+			return (
+				options.authStorage ??
+				({
+					has: () => false,
+					hasAuth: () => false,
+					getCredentialOrigin: () => undefined,
+				} as unknown as AuthStorage)
+			);
+		},
+		getAvailable: () => [],
+		getAll: () => [],
+		refresh: async () => {},
+		refreshProvider: async () => {},
+	};
+
+	const ctx: SetupWizardContext = {
+		settings,
+		ui: {
+			terminal: { rows: 24 },
+			setFocus: options.setFocus ?? (() => {}),
+			requestRender: () => {},
+			invalidate: () => {},
+		} as unknown as TUI,
+		modelRegistry,
+		modelSelection: {
+			mode: "default",
+			currentModel: undefined,
+			availableModels: () => [],
+			refresh: async () => {},
+			select: async () => {},
+		},
+		openInBrowser: options.openInBrowser ?? (() => {}),
+	};
+
+	return {
+		identity: options.identity,
+		providerAuthPort: options.providerAuthPort,
+		nativeAuthStorage: options.nativeAuthStorage,
+		ctx,
+		requestRender: () => {},
+		finish: () => {},
+		setFocus: options.setFocus ?? (() => {}),
+		restoreFocus: () => {},
+	};
+}
 
 beforeAll(async () => {
 	await initTheme();
@@ -39,27 +101,17 @@ describe("SignInTab", () => {
 				},
 			} as unknown as AuthStorage;
 
-			const host = {
+			const host = createSignInHost({
 				identity,
 				nativeAuthStorage: identity.id === BREADBOARD_PRODUCT_IDENTITY.id ? authStorage : undefined,
-				ctx: {
-					openInBrowser(openedUrl: string): void {
-						openedUrls.push(openedUrl);
-					},
-					session: {
-						modelRegistry: {
-							authStorage,
-							async refresh(): Promise<void> {},
-						},
-					},
+				authStorage,
+				openInBrowser: openedUrl => {
+					openedUrls.push(openedUrl);
 				},
-				requestRender(): void {},
-				finish(): void {},
-				setFocus(component: Component | null): void {
+				setFocus: component => {
 					focusTarget = component ?? undefined;
 				},
-				restoreFocus(): void {},
-			} as unknown as SetupSceneHost;
+			});
 
 			const tab = new SignInTab(host);
 			try {
@@ -115,22 +167,10 @@ describe("SignInTab", () => {
 				loginCompleted.resolve();
 			},
 		} as unknown as AuthStorage;
-		const host = {
+		const host = createSignInHost({
 			identity: OMP_PRODUCT_IDENTITY,
-			ctx: {
-				openInBrowser(): void {},
-				session: {
-					modelRegistry: {
-						authStorage,
-						async refresh(): Promise<void> {},
-					},
-				},
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+			authStorage,
+		});
 
 		const tab = new SignInTab(host);
 		try {
@@ -160,22 +200,10 @@ describe("SignInTab", () => {
 			},
 		} as unknown as AuthStorage;
 
-		const host = {
+		const host = createSignInHost({
 			identity: OMP_PRODUCT_IDENTITY,
-			ctx: {
-				openInBrowser(): void {},
-				session: {
-					modelRegistry: {
-						authStorage,
-						async refresh(): Promise<void> {},
-					},
-				},
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+			authStorage,
+		});
 
 		const tab = new SignInTab(host);
 		try {
@@ -266,20 +294,14 @@ describe("SignInTab", () => {
 			},
 		};
 		const focused: Component[] = [];
-		const host = {
+		const host = createSignInHost({
 			identity: BREADBOARD_PRODUCT_IDENTITY,
 			providerAuthPort: port,
-			ctx: {
-				openInBrowser(): void {},
-				session: { modelRegistry: { authStorage } },
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(component: Component | null): void {
+			authStorage,
+			setFocus: component => {
 				if (component) focused.push(component);
 			},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+		});
 		const tab = new SignInTab(host);
 		try {
 			for (let pass = 0; pass < 4; pass++) await Promise.resolve();
@@ -350,23 +372,12 @@ describe("SignInTab", () => {
 		}
 	});
 	it("shows product remediation without instantiating native AuthStorage when the broker port is absent", async () => {
-		const modelRegistry: Record<string, unknown> = {};
-		Object.defineProperty(modelRegistry, "authStorage", {
-			get() {
+		const host = createSignInHost({
+			identity: BREADBOARD_PRODUCT_IDENTITY,
+			modelRegistryAuthStorageGetter: () => {
 				throw new Error("native AuthStorage must not be read in BreadBoard setup");
 			},
 		});
-		const host = {
-			identity: BREADBOARD_PRODUCT_IDENTITY,
-			ctx: {
-				session: { modelRegistry },
-				openInBrowser(): void {},
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
 
 		const tab = new SignInTab(host);
 		try {
@@ -431,18 +442,10 @@ describe("SignInTab", () => {
 				return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
 			},
 		};
-		const host = {
+		const host = createSignInHost({
 			identity: BREADBOARD_PRODUCT_IDENTITY,
 			providerAuthPort: port,
-			ctx: {
-				openInBrowser(): void {},
-				session: { modelRegistry: {} },
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+		});
 		const tab = new SignInTab(host);
 		try {
 			for (let pass = 0; pass < 6; pass++) await Promise.resolve();

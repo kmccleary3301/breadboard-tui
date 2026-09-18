@@ -103,6 +103,8 @@ export interface ResolveBreadboardRunConfigInput {
 	readonly canonicalizeWorkspace?: (path: string) => string;
 	readonly installedEngineArtifact?: unknown;
 	readonly installedEngineIdentity?: InstalledEngineIdentity;
+	/** Internal setup-only endpoint replacement; never persisted as user config. */
+	readonly endpointOverride?: string;
 }
 
 export type RunConfigErrorCode =
@@ -527,14 +529,19 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 		hasOwn(selected, "baseUrl") ? selected.baseUrl : undefined,
 		defaultEndpoint,
 	);
-	const normalizedEndpoint = endpointChoice.value === undefined ? undefined : normalizeEndpoint(endpointChoice.value);
+	const effectiveEndpoint = input.endpointOverride ?? endpointChoice.value;
+	const normalizedEndpoint = effectiveEndpoint === undefined ? undefined : normalizeEndpoint(effectiveEndpoint);
 
 	let modeChoice: { value: BreadboardEngineMode; source: ConfigSource; explicit: boolean };
 	if (cliMode !== undefined) modeChoice = { value: parseMode(cliMode), source: "cli", explicit: true };
 	else if (envMode !== undefined) modeChoice = { value: parseMode(envMode), source: "environment", explicit: true };
 	else if (selectedMode !== undefined)
 		modeChoice = { value: parseMode(selectedMode), source: "selected-config", explicit: true };
-	else if (normalizedEndpoint === undefined || (environment.BREADBOARD_PRODUCT === "1" && !endpointChoice.explicit))
+	else if (
+		normalizedEndpoint === undefined ||
+		(environment.BREADBOARD_PRODUCT === "1" && !endpointChoice.explicit) ||
+		(input.endpointOverride !== undefined && !endpointChoice.explicit)
+	)
 		modeChoice = { value: "local-owned", source: "derived-default", explicit: false };
 	else
 		modeChoice = {
