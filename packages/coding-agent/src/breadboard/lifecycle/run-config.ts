@@ -103,7 +103,7 @@ export interface ResolveBreadboardRunConfigInput {
 	readonly canonicalizeWorkspace?: (path: string) => string;
 	readonly installedEngineArtifact?: unknown;
 	readonly installedEngineIdentity?: InstalledEngineIdentity;
-	/** Internal setup-only endpoint replacement; never persisted as user config. */
+	/** Ephemeral local-owned endpoint replacement; never persisted as user config. */
 	readonly endpointOverride?: string;
 }
 

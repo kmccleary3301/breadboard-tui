@@ -82,8 +82,6 @@ umask 077
 workspace="$(pwd -P)"
 workspace_key="$(printf '%s' "$workspace" | /usr/bin/shasum -a 256 | /usr/bin/cut -d ' ' -f 1)"
 project=${shellQuote(join(options.profileRoot, "user", "projects"))}/"$workspace_key"
-# A collision is rejected by the engine's workspace/authority checks, never adopted.
-port=$((30000 + 16#\${workspace_key:0:8} % 20000))
 # Public harness operations stay contained in this workspace.
 # Publish regular files atomically; never replace conflicting project resources.
 case "\${1:-}" in
@@ -144,7 +142,6 @@ exec /usr/bin/env -i \\
   PI_DEBUG_STARTUP="\${PI_DEBUG_STARTUP:-}" \\
   TMPDIR="$project/temp/" OMP_SKIP_SETUP=1 \\
   BREADBOARD_CONFIG_DIR="$project/config" PI_CODING_AGENT_DIR="$project/agent" \\
-  BREADBOARD_API_URL="http://127.0.0.1:$port" \\
   BREADBOARD_OMP_AGENT_DIR=${shellQuote(options.authSource)} \\
   ${shellQuote(options.binaryPath)} "$@"
 `;

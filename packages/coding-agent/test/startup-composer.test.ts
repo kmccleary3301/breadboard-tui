@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import type { TerminalStartOptions } from "@oh-my-pi/pi-tui";
+import { BreadboardLifecycleStartupError } from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { importRoomKey } from "@oh-my-pi/pi-coding-agent/collab/crypto";
 import { COLLAB_PROTO, type CollabFrame, parseCollabLink } from "@oh-my-pi/pi-coding-agent/collab/protocol";
@@ -47,6 +48,16 @@ class ThrowingStartTerminal extends CountingTerminal {
 	override start(): void {
 		this.starts += 1;
 		throw new Error("terminal start failed");
+	}
+}
+
+class InputTrackingTerminal extends CountingTerminal {
+	inputEvents = 0;
+	override start(onInput: (data: string) => void, onResize: () => void): void {
+		super.start(data => {
+			this.inputEvents += 1;
+			onInput(data);
+		}, onResize);
 	}
 }
 
@@ -251,6 +262,69 @@ describe("outer startup collaboration gate", () => {
 			resetSettingsForTest();
 			setProjectDir(originalProject);
 			Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+		}
+	});
+});
+
+describe("runRootCommand startup teardown", () => {
+	it("stops prepaint input when BreadBoard runtime preparation reports a handled failure", async () => {
+		const originalProject = getProjectDir();
+		const originalIsTTY = process.stdin.isTTY;
+		const previousExitCode = process.exitCode;
+		resetSettingsForTest();
+		await initTheme();
+		const testSession = await createTestSession({ inMemory: true });
+		setProjectDir(testSession.tempDir);
+		const activeSettings = await Settings.init({ inMemory: true, cwd: testSession.tempDir });
+		activeSettings.override("startup.checkUpdate", false);
+		activeSettings.override("startup.changelogMode", "hidden");
+		activeSettings.override("startup.setupWizard", false);
+		activeSettings.override("startup.showSplash", false);
+		activeSettings.override("marketplace.autoUpdate", "off");
+		const authStorage = await AuthStorage.create(path.join(testSession.tempDir, "startup-auth.db"));
+		const terminal = new InputTrackingTerminal();
+		beginStartupComposer({ terminal, version: "test", cache: false });
+		const rawArgs = ["--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-tools", "--no-lsp"];
+		const startupFailure = new BreadboardLifecycleStartupError({
+			kind: "failure",
+			state: {
+				name: "failed",
+				mode: "remote",
+				attempt: 1,
+				reason: "endpoint_unreachable",
+			},
+		});
+		const prepareBreadboardRuntime = vi.fn(async () => {
+			throw startupFailure;
+		});
+		const runInteractiveMode = vi.fn(async () => {});
+		vi.spyOn(ModelRegistry.prototype, "refreshInBackground").mockImplementation(() => {});
+		vi.spyOn(pluginHelpers, "preloadPluginRoots").mockResolvedValue(undefined);
+		Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+		try {
+			await runRootCommand(parseArgs(rawArgs), rawArgs, {
+				settings: activeSettings,
+				discoverAuthStorage: async () => authStorage,
+				prepareBreadboardRuntime,
+				runInteractiveMode,
+			});
+
+			expect(prepareBreadboardRuntime).toHaveBeenCalled();
+			expect(process.exitCode).toBe(1);
+			expect(runInteractiveMode).not.toHaveBeenCalled();
+			expect(terminal.starts).toBe(1);
+			expect(terminal.stops).toBe(1);
+			terminal.sendInput("after startup failure");
+			expect(terminal.inputEvents).toBe(0);
+		} finally {
+			stopPendingStartupComposer();
+			vi.restoreAllMocks();
+			authStorage.close();
+			await testSession.cleanup();
+			resetSettingsForTest();
+			setProjectDir(originalProject);
+			Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+			process.exitCode = previousExitCode ?? 0;
 		}
 	});
 });

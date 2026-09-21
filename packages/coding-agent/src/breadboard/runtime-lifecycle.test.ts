@@ -12,6 +12,8 @@ import {
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { Settings } from "../config/settings";
 import type { E4AgentStreamBridgeOptions } from "./e4-agent-stream";
 import { createLifecycleMonitor } from "./engine-port";
 import { lifecycleState } from "./lifecycle/lifecycle-state";
@@ -23,6 +25,7 @@ import {
 	resolveBreadboardCatalogModels,
 	resolveBreadboardSessionTarget,
 	resolveBreadboardStartupModelOverride,
+	resolveNativeSurfaceEngineSelection,
 } from "./runtime";
 import {
 	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
@@ -649,4 +652,43 @@ describe("connected BreadBoard runtime lifecycle", () => {
 		expect(entries).toHaveLength(3);
 		await runtime.close();
 	});
+});
+
+test("preserves explicit engine endpoints without turning a local-owned default into one", async () => {
+	const names = ["BREADBOARD_ENGINE_MODE", "BREADBOARD_API_URL", "BREADBOARD_API_TOKEN"] as const;
+	const previous = names.map(name => process.env[name]);
+	for (const name of names) delete process.env[name];
+	using directory = TempDir.createSync("@breadboard-endpoint-selection-");
+	const config = {
+		breadboard: {
+			engineMode: "local-owned",
+			engineArtifact: {
+				kind: "direct-executable",
+				executablePath: process.execPath,
+				argv: [],
+				executableSha256: `sha256:${"1".repeat(64)}`,
+				engineSourceSha256: `sha256:${"2".repeat(64)}`,
+				servedBackendCommit: "3".repeat(40),
+			},
+		},
+	};
+	try {
+		await Bun.write(`${directory.path()}/config.yml`, JSON.stringify(config));
+		const settings = await Settings.loadReadOnly({ agentDir: directory.path(), cwd: directory.path() });
+		expect(resolveNativeSurfaceEngineSelection({}, settings, process.cwd(), true).engineUrl).toBeUndefined();
+		process.env.BREADBOARD_API_URL = "http://127.0.0.1:49321";
+		expect(resolveNativeSurfaceEngineSelection({}, settings, process.cwd(), true).engineUrl).toBe(
+			"http://127.0.0.1:49321",
+		);
+		expect(
+			resolveNativeSurfaceEngineSelection({ engineUrl: "http://127.0.0.1:49322" }, settings, process.cwd(), true)
+				.engineUrl,
+		).toBe("http://127.0.0.1:49322");
+	} finally {
+		for (const [index, name] of names.entries()) {
+			const value = previous[index];
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	}
 });

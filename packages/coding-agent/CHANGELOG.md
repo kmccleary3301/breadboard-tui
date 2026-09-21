@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- Session-start checkpoint safety scans no longer block engine snapshots or lease renewals. Failed startup releases the prepaint terminal, and attached local engines use independent loopback endpoints unless an endpoint is explicitly configured.
 - Explicit BreadBoard setup retains its snake-and-logo startup animation while using a separate metadata-only engine, without creating a coding session or workspace checkpoint; completing or cancelling setup releases its owned resources.
 - Setup saves the default model for future sessions while in-session engine model changes remain temporary.
 - Startup diagnostics identify engine preparation, point to the actual product logfile, and accept `PI_DEBUG_STARTUP` through the local launcher.

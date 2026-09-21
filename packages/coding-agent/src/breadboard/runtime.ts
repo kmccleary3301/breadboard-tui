@@ -139,7 +139,10 @@ export function resolveNativeSurfaceEngineSelection(
 			selectedConfig,
 			workspacePath,
 		});
-		return { engineMode: effective.mode, engineUrl: effective.endpoint };
+		return {
+			engineMode: effective.mode,
+			engineUrl: effective.sources.endpoint === "derived-default" ? undefined : effective.endpoint,
+		};
 	} catch (error) {
 		if (
 			isBreadboardProduct &&
@@ -1092,7 +1095,7 @@ export function createRecoverableBreadboardRuntime(
 	});
 }
 
-async function allocateSetupLoopbackEndpoint(): Promise<string> {
+async function allocateOwnedLoopbackEndpoint(): Promise<string> {
 	const server = net.createServer();
 	await new Promise<void>((resolve, reject) => {
 		const onError = (error: Error) => {
@@ -1110,7 +1113,7 @@ async function allocateSetupLoopbackEndpoint(): Promise<string> {
 	const address = server.address();
 	const port = typeof address === "object" && address !== null ? address.port : undefined;
 	await new Promise<void>(resolve => server.close(() => resolve()));
-	if (port === undefined) throw new Error("BreadBoard setup could not allocate a loopback endpoint");
+	if (port === undefined) throw new Error("BreadBoard could not allocate a local-owned loopback endpoint");
 	return `http://127.0.0.1:${port}`;
 }
 
@@ -1148,7 +1151,7 @@ export async function prepareBreadboardSetup(
 		if (config.ownerExitPolicy !== "attached") {
 			throw new Error("Explicit setup requires an attached local-owned BreadBoard engine");
 		}
-		const endpoint = await allocateSetupLoopbackEndpoint();
+		const endpoint = await allocateOwnedLoopbackEndpoint();
 		config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath, endpoint);
 	}
 	if (config.mode === "off") return null;
@@ -1235,7 +1238,15 @@ export async function prepareBreadboardRuntime(
 ): Promise<PreparedBreadboardRuntime | null> {
 	const workspacePath = fsSync.realpathSync(getProjectDir());
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
-	const config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
+	let config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
+	if (
+		config.mode === "local-owned" &&
+		config.ownerExitPolicy === "attached" &&
+		config.sources.endpoint === "derived-default"
+	) {
+		const endpoint = await allocateOwnedLoopbackEndpoint();
+		config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath, endpoint);
+	}
 	if (authority.startOmpGateway && (config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")) {
 		throw new Error("BREADBOARD_OMP_AGENT_DIR requires an attached local-owned BreadBoard engine");
 	}

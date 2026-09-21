@@ -261,6 +261,12 @@ setup requires attached ownership and uses a separate temporary engine, leaving
 an existing coding engine untouched. Completion and cancellation close that
 temporary engine.
 
+Ordinary attached local-owned launches choose a fresh loopback endpoint when no
+engine URL is configured. Each client retains its own engine ownership; another
+client or a stale process cannot capture that launch. An explicit engine URL
+keeps the configured endpoint and its ownership checks. Session-start checkpoints
+retain their safety checks but run off the engine's request loop.
+
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`
 preselect the requested model, and `--harness` selects its engine catalog.

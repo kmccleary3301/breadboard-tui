@@ -2733,11 +2733,14 @@ export async function runRootCommand(
 			}
 		}
 	} catch (error) {
-		stopPendingStartupComposer();
 		stopStartupWatchdog();
 		throw error;
 	} finally {
-		await preparedBreadboardRuntime?.close();
+		try {
+			stopPendingStartupComposer();
+		} finally {
+			await preparedBreadboardRuntime?.close();
+		}
 	}
 }
 
