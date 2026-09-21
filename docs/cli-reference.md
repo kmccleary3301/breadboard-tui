@@ -264,8 +264,11 @@ temporary engine.
 Ordinary attached local-owned launches choose a fresh loopback endpoint when no
 engine URL is configured. Each client retains its own engine ownership; another
 client or a stale process cannot capture that launch. An explicit engine URL
-keeps the configured endpoint and its ownership checks. Session-start checkpoints
-retain their safety checks but run off the engine's request loop.
+keeps the configured endpoint and its ownership checks. Opening a session or
+chatting without tools does not snapshot the workspace. Automatic checkpoints
+begin immediately before a file-editing or shell tool, so the initial rollback
+point includes user edits made since the session opened. Checkpoint credential
+and sandbox safety checks remain enabled.
 
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`
