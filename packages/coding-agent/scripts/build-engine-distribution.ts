@@ -115,6 +115,10 @@ def _main() -> None:
     os.environ["BREADBOARD_VERIFIED_ENGINE_ROOT"] = str(engine_root)
     os.environ["BREADBOARD_RESEARCH_WORLD_WORKER"] = str(engine_root / "breadboard-research-world")
     os.environ["BREADBOARD_RESEARCH_WORLD_HELPER"] = str(Path(sys.executable).resolve())
+    if sys.argv[1:2] == ["--eval-python-worker"]:
+        from breadboard_engine.eval.py_worker import main as eval_python_worker_main
+
+        raise SystemExit(eval_python_worker_main())
     if sys.argv[1:2] == ["--process-child"]:
         from breadboard.product.runtime.process_child import main as process_child_main
 
@@ -180,6 +184,7 @@ const COLLECT_PACKAGES = [
 	"implementations",
 	"agentic_coder_prototype",
 	"ray",
+	"IPython",
 ] as const;
 const FREEZER_RUNTIME_REQUIREMENTS = ["colorama>=0.4.6", "psutil>=5.9"] as const;
 const REQUIREMENTS_INPUT_PATH = join(import.meta.dir, "engine-build-requirements.in");
@@ -415,6 +420,27 @@ async function normalizeInstalledMetadata(sitePackages: string): Promise<void> {
 		}
 	}
 }
+const JS_NOTICE_FILENAME = /^(?:LICENSE|LICENCE|NOTICE)(?:[._-].*)?$/i;
+
+async function copyJavaScriptDependencyNotices(sourceRoot: string, destinationRoot: string): Promise<void> {
+	const visit = async (directory: string): Promise<void> => {
+		for (const entry of await readdir(directory, { withFileTypes: true })) {
+			const sourcePath = join(directory, entry.name);
+			if (entry.isSymbolicLink()) continue;
+			if (entry.isDirectory()) {
+				await visit(sourcePath);
+				continue;
+			}
+			if (!entry.isFile() || !JS_NOTICE_FILENAME.test(entry.name)) continue;
+			const relativePath = relative(sourceRoot, sourcePath);
+			const destination = join(destinationRoot, relativePath);
+			await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+			await copyFile(sourcePath, destination);
+			await chmod(destination, 0o444);
+		}
+	};
+	await visit(sourceRoot);
+}
 
 function isContainedChild(root: string, candidate: string): boolean {
 	const path = relative(root, candidate);
@@ -634,7 +660,19 @@ async function main(options: BuildOptions): Promise<void> {
 			throw new Error("installed engine source digest is invalid");
 		const dependencyLockSha256 = await sha256File(REQUIREMENTS_LOCK_PATH);
 		const recipeSources = await Promise.all(
-			BUILD_RECIPE_SOURCE_PATHS.map(async ([label, path]) => ({
+			[
+				...BUILD_RECIPE_SOURCE_PATHS,
+				[
+					"sdk/ts-kernel-core/src/js-eval-worker.ts",
+					join(sourceRoot, "sdk", "ts-kernel-core", "src", "js-eval-worker.ts"),
+				],
+				[
+					"sdk/ts-kernel-core/src/js-eval-transform.ts",
+					join(sourceRoot, "sdk", "ts-kernel-core", "src", "js-eval-transform.ts"),
+				],
+				["sdk/ts-kernel-core/package.json", join(sourceRoot, "sdk", "ts-kernel-core", "package.json")],
+				["sdk/ts-kernel-core/package-lock.json", join(sourceRoot, "sdk", "ts-kernel-core", "package-lock.json")],
+			].map(async ([label, path]) => ({
 				label,
 				bytes: new Uint8Array(await Bun.file(path).arrayBuffer()),
 			})),
@@ -712,13 +750,15 @@ async function main(options: BuildOptions): Promise<void> {
 			workRoot,
 		);
 		const runtimeRoot = join(distPath, "breadboard-engine");
+		const kernelCoreRoot = join(sourceRoot, "sdk", "ts-kernel-core");
 		await run(
 			["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
 			join(sourceRoot, "sdk", "ts-kernel-contracts"),
 		);
+		await run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], kernelCoreRoot);
 		await run(
 			[
-				"bun",
+				process.execPath,
 				"build",
 				"sdk/ts-kernel-core/src/research-world-worker.ts",
 				"--compile",
@@ -728,6 +768,23 @@ async function main(options: BuildOptions): Promise<void> {
 				join(runtimeRoot, "breadboard-research-world"),
 			],
 			sourceRoot,
+		);
+		await run(
+			[
+				process.execPath,
+				"build",
+				"sdk/ts-kernel-core/src/js-eval-worker.ts",
+				"--compile",
+				"--tsconfig-override",
+				"sdk/ts-kernel-core/tsconfig.json",
+				"--outfile",
+				join(runtimeRoot, "breadboard-js-eval"),
+			],
+			sourceRoot,
+		);
+		await copyJavaScriptDependencyNotices(
+			join(kernelCoreRoot, "node_modules"),
+			join(runtimeRoot, "_internal", "js-third-party"),
 		);
 		const rayThirdPartyRoot = join(runtimeRoot, "_internal", "ray", "thirdparty_files");
 		for (const name of await readdir(rayThirdPartyRoot)) {
