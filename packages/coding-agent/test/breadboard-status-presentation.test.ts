@@ -85,4 +85,21 @@ describe("BreadBoard composer presentation", () => {
 		expect(detailed).toContain("ctx ~2% / 100K");
 		expect(renderBreadboardActivity(null, null, 40)).toBe("");
 	});
+
+	it("keeps model identity in place as turn activity changes", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const snapshot = { modelName: "Luna", workspace: "repo" };
+		const idle = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-balanced", 80, "box"));
+		const active = stripVTControlCharacters(
+			renderBreadboardStatusLine(
+				{ ...snapshot, activity: { kind: "tool", label: "Running run_shell" }, elapsedMs: 65_000 },
+				"bb-balanced",
+				80,
+				"box",
+			),
+		);
+		expect(active.indexOf(snapshot.modelName)).toBe(idle.indexOf(snapshot.modelName));
+		expect(active.indexOf("Running run_shell")).toBeGreaterThan(active.indexOf(snapshot.workspace));
+		expect(visibleWidth(active)).toBe(80);
+	});
 });

@@ -13,6 +13,7 @@
 ### Changed
 
 - BreadBoard now defaults to Balanced information in a rounded box without routine context counters, generation hashes, or native cost/reasoning indicators; explicit preferences and native OMP defaults are preserved.
+- BreadBoard composer labels have spacing around the connecting rule, model identity stays anchored during activity changes, and activity timers identify compact total-turn durations.
 - Integrated official OMP main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including v18.2.2 and its subsequent CJK edit fix, while retaining BreadBoard execution and shared subscription authentication.
 - BreadBoard-owned sessions now gate unsupported native subagent, prewalk, plan, compaction, advisor, automation, and tool controls while preserving frontend presentation and scoped helpers.
 - The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.

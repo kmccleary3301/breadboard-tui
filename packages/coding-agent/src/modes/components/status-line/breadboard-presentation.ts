@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { formatNumber } from "@oh-my-pi/pi-utils";
+import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
 import { lockValue, longRunBudgets } from "../../../breadboard/harness-lock-view";
 import type { HarnessSnapshot } from "../../../breadboard/harness-port";
 import { sanitizeStatusText } from "../../shared";
@@ -36,7 +36,9 @@ export function renderBreadboardActivity(
 	const icon = kind === "error" ? theme.status.error : kind === "approval" ? theme.status.warning : "";
 	const label = sanitizeStatusText(activity?.label ?? "Working");
 	const elapsed =
-		elapsedMs == null || kind === "approval" || kind === "error" ? "" : ` ${Math.floor(elapsedMs / 1000)}s`;
+		elapsedMs == null || elapsedMs < 1_000 || kind === "approval" || kind === "error"
+			? ""
+			: ` ${theme.getSymbolPreset() === "ascii" ? "|" : "·"} turn ${elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : formatDuration(elapsedMs)}`;
 	return theme.fg(color, truncateToWidth(`${icon ? `${icon} ` : ""}${label}${elapsed}`, width));
 }
 
@@ -73,7 +75,6 @@ export function renderBreadboardStatusLine(
 		snapshot.elapsedMs,
 		Math.min(36, Math.max(1, width - 2)),
 	);
-	add(activity, 100);
 	if (snapshot.vim) add(theme.fg("accent", clipped(snapshot.vim, 12)), 95);
 	add(theme.fg("statusLineModel", iconLabel(theme.icon.model, clipped(snapshot.modelName, 28))), 90);
 	const harness = snapshot.harness;
@@ -127,6 +128,8 @@ export function renderBreadboardStatusLine(
 		if (snapshot.outputTokens !== undefined)
 			add(theme.fg("muted", `out ${formatNumber(snapshot.outputTokens)}`), 20, "right");
 	}
+	// Keep model identity anchored while turn and tool activity changes.
+	add(activity, 100, "right");
 	// Rule-based shapes put their right group above the input and left group below it.
 	const selected = parts.filter(part =>
 		layout === "plain-left" ? part.side === "left" : layout === "plain-right" ? part.side === "right" : true,
@@ -152,7 +155,7 @@ export function renderBreadboardStatusLine(
 		.map(part => part.text)
 		.join(separator);
 	if (!left || !right) return truncateToWidth(` ${left || right} `, width);
-	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right) - 2);
+	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right) - 4);
 	const fill = layout === "box" ? theme.fg("dim", theme.boxRound.horizontal.repeat(gap)) : " ".repeat(gap);
-	return ` ${left}${fill}${right} `;
+	return ` ${left} ${fill} ${right} `;
 }

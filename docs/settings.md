@@ -718,6 +718,8 @@ BreadBoard defaults to `bb-balanced` with a rounded box, restrained separators, 
 
 Approval, cancellation, and error text take priority over routine metadata on narrow terminals. Context estimates are marked `~`. BreadBoard-owned sessions do not show native reasoning, cost, or automatic-compaction indicators as engine state. `unicode` uses restrained composer glyphs; `emoji` keeps expressive pictographs available.
 
+BreadBoard box and band layouts keep model identity on the left and activity on the right. Activity timers show total turn time, not the current tool's runtime. Longer durations use minutes and hours; approval and error states omit the timer.
+
 For a custom status line, set `statusLine.preset: custom` and configure `statusLine.leftSegments`, `statusLine.rightSegments`, and `statusLine.segmentOptions`. Include `status` in either segment list to render extension statuses registered through `ctx.ui.setStatus()`, ordered by key and joined inline. Set `statusLine.showHookStatus: false` to suppress the same statuses in the footer.
 
 The `cost` segment shows recorded session costs. For an active provider/model with scheduled pricing, it appends `↑` during peak hours or `↓` off-peak, refreshing at boundaries even while idle. The arrow reflects the current tariff, not past spending; flat-price models and explicit cost overrides have no arrow. See [usage costs and time-based pricing](models.md#usage-costs-and-time-based-pricing) for the UTC schedule and estimation semantics.
