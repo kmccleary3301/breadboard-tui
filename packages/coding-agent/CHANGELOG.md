@@ -31,7 +31,7 @@
 - BreadBoard retains model-facing conversation context from the first turn instead of starting later requests with an empty history.
 - Implementation write-receipt enforcement is opt-in; ordinary sessions no longer acquire mandatory file writes from prompt-text heuristics.
 - Mixed-tool prompts identify native tools separately from additional text-invoked functions, keeping shell and file capabilities visible after tool calls.
-- Native tool follow-ups no longer inject a new `Continue.` user request or move tool guidance between messages, preserving the task and a stable Responses input prefix.
+- Native tool follow-ups no longer inject a new `Continue.` user request or move tool guidance between messages.
 - Oversized BreadBoard tool-result and CTree events retain their full JSON in confined artifacts and stream bounded references, preventing these results from exceeding the event-stream limit.
 - Glyph setup cancels pending previews before restoring the original selection, and waits for persistence before completing.
 - Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
