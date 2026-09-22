@@ -347,7 +347,11 @@ export async function acquireSharedBreadboardEngine(
 				info,
 				async refreshAuth() {
 					if (leaseFailure !== undefined) throw leaseFailure;
-					const refreshed = await fetchUnix(socket, "/refresh", { method: "POST" });
+					// Cold credential/model discovery belongs to startup, not the short local-RPC budget.
+					const refreshed = await fetchUnix(socket, "/refresh", {
+						method: "POST",
+						signal: AbortSignal.timeout(config.startupTimeoutMs),
+					});
 					if (!refreshed.ok) throw new Error(`Shared engine auth refresh failed with HTTP ${refreshed.status}`);
 					await refreshed.text();
 				},
