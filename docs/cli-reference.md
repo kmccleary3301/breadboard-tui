@@ -273,6 +273,10 @@ Font, Emoji, and ASCII remain independent of the information layout.
 The shared owner chooses a loopback endpoint when no engine URL is configured.
 An explicit URL retains its endpoint and ownership checks. Unrelated, remote, and
 externally managed engines are not stopped by this shared-owner cleanup.
+A resumed session uses its original private state directory even when the engine
+receives a new port. Existing journals are not moved. Each managed engine holds
+an exclusive state-directory lock while serving; an incompatible second owner
+cannot open the same state concurrently.
 Opening a session or chatting without tools does not snapshot the workspace.
 Automatic checkpoints begin immediately before a file-editing or shell tool, so
 the initial rollback point includes user edits made since the session opened.
@@ -281,6 +285,8 @@ Turn completion does not compute a final workspace diff unless JSON snapshot
 output is requested.
 Idle event streams and shared-owner leases remain open until cancelled; native
 socket deadlines are disabled for these lifetime streams, not ordinary requests.
+Cold credential and model discovery uses the configured startup timeout rather
+than the shorter local-RPC deadline.
 
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`

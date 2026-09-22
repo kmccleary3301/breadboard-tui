@@ -27,6 +27,7 @@
 
 - Idle BreadBoard sessions no longer inherit Bun's five-minute event-stream timeout, which permanently disabled inference with `HTTP request failed (0)`.
 - Successful tool receipts no longer force an ongoing BreadBoard task to finish. Requested follow-up writes, shell calls, and repeated observations continue until the model completes the turn.
+- Prompt text requesting one tool "exactly once" no longer imposes a global one-tool limit on the turn.
 - BreadBoard retains model-facing conversation context from the first turn instead of starting later requests with an empty history.
 - Implementation write-receipt enforcement is opt-in; ordinary sessions no longer acquire mandatory file writes from prompt-text heuristics.
 - Mixed-tool prompts identify native tools separately from additional text-invoked functions, keeping shell and file capabilities visible after tool calls.
@@ -36,6 +37,8 @@
 - Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
 - Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal.
 - Setup and application windows now share compatible attached local engines and their OMP gateway. Private leases outlive native HTTP idle deadlines; the final client triggers authenticated cleanup without cancelling another client's turn.
+- Retained sessions reopen their original private state directories when an engine restarts on a new port. Managed engines exclusively lock those directories while serving; compatible setup and coding windows reuse the resumed owner.
+- Cold credential and model discovery uses the configured startup timeout instead of the ten-second local-RPC deadline.
 - Explicit BreadBoard setup retains its snake-and-logo startup animation without creating a coding session or workspace checkpoint; completing or cancelling setup releases its lease.
 - Setup saves the default model for future sessions while in-session engine model changes remain temporary.
 - Startup diagnostics identify engine preparation, point to the actual product logfile, and accept `PI_DEBUG_STARTUP` through the local launcher.
