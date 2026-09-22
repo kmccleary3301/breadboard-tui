@@ -355,6 +355,25 @@ export function engineArtifactLocationSha256(artifact: EngineArtifact): `sha256:
 		.digest("hex")}`;
 }
 
+/** Durable state follows launch configuration, not its allocated port or gateway. */
+export function engineStateNamespaceKey(config: BreadboardRunConfig, ompAgentDir?: string): string {
+	return createHash("sha256")
+		.update("breadboard-engine-state-namespace-v1\0")
+		.update(
+			JSON.stringify({
+				workspaceId: config.workspaceId,
+				engineArtifact: config.engineArtifact,
+				endpoint: config.sources.endpoint === "derived-default" ? undefined : config.endpoint,
+				sessionConfigPath: config.sessionConfigPath,
+				startupTimeoutMs: config.startupTimeoutMs,
+				requestTimeoutMs: config.requestTimeoutMs,
+				ownerExitPolicy: config.ownerExitPolicy,
+				ompAgentDir,
+			}),
+		)
+		.digest("hex");
+}
+
 function parseArtifact(value: unknown): EngineArtifact | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {

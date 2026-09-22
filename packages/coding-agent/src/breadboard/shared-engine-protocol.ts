@@ -15,7 +15,7 @@ export { SHARED_ENGINE_WORKER_ARG } from "../cli/worker-selectors";
 export const SHARED_ENGINE_CONFIG_ENV = "BREADBOARD_SHARED_ENGINE_CONFIG";
 export const SHARED_ENGINE_SOCKET_ENV = "BREADBOARD_SHARED_ENGINE_SOCKET";
 export const SHARED_ENGINE_READY_PATTERN = String.raw`breadboard shared engine serving`;
-export const SHARED_ENGINE_SCHEMA_VERSION = "bb.shared-engine.v1" as const;
+export const SHARED_ENGINE_SCHEMA_VERSION = "bb.shared-engine.v2" as const;
 
 export interface SharedEngineLaunch {
 	readonly schemaVersion: typeof SHARED_ENGINE_SCHEMA_VERSION;
@@ -24,6 +24,7 @@ export interface SharedEngineLaunch {
 	readonly ompAgentDir?: string;
 	readonly selectedConfig: SelectedBreadboardConfig;
 	readonly derivedEndpoint: boolean;
+	readonly stateNamespaceKey: string;
 }
 
 export interface SharedEngineInfo {
@@ -60,6 +61,8 @@ export function parseSharedEngineLaunch(value: unknown): SharedEngineLaunch {
 	const selectedConfig = parseSelectedBreadboardConfig(value.selectedConfig);
 	if (typeof value.derivedEndpoint !== "boolean") throw new Error("shared engine derivedEndpoint must be boolean");
 	const ompAgentDir = value.ompAgentDir === undefined ? undefined : absoluteDirectory(value, "ompAgentDir");
+	const stateNamespaceKey = requiredString(value, "stateNamespaceKey");
+	if (!/^[a-f0-9]{64}$/.test(stateNamespaceKey)) throw new Error("shared engine state namespace key is invalid");
 	const launch: SharedEngineLaunch = {
 		schemaVersion: SHARED_ENGINE_SCHEMA_VERSION,
 		workspacePath: absoluteDirectory(value, "workspacePath"),
@@ -67,6 +70,7 @@ export function parseSharedEngineLaunch(value: unknown): SharedEngineLaunch {
 		...(ompAgentDir === undefined ? {} : { ompAgentDir }),
 		selectedConfig,
 		derivedEndpoint: value.derivedEndpoint,
+		stateNamespaceKey,
 	};
 	const config = resolveBreadboardRunConfig({
 		selectedConfig,
@@ -90,6 +94,7 @@ export function sharedEngineKey(launch: SharedEngineLaunch): string {
 				ompAgentDir: launch.ompAgentDir,
 				selectedConfig: selected,
 				derivedEndpoint: launch.derivedEndpoint,
+				stateNamespaceKey: launch.stateNamespaceKey,
 			}),
 		)
 		.digest("hex");

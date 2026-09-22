@@ -1382,7 +1382,12 @@ export async function prepareBreadboardRuntime(
 	};
 	try {
 		if (config.mode === "local-owned" && config.ownerExitPolicy === "attached") {
-			shared = await acquireSharedBreadboardEngine(config, workspacePath, authority.ompAgentDir);
+			shared = await acquireSharedBreadboardEngine(
+				config,
+				workspacePath,
+				authority.ompAgentDir,
+				target.kind === "attach" ? target.sessionId : undefined,
+			);
 			config = shared.config;
 		}
 		const initial = await connectGeneration(target, sessionBinding, sessionBinding !== undefined);

@@ -1,6 +1,6 @@
 import { dlopen, FFIType, ptr, toArrayBuffer } from "bun:ffi";
 import { createHash, randomBytes } from "node:crypto";
-import type { Stats } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import {
 	closeSync,
 	constants,
@@ -9,11 +9,12 @@ import {
 	fsyncSync,
 	ftruncateSync,
 	readFileSync,
+	readSync,
 	writeFileSync,
 } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { chmod, lstat, mkdir, open, readdir } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { chmod, lstat, mkdir, open, readdir, realpath } from "node:fs/promises";
+import { basename, isAbsolute, join } from "node:path";
 import type { OwnerExitPolicy } from "./run-config";
 
 export const AUTHORITY_RECORD_SCHEMA_VERSION = "p30.local-authority.v4" as const;
@@ -204,6 +205,9 @@ const CONTROL_SECRET_REF = /^[0-9a-f]{64}\.control\.secret\.[A-Za-z0-9_-]{20,128
 const AUTHORITY_SECRET_MAGIC = Buffer.from("p30.local-authority-secret.v2\0", "utf8");
 const PENDING_SECRET_MAGIC = Buffer.from("p30.local-start-secret.v3\0", "utf8");
 const CONTROL_SECRET_MAGIC = Buffer.from("p30.local-control-secret.v1\0", "utf8");
+const ENGINE_STATE_NAMESPACE_KEY = /^[0-9a-f]{64}$/;
+const RETAINED_SESSION_STATE_SCHEMA_VERSION = "bb.cli_bridge.session_state.v1" as const;
+const MAX_RETAINED_SESSION_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 const LOCK_EX = 2;
 const LOCK_NB = 4;
 const LOCK_UN = 8;
@@ -469,6 +473,38 @@ function expectValidatedString(value: unknown): string {
 function expectValidatedNumber(value: unknown): number {
 	if (typeof value !== "number") throw new Error("validated number invariant violated");
 	return value;
+}
+
+interface RetainedSessionIdentity {
+	readonly sessionId: string;
+	readonly workspace: string;
+}
+
+function assertRetainedSessionIdentity(value: unknown): RetainedSessionIdentity {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new LocalAuthorityStoreError("record_integrity", "retained session state is not an object");
+	}
+	const payload = value as Record<string, unknown>;
+	if (payload.schema_version !== RETAINED_SESSION_STATE_SCHEMA_VERSION) {
+		throw new LocalAuthorityStoreError("record_integrity", "retained session state schema is invalid");
+	}
+	const session = payload.session;
+	if (typeof session !== "object" || session === null || Array.isArray(session)) {
+		throw new LocalAuthorityStoreError("record_integrity", "retained session state session is invalid");
+	}
+	const fields = session as Record<string, unknown>;
+	if (
+		typeof fields.session_id !== "string" ||
+		fields.session_id.length === 0 ||
+		fields.session_id.includes("\0") ||
+		typeof fields.workspace !== "string" ||
+		!isAbsolute(fields.workspace) ||
+		fields.workspace.length === 0 ||
+		fields.workspace.includes("\0")
+	) {
+		throw new LocalAuthorityStoreError("record_integrity", "retained session identity is invalid");
+	}
+	return Object.freeze({ sessionId: fields.session_id, workspace: fields.workspace });
 }
 
 function assertRecord(value: unknown, expectedKey: string): LocalAuthorityRecord {
@@ -1401,19 +1437,97 @@ export class LocalAuthorityStore {
 		);
 	}
 
+	async resolveEngineStateNamespace(
+		preferredKey: string,
+		workspacePath: string,
+		retainedSessionId?: string,
+	): Promise<string> {
+		this.#assertOpen();
+		if (!ENGINE_STATE_NAMESPACE_KEY.test(preferredKey)) {
+			throw new LocalAuthorityStoreError("root_integrity", "engine state namespace key is invalid");
+		}
+		if (retainedSessionId === undefined) return preferredKey;
+		if (!retainedSessionId || retainedSessionId.includes("\0")) {
+			throw new LocalAuthorityStoreError("record_integrity", "retained session identity is invalid");
+		}
+
+		let canonicalWorkspace: string;
+		try {
+			canonicalWorkspace = await realpath(workspacePath);
+		} catch {
+			return preferredKey;
+		}
+		if (!(await this.#readOnlyRootAvailable())) return preferredKey;
+
+		let engineStateFd: number;
+		try {
+			engineStateFd = await this.#openStateDirectory(this.#rootFd(), this.root, "engine-state");
+		} catch (error) {
+			if (isErrno(error, "ENOENT")) return preferredKey;
+			throw error;
+		}
+		try {
+			let entries: Dirent[];
+			try {
+				entries = await readdir(join(this.root, "engine-state"), { withFileTypes: true });
+			} catch (error) {
+				if (isErrno(error, "ENOENT")) return preferredKey;
+				throw new LocalAuthorityStoreError("root_integrity", "engine state namespace inventory is unavailable", {
+					cause: error,
+				});
+			}
+
+			let match: string | undefined;
+			for (const entry of entries) {
+				if (!ENGINE_STATE_NAMESPACE_KEY.test(entry.name)) continue;
+				let namespaceFd: number;
+				try {
+					namespaceFd = await this.#openStateDirectory(engineStateFd, join(this.root, "engine-state"), entry.name);
+				} catch (error) {
+					if (isErrno(error, "ENOENT")) continue;
+					throw error;
+				}
+				try {
+					const identity = await this.#readRetainedSessionIdentity(
+						namespaceFd,
+						join(this.root, "engine-state", entry.name),
+						retainedSessionId,
+					);
+					if (!identity) continue;
+					let candidateWorkspace: string;
+					try {
+						candidateWorkspace = await realpath(identity.workspace);
+					} catch {
+						continue;
+					}
+					if (candidateWorkspace !== canonicalWorkspace) continue;
+					if (await this.#readCurrentByKey(entry.name)) {
+						throw new LocalAuthorityStoreError(
+							"root_integrity",
+							"retained engine state namespace has an unretired authority",
+						);
+					}
+					if (match !== undefined) {
+						throw new LocalAuthorityStoreError(
+							"root_integrity",
+							"retained session identity has ambiguous engine state namespaces",
+						);
+					}
+					match = entry.name;
+				} finally {
+					closeSync(namespaceFd);
+				}
+			}
+			await this.#assertRootIdentity();
+			return match ?? preferredKey;
+		} finally {
+			closeSync(engineStateFd);
+		}
+	}
+
 	async probeCurrent(endpoint: string): Promise<LocalAuthorityRecord | null> {
 		if (!(await this.#readOnlyRootAvailable())) return null;
-		const key = endpointKey(endpoint);
-		try {
-			return assertRecord(
-				JSON.parse(await this.#readSecureText(join(this.root, `${key}.authority.json`), "record_integrity")),
-				key,
-			);
-		} catch (error) {
-			if (isErrno(error, "ENOENT")) return null;
-			if (error instanceof LocalAuthorityStoreError) throw error;
-			throw new LocalAuthorityStoreError("authority_record_invalid", "authority record JSON is invalid");
-		}
+		return await this.#readCurrentByKey(endpointKey(endpoint));
 	}
 
 	async readCurrent(endpoint: string): Promise<LocalAuthorityRecord | null> {
@@ -1724,6 +1838,144 @@ export class LocalAuthorityStore {
 		if (controlAttempt) await this.#unlinkAt(controlAttempt.requesterCredentialRef, true);
 		await this.#unlinkAt(current.ownerCredentialRef, true);
 		await this.#syncParent();
+	}
+
+	async #openStateDirectory(parentFd: number, parentPath: string, name: string): Promise<number> {
+		await this.seams.beforeSecureOpen?.(join(parentPath, name));
+		await this.#assertRootIdentity();
+		const fd = Number(
+			requireNativeSystem().openat(
+				parentFd,
+				ptr(cPath(name)),
+				constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC,
+				0,
+			),
+		);
+		if (fd < 0) {
+			const error = systemError(`openat(state-directory=${parentFd})`, name);
+			if (isErrno(error, "ENOENT")) throw error;
+			throw new LocalAuthorityStoreError("root_integrity", "engine state directory is unavailable", {
+				cause: error,
+			});
+		}
+		try {
+			const metadata = fstatSync(fd);
+			if (
+				!metadata.isDirectory() ||
+				metadata.isSymbolicLink() ||
+				metadata.uid !== this.#uid() ||
+				(metadata.mode & 0o777) !== 0o700
+			) {
+				throw new LocalAuthorityStoreError(
+					"root_integrity",
+					"engine state directory ownership, type, or permissions are invalid",
+				);
+			}
+			await this.#assertRootIdentity();
+			return fd;
+		} catch (error) {
+			closeSync(fd);
+			throw error;
+		}
+	}
+
+	async #readRetainedSessionIdentity(
+		namespaceFd: number,
+		namespacePath: string,
+		retainedSessionId: string,
+	): Promise<RetainedSessionIdentity | null> {
+		let sessionStateFd: number;
+		try {
+			sessionStateFd = await this.#openStateDirectory(namespaceFd, namespacePath, "session-state");
+		} catch (error) {
+			if (isErrno(error, "ENOENT")) return null;
+			throw error;
+		}
+		try {
+			const filename = `${createHash("sha256").update(retainedSessionId).digest("hex")}.json`;
+			await this.seams.beforeSecureOpen?.(join(namespacePath, "session-state", filename));
+			await this.#assertRootIdentity();
+			const snapshotFd = Number(
+				requireNativeSystem().openat(
+					sessionStateFd,
+					ptr(cPath(filename)),
+					constants.O_RDONLY | constants.O_NOFOLLOW | O_CLOEXEC,
+					0,
+				),
+			);
+			if (snapshotFd < 0) {
+				const error = systemError(`openat(session-state=${sessionStateFd})`, filename);
+				if (isErrno(error, "ENOENT")) return null;
+				throw new LocalAuthorityStoreError("record_integrity", "retained session state is unavailable", {
+					cause: error,
+				});
+			}
+			try {
+				const metadata = fstatSync(snapshotFd);
+				if (
+					!metadata.isFile() ||
+					metadata.nlink !== 1 ||
+					metadata.uid !== this.#uid() ||
+					(metadata.mode & 0o777) !== 0o600 ||
+					!Number.isSafeInteger(metadata.size) ||
+					metadata.size < 0 ||
+					metadata.size > MAX_RETAINED_SESSION_SNAPSHOT_BYTES
+				) {
+					throw new LocalAuthorityStoreError(
+						"record_integrity",
+						"retained session state ownership, link, or size integrity is invalid",
+					);
+				}
+				const bytes = Buffer.allocUnsafe(metadata.size + 1);
+				try {
+					const count = readSync(snapshotFd, bytes, 0, bytes.byteLength, 0);
+					if (count > MAX_RETAINED_SESSION_SNAPSHOT_BYTES || count !== metadata.size) {
+						throw new LocalAuthorityStoreError("record_integrity", "retained session state size changed");
+					}
+					let parsed: unknown;
+					try {
+						parsed = JSON.parse(bytes.subarray(0, count).toString("utf8"));
+					} catch (error) {
+						throw new LocalAuthorityStoreError("record_integrity", "retained session state JSON is invalid", {
+							cause: error,
+						});
+					}
+					const identity = assertRetainedSessionIdentity(parsed);
+					if (
+						identity.sessionId !== retainedSessionId ||
+						createHash("sha256").update(identity.sessionId).digest("hex") !== filename.slice(0, -5)
+					) {
+						throw new LocalAuthorityStoreError(
+							"record_integrity",
+							"retained session state identity does not match its filename",
+						);
+					}
+					await this.#assertRootIdentity();
+					return identity;
+				} finally {
+					bytes.fill(0);
+				}
+			} finally {
+				closeSync(snapshotFd);
+			}
+		} finally {
+			closeSync(sessionStateFd);
+		}
+	}
+
+	async #readCurrentByKey(key: string): Promise<LocalAuthorityRecord | null> {
+		try {
+			return assertRecord(
+				JSON.parse(await this.#readSecureText(join(this.root, `${key}.authority.json`), "record_integrity")),
+				key,
+			);
+		} catch (error) {
+			if (isErrno(error, "ENOENT")) return null;
+			if (error instanceof LocalAuthorityStoreError) throw error;
+			throw new LocalAuthorityStoreError("authority_record_invalid", "authority record JSON is invalid", {
+				cause: error,
+			});
+		}
 	}
 
 	async #readSecureBytes(path: string, errorCode: AuthorityStoreErrorCode): Promise<Buffer> {

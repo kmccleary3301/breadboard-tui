@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,12 +49,92 @@ function record(generation = 1) {
 	};
 }
 
+async function writeRetainedSession(
+	root: string,
+	namespaceKey: string,
+	sessionId: string,
+	workspace: string,
+	transcript = "",
+): Promise<void> {
+	const sessionStateRoot = join(root, "engine-state", namespaceKey, "session-state");
+	await mkdir(sessionStateRoot, { recursive: true, mode: 0o700 });
+	const filename = `${createHash("sha256").update(sessionId).digest("hex")}.json`;
+	await writeFile(
+		join(sessionStateRoot, filename),
+		JSON.stringify({
+			schema_version: "bb.cli_bridge.session_state.v1",
+			session: { session_id: sessionId, workspace, transcript },
+		}),
+		{ mode: 0o600 },
+	);
+}
+
 afterEach(async () => {
 	await Promise.all(stores.splice(0).map(store => store.close()));
 	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
 describe("LocalAuthorityStore", () => {
+	test("finds a retained session state root after an endpoint change", async () => {
+		const root = await temporaryRoot();
+		const workspace = await temporaryRoot();
+		const retainedSessionId = "session-retained-across-endpoints";
+		const retainedKey = "a".repeat(64);
+		const preferredKey = "b".repeat(64);
+		await writeRetainedSession(root, retainedKey, retainedSessionId, workspace, "x".repeat(2 * 1024 * 1024));
+
+		const store = ownedStore(root);
+		await expect(store.resolveEngineStateNamespace(preferredKey, workspace, retainedSessionId)).resolves.toBe(
+			retainedKey,
+		);
+	});
+
+	test("keeps the preferred namespace when a retained session does not match workspace", async () => {
+		const root = await temporaryRoot();
+		const workspace = await temporaryRoot();
+		const otherWorkspace = await temporaryRoot();
+		const retainedSessionId = "session-workspace-mismatch";
+		const retainedKey = "c".repeat(64);
+		const preferredKey = "d".repeat(64);
+		await writeRetainedSession(root, retainedKey, retainedSessionId, otherWorkspace);
+
+		const store = ownedStore(root);
+		await expect(store.resolveEngineStateNamespace(preferredKey, workspace, retainedSessionId)).resolves.toBe(
+			preferredKey,
+		);
+	});
+
+	test("rejects ambiguous retained session state namespaces", async () => {
+		const root = await temporaryRoot();
+		const workspace = await temporaryRoot();
+		const retainedSessionId = "session-ambiguous";
+		await writeRetainedSession(root, "e".repeat(64), retainedSessionId, workspace);
+		await writeRetainedSession(root, "f".repeat(64), retainedSessionId, workspace);
+
+		const store = ownedStore(root);
+		await expect(
+			store.resolveEngineStateNamespace("0".repeat(64), workspace, retainedSessionId),
+		).rejects.toMatchObject({
+			code: "root_integrity",
+		});
+	});
+
+	test("rejects a matching legacy namespace with an unretired authority", async () => {
+		const root = await temporaryRoot();
+		const workspace = await temporaryRoot();
+		const retainedSessionId = "session-live-legacy-authority";
+		const legacyKey = LocalAuthorityStore.endpointKey(endpoint);
+		await writeRetainedSession(root, legacyKey, retainedSessionId, workspace);
+
+		const store = ownedStore(root);
+		await store.withExclusiveLock(endpoint, () => store.commit(endpoint, null, record(), { ownerCredential }));
+		await expect(
+			store.resolveEngineStateNamespace("1".repeat(64), workspace, retainedSessionId),
+		).rejects.toMatchObject({
+			code: "root_integrity",
+		});
+	});
+
 	test("creates a user-only root and separate durable public/secret records", async () => {
 		const root = await temporaryRoot();
 		const store = ownedStore(root);

@@ -220,9 +220,13 @@ export async function startSharedBreadboardEngineFromEnvironment(): Promise<void
 		if (config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")
 			throw new Error("shared engine requires attached local-owned configuration");
 		const lifecycleConfig = gateway ? Object.freeze({ ...config, gateway: gateway.binding }) : config;
-		supervisor = createProductionLifecycleSupervisor(lifecycleConfig, state => {
-			logger.debug("BreadBoard shared engine lifecycle", { state: state.name, reason: state.reason });
-		});
+		supervisor = createProductionLifecycleSupervisor(
+			lifecycleConfig,
+			state => {
+				logger.debug("BreadBoard shared engine lifecycle", { state: state.name, reason: state.reason });
+			},
+			launch.stateNamespaceKey,
+		);
 		const connected = await supervisor.connect();
 		if (connected.kind !== "ready")
 			throw new Error(

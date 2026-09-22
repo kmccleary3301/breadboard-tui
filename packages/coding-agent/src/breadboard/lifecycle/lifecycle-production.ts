@@ -17,7 +17,7 @@ import {
 	readKeychainReference,
 } from "./lifecycle-supervisor";
 import { LocalAuthorityStore } from "./local-authority-store";
-import type { BreadboardAuth, BreadboardRunConfig } from "./run-config";
+import { engineStateNamespaceKey, type BreadboardAuth, type BreadboardRunConfig } from "./run-config";
 
 function productionClock(): LifecycleClock {
 	return { now: Date.now, sleep: milliseconds => Bun.sleep(milliseconds) };
@@ -87,6 +87,7 @@ function productionClient(config: {
 export function createProductionLifecycleSupervisor(
 	config: BreadboardRunConfig,
 	stateChanged: NonNullable<LifecycleSupervisorDependencies["stateChanged"]>,
+	stateNamespaceKey?: string,
 ): LifecycleSupervisor {
 	const dependencies = {
 		clock: productionClock(),
@@ -102,7 +103,9 @@ export function createProductionLifecycleSupervisor(
 	const endpoint = config.endpoint;
 	if (!endpoint) throw new Error("local-owned requires one endpoint");
 	const store = new LocalAuthorityStore(join(getAgentDir(), "breadboard", "lifecycle"));
-	const stateRootRelativePath = join("engine-state", LocalAuthorityStore.endpointKey(endpoint));
+	const namespaceKey = stateNamespaceKey ?? engineStateNamespaceKey(config);
+	if (!/^[a-f0-9]{64}$/.test(namespaceKey)) throw new Error("engine state namespace key is invalid");
+	const stateRootRelativePath = join("engine-state", namespaceKey);
 	return new LifecycleSupervisor(config, {
 		...dependencies,
 		store,

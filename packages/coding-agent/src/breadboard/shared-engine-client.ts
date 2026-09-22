@@ -6,7 +6,9 @@ import { createDaemonBrokerClient, DaemonBrokerRejectedError, type DaemonBrokerC
 import { daemonRuntimeDir } from "../launch/paths";
 import type { DaemonSpec } from "../launch/protocol";
 import { resolveWorkerSpawnCmd, workerEnvFromParent } from "../subprocess/worker-client";
+import { LocalAuthorityStore } from "./lifecycle/local-authority-store";
 import {
+	engineStateNamespaceKey,
 	resolveBreadboardRunConfig,
 	type BreadboardRunConfig,
 	type SelectedBreadboardConfig,
@@ -14,6 +16,7 @@ import {
 import {
 	SHARED_ENGINE_CONFIG_ENV,
 	SHARED_ENGINE_READY_PATTERN,
+	SHARED_ENGINE_SCHEMA_VERSION,
 	SHARED_ENGINE_SOCKET_ENV,
 	SHARED_ENGINE_WORKER_ARG,
 	parseSharedEngineEvent,
@@ -27,6 +30,7 @@ import {
 const REQUEST_TIMEOUT_MS = 10_000;
 const START_RETRY_MS = 100;
 const MAX_EFFORT_OBSERVATIONS = 256;
+const SHARED_ENGINE_DAEMON_PREFIX = "omp.shared.bb.v2.";
 const effortSources = new Set<Map<string, ObservedGatewayEffort>>();
 
 export interface AcquiredSharedBreadboardEngine {
@@ -36,7 +40,26 @@ export interface AcquiredSharedBreadboardEngine {
 	close(): Promise<void>;
 }
 
-function sharedLaunch(config: BreadboardRunConfig, workspacePath: string, ompAgentDir?: string): SharedEngineLaunch {
+async function sharedLaunch(
+	config: BreadboardRunConfig,
+	workspacePath: string,
+	ompAgentDir?: string,
+	retainedSessionId?: string,
+): Promise<SharedEngineLaunch> {
+	const agentDir = realpathSync(getAgentDir());
+	const canonicalWorkspace = realpathSync(workspacePath);
+	const canonicalOmpAgentDir = ompAgentDir === undefined ? undefined : realpathSync(ompAgentDir);
+	const store = new LocalAuthorityStore(path.join(agentDir, "breadboard", "lifecycle"));
+	let stateNamespaceKey: string;
+	try {
+		stateNamespaceKey = await store.resolveEngineStateNamespace(
+			engineStateNamespaceKey(config, canonicalOmpAgentDir),
+			canonicalWorkspace,
+			retainedSessionId,
+		);
+	} finally {
+		await store.close();
+	}
 	const selectedConfig: SelectedBreadboardConfig = {
 		engineMode: config.mode,
 		...(config.sources.endpoint === "derived-default" ? {} : { baseUrl: config.endpoint }),
@@ -48,12 +71,13 @@ function sharedLaunch(config: BreadboardRunConfig, workspacePath: string, ompAge
 		...(config.sessionConfigPath === undefined ? {} : { sessionConfigPath: config.sessionConfigPath }),
 	};
 	return parseSharedEngineLaunch({
-		schemaVersion: "bb.shared-engine.v1",
-		workspacePath: realpathSync(workspacePath),
-		agentDir: realpathSync(getAgentDir()),
-		...(ompAgentDir === undefined ? {} : { ompAgentDir: realpathSync(ompAgentDir) }),
+		schemaVersion: SHARED_ENGINE_SCHEMA_VERSION,
+		workspacePath: canonicalWorkspace,
+		agentDir,
+		...(canonicalOmpAgentDir === undefined ? {} : { ompAgentDir: canonicalOmpAgentDir }),
 		selectedConfig,
 		derivedEndpoint: config.sources.endpoint === "derived-default",
+		stateNamespaceKey,
 	});
 }
 
@@ -78,6 +102,34 @@ async function readInfo(socket: string): Promise<SharedEngineInfo | undefined> {
 	}
 	if (!response.ok) throw new Error(`Shared engine discovery failed with HTTP ${response.status}`);
 	return parseSharedEngineInfo(await response.json());
+}
+
+async function reuseCompatibleNamespace(
+	broker: DaemonBrokerClient,
+	launch: SharedEngineLaunch,
+): Promise<SharedEngineLaunch> {
+	const listed = await broker.request({ op: "list" });
+	if (listed.op !== "list") throw new Error("Shared engine broker returned an unexpected list response");
+	for (const daemon of listed.daemons) {
+		if (daemon.state !== "ready" || !daemon.name.startsWith(SHARED_ENGINE_DAEMON_PREFIX)) continue;
+		const described = await broker.request({ op: "describe", name: daemon.name });
+		if (described.op !== "describe") throw new Error("Shared engine broker returned an unexpected description");
+		const launchJson = described.spec.env[SHARED_ENGINE_CONFIG_ENV];
+		if (launchJson === undefined) throw new Error("Shared engine worker launch configuration is missing");
+		const candidate = parseSharedEngineLaunch(JSON.parse(launchJson));
+		const selected = { ...launch, stateNamespaceKey: candidate.stateNamespaceKey };
+		const key = sharedEngineKey(selected);
+		if (key !== sharedEngineKey(candidate)) continue;
+		const keyScope = key.slice(0, 24);
+		if (daemon.name !== `${SHARED_ENGINE_DAEMON_PREFIX}${keyScope}`)
+			throw new Error("Shared engine worker name conflicts with its launch configuration");
+		const socket = path.join(daemonRuntimeDir(broker.projectDir), `shared-engine-${keyScope}.sock`);
+		const info = await readInfo(socket);
+		if (info === undefined) continue;
+		if (info.key !== key) throw new Error("Shared engine identity conflicts with its launch configuration");
+		return Object.freeze(selected);
+	}
+	return launch;
 }
 
 function startSpec(launch: SharedEngineLaunch, socket: string, daemonName: string, timeoutMs: number): DaemonSpec {
@@ -211,13 +263,10 @@ export async function acquireSharedBreadboardEngine(
 	config: BreadboardRunConfig,
 	workspacePath: string,
 	ompAgentDir?: string,
+	retainedSessionId?: string,
 ): Promise<AcquiredSharedBreadboardEngine> {
-	const launch = sharedLaunch(config, workspacePath, ompAgentDir);
+	let launch = await sharedLaunch(config, workspacePath, ompAgentDir, retainedSessionId);
 	const broker = await createDaemonBrokerClient(launch.workspacePath);
-	const key = sharedEngineKey(launch);
-	const keyScope = key.slice(0, 24);
-	const socket = path.join(daemonRuntimeDir(broker.projectDir), `shared-engine-${keyScope}.sock`);
-	const daemonName = `omp.shared.bb.${keyScope}`;
 	const deadline = Date.now() + config.startupTimeoutMs + REQUEST_TIMEOUT_MS;
 	let leaseAbort: AbortController | undefined;
 	let leaseTask: Promise<void> | undefined;
@@ -237,6 +286,10 @@ export async function acquireSharedBreadboardEngine(
 	};
 	try {
 		await broker.request({ op: "ping" });
+		if (retainedSessionId === undefined) launch = await reuseCompatibleNamespace(broker, launch);
+		const keyScope = sharedEngineKey(launch).slice(0, 24);
+		const socket = path.join(daemonRuntimeDir(broker.projectDir), `shared-engine-${keyScope}.sock`);
+		const daemonName = `${SHARED_ENGINE_DAEMON_PREFIX}${keyScope}`;
 		for (;;) {
 			const info = await startOrReuse(broker, launch, socket, daemonName, deadline);
 			leaseAbort = new AbortController();

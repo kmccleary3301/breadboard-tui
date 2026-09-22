@@ -6,6 +6,7 @@ import type { EngineArtifact } from "./run-config";
 import {
 	BreadboardRunConfigError,
 	engineArtifactLocationSha256,
+	engineStateNamespaceKey,
 	loadSelectedBreadboardConfig,
 	parseSelectedBreadboardConfig,
 	resolveBreadboardRunConfig,
@@ -116,6 +117,41 @@ describe("parseSelectedBreadboardConfig", () => {
 		});
 
 		expect(parseSelectedBreadboardConfig(selected)).toEqual({ engineMode: "off" });
+	});
+});
+
+describe("engineStateNamespaceKey", () => {
+	test("retains state when an owned engine receives a new port and auth gateway", () => {
+		const selectedConfig = { engineMode: "local-owned", engineArtifact: artifact };
+		const original = resolveBreadboardRunConfig({ ...baseInput, selectedConfig });
+		const restarted = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig,
+			endpointOverride: "http://127.0.0.1:45678",
+		});
+		expect(restarted.endpoint).not.toBe(original.endpoint);
+		expect(
+			engineStateNamespaceKey({
+				...restarted,
+				gateway: {
+					url: "http://127.0.0.1:45679",
+					token: "new-ephemeral-gateway-token",
+					identity: `sha256:${"e".repeat(64)}`,
+				},
+			}),
+		).toBe(engineStateNamespaceKey(original));
+	});
+
+	test("separates fresh state for incompatible engine artifacts and credential vaults", () => {
+		const original = resolveBreadboardRunConfig({ ...baseInput, selectedConfig: { engineArtifact: artifact } });
+		const changed = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig: { engineArtifact: { ...artifact, executableSha256: `sha256:${"f".repeat(64)}` } },
+		});
+		expect(engineStateNamespaceKey(changed)).not.toBe(engineStateNamespaceKey(original));
+		expect(engineStateNamespaceKey(original, "/first/vault")).not.toBe(
+			engineStateNamespaceKey(original, "/second/vault"),
+		);
 	});
 });
 
