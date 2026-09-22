@@ -287,3 +287,13 @@ an existing BreadBoard session remains temporary. `--model` and `--provider`
 preselect the requested model, and `--harness` selects its engine catalog.
 For startup diagnostics through the launcher, run `PI_DEBUG_STARTUP=1 bb-omp setup`.
 The watchdog reports the active phase and the actual `bb.<date>.<pid>.log` path.
+
+Tools come from the selected engine harness, not native OMP's tool catalog. The
+current daily-driver harness provides file, shell, todo, and completion tools.
+It does not provide native OMP's `eval` tool or persistent Python/IPython and
+JavaScript kernels; selecting the same model does not add those capabilities.
+
+Ordinary sessions preserve conversation context across turns and keep tools
+available until the model finishes. Experimental implementation-write receipt
+checks run only when explicitly enabled in the engine configuration; they do
+not impose a guessed file-write requirement on ordinary chat or read-only work.

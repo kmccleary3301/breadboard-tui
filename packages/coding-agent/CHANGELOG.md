@@ -26,6 +26,11 @@
 ### Fixed
 
 - Idle BreadBoard sessions no longer inherit Bun's five-minute event-stream timeout, which permanently disabled inference with `HTTP request failed (0)`.
+- Successful tool receipts no longer force an ongoing BreadBoard task to finish. Requested follow-up writes, shell calls, and repeated observations continue until the model completes the turn.
+- BreadBoard retains model-facing conversation context from the first turn instead of starting later requests with an empty history.
+- Implementation write-receipt enforcement is opt-in; ordinary sessions no longer acquire mandatory file writes from prompt-text heuristics.
+- Mixed-tool prompts identify native tools separately from additional text-invoked functions, keeping shell and file capabilities visible after tool calls.
+- Oversized BreadBoard tool-result and CTree events retain their full JSON in confined artifacts and stream bounded references, preventing these results from exceeding the event-stream limit.
 - Glyph setup cancels pending previews before restoring the original selection, and waits for persistence before completing.
 - Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
 - Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal.
