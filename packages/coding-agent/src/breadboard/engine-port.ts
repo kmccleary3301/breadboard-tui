@@ -371,6 +371,9 @@ export function createCanonicalEventFetch(requestFetch: typeof fetch): typeof fe
 			if (url.pathname.endsWith("/events")) {
 				url.searchParams.set("schema", "2");
 				url.searchParams.set("include_legacy", "false");
+				// Human idle time is not a failed event stream. The session's AbortSignal
+				// owns its lifetime; Bun's five-minute socket deadline must not end it.
+				return await requestFetch(url, { ...init, timeout: false });
 			}
 			return await requestFetch(url, init);
 		},
