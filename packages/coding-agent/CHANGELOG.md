@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
 - Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal, and attached local engines use independent loopback endpoints unless an endpoint is explicitly configured.
 - Explicit BreadBoard setup retains its snake-and-logo startup animation while using a separate metadata-only engine, without creating a coding session or workspace checkpoint; completing or cancelling setup releases its owned resources.
 - Setup saves the default model for future sessions while in-session engine model changes remain temporary.

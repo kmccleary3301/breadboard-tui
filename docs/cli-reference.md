@@ -269,6 +269,8 @@ chatting without tools does not snapshot the workspace. Automatic checkpoints
 begin immediately before a file-editing or shell tool, so the initial rollback
 point includes user edits made since the session opened. Checkpoint credential
 and sandbox safety checks remain enabled.
+Turn completion does not compute a final workspace diff unless JSON snapshot
+output is requested.
 
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`
