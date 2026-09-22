@@ -39,6 +39,7 @@
 - Setup and application windows now share compatible attached local engines and their OMP gateway. Private leases outlive native HTTP idle deadlines; the final client triggers authenticated cleanup without cancelling another client's turn.
 - Retained sessions reopen their original private state directories when an engine restarts on a new port. Managed engines exclusively lock those directories while serving; compatible setup and coding windows reuse the resumed owner.
 - Cold credential and model discovery uses the configured startup timeout instead of the ten-second local-RPC deadline.
+- Attached startup cleanup authenticates and retires its own late-starting engine. Unresolved startup authority is retained instead of being reported as stopped.
 - Explicit BreadBoard setup retains its snake-and-logo startup animation without creating a coding session or workspace checkpoint; completing or cancelling setup releases its lease.
 - Setup saves the default model for future sessions while in-session engine model changes remain temporary.
 - Startup diagnostics identify engine preparation, point to the actual product logfile, and accept `PI_DEBUG_STARTUP` through the local launcher.

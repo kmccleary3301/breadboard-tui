@@ -1226,6 +1226,16 @@ export class LocalAuthorityStore {
 		}
 	}
 
+	async probeStartClaim(endpoint: string): Promise<LocalStartClaim | null> {
+		if (!(await this.#readOnlyRootAvailable())) return null;
+		try {
+			return await this.#readStartClaim(endpointKey(endpoint));
+		} catch (error) {
+			if (isErrno(error, "ENOENT")) return null;
+			throw error;
+		}
+	}
+
 	async claimStart(endpoint: string): Promise<StartClaimResult> {
 		await this.#assertRootIdentity();
 		const key = endpointKey(endpoint);

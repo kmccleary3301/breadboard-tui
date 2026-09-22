@@ -287,6 +287,9 @@ Idle event streams and shared-owner leases remain open until cancelled; native
 socket deadlines are disabled for these lifetime streams, not ordinary requests.
 Cold credential and model discovery uses the configured startup timeout rather
 than the shorter local-RPC deadline.
+After a startup timeout, the starter retires its own engine if it has become
+reachable and can be authenticated. Unreachable or unauthenticated processes
+retain their recovery authority; they are not reported as successfully stopped.
 
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`

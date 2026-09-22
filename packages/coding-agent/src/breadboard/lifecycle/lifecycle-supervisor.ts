@@ -1471,6 +1471,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 	#childRecoveryPromise: Promise<void> | undefined;
 	readonly #restartOnUnexpectedChildExit: boolean;
 	#unexpectedDeathRecord: LocalAuthorityRecord | undefined;
+	#ownedStartToken: string | undefined;
 
 	constructor(config: BreadboardRunConfig, dependencies: LifecycleSupervisorDependencies) {
 		super(config, dependencies);
@@ -1577,6 +1578,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		policy: OwnerExitPolicy,
 		restart: boolean,
 	): Promise<LifecycleResult> {
+		this.#ownedStartToken = claim.token;
 		return await this.#coldStart(claim, attempt, policy, restart);
 	}
 
@@ -3106,6 +3108,21 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			if (!endpoint) return lifecycleFailure("local-owned", "failed", "endpoint_unreachable");
 			const record = await this.#store.probeCurrent(endpoint);
 			if (!record) {
+				const pending = await this.#store.probeStartClaim(endpoint);
+				if (pending) {
+					if (pending.token !== this.#ownedStartToken)
+						return lifecycleFailure("local-owned", "recovery-needed", "ownership_conflict");
+					const policy = this.config.ownerExitPolicy;
+					if (!policy) return lifecycleFailure("local-owned", "failed", "process_control_failed");
+					// A late engine still needs authenticated retirement, not a false "stopped" result.
+					try {
+						const recovered = await this.#resumePendingStart(pending, 0, policy);
+						if (recovered.kind !== "ready") return recovered;
+					} catch (error) {
+						return mappedFailure("local-owned", error);
+					}
+					return await this.stop(options);
+				}
 				return {
 					kind: "stopped",
 					state: lifecycleState("local-owned", "stopped") as LifecycleState & { readonly name: "stopped" },

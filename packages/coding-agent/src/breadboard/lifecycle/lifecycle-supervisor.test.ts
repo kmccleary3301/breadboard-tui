@@ -1427,6 +1427,7 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			}),
 		});
 		expect((await supervisor.connect()).state.reason).toBe("auth_failed");
+		expect((await supervisor.close({ consumerClosed: true })).state.reason).toBe("auth_failed");
 		expect(process.events).not.toContain("hard-control");
 		const preserved = await store.withExclusiveLock("http://127.0.0.1:7777", () =>
 			store.claimStart("http://127.0.0.1:7777"),
@@ -1442,6 +1443,58 @@ describe("LifecycleSupervisor local-owned authority", () => {
 			secret.bootstrapCredential.fill(0);
 			secret.ownerCredential.fill(0);
 		}
+	});
+
+	test("failed starter retires only its own late-starting engine", async () => {
+		const process = processHarness();
+		const store = await temporaryStore();
+		const config = resolved("local-owned", "attached");
+		const calls: string[] = [];
+		let now = Date.now();
+		let reachable = false;
+		const supervisor = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			clock: {
+				now: () => now,
+				sleep: async () => {
+					now += config.startupTimeoutMs + 1;
+				},
+			},
+			createClient: () => ({
+				handshake: async () => {
+					if (!reachable)
+						throw new LifecycleE4ClientError({
+							kind: "http",
+							status: 0,
+							code: null,
+							correlation: {},
+							body: "[redacted]",
+						});
+					const current = process.current();
+					return boundClient(bindingFor(current.pid, current.launchId), calls);
+				},
+			}),
+		});
+		expect((await supervisor.connect()).state.reason).toBe("endpoint_unreachable");
+		const pid = process.current().pid;
+		const unrelated = new LifecycleSupervisor(config, {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls),
+		});
+		const unrelatedClose = await unrelated.close({ consumerClosed: true });
+		expect(process.dead.has(pid)).toBe(false);
+
+		reachable = true;
+		process.exitOnNextWait();
+		expect((await supervisor.close({ consumerClosed: true })).kind).toBe("stopped");
+		expect(process.dead.has(pid)).toBe(true);
+		expect(unrelatedClose.state.name).toBe("recovery-needed");
+		expect(process.events).not.toContain("hard-control");
+		expect(await store.probeCurrent("http://127.0.0.1:7777")).toBeNull();
 	});
 
 	test("pure local status never spawns, owns, or registers", async () => {
