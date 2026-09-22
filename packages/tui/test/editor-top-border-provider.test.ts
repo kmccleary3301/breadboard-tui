@@ -75,19 +75,12 @@ describe("Editor lazy top-border provider (#4145)", () => {
 		expect(frame).not.toContain("lazy");
 	});
 
-	it("passes the visually-available width (terminal width minus border chrome) to the provider", () => {
+	it("keeps a right-edge numeric badge intact within the provider's available width", () => {
 		const editor = new Editor(defaultEditorTheme);
-		const widths: number[] = [];
-		editor.setTopBorderProvider(availableWidth => {
-			widths.push(availableWidth);
-			return undefined;
-		});
+		editor.setBorderStyle("rule");
+		editor.setTopBorderProvider(availableWidth => stubTopBorder("~27%".padStart(availableWidth)));
 
-		editor.render(80);
-		editor.render(120);
-
-		expect(widths).toHaveLength(2);
-		expect(widths[0]).toBe(editor.getTopBorderAvailableWidth(80));
-		expect(widths[1]).toBe(editor.getTopBorderAvailableWidth(120));
+		expect(editor.render(80)[0]).toContain("~27%");
+		expect(editor.render(24)[0]).toContain("~27%");
 	});
 });

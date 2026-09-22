@@ -20,6 +20,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { adjustHsv, formatNumber, getProjectDir, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils";
 import type { HarnessSnapshot } from "../../../breadboard/harness-port";
+import { readBreadboardComposerMetrics } from "../../../breadboard/composer-metrics";
 import { settings } from "../../../config/settings";
 import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../../../product-identity";
 import type { AgentSession } from "../../../session/agent-session";
@@ -47,7 +48,8 @@ import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCa
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
-import { isBreadboardPreset, renderBreadboardStatusLine } from "./breadboard-presentation";
+import { isBreadboardPreset, renderBreadboardStatusLine, renderBreadboardStatusRows } from "./breadboard-presentation";
+import { resolveBreadboardFields } from "./breadboard-fields";
 import type {
 	BreadboardComposerActivity,
 	CollabStatus,
@@ -187,6 +189,7 @@ interface StatusLineExternalInputs {
 interface CachedStatusLine {
 	content: string;
 	dimmedContent: string;
+	overflow?: string;
 	width: number;
 	availableWidth: number;
 	renderRevision: number;
@@ -329,6 +332,7 @@ export class StatusLineComponent implements Component {
 	#standalone: false | "full" | "left-only" = false;
 	#topAttachment: ComposerStyle["statusAttachment"] = "top-border";
 	#standaloneGap = false;
+	#topBorderWidth: (width: number) => number = width => Math.max(1, width - 6);
 	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#renderRevision = 0;
 	#renderCache:
@@ -517,6 +521,7 @@ export class StatusLineComponent implements Component {
 			transparent: settings.get("statusLine.transparent"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 			contextLine: settings.get("statusLine.contextLine"),
+			breadboard: settings.get("statusLine.breadboard"),
 		};
 	}
 
@@ -525,6 +530,13 @@ export class StatusLineComponent implements Component {
 	}
 	#hasGitBackedSegment(): boolean {
 		const effectiveSettings = this.#resolveSettings();
+		if (isBreadboardPreset(effectiveSettings.preset)) {
+			const fields = resolveBreadboardFields(
+				effectiveSettings.preset ?? "bb-balanced",
+				effectiveSettings.breadboard,
+			);
+			return fields.branch === "shown" || fields.folder !== "hidden";
+		}
 		return (
 			hasGitBackedSegment(effectiveSettings.leftSegments) || hasGitBackedSegment(effectiveSettings.rightSegments)
 		);
@@ -2464,10 +2476,12 @@ export class StatusLineComponent implements Component {
 			return cached;
 		}
 
-		const content = this.#renderStatusLine(width, layout, previewTitle, options, nowMs);
+		const rendered = this.#renderStatusLine(width, layout, previewTitle, options, nowMs);
+		const content = rendered.content;
 		const result = {
 			content,
 			dimmedContent: this.#dimWhileFocusProxied(content),
+			overflow: rendered.overflow,
 			width: visibleWidth(content),
 			availableWidth: width,
 			renderRevision: this.#renderRevision,
@@ -2501,17 +2515,23 @@ export class StatusLineComponent implements Component {
 		previewTitle: string | undefined,
 		options: { readonly placeholders?: boolean } | undefined,
 		nowMs: number,
-	): string {
+	): { content: string; overflow?: string } {
 		const effectiveSettings = this.#resolveSettings();
 		if (!this.session.mainStreamOwnsTurnLifecycle && this.identity.id !== "breadboard") this.#syncPricingTimer();
 		const placeholders = options?.placeholders === true;
 		const plain = layout !== "box" && layout !== "band";
-		const includePath =
-			hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
+		const breadboardFields = isBreadboardPreset(effectiveSettings.preset)
+			? resolveBreadboardFields(effectiveSettings.preset ?? "bb-balanced", effectiveSettings.breadboard)
+			: undefined;
+		const includePath = breadboardFields
+			? breadboardFields.folder !== "hidden"
+			: hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
 		const gitEnabled = this.#gitEnabled();
 		const includeGit =
 			gitEnabled &&
-			(hasGitSegment(effectiveSettings.leftSegments) || hasGitSegment(effectiveSettings.rightSegments));
+			(breadboardFields
+				? breadboardFields.branch === "shown"
+				: hasGitSegment(effectiveSettings.leftSegments) || hasGitSegment(effectiveSettings.rightSegments));
 		const includePr =
 			gitEnabled && (hasPrSegment(effectiveSettings.leftSegments) || hasPrSegment(effectiveSettings.rightSegments));
 		const liveCtx = this.#buildSegmentContext(
@@ -2524,31 +2544,35 @@ export class StatusLineComponent implements Component {
 			previewTitle,
 		);
 		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: true } : liveCtx;
-		if (isBreadboardPreset(effectiveSettings.preset)) {
-			return renderBreadboardStatusLine(
-				{
-					modelName: placeholders
-						? "Connecting"
-						: (this.session.model?.name ?? this.session.model?.id ?? "No model"),
-					workspace: ctx.worktree
-						? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
-						: path.basename(getProjectDir()),
-					harness: ctx.harness,
-					branch: ctx.git.branch,
-					activity: placeholders ? null : ctx.breadboardActivity,
-					elapsedMs: placeholders ? null : ctx.turnElapsedMs,
-					context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
-					inputTokens: placeholders ? undefined : ctx.usageStats.input,
-					outputTokens: placeholders ? undefined : ctx.usageStats.output,
-					vim:
-						ctx.vim && ctx.vim.display !== "none"
-							? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
-							: undefined,
-				},
-				effectiveSettings.preset ?? "bb-balanced",
-				width,
-				layout,
-			);
+		if (breadboardFields) {
+			const metrics = placeholders ? null : readBreadboardComposerMetrics(this.session, this.#harness);
+			const snapshot = {
+				modelName: placeholders ? "Connecting" : (this.session.model?.name ?? this.session.model?.id ?? "No model"),
+				workspace: ctx.worktree
+					? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
+					: path.basename(getProjectDir()),
+				workspacePath: getProjectDir(),
+				sessionName: this.session.sessionManager?.getSessionName?.() || previewTitle,
+				harness: ctx.harness,
+				branch: ctx.git.branch,
+				effort: metrics?.effort,
+				spend: metrics?.spend,
+				activity: placeholders ? null : ctx.breadboardActivity,
+				elapsedMs: placeholders ? null : ctx.turnElapsedMs,
+				context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
+				inputTokens: placeholders ? undefined : ctx.usageStats.input,
+				outputTokens: placeholders ? undefined : ctx.usageStats.output,
+				vim:
+					ctx.vim && ctx.vim.display !== "none"
+						? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
+						: undefined,
+			};
+			const preset = effectiveSettings.preset ?? "bb-balanced";
+			if (layout === "box" || layout === "band" || layout === "plain-right") {
+				const rows = renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard);
+				return { content: rows.top, overflow: rows.bottom };
+			}
+			return { content: renderBreadboardStatusLine(snapshot, preset, width, layout, effectiveSettings.breadboard) };
 		}
 		const separatorDef = plain
 			? {
@@ -2778,22 +2802,24 @@ export class StatusLineComponent implements Component {
 
 		const leftGroup = renderGroup(left, "left");
 		const rightGroup = renderGroup(right, "right");
-		if (!leftGroup && !rightGroup) return "";
+		if (!leftGroup && !rightGroup) return { content: "" };
 
 		if (topFillWidth === 0 || (plain && (left.length === 0 || right.length === 0))) {
-			return leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup;
+			return { content: leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup };
 		}
 
 		const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
 		if (plain) {
 			// Standalone composers: no gauge line between the groups, just air.
-			return leftGroup + padding(gapWidth) + rightGroup;
+			return { content: leftGroup + padding(gapWidth) + rightGroup };
 		}
 		// Box layout: with one group absent (an unnamed session hides
 		// `session_name`, emptying the default preset's right group) the gauge
 		// runs to the border edge instead of disappearing, so embedded context
 		// labels don't fall back to a context chip until the session is titled.
-		return leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup;
+		return {
+			content: leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup,
+		};
 	}
 
 	/**
@@ -2959,6 +2985,7 @@ export class StatusLineComponent implements Component {
 		previewTitle?: string,
 	): { content: string; width: number; revision: number } {
 		const cacheable =
+			!isBreadboardPreset(this.#resolveSettings().preset) &&
 			this.getTurnElapsedMs() === null &&
 			this.#brandFade === null &&
 			this.session.compactionSpeculation !== "running" &&
@@ -3017,10 +3044,15 @@ export class StatusLineComponent implements Component {
 	 * `bottomBarGap` inserts a blank spacer row above the bar for styles whose
 	 * editor has no bottom chrome.
 	 */
-	setComposerStyle(style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">): void {
+	setComposerStyle(
+		style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">,
+		topBorderWidth?: (width: number) => number,
+	): void {
 		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
 		this.#topAttachment = style.statusAttachment;
 		this.#standaloneGap = style.bottomBarGap;
+		this.#topBorderWidth =
+			topBorderWidth ?? (width => (style.statusAttachment === "top-border" ? Math.max(1, width - 6) : width));
 		this.#clearRenderedOutput();
 		this.#syncPricingTimer();
 	}
@@ -3044,6 +3076,18 @@ export class StatusLineComponent implements Component {
 	 */
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string {
 		return this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle).dimmedContent;
+	}
+
+	/** Overflow shares the exact top-row allocation, including its inner chrome width. */
+	renderOverflowBar(
+		width: number,
+		topWidth: number,
+		layout: "box" | "band" | "plain-right",
+		previewTitle?: string,
+	): string | undefined {
+		if (!isBreadboardPreset(this.#resolveSettings().preset)) return undefined;
+		const overflow = this.#buildStatusLine(topWidth, layout, previewTitle).overflow;
+		return overflow ? padding(Math.max(0, Math.floor((width - topWidth) / 2))) + overflow : "";
 	}
 	/**
 	 * Status bar lines for a composer layout, rendered through the real
@@ -3076,7 +3120,11 @@ export class StatusLineComponent implements Component {
 			});
 			if (rule !== undefined) lines.push(rule);
 		}
-		if (bottomBar !== "none") {
+		if (isBreadboardPreset(this.#resolveSettings().preset) && attachment !== "none") {
+			const layout = attachment === "top-border" ? "box" : attachment === "top-band" ? "band" : "plain-right";
+			const overflow = this.renderOverflowBar(width, width, layout);
+			if (overflow) lines.push(overflow);
+		} else if (bottomBar !== "none") {
 			const main = this.renderBottomBar(width, bottomBar);
 			if (main) lines.push(main);
 		}
@@ -3088,6 +3136,7 @@ export class StatusLineComponent implements Component {
 		const bucket = Math.floor(Date.now() / STATUS_RENDER_CACHE_MS);
 		const cacheable =
 			this.getTurnElapsedMs() === null &&
+			!isBreadboardPreset(this.#resolveSettings().preset) &&
 			this.#brandFade === null &&
 			this.session.compactionSpeculation !== "running";
 		const cached = this.#renderCache;
@@ -3103,7 +3152,15 @@ export class StatusLineComponent implements Component {
 		}
 
 		const lines: string[] = [];
-		if (this.#standalone && !autocompleteActive) {
+		if (isBreadboardPreset(this.#resolveSettings().preset) && this.#topAttachment !== "none" && !autocompleteActive) {
+			const layout =
+				this.#topAttachment === "top-border" ? "box" : this.#topAttachment === "top-band" ? "band" : "plain-right";
+			const overflow = this.renderOverflowBar(width, this.#topBorderWidth(width), layout);
+			if (overflow) {
+				if (this.#standaloneGap) lines.push("");
+				lines.push(overflow);
+			}
+		} else if (this.#standalone && !autocompleteActive) {
 			const content = this.renderBottomBar(width, this.#standalone === "left-only" ? "left" : "full");
 			if (content) {
 				if (this.#standaloneGap) lines.push("");

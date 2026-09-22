@@ -5,6 +5,7 @@
 ### Added
 
 - Added BreadBoard Balanced, Quiet, and Detailed information layouts, with shared live/setup previews and width-aware priority for actionable state.
+- Added per-field BreadBoard composer customization with staged Apply/Cancel, a live preview, and a layout-only reset. Shape and glyph preferences remain independent.
 - Added an independent Emoji glyph preset alongside restrained Unicode, Nerd Font, and ASCII.
 - Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
 - Added shared OMP subscription authentication for attached local BreadBoard engines through an authenticated loopback inference gateway, retaining BreadBoard tools and permissions without copying provider credentials.
@@ -12,8 +13,8 @@
 
 ### Changed
 
-- BreadBoard now defaults to Balanced information in a rounded box without routine context counters, generation hashes, or native cost/reasoning indicators; explicit preferences and native OMP defaults are preserved.
-- BreadBoard composer labels have spacing around the connecting rule, model identity stays anchored during activity changes, and activity timers identify compact total-turn durations.
+- BreadBoard Balanced now shows compact context and available spend alongside folder, session, branch, and model identity. Unknown accounting and subscription billing remain hidden; effort follows actual gateway request metadata or verified harness configuration.
+- BreadBoard composer metadata reflows between attached edges, preserving whole numeric badges and stable identity alignment as activity changes. Full folder paths, token counts, and session or turn spend are selectable.
 - Integrated official OMP main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including v18.2.2 and its subsequent CJK edit fix, while retaining BreadBoard execution and shared subscription authentication.
 - BreadBoard-owned sessions now gate unsupported native subagent, prewalk, plan, compaction, advisor, automation, and tool controls while preserving frontend presentation and scoped helpers.
 - The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.
@@ -27,8 +28,9 @@
 - Idle BreadBoard sessions no longer inherit Bun's five-minute event-stream timeout, which permanently disabled inference with `HTTP request failed (0)`.
 - Glyph setup cancels pending previews before restoring the original selection, and waits for persistence before completing.
 - Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
-- Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal, and attached local engines use independent loopback endpoints unless an endpoint is explicitly configured.
-- Explicit BreadBoard setup retains its snake-and-logo startup animation while using a separate metadata-only engine, without creating a coding session or workspace checkpoint; completing or cancelling setup releases its owned resources.
+- Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal.
+- Setup and application windows now share compatible attached local engines and their OMP gateway. Private leases outlive native HTTP idle deadlines; the final client triggers authenticated cleanup without cancelling another client's turn.
+- Explicit BreadBoard setup retains its snake-and-logo startup animation without creating a coding session or workspace checkpoint; completing or cancelling setup releases its lease.
 - Setup saves the default model for future sessions while in-session engine model changes remain temporary.
 - Startup diagnostics identify engine preparation, point to the actual product logfile, and accept `PI_DEBUG_STARTUP` through the local launcher.
 - Engine model selection now owns picker, setup, command, and model-cycle changes; native helper-role settings do not configure engine workers.

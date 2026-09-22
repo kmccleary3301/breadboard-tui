@@ -712,13 +712,26 @@ tui:
 
 BreadBoard defaults to `bb-balanced` with a rounded box, restrained separators, no session accent, and no separate context line. Explicit saved preferences take precedence. Information layout, `composer.shape`, and `symbolPreset` are independent.
 
-- **BreadBoard Balanced** keeps model, harness, and workspace visible, adding activity and context pressure when relevant.
-- **BreadBoard Quiet** reduces routine information to model and workspace.
-- **BreadBoard Detailed** includes harness generation, context estimates, recorded tokens, and configured limits when space permits.
+- **BreadBoard Balanced** shows folder, session, branch, model, compact context, available spend, and activity.
+- **BreadBoard Quiet** keeps folder and model, adding activity and context pressure when needed.
+- **BreadBoard Detailed** adds the harness name and used/capacity token counts.
 
-Approval, cancellation, and error text take priority over routine metadata on narrow terminals. Context estimates are marked `~`. BreadBoard-owned sessions do not show native reasoning, cost, or automatic-compaction indicators as engine state. `unicode` uses restrained composer glyphs; `emoji` keeps expressive pictographs available.
+In `/settings` → **Status Line Preset**, **Customize…** follows these three presets. Changes are staged in a live composer preview: **Apply** saves them; **Cancel** discards them. **Reset layout to selected preset** clears only field overrides, and is itself staged until Apply. It does not reset the theme, glyphs, or composer shape.
 
-BreadBoard box and band layouts keep model identity on the left and activity on the right. Activity timers show total turn time, not the current tool's runtime. Longer durations use minutes and hours; approval and error states omit the timer.
+Field overrides are stored under `statusLine.breadboard`. Every field defaults to `preset`, which follows the selected layout:
+
+| Field | Choices |
+| --- | --- |
+| `folder` | `preset`, `name`, `full`, `hidden` |
+| `session`, `branch`, `model`, `harness`, `effort`, `activity`, `elapsed` | `preset`, `shown`, `hidden` |
+| `context` | `preset`, `percent`, `tokens`, `pressure`, `hidden` |
+| `spend` | `preset`, `session`, `turn`, `hidden` |
+
+Context and spend use compact icon/number badges; `~` marks estimates. Unknown accounting and subscription billing remain hidden rather than appearing as zero. Effort comes from observed OMP gateway request metadata or verified harness configuration, never an unrelated frontend thinking setting. An omitted effort remains hidden.
+
+Attached box, band, rule, and Claude layouts move overflow onto the lower edge and promote fields back to the top as space permits. Detached shapes use one row. Identity remains left-aligned; runtime information stays on the right. Names can shorten, while numeric badges remain whole. Approval and error alerts outrank routine metadata even when activity is hidden.
+
+Activity timers show total turn time, not the current tool's runtime. Approval and error states omit the timer. `unicode` uses restrained composer glyphs; `emoji` keeps expressive pictographs available.
 
 For a custom status line, set `statusLine.preset: custom` and configure `statusLine.leftSegments`, `statusLine.rightSegments`, and `statusLine.segmentOptions`. Include `status` in either segment list to render extension statuses registered through `ctx.ui.setStatus()`, ordered by key and joined inline. Set `statusLine.showHookStatus: false` to suppress the same statuses in the footer.
 

@@ -306,6 +306,7 @@ export class SelectorController {
 							transparent: settings.get("statusLine.transparent"),
 							compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 							contextLine: settings.get("statusLine.contextLine"),
+							breadboard: settings.get("statusLine.breadboard"),
 							...previewSettings,
 						});
 						this.ctx.ui.requestRender();
@@ -335,6 +336,7 @@ export class SelectorController {
 							showHookStatus: settings.get("statusLine.showHookStatus"),
 							sessionAccent: settings.get("statusLine.sessionAccent"),
 							transparent: settings.get("statusLine.transparent"),
+							breadboard: settings.get("statusLine.breadboard"),
 							compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 							contextLine: settings.get("statusLine.contextLine"),
 						});
@@ -619,6 +621,14 @@ export class SelectorController {
 		}
 
 		switch (id) {
+			case "statusLine.breadboard":
+				this.ctx.statusLine.updateSettings({
+					...this.ctx.settings.getGroup("statusLine"),
+					breadboard: this.ctx.settings.get("statusLine.breadboard"),
+				});
+				this.ctx.statusLine.invalidate();
+				this.ctx.ui.requestRender();
+				break;
 			// Session-managed settings (not in SettingsManager)
 			case "autoCompact":
 				this.ctx.session.setAutoCompactionEnabled(value as boolean, true);

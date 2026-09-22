@@ -66,6 +66,10 @@ import {
 	SERVICE_TIER_OPENAI_VALUES,
 	type ServiceTierInheritSettingValue,
 } from "./service-tier";
+import {
+	DEFAULT_BREADBOARD_FIELD_SETTINGS,
+	type BreadboardFieldSettings,
+} from "../modes/components/status-line/breadboard-fields";
 
 /** Unified settings schema - single source of truth for all settings.
  *
@@ -967,17 +971,17 @@ export const SETTINGS_SCHEMA = {
 				{
 					value: "bb-balanced",
 					label: "BreadBoard Balanced",
-					description: "Recommended: model, harness, workspace, and actionable state",
+					description: "Folder, session, model, compact context and available spend",
 				},
 				{
 					value: "bb-quiet",
 					label: "BreadBoard Quiet",
-					description: "Model and workspace, with activity when needed",
+					description: "Folder and model, with activity and context pressure when needed",
 				},
 				{
 					value: "bb-detailed",
 					label: "BreadBoard Detailed",
-					description: "Harness identity, context estimate, tokens, and configured budgets",
+					description: "Identity, harness, token counts, available spend and timing",
 				},
 				{ value: "default", label: "Default", description: "Model, path, git, context, tokens, cost" },
 				{ value: "minimal", label: "Minimal", description: "Path and git only" },
@@ -988,6 +992,10 @@ export const SETTINGS_SCHEMA = {
 				{ value: "custom", label: "Custom", description: "User-defined segments" },
 			],
 		},
+	},
+	"statusLine.breadboard": {
+		type: "record",
+		default: DEFAULT_BREADBOARD_FIELD_SETTINGS,
 	},
 
 	"statusLine.separator": {
@@ -6751,6 +6759,7 @@ export interface StatusLineSettings {
 	leftSegments: StatusLineSegmentId[];
 	rightSegments: StatusLineSegmentId[];
 	segmentOptions: Record<string, unknown>;
+	breadboard?: BreadboardFieldSettings;
 }
 
 export interface ThinkingBudgetsSettings {

@@ -175,6 +175,13 @@ export interface LifecycleSupervisorDependencies {
 export interface StopOptions {
 	readonly consumerClosed: boolean;
 	readonly explicit?: boolean;
+	/**
+	 * Keep this supervisor's authenticated owner/client registration attached when
+	 * another engine client prevents a control drain. A shared host uses this to
+	 * retry after its last lease disconnects; ordinary callers retain the
+	 * historical detach-on-conflict behavior.
+	 */
+	readonly preserveOnDrainConflict?: boolean;
 }
 
 export type LifecycleAction = "connect" | "start" | "status" | "stop" | "restart" | "update" | "close";
@@ -2664,7 +2671,11 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		return this.readyResult(context);
 	}
 
-	async #controlledStop(context: ReadyContext, restart: boolean): Promise<LifecycleResult> {
+	async #controlledStop(
+		context: ReadyContext,
+		restart: boolean,
+		preserveOnDrainConflict = false,
+	): Promise<LifecycleResult> {
 		if (!context.ownerCredential || context.ownerGeneration === undefined || !context.record) {
 			return lifecycleFailure("local-owned", "ownership-conflict", "ownership_conflict");
 		}
@@ -2674,7 +2685,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 		const ownerCredentialText = credentialText(ownerCredential);
 		let control = context.process ?? (await this.#process.controlFor(record.pid, record.osProcessStartToken));
 		this.transition("draining");
-		await this.#cancelActiveSessionsBestEffort(context);
+		if (!preserveOnDrainConflict) await this.#cancelActiveSessionsBestEffort(context);
 		let drainGeneration: number | undefined;
 		let hardDecisionRecorded = false;
 		const refreshedRegistration = await context.client.renewClient({
@@ -2781,7 +2792,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 										await this.#detachRequesterBestEffort(context);
 										return lifecycleFailure("local-owned", "request-aborted", "request_aborted");
 									}
-									if (error.failure.code === "drain_turn_active") {
+									if (!preserveOnDrainConflict && error.failure.code === "drain_turn_active") {
 										const remaining = drainTurnActiveDeadline - this.clock.now();
 										if (remaining > 0) {
 											const delay =
@@ -2809,7 +2820,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 										);
 									}
 									await clearControlAttempt();
-									await this.#detachRequesterBestEffort(context);
+									if (!preserveOnDrainConflict) await this.#detachRequesterBestEffort(context);
 									return lifecycleFailure("local-owned", "restart-blocked", "drain_denied");
 								}
 								throw error;
@@ -3129,7 +3140,7 @@ class LocalOwnedModeStrategy extends ModeStrategy {
 			const adopted = await this.#adoptOrRecover(record, 0, false);
 			if (adopted.kind !== "ready") return adopted;
 		}
-		return await this.#controlledStop(this.context as ReadyContext, false);
+		return await this.#controlledStop(this.context as ReadyContext, false, options.preserveOnDrainConflict);
 	}
 
 	async restart(options: StopOptions): Promise<LifecycleResult> {

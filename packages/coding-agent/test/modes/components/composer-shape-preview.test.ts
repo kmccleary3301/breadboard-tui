@@ -12,6 +12,7 @@ import {
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/settings-selector";
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { composerSetupScene } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/composer";
+import { createBreadboardPreviewStatusSource } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/information-layout";
 import type { SetupSceneHost } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
 import { initTheme, setTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
@@ -19,7 +20,7 @@ import {
 	OMP_PRODUCT_IDENTITY,
 	type ProductIdentity,
 } from "@oh-my-pi/pi-coding-agent/product-identity";
-import type { ComposerStyle } from "@oh-my-pi/pi-tui";
+import { type ComposerStyle, visibleWidth } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
 	await initTheme();
@@ -88,97 +89,73 @@ describe("composer shape preview", () => {
 		return status;
 	}
 
-	it.each(shapes)("renders %s shape preview without throwing in dark theme", async (shape: ComposerShape) => {
-		await setTheme("dark");
+	it.each(shapes)("preserves the draft within %s preview geometry", async (shape: ComposerShape) => {
+		await initTheme(false, "unicode", false, "titanium", "light");
 		const lines = renderComposerShapePreview(shape, 80);
-		expect(lines.length).toBeGreaterThan(0);
-		const joined = lines.join("\n");
-		expect(joined).toContain("Ask anything");
+		expect(lines.join("\n")).toContain("Ask anything");
+		expect(lines.every(line => visibleWidth(line) <= 80)).toBe(true);
 	});
 
-	it.each(shapes)("renders %s shape preview without throwing in light theme", async (shape: ComposerShape) => {
-		await setTheme("light");
-		const lines = renderComposerShapePreview(shape, 80);
-		expect(lines.length).toBeGreaterThan(0);
-		const joined = lines.join("\n");
-		expect(joined).toContain("Ask anything");
-	});
-
-	it("updates preview when setValue is called on ComposerShapePreview component", async () => {
-		await setTheme("dark");
-		let renderRequested = false;
-		const preview = new ComposerShapePreview("box", {
-			requestRender: () => {
-				renderRequested = true;
-			},
-		});
-		const initialLines = preview.render(80);
-		expect(initialLines.some(l => l.includes("Preview:"))).toBe(true);
-
+	it("changes the visible composer geometry without losing its draft", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const preview = new ComposerShapePreview("box", { requestRender: () => {} });
+		expect(preview.render(80).join("\n")).toContain("╭");
 		preview.setValue("claude");
-		expect(renderRequested).toBe(true);
-		const nextLines = preview.render(80);
-		expect(nextLines.some(l => l.includes("Preview:"))).toBe(true);
+		const rendered = preview.render(80).join("\n");
+		expect(rendered).not.toContain("╭");
+		expect(rendered).toContain("Ask anything");
 	});
 
-	it("borrows status rows from the live status source per shape layout", async () => {
-		await setTheme("dark");
-		// Echo mocks: the stand-in title must be forwarded as a prop to every
-		// title-bearing status call, not glued onto the rendered content.
-		const status = {
-			getTopBorder: (_width: number, previewTitle?: string) => {
-				const content = `TOPBAR ${previewTitle ?? ""}`;
-				return { content, width: content.length };
+	it("keeps the native lower status group when responsive overflow is unavailable", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const status = createPreviewStatus(OMP_PRODUCT_IDENTITY);
+		const lines = renderComposerShapePreview("claude", 80, status, "Example session").map(Bun.stripANSI);
+		expect(lines[lines.length - 1]).toContain(theme.icon.omp);
+		expect(lines.slice(0, -1).join("\n")).toContain("Example session");
+	});
+
+	it("keeps each responsive field exactly once across the actual box edges", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const source = createBreadboardPreviewStatusSource(
+			{
+				modelName: "Model",
+				workspace: "Folder",
+				sessionName: "Session",
+				branch: "Branch",
+				context: { tokens: 40_000, capacity: 100_000 },
+				spend: { sessionUsd: 1.25, turnUsd: 0.05, estimated: true },
 			},
-			getStandaloneTopBorder: (_width: number, previewTitle?: string) => {
-				const content = `CHIP ${previewTitle ?? ""}`;
-				return { content, width: content.length };
-			},
-			getBandTopBorder: (_width: number, previewTitle?: string) => {
-				const content = `BAND ${previewTitle ?? ""}`;
-				return { content, width: content.length };
-			},
-			renderBottomBar: (_width: number, groups: "left" | "full", previewTitle?: string) =>
-				`BOTTOM-${groups.toUpperCase()} ${previewTitle ?? ""}`,
-		};
-
-		const box = renderComposerShapePreview("box", 80, status).join("\n");
-		expect(box).toContain("TOPBAR"); // embedded in the top border
-		expect(box).toContain("omp"); // stand-in title forwarded to the status source
-		expect(box).not.toContain("BOTTOM"); // box has no standalone bottom bar
-		const band = renderComposerShapePreview("band", 80, status).join("\n");
-		expect(band).toContain("BAND"); // flush band row above the prompt
-		expect(band).toContain("omp");
-		expect(band).not.toContain("BOTTOM"); // the band replaces the bottom bar
-
-		const claude = renderComposerShapePreview("claude", 80, status).join("\n");
-		expect(claude).toContain("CHIP"); // right group chips onto the top rule
-		expect(claude).toContain("omp");
-		expect(claude).toContain("BOTTOM-LEFT"); // left group only on the bottom bar
-
-		const rule = renderComposerShapePreview("rule", 80, status);
-		expect(rule.join("\n")).toContain("CHIP");
-		expect(rule.join("\n")).toContain("omp");
-		expect(rule.join("\n")).toContain("BOTTOM-LEFT");
-		expect(rule[rule.length - 2]).toBe(""); // spacer row: rule has no bottom chrome
-
-		const pi = renderComposerShapePreview("pi", 80, status);
-		expect(pi.join("\n")).not.toContain("CHIP");
-		expect(pi.join("\n")).toContain("omp");
-		expect(pi.join("\n")).toContain("BOTTOM-FULL"); // both groups on the bottom bar
-		expect(pi[pi.length - 2]).not.toBe(""); // bottom rule already separates the bar
-
-		const borderless = renderComposerShapePreview("borderless", 80, status).join("\n");
-		expect(borderless).toContain("omp");
-		expect(borderless).toContain("BOTTOM-FULL");
-
-		for (const shape of ["field", "rail"]) {
-			const rendered = renderComposerShapePreview(shape, 80, status);
-			expect(rendered.join("\n")).not.toContain("CHIP");
-			expect(rendered.join("\n")).toContain("omp");
-			expect(rendered.join("\n")).toContain("BOTTOM-FULL");
-			expect(rendered[rendered.length - 2]).toBe(""); // spacer row before the bar
+			"bb-balanced",
+		);
+		const narrow = renderComposerShapePreview("box", 56, source).map(Bun.stripANSI);
+		const wide = renderComposerShapePreview("box", 96, source).map(Bun.stripANSI);
+		for (const value of ["Model", "Folder", "Session", "Branch", "~40%", "~1.25"]) {
+			expect(narrow.join("\n").split(value).length - 1).toBe(1);
+			expect(wide.join("\n").split(value).length - 1).toBe(1);
 		}
+		expect(narrow[narrow.length - 1]).toContain("~40%");
+		expect(wide[wide.length - 1]).toContain("╰");
+	});
+
+	it("keeps Quiet identity anchored when activity appears on the rule", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const identity = { modelName: "Model", workspace: "Folder" };
+		const idle = Bun.stripANSI(
+			renderComposerShapePreview("rule", 80, createBreadboardPreviewStatusSource(identity, "bb-quiet"))[0]!,
+		);
+		const active = Bun.stripANSI(
+			renderComposerShapePreview(
+				"rule",
+				80,
+				createBreadboardPreviewStatusSource(
+					{ ...identity, activity: { kind: "working", label: "Working" } },
+					"bb-quiet",
+				),
+			)[0]!,
+		);
+		expect(idle).toContain("Folder");
+		expect(active).toContain("Working");
+		expect(idle.indexOf("Folder")).toBe(active.indexOf("Folder"));
 	});
 
 	it("uses the real status source for native and product marks across every symbol preset", async () => {

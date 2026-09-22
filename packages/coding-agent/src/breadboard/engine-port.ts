@@ -458,7 +458,10 @@ function createConnectedPort(
 			let lifecycleError: unknown;
 			try {
 				const outcome = await supervisor.close({ consumerClosed: true } satisfies StopOptions);
-				if (outcome.kind === "failure") monitor.stateChanged(outcome.state);
+				if (outcome.kind === "failure") {
+					monitor.stateChanged(outcome.state);
+					lifecycleError = new BreadboardEngineLifecycleError(outcome);
+				}
 			} catch (error) {
 				lifecycleError = error;
 			}
@@ -613,7 +616,8 @@ export async function connectCanonicalBreadboardEnginePort(
 	const supervisor = createProductionLifecycleSupervisor(config, monitor.stateChanged);
 	const connected = await supervisor.connect();
 	if (connected.kind !== "ready") {
-		await supervisor.close({ consumerClosed: true });
+		const cleanup = await supervisor.close({ consumerClosed: true });
+		if (cleanup.kind === "failure") throw new BreadboardEngineLifecycleError(cleanup);
 		return { kind: "failure", result: connected };
 	}
 	return {

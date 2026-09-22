@@ -2688,6 +2688,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			segmentOptions: settings.get("statusLine.segmentOptions"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 			contextLine: settings.get("statusLine.contextLine"),
+			breadboard: settings.get("statusLine.breadboard"),
 		});
 	}
 	syncComposerShape(): void {
@@ -2710,7 +2711,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.editor.setTopBorder(undefined);
 				break;
 		}
-		this.statusLine.setComposerStyle(style);
+		this.statusLine.setComposerStyle(style, width => this.editor.getTopBorderAvailableWidth(width));
 		this.updateEditorBorderColor();
 		this.#persistComposerStatus();
 		this.ui.requestRender();

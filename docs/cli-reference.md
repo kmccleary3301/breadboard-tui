@@ -256,10 +256,13 @@ Run `omp <command> --help` for each command's own flags and examples.
 
 In the BreadBoard distribution, `bb setup` (or `bb-omp setup` through the local
 launcher) configures providers, the default model, and presentation preferences
-with its original snake-and-logo animation, without a coding session or workspace checkpoint. Local-owned
-setup requires attached ownership and uses a separate temporary engine, leaving
-an existing coding engine untouched. Completion and cancellation close that
-temporary engine.
+with its original snake-and-logo animation, without a coding session or workspace
+checkpoint. Attached local-owned setup and application windows share a healthy
+engine and OMP gateway for the same workspace, profile, and engine configuration.
+Each client has its own SDK connection and a private local lease. Completing or
+cancelling setup releases that lease; other windows remain usable. The owner
+performs authenticated shutdown after the final client disconnects, retaining
+ownership and the gateway if another engine client prevents the drain.
 
 Information layout comes before glyph and composer-shape selection. BreadBoard
 Balanced, Quiet, and Detailed lead the list; Balanced is recommended. The sample
@@ -267,18 +270,17 @@ preview uses the selected shape, and Space cycles idle, working, and approval
 states. Enter saves a choice; Escape skips without changing it. Unicode, Nerd
 Font, Emoji, and ASCII remain independent of the information layout.
 
-Ordinary attached local-owned launches choose a fresh loopback endpoint when no
-engine URL is configured. Each client retains its own engine ownership; another
-client or a stale process cannot capture that launch. An explicit engine URL
-keeps the configured endpoint and its ownership checks. Opening a session or
-chatting without tools does not snapshot the workspace. Automatic checkpoints
-begin immediately before a file-editing or shell tool, so the initial rollback
-point includes user edits made since the session opened. Checkpoint credential
-and sandbox safety checks remain enabled.
+The shared owner chooses a loopback endpoint when no engine URL is configured.
+An explicit URL retains its endpoint and ownership checks. Unrelated, remote, and
+externally managed engines are not stopped by this shared-owner cleanup.
+Opening a session or chatting without tools does not snapshot the workspace.
+Automatic checkpoints begin immediately before a file-editing or shell tool, so
+the initial rollback point includes user edits made since the session opened.
+Checkpoint credential and sandbox safety checks remain enabled.
 Turn completion does not compute a final workspace diff unless JSON snapshot
 output is requested.
-Idle event streams remain open until cancelled; Bun's native five-minute idle
-timeout is disabled for these streams, not for ordinary engine requests.
+Idle event streams and shared-owner leases remain open until cancelled; native
+socket deadlines are disabled for these lifetime streams, not ordinary requests.
 
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`

@@ -807,6 +807,7 @@ export class Editor implements Component, Focusable {
 	 * Accounts for the border characters and horizontal padding when visible.
 	 */
 	getTopBorderAvailableWidth(terminalWidth: number): number {
+		if (this.#effectiveStyle().statusAttachment === "top-rule-chip") return Math.max(0, terminalWidth - 2);
 		const paddingX = this.#getEditorPaddingX();
 		const borderWidth = this.#getHorizontalChromeWidth(paddingX);
 		return Math.max(0, terminalWidth - borderWidth * 2);
@@ -1247,7 +1248,6 @@ export class Editor implements Component, Focusable {
 		this.#lastLayoutWidth = layoutWidth;
 
 		const box = this.#theme.symbols.boxRound;
-		const borderWidth = this.#getHorizontalChromeWidth(paddingX);
 
 		// Layout the text
 		const layoutLines = this.#layoutText(layoutWidth);
@@ -1276,7 +1276,7 @@ export class Editor implements Component, Focusable {
 		// Resolve the custom top-border content once per frame; the style decides
 		// how (and whether) to draw it. Provider evaluation stays editor-owned,
 		// coalescing per-event rebuilds to one per painted frame.
-		const topFillWidth = Math.max(0, width - borderWidth * 2);
+		const topFillWidth = this.getTopBorderAvailableWidth(width);
 		let topBorder: EditorTopBorder | undefined;
 		if (style.statusAttachment !== "none") {
 			if (this.#topBorderProvider) {

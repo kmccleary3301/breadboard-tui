@@ -5,6 +5,7 @@ import {
 	renderBreadboardActivity,
 	renderBreadboardPolicy,
 	renderBreadboardStatusLine,
+	renderBreadboardStatusRows,
 } from "../src/modes/components/status-line/breadboard-presentation";
 import { initTheme, setSymbolPreset } from "../src/modes/theme/theme";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
@@ -73,16 +74,16 @@ describe("BreadBoard composer presentation", () => {
 		expect(stripVTControlCharacters(renderBreadboardPolicy(harness))).toBe("Default: ask");
 	});
 
-	it("keeps generation and low context estimates in Detailed, not Balanced", async () => {
+	it("shows low context by default and respects field-specific overrides", async () => {
 		await initTheme(false, "unicode", false, "titanium", "light");
-		const snapshot = { modelName: "Luna", workspace: "repo", harness, context: { tokens: 2_000, capacity: 100_000 } };
-		const balanced = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-balanced", 160, "box"));
-		const detailed = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-detailed", 160, "box"));
-		expect(balanced).toContain("Daily driver / coding");
-		expect(balanced).not.toContain("g12345678");
-		expect(balanced).not.toContain("ctx");
-		expect(detailed).toContain("g12345678");
-		expect(detailed).toContain("ctx ~2% / 100K");
+		const snapshot = { modelName: "Luna", workspace: "repo", context: { tokens: 2_000, capacity: 100_000 } };
+		const balanced = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-balanced", 100, "box"));
+		const hidden = stripVTControlCharacters(
+			renderBreadboardStatusLine(snapshot, "bb-balanced", 100, "box", { context: "hidden" }),
+		);
+		expect(balanced).toContain("~2%");
+		expect(hidden).not.toContain("~2%");
+		expect(hidden).toContain(snapshot.workspace);
 		expect(renderBreadboardActivity(null, null, 40)).toBe("");
 	});
 
@@ -101,5 +102,87 @@ describe("BreadBoard composer presentation", () => {
 		expect(active.indexOf(snapshot.modelName)).toBe(idle.indexOf(snapshot.modelName));
 		expect(active.indexOf("Running run_shell")).toBeGreaterThan(active.indexOf(snapshot.workspace));
 		expect(visibleWidth(active)).toBe(80);
+	});
+
+	it("reveals the complete selected folder path when the edge has room", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const snapshot = {
+			modelName: "Luna",
+			workspace: "breadboard",
+			workspacePath: "/Users/developer/projects/experiments/terminal/breadboard",
+		};
+		const full = renderBreadboardStatusRows(snapshot, "bb-balanced", 120, "box", { folder: "full" });
+		const name = renderBreadboardStatusRows(snapshot, "bb-balanced", 120, "box", { folder: "name" });
+		expect(stripVTControlCharacters(full.top)).toContain(snapshot.workspacePath);
+		expect(full.bottom).toBe("");
+		expect(stripVTControlCharacters(name.top)).toContain(snapshot.workspace);
+		expect(name.top).not.toContain("/Users/");
+	});
+
+	it("moves fields below the input before dropping them and promotes them on expansion", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const snapshot = {
+			modelName: "Luna",
+			workspace: "breadboard",
+			sessionName: "Fix login flow",
+			branch: "feature/login",
+			harness,
+			context: { tokens: 40_000, capacity: 100_000 },
+			spend: { sessionUsd: 1.25, turnUsd: 0.05, estimated: true },
+		};
+		const narrow = renderBreadboardStatusRows(snapshot, "bb-balanced", 50, "box");
+		const wide = renderBreadboardStatusRows(snapshot, "bb-balanced", 160, "box");
+		expect(narrow.bottom).not.toBe("");
+		const combined = stripVTControlCharacters(`${narrow.top}\n${narrow.bottom}`);
+		expect(combined).toContain(snapshot.modelName);
+		expect(combined).toContain(snapshot.workspace);
+		expect(combined).toContain("~40%");
+		expect(combined).toContain("~1.25");
+		expect(visibleWidth(narrow.top)).toBeLessThanOrEqual(50);
+		expect(visibleWidth(narrow.bottom)).toBeLessThanOrEqual(50);
+		expect(wide.bottom).toBe("");
+		expect(stripVTControlCharacters(wide.top)).toContain(snapshot.sessionName);
+	});
+
+	it("keeps critical state and context ahead of routine metadata across both edges", async () => {
+		await initTheme(false, "emoji", false, "titanium", "light");
+		const rows = renderBreadboardStatusRows(
+			{
+				modelName: "Luna",
+				workspace: "breadboard",
+				sessionName: "A long session title",
+				harness: { ...harness, name: "Rules" },
+				context: { tokens: 95_000, capacity: 100_000 },
+				activity: { kind: "approval", label: "Approval required" },
+			},
+			"bb-detailed",
+			24,
+			"box",
+			{ context: "percent", activity: "hidden" },
+		);
+		const combined = stripVTControlCharacters(`${rows.top}\n${rows.bottom}`);
+		expect(combined).toContain("Approval required");
+		expect(combined).toContain("~95%");
+		expect(combined).not.toContain("Rules");
+		expect(visibleWidth(rows.top)).toBeLessThanOrEqual(24);
+		expect(visibleWidth(rows.bottom)).toBeLessThanOrEqual(24);
+	});
+
+	it("shows the chosen spend scope without treating unavailable accounting as zero", async () => {
+		await initTheme(false, "nerd", false, "titanium", "light");
+		const snapshot = {
+			modelName: "Luna",
+			workspace: "repo",
+			spend: { sessionUsd: 1.25, turnUsd: 0.05, estimated: true },
+		};
+		const turn = stripVTControlCharacters(
+			renderBreadboardStatusLine(snapshot, "bb-balanced", 100, "box", { spend: "turn" }),
+		);
+		expect(turn).toContain("~0.05");
+		expect(turn).not.toContain("1.25");
+		const absent = stripVTControlCharacters(
+			renderBreadboardStatusLine({ ...snapshot, spend: null }, "bb-balanced", 100, "box"),
+		);
+		expect(absent).not.toContain("0.00");
 	});
 });

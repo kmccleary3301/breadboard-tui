@@ -63,6 +63,11 @@ import {
 	type SettingPath,
 	type SettingValue,
 } from "./settings-schema";
+import {
+	BREADBOARD_FIELD_DEFINITIONS,
+	type BreadboardFieldSettings,
+	DEFAULT_BREADBOARD_FIELD_SETTINGS,
+} from "../modes/components/status-line/breadboard-fields";
 
 // Re-export types that callers need
 export type * from "./settings-schema";
@@ -90,6 +95,19 @@ function assertKnownStatusLineSegments(path: SettingPath, value: unknown): void 
 	throw new Error(
 		`Unknown status line ${noun}: ${unknown.join(", ")}. Valid segments: ${STATUS_LINE_SEGMENT_IDS.join(", ")}`,
 	);
+}
+
+function assertBreadboardFieldSettings(value: unknown): asserts value is Partial<BreadboardFieldSettings> {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error("statusLine.breadboard must be an object of field choices.");
+	}
+	for (const [key, choice] of Object.entries(value)) {
+		const field = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
+		if (!field) throw new Error(`Unknown BreadBoard information field: ${key}`);
+		if (!field.options.some(option => option.value === choice)) {
+			throw new Error(`Invalid BreadBoard information choice for ${key}: ${String(choice)}`);
+		}
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -700,8 +718,15 @@ export class Settings {
 		}
 
 		const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
-		const resolved =
+		if (value !== undefined) {
+			assertKnownStatusLineSegments(path, value);
+		}
+		let resolved =
 			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : getDefault(path);
+		if (path === "statusLine.breadboard") {
+			assertBreadboardFieldSettings(resolved);
+			resolved = { ...DEFAULT_BREADBOARD_FIELD_SETTINGS, ...resolved };
+		}
 		this.#resolvedCache.set(path, resolved);
 		return resolved as SettingValue<P>;
 	}
@@ -725,12 +750,12 @@ export class Settings {
 	}
 
 	/**
-	 * Set a setting value (sync).
 	 * Updates global settings and queues a background save.
 	 * Triggers hooks for settings that have side effects.
 	 */
 	set<P extends SettingPath>(path: P, value: SettingValue<P>): void {
 		assertKnownStatusLineSegments(path, value);
+		if (path === "statusLine.breadboard") assertBreadboardFieldSettings(value);
 		const prev = this.get(path);
 		const segments = path.split(".");
 		this.#captureGlobalMutation(path, this.#modifiedPathMutations, getByPath(this.#global, segments));

@@ -37,6 +37,7 @@ import {
 	COMPUTER_WORKER_ARG,
 	DAEMON_BROKER_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
+	SHARED_ENGINE_WORKER_ARG,
 	STATS_ACTIVITY_WORKER_ARG,
 	TERMINAL_OUTPUT_WORKER_ARG,
 } from "./cli/worker-selectors";
@@ -270,6 +271,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === BLOB_BROKER_WORKER_ARG) {
 		const { startBlobBrokerFromEnvironment } = await import("./blob-broker/server");
 		await startBlobBrokerFromEnvironment();
+		return true;
+	}
+	if (arg === SHARED_ENGINE_WORKER_ARG) {
+		const { startSharedBreadboardEngineFromEnvironment } = await import("./breadboard/shared-engine-worker");
+		await startSharedBreadboardEngineFromEnvironment();
 		return true;
 	}
 	return false;

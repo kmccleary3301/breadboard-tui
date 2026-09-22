@@ -3215,6 +3215,79 @@ describe("LifecycleSupervisor local-owned authority", () => {
 		expect(calls).toContain("detach-client");
 	});
 
+	test("a shared owner can retry shutdown after another client leaves without losing its registration", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		let otherClientActive = true;
+		const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+			...TEST_LIFECYCLE_DEFAULTS,
+			store,
+			process: process.adapter,
+			createClient: clientFactory(process, calls, {
+				get drainError() {
+					if (calls.includes("detach-client")) return new Error("requester registration was detached");
+					return otherClientActive
+						? new LifecycleE4ClientError({
+								kind: "drain-conflict",
+								status: 409,
+								code: "drain_clients_active",
+								correlation: {},
+								body: "[redacted]",
+							})
+						: undefined;
+				},
+			}),
+		});
+		expect((await supervisor.connect()).kind).toBe("ready");
+		const options = { consumerClosed: true, preserveOnDrainConflict: true };
+		expect(await supervisor.close(options)).toMatchObject({ kind: "failure", state: { reason: "drain_denied" } });
+		expect(await store.readCurrent("http://127.0.0.1:7777")).not.toBeNull();
+		otherClientActive = false;
+		process.exitOnNextWait();
+		expect((await supervisor.close(options)).kind).toBe("stopped");
+		expect(await store.readCurrent("http://127.0.0.1:7777")).toBeNull();
+	});
+
+	test("a shared owner never cancels another client's active turn while testing an idle shutdown", async () => {
+		const store = await temporaryStore();
+		const process = processHarness();
+		const calls: string[] = [];
+		const originalFetch = globalThis.fetch;
+		let otherTurnCancelled = false;
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0]) => {
+				if (String(input).endsWith("/cancel")) otherTurnCancelled = true;
+				return Response.json([{ session_id: "other-client-session", active_turn_id: "active-turn" }]);
+			},
+			{ preconnect: originalFetch.preconnect },
+		);
+		try {
+			const supervisor = new LifecycleSupervisor(resolved("local-owned"), {
+				...TEST_LIFECYCLE_DEFAULTS,
+				store,
+				process: process.adapter,
+				createClient: clientFactory(process, calls, {
+					drainError: new LifecycleE4ClientError({
+						kind: "drain-conflict",
+						status: 409,
+						code: "drain_clients_active",
+						correlation: {},
+						body: "[redacted]",
+					}),
+				}),
+			});
+			expect((await supervisor.connect()).kind).toBe("ready");
+			expect(await supervisor.close({ consumerClosed: true, preserveOnDrainConflict: true })).toMatchObject({
+				kind: "failure",
+				state: { reason: "drain_denied" },
+			});
+			expect(otherTurnCancelled).toBe(false);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	test("retires only after exact graceful process death without rollback or hard-signal outcome", async () => {
 		const store = await temporaryStore();
 		const process = processHarness();

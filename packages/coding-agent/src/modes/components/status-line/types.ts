@@ -1,3 +1,4 @@
+import type { HarnessSnapshot } from "../../../breadboard/harness-port";
 import type { CollabSessionState } from "../../../collab/protocol";
 import type {
 	ContextLineMode,
@@ -5,7 +6,7 @@ import type {
 	StatusLineSegmentId,
 	StatusLineSeparatorStyle,
 } from "../../../config/settings-schema";
-import type { HarnessSnapshot } from "../../../breadboard/harness-port";
+import type { BreadboardFieldSettings } from "./breadboard-fields";
 import type { AgentSession } from "../../../session/agent-session";
 import type { ActiveRepoContext } from "../../../utils/active-repo-context";
 import type { LoopConditionConfig } from "../../loop-condition";
@@ -53,6 +54,8 @@ export interface StatusLineSettings {
 	 *  usage. `embedded` moves configured context segments into the annotated
 	 *  gauge as percentage and window labels. Box composer only. */
 	contextLine?: ContextLineMode;
+	/** Per-field BreadBoard information choices; omitted means canonical defaults. */
+	breadboard?: BreadboardFieldSettings;
 }
 
 export type EffectiveStatusLineSettings = Required<

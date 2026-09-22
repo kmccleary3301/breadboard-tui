@@ -35,6 +35,13 @@ export interface ComposerPreviewStatusSource {
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number };
 	/** Plain standalone bottom bar carrying the given segment groups. */
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string;
+	/** Responsive overflow for shapes with a top attachment; omitted by non-responsive renderers. */
+	renderOverflowBar?(
+		width: number,
+		topWidth: number,
+		layout: "box" | "band" | "plain-right",
+		previewTitle?: string,
+	): string | undefined;
 }
 
 export interface ComposerShapePreviewOptions {
@@ -57,15 +64,16 @@ export function renderComposerShapePreview(
 	const style = getComposerStyle(shape);
 	const paddingX = style.defaultPaddingX(undefined);
 	const chromeWidth = style.sideChromeWidth(paddingX);
+	const topWidth = Math.max(0, previewWidth - (style.statusAttachment === "top-rule-chip" ? 2 : chromeWidth * 2));
 
 	let topBorder: EditorTopBorder | undefined;
 	if (status) {
 		if (style.statusAttachment === "top-border") {
-			topBorder = status.getTopBorder(Math.max(1, previewWidth - chromeWidth * 2), previewTitle);
+			topBorder = status.getTopBorder(topWidth, previewTitle);
 		} else if (style.statusAttachment === "top-band") {
-			topBorder = status.getBandTopBorder(previewWidth, previewTitle);
+			topBorder = status.getBandTopBorder(topWidth, previewTitle);
 		} else if (style.statusAttachment === "top-rule-chip") {
-			topBorder = status.getStandaloneTopBorder(previewWidth, previewTitle);
+			topBorder = status.getStandaloneTopBorder(topWidth, previewTitle);
 		}
 	}
 
@@ -109,7 +117,21 @@ export function renderComposerShapePreview(
 	const bottom = style.renderBottom(ctx);
 	if (bottom !== undefined) lines.push(bottom);
 
-	if (style.bottomBar !== "none" && status) {
+	let overflow: string | undefined;
+	if (style.statusAttachment !== "none" && status?.renderOverflowBar) {
+		const layout =
+			style.statusAttachment === "top-border"
+				? "box"
+				: style.statusAttachment === "top-band"
+					? "band"
+					: "plain-right";
+		overflow = status.renderOverflowBar(previewWidth, topWidth, layout, previewTitle);
+		if (overflow) {
+			if (style.bottomBarGap) lines.push("");
+			lines.push(overflow);
+		}
+	}
+	if (overflow === undefined && style.bottomBar !== "none" && status) {
 		const bar = status.renderBottomBar(previewWidth, style.bottomBar, previewTitle);
 		if (bar) {
 			if (style.bottomBarGap) lines.push("");

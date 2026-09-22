@@ -76,7 +76,9 @@ describe("Editor async autocomplete scheduling", () => {
 			new CombinedAutocompleteProvider([{ name: "harness", aliases: ["team"] }], "/tmp"),
 		);
 		const submissions: string[] = [];
-		editor.onSubmit = text => submissions.push(text);
+		editor.onSubmit = text => {
+			submissions.push(text);
+		};
 		editor.handleInput("/te");
 		await untilAutocompleteShown(editor);
 
@@ -101,7 +103,9 @@ describe("Editor async autocomplete scheduling", () => {
 		const editor = new Editor(defaultEditorTheme);
 		editor.setAutocompleteProvider(new DelayedCommands([{ name: "harness", aliases: ["team"] }], "/tmp"));
 		const submissions: string[] = [];
-		editor.onSubmit = text => submissions.push(text);
+		editor.onSubmit = text => {
+			submissions.push(text);
+		};
 		editor.handleInput("/te");
 		await requested.promise;
 

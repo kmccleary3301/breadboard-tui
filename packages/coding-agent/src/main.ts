@@ -26,7 +26,7 @@ import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
 import { nativeControlRestriction, nativeStartupRestriction } from "./breadboard/native-control-policy";
-import { resolveBreadboardOmpAgentDir, startBreadboardOmpGateway } from "./breadboard/omp-auth-gateway";
+import { resolveBreadboardOmpAgentDir } from "./breadboard/omp-auth-gateway";
 import {
 	applyCliApiKeyOverride,
 	BreadboardLifecycleStartupError,
@@ -1937,10 +1937,7 @@ export async function runRootCommand(
 			try {
 				preparation = logger.time("prepareBreadboardSetup", () =>
 					(deps.prepareBreadboardSetup ?? prepareBreadboardSetup)(parsedArgs, modelRegistry, settingsInstance, {
-						startOmpGateway:
-							ompAgentDir === undefined
-								? undefined
-								: () => startBreadboardOmpGateway(authStorage, modelRegistry),
+						ompAgentDir,
 						nativeAuthStorage: authStorage,
 					}),
 				);
@@ -2481,10 +2478,7 @@ export async function runRootCommand(
 						{
 							modelRegistry,
 							nativeAuthStorage: authStorage,
-							startOmpGateway:
-								ompAgentDir === undefined
-									? undefined
-									: () => startBreadboardOmpGateway(authStorage, modelRegistry),
+							ompAgentDir,
 							requestPermission: breadboardPermissionHandler,
 							selectedModel: parsedArgs.model ? sessionOptions.model : undefined,
 						},

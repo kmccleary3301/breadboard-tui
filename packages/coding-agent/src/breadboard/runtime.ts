@@ -5,7 +5,6 @@
  * assembly live here so the CLI entry point only coordinates startup.
  */
 import * as fsSync from "node:fs";
-import * as net from "node:net";
 import * as path from "node:path";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
@@ -36,7 +35,7 @@ import {
 	connectCanonicalBreadboardEnginePort,
 	type BreadboardLifecycleFailureResult as EngineLifecycleFailureResult,
 } from "./engine-port";
-import type { BreadboardOmpGateway } from "./omp-auth-gateway";
+import { acquireSharedBreadboardEngine, type AcquiredSharedBreadboardEngine } from "./shared-engine-client";
 import { formatBreadboardConnectionError, writeLifecyclePresentation } from "./lifecycle/lifecycle-presenter";
 import { resolveProductBreadboardRunConfig } from "./lifecycle/product-run-config";
 import {
@@ -333,8 +332,8 @@ interface BreadboardRuntimeBridge {
 type BreadboardModelRegistry = Pick<ModelRegistry, "getAll">;
 
 export interface BreadboardRuntimeAuthority {
-	readonly modelRegistry: BreadboardModelRegistry;
-	readonly startOmpGateway?: () => BreadboardOmpGateway;
+	readonly modelRegistry: Pick<ModelRegistry, "getAll" | "refresh">;
+	readonly ompAgentDir?: string;
 	readonly nativeAuthStorage?: AuthStorage;
 	readonly requestPermission: E4PermissionHandler;
 	readonly selectedModel?: Pick<Model, "provider" | "id">;
@@ -365,7 +364,8 @@ type ConnectedBreadboardEnginePort = Pick<
 	| "close"
 >;
 
-export interface ConnectedBreadboardRuntimeOptions extends BreadboardRuntimeAuthority {
+export interface ConnectedBreadboardRuntimeOptions extends Omit<BreadboardRuntimeAuthority, "modelRegistry"> {
+	readonly modelRegistry: BreadboardModelRegistry;
 	readonly engine: ConnectedBreadboardEnginePort;
 	readonly sessionTarget: OpenSession;
 	readonly harnessId?: string;
@@ -1099,31 +1099,27 @@ export function createRecoverableBreadboardRuntime(
 	});
 }
 
-async function allocateOwnedLoopbackEndpoint(): Promise<string> {
-	const server = net.createServer();
-	await new Promise<void>((resolve, reject) => {
-		const onError = (error: Error) => {
-			server.off("listening", onListening);
-			reject(error);
-		};
-		const onListening = () => {
-			server.off("error", onError);
-			resolve();
-		};
-		server.once("error", onError);
-		server.once("listening", onListening);
-		server.listen(0, "127.0.0.1");
-	});
-	const address = server.address();
-	const port = typeof address === "object" && address !== null ? address.port : undefined;
-	await new Promise<void>(resolve => server.close(() => resolve()));
-	if (port === undefined) throw new Error("BreadBoard could not allocate a local-owned loopback endpoint");
-	return `http://127.0.0.1:${port}`;
+export interface BreadboardSetupAuthority {
+	readonly ompAgentDir?: string;
+	readonly nativeAuthStorage?: AuthStorage;
 }
 
-export interface BreadboardSetupAuthority {
-	readonly startOmpGateway?: () => BreadboardOmpGateway;
-	readonly nativeAuthStorage?: AuthStorage;
+function assertSharedEngineAuthority(
+	engine: BreadboardEnginePort,
+	shared: AcquiredSharedBreadboardEngine | undefined,
+): void {
+	if (shared === undefined) return;
+	const binding = engine.authority.binding;
+	const expected = shared.info;
+	if (
+		binding.endpoint !== expected.endpoint ||
+		binding.engineInstanceId !== expected.engineInstanceId ||
+		binding.engineBootId !== expected.engineBootId ||
+		binding.process.pid !== expected.pid ||
+		binding.process.osProcessStartToken !== expected.osProcessStartToken
+	) {
+		throw new Error("BreadBoard connected engine does not match the shared lease identity");
+	}
 }
 
 export interface PreparedBreadboardSetup {
@@ -1141,60 +1137,72 @@ export interface PreparedBreadboardSetup {
  */
 export async function prepareBreadboardSetup(
 	parsed: Pick<Args, "engineMode" | "engineUrl" | "harness">,
-	modelRegistry: BreadboardModelRegistry,
+	modelRegistry: Pick<ModelRegistry, "getAll" | "refresh">,
 	activeSettings: Settings = settings,
 	authority?: BreadboardSetupAuthority,
 ): Promise<PreparedBreadboardSetup | null> {
 	const workspacePath = fsSync.realpathSync(getProjectDir());
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
 	let config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
-	if (authority?.startOmpGateway && (config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")) {
-		throw new Error("BREADBOARD_OMP_AGENT_DIR requires an attached local-owned BreadBoard engine");
-	}
-	if (config.mode === "local-owned") {
-		if (config.ownerExitPolicy !== "attached") {
-			throw new Error("Explicit setup requires an attached local-owned BreadBoard engine");
-		}
-		const endpoint = await allocateOwnedLoopbackEndpoint();
-		config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath, endpoint);
-	}
 	if (config.mode === "off") return null;
-
-	const gateway = authority?.startOmpGateway?.();
-	const lifecycleConfig = gateway === undefined ? config : Object.freeze({ ...config, gateway: gateway.binding });
-
-	let engine: BreadboardEnginePort;
+	if (
+		authority?.ompAgentDir !== undefined &&
+		(config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")
+	) {
+		throw new Error("The OMP auth gateway requires an attached local-owned BreadBoard engine");
+	}
+	let shared: AcquiredSharedBreadboardEngine | undefined;
+	if (config.mode === "local-owned" && config.ownerExitPolicy === "attached") {
+		shared = await acquireSharedBreadboardEngine(config, workspacePath, authority?.ompAgentDir);
+		config = shared.config;
+	} else if (config.mode === "local-owned") {
+		throw new Error("Explicit setup requires an attached local-owned BreadBoard engine");
+	}
+	let engine: BreadboardEnginePort | undefined;
 	try {
-		const connected = await connectCanonicalBreadboardEnginePort(lifecycleConfig, {
+		const connected = await connectCanonicalBreadboardEnginePort(config, {
 			onLateSessionCloseError: error => {
 				logger.warn("BreadBoard setup engine cleanup failed", { error: String(error) });
 			},
 		});
-		if (connected.kind !== "ready") {
-			throw new BreadboardLifecycleStartupError(connected.result);
-		}
+		if (connected.kind !== "ready") throw new BreadboardLifecycleStartupError(connected.result);
 		engine = connected.port;
+		assertSharedEngineAuthority(engine, shared);
 	} catch (error) {
+		const failures: unknown[] = [error];
 		try {
-			await gateway?.close();
+			await engine?.close();
 		} catch (cleanupError) {
-			throw new AggregateError([error, cleanupError], "BreadBoard setup startup and gateway cleanup failed");
+			failures.push(cleanupError);
 		}
+		try {
+			await shared?.close();
+		} catch (cleanupError) {
+			failures.push(cleanupError);
+		}
+		if (failures.length > 1) throw new AggregateError(failures, "BreadBoard setup startup and cleanup failed");
 		throw error;
 	}
-
 	let closePromise: Promise<void> | undefined;
 	const close = (): Promise<void> => {
 		closePromise ??= (async () => {
+			let engineError: unknown;
 			try {
 				await engine.close();
-			} finally {
-				await gateway?.close();
+			} catch (error) {
+				engineError = error;
 			}
+			try {
+				await shared?.close();
+			} catch (sharedError) {
+				if (engineError !== undefined)
+					throw new AggregateError([engineError, sharedError], "BreadBoard setup cleanup failed");
+				throw sharedError;
+			}
+			if (engineError !== undefined) throw engineError;
 		})();
 		return closePromise;
 	};
-
 	try {
 		const requestedHarnessId = IS_BREADBOARD_PRODUCT
 			? (parsed.harness ?? configuredHarnessId(activeSettings))
@@ -1204,13 +1212,14 @@ export async function prepareBreadboardSetup(
 				? await resolveHarnessId(engine.harnessClient, requestedHarnessId)
 				: (requestedHarnessId ?? DEFAULT_BREADBOARD_MODEL_CATALOG_CONFIG_PATH);
 		const loadCatalogModels = async (): Promise<readonly Model[]> => {
-			const catalog = await engine.getModelCatalog(catalogConfigPath);
-			return resolveBreadboardCatalogModels(catalog, modelRegistry);
+			await shared?.refreshAuth();
+			if (shared) await modelRegistry.refresh("offline");
+			return resolveBreadboardCatalogModels(await engine.getModelCatalog(catalogConfigPath), modelRegistry);
 		};
 		let currentModels = await loadCatalogModels();
 		return {
-			providerAuth: gateway !== undefined ? undefined : engine.providerAuth,
-			nativeAuthStorage: gateway !== undefined ? authority?.nativeAuthStorage : undefined,
+			providerAuth: authority?.ompAgentDir === undefined ? engine.providerAuth : undefined,
+			nativeAuthStorage: authority?.ompAgentDir === undefined ? undefined : authority.nativeAuthStorage,
 			get models() {
 				return currentModels;
 			},
@@ -1243,18 +1252,14 @@ export async function prepareBreadboardRuntime(
 	const workspacePath = fsSync.realpathSync(getProjectDir());
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
 	let config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
-	if (
-		config.mode === "local-owned" &&
-		config.ownerExitPolicy === "attached" &&
-		config.sources.endpoint === "derived-default"
-	) {
-		const endpoint = await allocateOwnedLoopbackEndpoint();
-		config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath, endpoint);
-	}
-	if (authority.startOmpGateway && (config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")) {
-		throw new Error("BREADBOARD_OMP_AGENT_DIR requires an attached local-owned BreadBoard engine");
-	}
+	let shared: AcquiredSharedBreadboardEngine | undefined;
 	if (config.mode === "off") return null;
+	if (
+		authority.ompAgentDir !== undefined &&
+		(config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")
+	) {
+		throw new Error("The OMP auth gateway requires an attached local-owned BreadBoard engine");
+	}
 	const sessionBinding =
 		parsed.continue || parsed.resume === true || typeof parsed.resume === "string"
 			? sessionManager && readBreadboardSessionBinding(sessionManager)
@@ -1286,16 +1291,13 @@ export async function prepareBreadboardRuntime(
 					startupModelOverride,
 					activeSettings.get("tools.approvalMode"),
 				);
-	const gateway = authority.startOmpGateway?.();
-	const lifecycleConfig = gateway === undefined ? config : Object.freeze({ ...config, gateway: gateway.binding });
-
 	const connectGeneration = async (
 		sessionTarget: OpenSession,
 		binding: BreadboardSessionBindingData | undefined,
 		allowTerminalSnapshotRecovery = false,
 		harnessRequestId = requestedHarnessId,
 	): Promise<BreadboardRuntimeGeneration> => {
-		const connected = await connectCanonicalBreadboardEnginePort(lifecycleConfig, {
+		const connected = await connectCanonicalBreadboardEnginePort(config, {
 			onLateSessionCloseError: () => {
 				process.stderr.write("BreadBoard session cleanup failed after caller abort.\n");
 				process.exitCode = 1;
@@ -1311,6 +1313,9 @@ export async function prepareBreadboardRuntime(
 		}
 		const enginePort = connected.port;
 		try {
+			assertSharedEngineAuthority(enginePort, shared);
+			await shared?.refreshAuth();
+			if (shared) await authority.modelRegistry.refresh("offline");
 			let resolvedHarnessId = harnessRequestId;
 			let resolvedSessionTarget = sessionTarget;
 			const usesDefaultTerminalResume = harnessRequestId === requestedHarnessId;
@@ -1363,7 +1368,7 @@ export async function prepareBreadboardRuntime(
 				modelRegistry: authority.modelRegistry,
 				nativeAuthStorage: authority.nativeAuthStorage,
 				requestPermission: authority.requestPermission,
-				exposeProviderAuth: gateway === undefined,
+				exposeProviderAuth: authority.ompAgentDir === undefined,
 			});
 			return { runtime, lifecycleFailure: enginePort.lifecycleFailure };
 		} catch (error) {
@@ -1376,6 +1381,10 @@ export async function prepareBreadboardRuntime(
 		}
 	};
 	try {
+		if (config.mode === "local-owned" && config.ownerExitPolicy === "attached") {
+			shared = await acquireSharedBreadboardEngine(config, workspacePath, authority.ompAgentDir);
+			config = shared.config;
+		}
 		const initial = await connectGeneration(target, sessionBinding, sessionBinding !== undefined);
 		return createRecoverableBreadboardRuntime(
 			initial,
@@ -1399,10 +1408,14 @@ export async function prepareBreadboardRuntime(
 					configPath,
 				);
 			},
-			gateway?.close,
+			shared?.close,
 		);
 	} catch (error) {
-		await gateway?.close().catch(() => undefined);
+		try {
+			await shared?.close();
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], "BreadBoard runtime startup and shared cleanup failed");
+		}
 		throw error;
 	}
 }
