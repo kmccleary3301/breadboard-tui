@@ -19,6 +19,7 @@ import { getSessionAccentHex } from "../../../utils/session-color";
 import { summarizeLoopCondition } from "../../loop-condition";
 import { sanitizeStatusText } from "../../shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./context-thresholds";
+import { renderBreadboardActivity, renderBreadboardPolicy } from "./breadboard-presentation";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 export type { SegmentContext } from "./types";
 
@@ -241,7 +242,7 @@ const modelSegment: StatusLineSegment = {
 		// Resolve the current thinking-level display ("◉ xhigh", "⟳ auto", …)
 		// when the model supports thinking and the segment isn't hiding it.
 		let thinkingDisplay = "";
-		if (opts.showThinkingLevel !== false && state.model?.thinking) {
+		if (!ctx.breadboardOwned && opts.showThinkingLevel !== false && state.model?.thinking) {
 			if (ctx.session.isAutoThinking) {
 				// Pending (no turn classified yet / classifying) shows a symbol-theme
 				// question-box marker; once resolved it shows `<level>`.
@@ -273,7 +274,7 @@ const modelSegment: StatusLineSegment = {
 		// theme.fg resets only the fg, so the spans are concatenated (not
 		// nested) to keep each color intact.
 		let tail = "";
-		if (ctx.session.isFastModeActive() && theme.icon.fast) {
+		if (!ctx.breadboardOwned && ctx.session.isFastModeActive() && theme.icon.fast) {
 			tail += ` ${theme.icon.fast}`;
 		}
 		if (!compact && thinkingDisplay) {
@@ -289,7 +290,7 @@ const modelSegment: StatusLineSegment = {
 		// `/advisor status`.
 		// Optional chaining: lightweight session doubles (test mocks) that don't
 		// implement getAdvisorStatusOverview skip the badge instead of crashing.
-		const advisorStats = ctx.session.getAdvisorStatusOverview?.();
+		const advisorStats = ctx.breadboardOwned ? undefined : ctx.session.getAdvisorStatusOverview?.();
 		if (advisorStats?.configured && advisorStats.advisors.length > 0) {
 			const statuses = advisorStats.advisors.map(a => a.status);
 			const badgeColor = statuses.includes("error")
@@ -589,6 +590,7 @@ const tokenRateSegment: StatusLineSegment = {
 const costSegment: StatusLineSegment = {
 	id: "cost",
 	render(ctx) {
+		if (ctx.breadboardOwned) return { content: "", visible: false };
 		const { cost, premiumRequests } = ctx.usageStats;
 		const advisorCost = ctx.session.getAdvisorCost?.() ?? 0;
 		const normalizedPremiumRequests = normalizePremiumRequests(premiumRequests);
@@ -641,6 +643,19 @@ const contextPctSegment: StatusLineSegment = {
 	render(ctx) {
 		const pct = ctx.contextPercent;
 		const window = ctx.contextWindow;
+		if (ctx.options.context_pct?.minPercent !== undefined && (pct ?? 0) < ctx.options.context_pct.minPercent) {
+			return { content: "", visible: false };
+		}
+		if (ctx.breadboardOwned) {
+			if (pct === null || !window || ctx.startupPlaceholder) return { content: "", visible: false };
+			return {
+				content: theme.fg(
+					getContextUsageThemeColor(getContextUsageLevel(pct, window)),
+					`ctx ~${Math.round(pct)}% / ${formatNumber(window)}`,
+				),
+				visible: true,
+			};
+		}
 
 		const color = getContextUsageThemeColor(getContextUsageLevel(pct ?? 0, window));
 		// Async-compaction indicator: pulse the auto icon while a background
@@ -952,12 +967,14 @@ const harnessSegment: StatusLineSegment = {
 	render(ctx) {
 		const harness = ctx.harness;
 		if (!harness) return { content: "", visible: false };
-		const parts = [truncateToWidth(sanitizeStatusText(harness.name), TRUNCATE_LENGTHS.SHORT)];
+		const options = ctx.options.harness;
+		const name = options?.showGeneration === false ? harness.name.replace(/\.(?:harness|ya?ml)$/u, "") : harness.name;
+		const parts = [truncateToWidth(sanitizeStatusText(name), options?.maxLength ?? TRUNCATE_LENGTHS.SHORT)];
 		if (harness.mode !== null) {
 			const mode = truncateToWidth(sanitizeStatusText(harness.mode), TRUNCATE_LENGTHS.SHORT);
 			if (mode.length > 0) parts.push(mode);
 		}
-		if (harness.generation !== null) {
+		if (options?.showGeneration !== false && harness.generation !== null) {
 			const generation = sanitizeStatusText(harness.generation);
 			if (generation.length > 0) {
 				const shortGen = generation.startsWith("sha256:")
@@ -985,6 +1002,27 @@ const longrunSegment: StatusLineSegment = {
 		if (budgets.totalTokens !== undefined) caps.push(`${formatNumber(budgets.totalTokens)} tok`);
 		const label = caps.length > 0 ? `longrun ≤ ${caps.join(" · ")}` : "longrun";
 		return { content: theme.fg("muted", label), visible: true };
+	},
+};
+
+const breadboardActivitySegment: StatusLineSegment = {
+	id: "bb_activity",
+	render(ctx) {
+		if (ctx.startupPlaceholder) return { content: "", visible: false };
+		const content = renderBreadboardActivity(
+			ctx.breadboardActivity,
+			ctx.turnElapsedMs,
+			Math.max(1, Math.min(36, ctx.width - 2)),
+		);
+		return { content, visible: content.length > 0 };
+	},
+};
+
+const breadboardPolicySegment: StatusLineSegment = {
+	id: "bb_policy",
+	render(ctx) {
+		const content = renderBreadboardPolicy(ctx.harness);
+		return { content, visible: content.length > 0 };
 	},
 };
 
@@ -1021,6 +1059,8 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	harness: harnessSegment,
 	longrun: longrunSegment,
 	vim: vimSegment,
+	bb_activity: breadboardActivitySegment,
+	bb_policy: breadboardPolicySegment,
 };
 
 export function renderSegment(id: StatusLineSegmentId, ctx: SegmentContext): RenderedSegment {

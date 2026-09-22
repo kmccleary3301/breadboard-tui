@@ -4,7 +4,7 @@ import "@oh-my-pi/pi-utils/env";
 import { getComposerCacheDir } from "@oh-my-pi/pi-utils/dirs";
 import type { LspServerInfo, RecentSession } from "./components/welcome";
 import type { ComposerPreferences, ComposerStatusSnapshot } from "./composer";
-import type { SymbolPreset } from "./theme/theme";
+import { isValidSymbolPreset, type SymbolPreset } from "./theme/theme";
 
 const CACHE_VERSION = 1;
 const STATUS_CACHE_VERSION = 3;
@@ -215,11 +215,12 @@ function readUiState(file: string): { preferences: ComposerPreferences; theme: C
 	const colorBlindMode = field(rawTheme, "colorBlindMode");
 	const darkTheme = field(rawTheme, "darkTheme");
 	const lightTheme = field(rawTheme, "lightTheme");
+	let validatedSymbolPreset: SymbolPreset | undefined;
+	if (symbolPreset !== undefined) {
+		if (typeof symbolPreset !== "string" || !isValidSymbolPreset(symbolPreset)) return undefined;
+		validatedSymbolPreset = symbolPreset;
+	}
 	if (
-		(symbolPreset !== undefined &&
-			symbolPreset !== "unicode" &&
-			symbolPreset !== "nerd" &&
-			symbolPreset !== "ascii") ||
 		(colorBlindMode !== undefined && typeof colorBlindMode !== "boolean") ||
 		(darkTheme !== undefined && typeof darkTheme !== "string") ||
 		(lightTheme !== undefined && typeof lightTheme !== "string")
@@ -243,7 +244,7 @@ function readUiState(file: string): { preferences: ComposerPreferences; theme: C
 			spellingAutocorrect,
 			reduceMotion,
 		},
-		theme: { symbolPreset, colorBlindMode, darkTheme, lightTheme },
+		theme: { symbolPreset: validatedSymbolPreset, colorBlindMode, darkTheme, lightTheme },
 	};
 }
 

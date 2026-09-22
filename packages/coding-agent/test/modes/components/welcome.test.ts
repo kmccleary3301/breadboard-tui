@@ -211,7 +211,7 @@ describe("WelcomeComponent native identity", () => {
 			setupWordmark: "Alternate",
 			composerFrameLabel: "Alternate Frame",
 			logoArt: Object.freeze(["ALT"]),
-			compactLogo: Object.freeze({ unicode: "A", nerd: "A", ascii: "A" }),
+			compactLogo: Object.freeze({ unicode: "A", nerd: "A", emoji: "A", ascii: "A" }),
 			gradientPalettes: Object.freeze({
 				dark: Object.freeze({
 					stops: Object.freeze([[255, 0, 0] as const, [128, 0, 0] as const]),

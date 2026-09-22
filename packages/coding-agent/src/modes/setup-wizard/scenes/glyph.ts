@@ -1,18 +1,20 @@
 import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
-import { getSelectListTheme, type SymbolPreset, setSymbolPreset, theme } from "../../theme/theme";
+import { getSelectListTheme, isValidSymbolPreset, type SymbolPreset, setSymbolPreset, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
-const GLYPH_PRESETS = ["nerd", "unicode", "ascii"] as const satisfies readonly SymbolPreset[];
+const GLYPH_PRESETS = ["unicode", "nerd", "emoji", "ascii"] as const satisfies readonly SymbolPreset[];
 
 const GLYPH_LABELS: Readonly<Record<SymbolPreset, string>> = {
-	nerd: "Nerd Font",
 	unicode: "Unicode",
+	nerd: "Nerd Font",
+	emoji: "Emoji",
 	ascii: "ASCII",
 };
 
 const GLYPH_SAMPLES: Readonly<Record<SymbolPreset, string>> = {
+	unicode: "✔  ✖  ▱  ◎  ╭─╮  ├─  •  ⠋  →",
 	nerd: "      󰉋  ",
-	unicode: "✔  ✖  📁  ⬢  ╭─╮  ├─  •  ⠋  →",
+	emoji: "✔  ✖  📁  🎯  🧠  🚀",
 	ascii: "[ok]  [x]  >  +  [D]  +-+  |--  *  ->",
 };
 
@@ -20,8 +22,12 @@ const GLYPH_SAMPLES: Readonly<Record<SymbolPreset, string>> = {
 const GLYPH_ITEMS: readonly SelectItem[] = GLYPH_PRESETS.map((preset, index) => ({
 	value: preset,
 	label: `${index + 1}  ${GLYPH_LABELS[preset]}`,
-	description: preset === "nerd" ? `${GLYPH_SAMPLES.nerd}  ╭─╮  ├─  ◆  ✔  ✖` : GLYPH_SAMPLES[preset],
+	description: GLYPH_SAMPLES[preset],
 }));
+
+function presetFromItem(item: SelectItem): SymbolPreset | undefined {
+	return isValidSymbolPreset(item.value) ? item.value : undefined;
+}
 
 class GlyphSceneController implements SetupSceneController {
 	title = "Choose glyph mode";
@@ -29,21 +35,30 @@ class GlyphSceneController implements SetupSceneController {
 	#selectList: SelectList;
 	#previewRequest = 0;
 	#committing = false;
+	readonly #originalPreset: SymbolPreset;
+	#previewChain: Promise<void> = Promise.resolve();
 	/** Render line where the select list begins. */
 	#listRowStart = 0;
 
 	constructor(private readonly host: SetupSceneHost) {
-		this.#selectList = new SelectList(GLYPH_ITEMS, GLYPH_ITEMS.length, getSelectListTheme());
-		const current = theme.getSymbolPreset();
-		const currentIndex = GLYPH_PRESETS.indexOf(current);
+		this.#originalPreset = theme.getSymbolPreset();
+		this.#selectList = new SelectList(GLYPH_ITEMS, GLYPH_ITEMS.length, getSelectListTheme(), {
+			wrapDescription: true,
+			maxDescriptionRows: 1,
+		});
+		const currentIndex = GLYPH_PRESETS.indexOf(this.#originalPreset);
 		this.#selectList.setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
 		this.#selectList.onSelectionChange = item => {
-			this.#preview(item.value as SymbolPreset);
+			const preset = presetFromItem(item);
+			if (preset) this.#preview(preset);
 		};
 		this.#selectList.onSelect = item => {
-			void this.#commit(item.value as SymbolPreset);
+			const preset = presetFromItem(item);
+			if (preset) void this.#commit(preset);
 		};
-		this.#selectList.onCancel = () => host.finish("skipped");
+		this.#selectList.onCancel = () => {
+			void this.#cancel();
+		};
 	}
 
 	invalidate(): void {
@@ -52,7 +67,7 @@ class GlyphSceneController implements SetupSceneController {
 
 	handleInput(data: string): void {
 		if (this.#committing) return;
-		const quickIndex = data >= "1" && data <= "3" ? Number(data) - 1 : -1;
+		const quickIndex = data >= "1" && data <= "4" ? Number(data) - 1 : -1;
 		if (quickIndex >= 0) {
 			const preset = GLYPH_PRESETS[quickIndex];
 			this.#selectList.setSelectedIndex(quickIndex);
@@ -79,15 +94,30 @@ class GlyphSceneController implements SetupSceneController {
 		if (this.#committing) return;
 		this.#committing = true;
 		this.#previewRequest += 1;
+		await this.#previewChain;
 		this.host.ctx.settings.set("symbolPreset", preset);
 		await setSymbolPreset(preset);
+		await this.host.ctx.settings.flush();
 		this.host.ctx.ui.invalidate();
 		this.host.finish("done");
 	}
 
+	async #cancel(): Promise<void> {
+		if (this.#committing) return;
+		this.#committing = true;
+		this.#previewRequest += 1;
+		await this.#previewChain;
+		await setSymbolPreset(this.#originalPreset);
+		this.host.ctx.ui.invalidate();
+		this.host.requestRender();
+		this.host.finish("skipped");
+	}
+
 	#preview(preset: SymbolPreset): void {
 		const request = ++this.#previewRequest;
-		void setSymbolPreset(preset).then(() => {
+		this.#previewChain = this.#previewChain.then(async () => {
+			if (request !== this.#previewRequest || this.#committing) return;
+			await setSymbolPreset(preset);
 			if (request !== this.#previewRequest || this.#committing) return;
 			this.host.ctx.ui.invalidate();
 			this.host.requestRender();

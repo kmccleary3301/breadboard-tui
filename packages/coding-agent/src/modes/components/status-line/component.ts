@@ -47,7 +47,9 @@ import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCa
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
+import { isBreadboardPreset, renderBreadboardStatusLine } from "./breadboard-presentation";
 import type {
+	BreadboardComposerActivity,
 	CollabStatus,
 	EffectiveStatusLineSettings,
 	StatusLineSegmentId,
@@ -439,6 +441,7 @@ export class StatusLineComponent implements Component {
 	#vibeWorkerTokenRate: (() => number | null) | null = null;
 	#collabStatus: CollabStatus | null = null;
 	#harness: HarnessSnapshot | null = null;
+	#breadboardActivity: BreadboardComposerActivity | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 	#repositoryProbeImmediate: NodeJS.Immediate | undefined;
@@ -860,6 +863,13 @@ export class StatusLineComponent implements Component {
 	setHarness(harness: HarnessSnapshot | null | undefined): void {
 		this.#harness = harness ?? null;
 		this.invalidate();
+	}
+
+	setBreadboardActivity(activity: BreadboardComposerActivity | null): void {
+		if (this.#breadboardActivity?.kind === activity?.kind && this.#breadboardActivity?.label === activity?.label)
+			return;
+		this.#breadboardActivity = activity;
+		this.#clearRenderedOutput();
 	}
 
 	/** Set the callback that presents detected Codex reset celebrations, or clear it with `undefined`. */
@@ -2069,7 +2079,8 @@ export class StatusLineComponent implements Component {
 		const state = this.session.state;
 
 		// Trigger background fetch (5-min TTL); render uses cached value
-		this.refreshUsageInBackground();
+		const breadboardOwned = this.session.mainStreamOwnsTurnLifecycle || this.identity.id === "breadboard";
+		if (!breadboardOwned) this.refreshUsageInBackground();
 
 		// Get usage statistics
 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
@@ -2130,6 +2141,8 @@ export class StatusLineComponent implements Component {
 			sessionAccent: sessionAccentEnabled,
 			previewTitle,
 			harness: this.#harness,
+			breadboardOwned,
+			breadboardActivity: this.#breadboardActivity,
 			identityMark:
 				this.identity.id === OMP_PRODUCT_IDENTITY.id
 					? theme.icon.omp
@@ -2153,8 +2166,8 @@ export class StatusLineComponent implements Component {
 			contextPercent,
 			contextTokens,
 			contextWindow,
-			autoCompactEnabled: this.#autoCompactEnabled,
-			compactionSpeculation,
+			autoCompactEnabled: !breadboardOwned && this.#autoCompactEnabled,
+			compactionSpeculation: breadboardOwned ? "idle" : compactionSpeculation,
 			speculationBlinkOn: this.#speculationBlinkOn,
 			subagentCount: this.#subagentCount,
 			activeMs: this.getActiveMs(),
@@ -2208,6 +2221,10 @@ export class StatusLineComponent implements Component {
 			leftSegments,
 			rightSegments,
 			separator: this.#settings.separator ?? presetDef.separator,
+			contextLine:
+				this.session.mainStreamOwnsTurnLifecycle || this.identity.id === "breadboard"
+					? "off"
+					: this.#settings.contextLine,
 			segmentOptions: mergedSegmentOptions,
 		};
 	}
@@ -2486,7 +2503,7 @@ export class StatusLineComponent implements Component {
 		nowMs: number,
 	): string {
 		const effectiveSettings = this.#resolveSettings();
-		this.#syncPricingTimer();
+		if (!this.session.mainStreamOwnsTurnLifecycle && this.identity.id !== "breadboard") this.#syncPricingTimer();
 		const placeholders = options?.placeholders === true;
 		const plain = layout !== "box" && layout !== "band";
 		const includePath =
@@ -2507,8 +2524,37 @@ export class StatusLineComponent implements Component {
 			previewTitle,
 		);
 		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: true } : liveCtx;
+		if (isBreadboardPreset(effectiveSettings.preset)) {
+			return renderBreadboardStatusLine(
+				{
+					modelName: placeholders
+						? "Connecting"
+						: (this.session.model?.name ?? this.session.model?.id ?? "No model"),
+					workspace: ctx.worktree
+						? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
+						: path.basename(getProjectDir()),
+					harness: ctx.harness,
+					branch: ctx.git.branch,
+					activity: placeholders ? null : ctx.breadboardActivity,
+					elapsedMs: placeholders ? null : ctx.turnElapsedMs,
+					context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
+					inputTokens: placeholders ? undefined : ctx.usageStats.input,
+					outputTokens: placeholders ? undefined : ctx.usageStats.output,
+					vim:
+						ctx.vim && ctx.vim.display !== "none"
+							? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
+							: undefined,
+				},
+				effectiveSettings.preset ?? "bb-balanced",
+				width,
+				layout,
+			);
+		}
 		const separatorDef = plain
-			? { left: "·", right: "·" }
+			? {
+					left: theme.getSymbolPreset() === "ascii" ? "|" : "·",
+					right: theme.getSymbolPreset() === "ascii" ? "|" : "·",
+				}
 			: getSeparator(effectiveSettings.separator ?? "powerline-thin", theme);
 
 		// Transparent bars inherit the terminal's default background. Powerline

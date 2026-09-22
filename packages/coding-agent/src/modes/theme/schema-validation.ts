@@ -105,7 +105,7 @@ const themeJsonSchema = type({
 		"infoBg?": "string | number",
 	},
 	"symbols?": {
-		"preset?": "'unicode' | 'nerd' | 'ascii'",
+		"preset?": "'unicode' | 'nerd' | 'emoji' | 'ascii'",
 		"overrides?": { "[string]": "string" },
 		"spinnerFrames?": spinnerFramesSchema,
 	},

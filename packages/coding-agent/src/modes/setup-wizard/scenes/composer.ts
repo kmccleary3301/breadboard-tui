@@ -1,8 +1,10 @@
 import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import type { ComposerShape } from "../../../config/settings-schema";
-import { renderComposerShapePreview } from "../../components/composer-shape-preview";
+import { renderComposerShapePreview, type ComposerPreviewStatusSource } from "../../components/composer-shape-preview";
 import { getComposerShapeOptions } from "../../components/composer-shape-registry";
+import { isBreadboardPreset } from "../../components/status-line/breadboard-presentation";
 import { getSelectListTheme, theme } from "../../theme/theme";
+import { createBreadboardPreviewStatusSource, previewSnapshot } from "./information-layout";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 class ComposerSceneController implements SetupSceneController {
@@ -14,6 +16,7 @@ class ComposerSceneController implements SetupSceneController {
 	#currentShape: ComposerShape = "band";
 	#committing = false;
 	#listRowStart = 0;
+	#previewStatus?: ComposerPreviewStatusSource;
 
 	constructor(private readonly host: SetupSceneHost) {
 		const choices = getComposerShapeOptions(host.identity);
@@ -27,6 +30,12 @@ class ComposerSceneController implements SetupSceneController {
 		const initialShape = this.#shapes.includes(configuredShape) ? configuredShape : "band";
 		this.#currentShape = initialShape;
 		const initialIndex = Math.max(0, this.#shapes.indexOf(initialShape));
+		const configuredPreset = host.ctx.settings.get("statusLine.preset");
+		this.#previewStatus =
+			host.ctx.statusLine ??
+			(host.identity.id === "breadboard" && isBreadboardPreset(configuredPreset)
+				? createBreadboardPreviewStatusSource(previewSnapshot(host), configuredPreset)
+				: undefined);
 
 		const selectListTheme = getSelectListTheme();
 		this.#selectList = new SelectList(this.#items, this.#items.length, selectListTheme);
@@ -70,7 +79,7 @@ class ComposerSceneController implements SetupSceneController {
 		const previewLines = renderComposerShapePreview(
 			this.#currentShape,
 			width,
-			this.host.ctx.statusLine,
+			this.#previewStatus,
 			this.host.identity.cliName,
 		);
 		if (budget - lines.length - previewLines.length - 2 >= this.#items.length) {

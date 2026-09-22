@@ -6,6 +6,7 @@ import { CURRENT_SETUP_VERSION } from "../setup-version";
 import type { InteractiveModeContext } from "../types";
 import { composerSetupScene } from "./scenes/composer";
 import { glyphSetupScene } from "./scenes/glyph";
+import { informationLayoutSetupScene } from "./scenes/information-layout";
 import { modelSetupScene } from "./scenes/model";
 import { providersSetupScene } from "./scenes/providers";
 import { themeSetupScene } from "./scenes/theme";
@@ -22,10 +23,10 @@ export type {
 
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
-
 export const ALL_SCENES = [
 	providersSetupScene,
 	modelSetupScene,
+	informationLayoutSetupScene,
 	glyphSetupScene,
 	composerSetupScene,
 	themeSetupScene,

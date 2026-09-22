@@ -272,6 +272,8 @@ export const STATUS_LINE_SEGMENT_IDS = [
 	"vim",
 	"harness",
 	"longrun",
+	"bb_activity",
+	"bb_policy",
 ] as const;
 
 /** One identifier from the supported status-line segment catalog. */
@@ -901,16 +903,17 @@ export const SETTINGS_SCHEMA = {
 
 	symbolPreset: {
 		type: "enum",
-		values: ["unicode", "nerd", "ascii"] as const,
+		values: ["unicode", "nerd", "emoji", "ascii"] as const,
 		default: "unicode",
 		ui: {
 			tab: "appearance",
 			group: "Theme",
 			label: "Symbol Preset",
-			description: "Glyph set for icons and symbols (Unicode, Nerd Font, or ASCII)",
+			description: "Choose restrained symbols, Nerd Font icons, emoji, or plain ASCII",
 			options: [
-				{ value: "unicode", label: "Unicode", description: "Standard symbols (default)" },
+				{ value: "unicode", label: "Unicode", description: "Restrained monochrome symbols (default)" },
 				{ value: "nerd", label: "Nerd Font", description: "Requires Nerd Font" },
+				{ value: "emoji", label: "Emoji", description: "Expressive icons; preview terminal alignment" },
 				{ value: "ascii", label: "ASCII", description: "Maximum compatibility" },
 			],
 		},
@@ -942,14 +945,40 @@ export const SETTINGS_SCHEMA = {
 	// Status line
 	"statusLine.preset": {
 		type: "enum",
-		values: ["default", "minimal", "compact", "full", "nerd", "ascii", "custom"] as const,
+		values: [
+			"bb-balanced",
+			"bb-quiet",
+			"bb-detailed",
+			"default",
+			"minimal",
+			"compact",
+			"full",
+			"nerd",
+			"ascii",
+			"custom",
+		] as const,
 		default: "default",
 		ui: {
 			tab: "appearance",
 			group: "Status Line",
 			label: "Status Line Preset",
-			description: "Pre-built status line configurations",
+			description: "Information shown around the input editor; independent of shape and glyph style",
 			options: [
+				{
+					value: "bb-balanced",
+					label: "BreadBoard Balanced",
+					description: "Recommended: model, harness, workspace, and actionable state",
+				},
+				{
+					value: "bb-quiet",
+					label: "BreadBoard Quiet",
+					description: "Model and workspace, with activity when needed",
+				},
+				{
+					value: "bb-detailed",
+					label: "BreadBoard Detailed",
+					description: "Harness identity, context estimate, tokens, and configured budgets",
+				},
 				{ value: "default", label: "Default", description: "Model, path, git, context, tokens, cost" },
 				{ value: "minimal", label: "Minimal", description: "Path and git only" },
 				{ value: "compact", label: "Compact", description: "Model, git, cost, context" },

@@ -170,7 +170,7 @@ describe("identity and theme customization boundaries", () => {
 			setupWordmark: "Alternate",
 			composerFrameLabel: "Alternate Frame",
 			logoArt: ["ALT"],
-			compactLogo: { unicode: "A", nerd: "A", ascii: "A" },
+			compactLogo: { unicode: "A", nerd: "A", emoji: "A", ascii: "A" },
 			gradientPalettes: {
 				dark: {
 					stops: [

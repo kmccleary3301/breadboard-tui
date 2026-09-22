@@ -182,7 +182,7 @@ describe("composer shape preview", () => {
 	});
 
 	it("uses the real status source for native and product marks across every symbol preset", async () => {
-		for (const preset of ["unicode", "nerd", "ascii"] as const) {
+		for (const preset of ["unicode", "nerd", "emoji", "ascii"] as const) {
 			await initTheme(false, preset, false, "titanium", "light");
 			for (const identity of [OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY]) {
 				const status = createPreviewStatus(identity);

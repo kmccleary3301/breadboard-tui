@@ -5,6 +5,7 @@ import type { ModelRegistry } from "../../../config/model-registry";
 import type { Settings } from "../../../config/settings";
 import type { ProductIdentity } from "../../../product-identity";
 import type { ComposerPreviewStatusSource } from "../../components/composer-shape-preview";
+import type { StatusLineComponent } from "../../components/status-line";
 
 export interface SetupModelSelection {
 	readonly mode: "default" | "session";
@@ -27,7 +28,7 @@ export interface SetupWizardContext {
 		"authStorage" | "getAvailable" | "getAll" | "refresh" | "refreshProvider"
 	>;
 	readonly modelSelection: SetupModelSelection;
-	readonly statusLine?: ComposerPreviewStatusSource;
+	readonly statusLine?: ComposerPreviewStatusSource & Pick<StatusLineComponent, "updateSettings">;
 	openInBrowser(urlOrPath: string): void;
 	playWelcomeIntro?(): void;
 }

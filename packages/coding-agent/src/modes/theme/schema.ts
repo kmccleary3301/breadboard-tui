@@ -17,7 +17,7 @@ export interface ThemeJson {
 		infoBg?: ColorValue;
 	};
 	symbols?: {
-		preset?: "unicode" | "nerd" | "ascii";
+		preset?: "unicode" | "nerd" | "emoji" | "ascii";
 		overrides?: Record<string, string>;
 		spinnerFrames?: SpinnerFramesOverride;
 	};

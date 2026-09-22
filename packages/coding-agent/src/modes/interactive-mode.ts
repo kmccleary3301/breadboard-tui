@@ -1080,6 +1080,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.lastAssistantUsage = undefined;
 		this.servedModelTracker = new ServedModelTracker();
 		this.pendingTools.clear();
+		this.#eventController.clearBreadboardActivity();
 	}
 	readonly #uiHelpers: UiHelpers;
 	#sttController: STTController | undefined;

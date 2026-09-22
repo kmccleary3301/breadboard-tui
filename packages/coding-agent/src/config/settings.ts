@@ -36,7 +36,13 @@ import { invalidate as invalidateCapabilityFsCache } from "../capability/fs";
 import { type Settings as SettingsCapabilityItem, settingsCapability } from "../capability/settings";
 import type { ModelRole } from "../config/model-roles";
 import { loadCapability } from "../discovery";
-import { isLightTheme, setAutoThemeMapping, setColorBlindMode, setSymbolPreset } from "../modes/theme/theme";
+import {
+	isLightTheme,
+	isValidSymbolPreset,
+	setAutoThemeMapping,
+	setColorBlindMode,
+	setSymbolPreset,
+} from "../modes/theme/theme";
 import { AgentStorage } from "../session/agent-storage";
 import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
 import { AUTO_IMAGE_PROVIDER_ORDER, isImageProviderId } from "../tools/image-providers";
@@ -3230,7 +3236,7 @@ const SETTING_HOOKS: Partial<Record<SettingPath, SettingHook<any>>> = {
 		}
 	},
 	symbolPreset: value => {
-		if (typeof value === "string" && (value === "unicode" || value === "nerd" || value === "ascii")) {
+		if (typeof value === "string" && isValidSymbolPreset(value)) {
 			setSymbolPreset(value).catch(err => {
 				logger.warn("Settings: symbolPreset hook failed", { preset: value, error: String(err) });
 			});

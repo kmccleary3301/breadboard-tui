@@ -561,6 +561,7 @@ function safeBreadboardPermissionText(value: string | null): string | undefined 
 
 export function createBreadboardPermissionHandler(
 	getUIContext: () => ExtensionUIContext | undefined,
+	onActivity?: (pending: boolean) => void,
 ): E4PermissionHandler {
 	return async (request, signal) => {
 		if (signal.aborted) return "cancel";
@@ -577,6 +578,7 @@ export function createBreadboardPermissionHandler(
 				? "BreadBoard permission request"
 				: `BreadBoard permission request · ${details.join(" · ")}`;
 		try {
+			onActivity?.(true);
 			const choice = await uiContext.select(title, ["Allow", "Deny"], { signal });
 			if (signal.aborted) return "cancel";
 			if (choice === "Allow") return "allow";
@@ -585,6 +587,8 @@ export function createBreadboardPermissionHandler(
 		} catch (error) {
 			if (signal.aborted || (error instanceof Error && error.name === "AbortError")) return "cancel";
 			throw error;
+		} finally {
+			onActivity?.(false);
 		}
 	};
 }

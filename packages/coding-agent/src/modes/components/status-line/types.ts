@@ -13,6 +13,11 @@ import type { LoopLimitRuntime } from "../../loop-limit";
 
 export type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle };
 
+export interface BreadboardComposerActivity {
+	readonly kind: "working" | "tool" | "approval" | "cancelling" | "error";
+	readonly label: string;
+}
+
 /** Collab session indicator + (guest-only) host-state override for segments. */
 export interface CollabStatus {
 	role: "host" | "guest";
@@ -26,6 +31,8 @@ export interface StatusLineSegmentOptions {
 	path?: { abbreviate?: boolean; maxLength?: number; stripWorkPrefix?: boolean };
 	git?: { showBranch?: boolean; showStaged?: boolean; showUnstaged?: boolean; showUntracked?: boolean };
 	time?: { format?: "12h" | "24h"; showSeconds?: boolean };
+	harness?: { showGeneration?: boolean; maxLength?: number };
+	context_pct?: { minPercent?: number };
 }
 
 export interface StatusLineSettings {
@@ -77,6 +84,9 @@ export interface SegmentContext {
 	startupPlaceholder?: boolean;
 	/** Active BreadBoard harness identity, when this session is running on BreadBoard. */
 	harness?: HarnessSnapshot | null;
+	/** Engine-owned turns must not expose native reasoning, billing, or compaction state. */
+	breadboardOwned?: boolean;
+	breadboardActivity?: BreadboardComposerActivity | null;
 	activeRepo: ActiveRepoContext | null;
 	width: number;
 	options: StatusLineSegmentOptions;

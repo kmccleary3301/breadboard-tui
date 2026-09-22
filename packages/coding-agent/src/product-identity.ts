@@ -7,7 +7,7 @@
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 
 export type ProductAppearance = "dark" | "light";
-export type ProductSymbolPreset = "unicode" | "nerd" | "ascii";
+export type ProductSymbolPreset = "unicode" | "nerd" | "emoji" | "ascii";
 export type GradientStop = readonly [red: number, green: number, blue: number];
 
 export interface GradientPalette {
@@ -84,7 +84,7 @@ export const OMP_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	setupWordmark: "O h   M y   P i",
 	composerFrameLabel: "Pi",
 	logoArt: OMP_LOGO,
-	compactLogo: Object.freeze({ unicode: "π", nerd: "\ue22c", ascii: "pi" }),
+	compactLogo: Object.freeze({ unicode: "π", nerd: "\ue22c", emoji: "π", ascii: "pi" }),
 	gradientPalettes: Object.freeze({ dark: OMP_GRADIENT, light: OMP_GRADIENT }),
 	defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
 });
@@ -99,7 +99,7 @@ export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	composerFrameLabel: "Framed Rules",
 	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",
 	logoArt: BREADBOARD_LOGO,
-	compactLogo: Object.freeze({ unicode: "ƁB", nerd: "bb", ascii: "bb" }),
+	compactLogo: Object.freeze({ unicode: "ƁB", nerd: "bb", emoji: "🍞", ascii: "bb" }),
 	gradientPalettes: Object.freeze({ dark: BREADBOARD_GRADIENT, light: BREADBOARD_GRADIENT }),
 	defaultThemes: Object.freeze({ dark: "breadboard", light: "breadboard-light" }),
 });

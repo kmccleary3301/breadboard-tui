@@ -316,6 +316,7 @@ export class InputController {
 	}
 
 	#abortStreamingTurn(): void {
+		if (this.ctx.session.mainStreamOwnsTurnLifecycle) this.ctx.eventController.markBreadboardCancelling();
 		const loader = this.ctx.loadingAnimation;
 		if (loader) {
 			loader.stop();

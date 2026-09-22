@@ -606,6 +606,7 @@ async function runInteractiveMode(
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
 	breadboard?: {
+		readonly bindPermissionActivity?: (observer: (pending: boolean) => void) => void;
 		readonly providerAuth?: ProviderAuthPort;
 		readonly nativeAuthStorage?: AuthStorage;
 		readonly close: () => Promise<void>;
@@ -642,6 +643,10 @@ async function runInteractiveMode(
 			breadboard?.sessionId,
 			breadboard?.nativeAuthStorage,
 		);
+		breadboard?.bindPermissionActivity?.(pending => {
+			if (pending) mode.eventController.markBreadboardApproval();
+			else mode.eventController.resolveBreadboardApproval();
+		});
 		startupLease?.adopt();
 	} catch (error) {
 		startupLease?.dispose();
@@ -2455,7 +2460,11 @@ export async function runRootCommand(
 
 			let breadboardAgentSession: AgentSession | undefined = undefined;
 			let breadboardUIContext: ExtensionUIContext | undefined;
-			const breadboardPermissionHandler = createBreadboardPermissionHandler(() => breadboardUIContext);
+			let breadboardPermissionActivity: ((pending: boolean) => void) | undefined;
+			const breadboardPermissionHandler = createBreadboardPermissionHandler(
+				() => breadboardUIContext,
+				pending => breadboardPermissionActivity?.(pending),
+			);
 			if (isInteractive) {
 				try {
 					preparedBreadboardRuntime = await logger.time(
@@ -2560,6 +2569,7 @@ export async function runRootCommand(
 			if (isInteractive) preparedBreadboardRuntime?.start();
 			const setInteractiveToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean): void => {
 				breadboardUIContext = hasUI ? uiContext : undefined;
+				if (!hasUI) breadboardPermissionActivity = undefined;
 				setToolUIContext(uiContext, hasUI);
 				if (hasUI) preparedBreadboardRuntime?.start();
 			};
@@ -2689,6 +2699,9 @@ export async function runRootCommand(
 						startupLease,
 						breadboardRuntime
 							? {
+									bindPermissionActivity: observer => {
+										breadboardPermissionActivity = observer;
+									},
 									providerAuth: breadboardRuntime.providerAuth,
 									nativeAuthStorage: breadboardRuntime.nativeAuthStorage,
 									close: breadboardRuntime.close,
@@ -2710,6 +2723,7 @@ export async function runRootCommand(
 							: undefined,
 					);
 				} finally {
+					breadboardPermissionActivity = undefined;
 					startupLease?.dispose();
 				}
 			} else {

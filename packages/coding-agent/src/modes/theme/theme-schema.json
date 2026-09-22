@@ -399,7 +399,7 @@
 			"properties": {
 				"preset": {
 					"type": "string",
-					"enum": ["unicode", "nerd", "ascii"],
+					"enum": ["unicode", "nerd", "emoji", "ascii"],
 					"description": "Default symbol preset for this theme (can be overridden by user setting)"
 				},
 				"overrides": {
@@ -432,10 +432,7 @@
 								}
 							},
 							"additionalProperties": false,
-							"anyOf": [
-								{ "required": ["status"] },
-								{ "required": ["activity"] }
-							]
+							"anyOf": [{ "required": ["status"] }, { "required": ["activity"] }]
 						}
 					]
 				}

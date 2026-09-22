@@ -2,7 +2,7 @@
 // Symbol Presets
 // ============================================================================
 
-export type SymbolPreset = "unicode" | "nerd" | "ascii";
+export type SymbolPreset = "unicode" | "nerd" | "emoji" | "ascii";
 
 /**
  * All available symbol keys organized by category.
@@ -367,7 +367,7 @@ export type SlashCommandIconName =
 	| "mcp"
 	| "pin";
 
-const UNICODE_SYMBOLS: SymbolMap = {
+const EMOJI_SYMBOLS: SymbolMap = {
 	// Status
 	"status.success": "✔",
 	"status.error": "✘",
@@ -648,6 +648,135 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"tool.irc": "✉",
 	"tool.delete": "🗑",
 	"tool.move": "➜",
+};
+/**
+ * Unicode keeps the composer and status chrome monochrome and terminal-safe.
+ * Emoji remains available as a separate expressive preset, while language and
+ * extension labels retain short, legible text rather than color glyphs.
+ */
+const UNICODE_SYMBOLS: SymbolMap = {
+	...EMOJI_SYMBOLS,
+	// Composer/status icons.
+	"status.pending": "…",
+	"icon.time": "◷",
+	"icon.job": "✣",
+	"icon.throughput": "↯",
+	"icon.fast": "↯",
+	"icon.plan": "☷",
+	"icon.prewalk": "▶",
+	"icon.goal": "◎",
+	"icon.folder": "▱",
+	"icon.worktree": "♧",
+	"icon.search": "⌕",
+	"icon.scratchFolder": "⊗",
+	"icon.file": "▤",
+	"icon.pin": "⌖",
+	"icon.tokens": "◈",
+	"icon.cost": "$",
+	"icon.advisor": "◉",
+	"icon.advisorClosed": "○",
+	"icon.ghost": "◌",
+	"icon.agents": "♧",
+	"icon.cache": "▣",
+	"icon.intelligence": "✧",
+	"icon.host": "▦",
+	"icon.session": "◫",
+	"icon.package": "▦",
+	"icon.extensionTool": "†",
+	"icon.extensionMcp": "⌘",
+	"icon.extensionHook": "↪",
+	"icon.extensionContextFile": "⌑",
+	"icon.extensionInstruction": "▧",
+	// Slash-command indicators.
+	"cmd.extension": "◇",
+	"cmd.settings": "✣",
+	"cmd.gear": "✣",
+	"cmd.shield": "⚑",
+	"cmd.compass": "⊙",
+	"cmd.inbox": "⇩",
+	"cmd.computer": "▣",
+	"cmd.eye": "◉",
+	"cmd.stats": "▥",
+	"cmd.news": "▤",
+	"cmd.export": "⇧",
+	"cmd.clipboard": "▱",
+	"cmd.broadcast": "⌁",
+	"cmd.globe": "◎",
+	"cmd.eraser": "⌫",
+	"cmd.trash": "⌑",
+	"cmd.compress": "≋",
+	"cmd.vibrate": "≋",
+	"cmd.history": "↶",
+	"cmd.question": "?",
+	"cmd.rocket": "↗",
+	"cmd.stethoscope": "⊙",
+	"cmd.redo": "↻",
+	"cmd.bug": "♣",
+	"cmd.memory": "▦",
+	"cmd.folderMove": "↪",
+	"cmd.folderPlus": "⊞",
+	"cmd.hammer": "†",
+	"cmd.cart": "▣",
+	"icon.mic": "♩",
+	"icon.camera": "▧",
+	// Language/file labels stay monochrome and width-stable.
+	"lang.typescript": "TS",
+	"lang.javascript": "JS",
+	"lang.python": "Py",
+	"lang.rust": "Rs",
+	"lang.go": "Go",
+	"lang.java": "J",
+	"lang.c": "C",
+	"lang.cpp": "C++",
+	"lang.csharp": "C#",
+	"lang.ruby": "Rb",
+	"lang.julia": "Jl",
+	"lang.php": "PHP",
+	"lang.swift": "Sw",
+	"lang.kotlin": "Kt",
+	"lang.shell": "$",
+	"lang.html": "<>",
+	"lang.css": "#",
+	"lang.json": "{}",
+	"lang.yaml": "YAML",
+	"lang.markdown": "Md",
+	"lang.sql": "SQL",
+	"lang.docker": "Dk",
+	"lang.lua": "Lu",
+	"lang.text": "Tx",
+	"lang.env": "Env",
+	"lang.toml": "Toml",
+	"lang.log": "Log",
+	"lang.csv": "Csv",
+	"lang.tsv": "Tsv",
+	"lang.image": "Img",
+	"lang.archive": "Arc",
+	"lang.binary": "Bin",
+	"lang.ini": "Ini",
+	"lang.conf": "Cfg",
+	// Attachment chips and settings tabs.
+	"chip.image": "▧",
+	"chip.video": "▥",
+	"chip.paste": "▤",
+	"tab.appearance": "✦",
+	"tab.model": "◆",
+	"tab.context": "▤",
+	"tab.files": "▱",
+	"tab.shell": "$",
+	"tab.tools": "†",
+	"tab.memory": "▦",
+	"tab.tasks": "☑",
+	"tab.providers": "◎",
+	"tab.breadboard": "⌘",
+	// Tool identity icons.
+	"tool.lsp": "?",
+	"tool.exa": "◌",
+	"tool.browser": "◎",
+	"tool.debug": "♣",
+	"tool.mcp": "⌘",
+	"tool.launch": "↗",
+	"tool.memory": "▦",
+	"tool.delete": "⌫",
 };
 
 const NERD_SYMBOLS: SymbolMap = {
@@ -1383,6 +1512,7 @@ const ASCII_SYMBOLS: SymbolMap = {
 export const SYMBOL_PRESETS: Record<SymbolPreset, SymbolMap> = {
 	unicode: UNICODE_SYMBOLS,
 	nerd: NERD_SYMBOLS,
+	emoji: EMOJI_SYMBOLS,
 	ascii: ASCII_SYMBOLS,
 };
 
@@ -1396,6 +1526,10 @@ export const SPINNER_FRAMES: Record<SymbolPreset, Record<SpinnerType, string[]>>
 	nerd: {
 		status: ["󱑖", "󱑋", "󱑌", "󱑍", "󱑎", "󱑏", "󱑐", "󱑑", "󱑒", "󱑓", "󱑔", "󱑕"],
 		activity: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+	},
+	emoji: {
+		status: ["⏳", "⌛", "🔄", "🔃"],
+		activity: ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"],
 	},
 	ascii: {
 		status: ["|", "/", "-", "\\"],
@@ -1426,12 +1560,12 @@ export function normalizeSpinnerFramesOverride(
  * Get available symbol presets.
  */
 export function getAvailableSymbolPresets(): SymbolPreset[] {
-	return ["unicode", "nerd", "ascii"];
+	return ["unicode", "nerd", "emoji", "ascii"];
 }
 
 /**
  * Check if a string is a valid symbol preset.
  */
 export function isValidSymbolPreset(preset: string): preset is SymbolPreset {
-	return preset === "unicode" || preset === "nerd" || preset === "ascii";
+	return preset === "unicode" || preset === "nerd" || preset === "emoji" || preset === "ascii";
 }

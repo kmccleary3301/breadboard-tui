@@ -39,6 +39,7 @@ import {
 import {
 	getAvailableThemes,
 	getSymbolTheme,
+	isValidSymbolPreset,
 	previewTheme,
 	setColorBlindMode,
 	setMarkdownMermaidRendering,
@@ -817,7 +818,8 @@ export class SelectorController {
 				break;
 			}
 			case "symbolPreset": {
-				setSymbolPreset(value as "unicode" | "nerd" | "ascii").then(() => {
+				if (typeof value !== "string" || !isValidSymbolPreset(value)) break;
+				setSymbolPreset(value).then(() => {
 					this.ctx.statusLine.invalidate();
 					this.ctx.ui.requestRender();
 					this.ctx.ui.invalidate();

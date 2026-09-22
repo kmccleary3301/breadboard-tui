@@ -22,6 +22,7 @@ import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { OMP_PRODUCT_IDENTITY } from "@oh-my-pi/pi-coding-agent/product-identity";
 import { SEARCH_PROVIDER_OPTIONS, SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import type { Component, TUI } from "@oh-my-pi/pi-tui";
+import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 
 function createTestSetupWizardContext(options?: {
 	settings?: Settings;
@@ -116,7 +117,9 @@ afterEach(async () => {
 describe("setup wizard scene selection", () => {
 	it("runs all v1 scenes for a new user", async () => {
 		const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
-		expect(scenes.map(scene => scene.id)).toEqual(ALL_SCENES.map(scene => scene.id));
+		expect(scenes.map(scene => scene.id)).toEqual(
+			ALL_SCENES.filter(scene => scene.id !== "information-layout" || IS_BREADBOARD_PRODUCT).map(scene => scene.id),
+		);
 	});
 
 	it("keeps CURRENT_SETUP_VERSION in sync with the highest scene minVersion", () => {
@@ -163,7 +166,9 @@ describe("setup wizard scene selection", () => {
 			resuming: true,
 			force: true,
 		});
-		expect(selected.map(scene => scene.id)).toEqual(ALL_SCENES.map(scene => scene.id));
+		expect(selected.map(scene => scene.id)).toEqual(
+			ALL_SCENES.filter(scene => scene.id !== "information-layout" || IS_BREADBOARD_PRODUCT).map(scene => scene.id),
+		);
 		expect(await selectSetupScenes(0, ALL_SCENES, ctx, { isTTY: false, force: true })).toEqual([]);
 	});
 
@@ -494,34 +499,47 @@ describe("setup wizard theme previews", () => {
 });
 
 describe("setup wizard glyph scene", () => {
-	it("lists Nerd Font first and commits the chosen preset", async () => {
+	it("commits Emoji after an immediately confirmed preview", async () => {
 		await initTheme(false, "unicode", false, "titanium", "light");
 		const settings = Settings.isolated();
-		const scene = ALL_SCENES.find(s => s.id === "glyph-mode");
-		expect(scene).toBeDefined();
-
-		let finished = false;
-		const host = {
+		settings.set("symbolPreset", "unicode");
+		const finished = Promise.withResolvers<SetupSceneResult>();
+		const host: SetupSceneHost = {
 			ctx: createTestSetupWizardContext({ settings }),
 			identity: OMP_PRODUCT_IDENTITY,
 			requestRender: () => {},
-			finish: () => {
-				finished = true;
-			},
+			finish: finished.resolve,
 			setFocus: () => {},
 			restoreFocus: () => {},
 		};
-
-		const controller = scene!.mount(host);
-		// Row "1" is now Nerd Font (it must lead the list).
-		controller.handleInput?.("1");
-		await Bun.sleep(20);
-		expect(theme.getSymbolPreset()).toBe("nerd");
-
+		const controller = ALL_SCENES.find(scene => scene.id === "glyph-mode")!.mount(host);
+		controller.handleInput?.("3");
 		controller.handleInput?.("\n");
-		await Bun.sleep(20);
+		expect(await finished.promise).toBe("done");
+		expect(settings.get("symbolPreset")).toBe("emoji");
+		expect(theme.getSymbolPreset()).toBe("emoji");
+	});
+
+	it("restores the original glyphs when rapid previews are cancelled", async () => {
+		await initTheme(false, "nerd", false, "titanium", "light");
+		const settings = Settings.isolated();
+		settings.set("symbolPreset", "nerd");
+		const finished = Promise.withResolvers<SetupSceneResult>();
+		const host: SetupSceneHost = {
+			ctx: createTestSetupWizardContext({ settings }),
+			identity: OMP_PRODUCT_IDENTITY,
+			requestRender: () => {},
+			finish: finished.resolve,
+			setFocus: () => {},
+			restoreFocus: () => {},
+		};
+		const controller = ALL_SCENES.find(scene => scene.id === "glyph-mode")!.mount(host);
+		controller.handleInput?.("3");
+		controller.handleInput?.("1");
+		controller.handleInput?.("\x1b");
+		expect(await finished.promise).toBe("skipped");
 		expect(settings.get("symbolPreset")).toBe("nerd");
-		expect(finished).toBe(true);
+		expect(theme.getSymbolPreset()).toBe("nerd");
 	});
 });
 
