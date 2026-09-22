@@ -23,8 +23,13 @@ export function installExtensionComposerShape(definition: ComposerShapeDefinitio
 
 /** Available built-in and extension composer choices in selector order. */
 export function getComposerShapeOptions(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): readonly SubmenuOption[] {
-	const builtins = BUILTIN_COMPOSER_SHAPES.map(option =>
-		option.value === "pi" ? { ...option, label: identity.composerFrameLabel } : option,
-	);
+	const builtins = BUILTIN_COMPOSER_SHAPES.map(option => {
+		if (option.value === "pi") return { ...option, label: identity.composerFrameLabel };
+		if (identity.id === "breadboard") {
+			if (option.value === "band") return { ...option, label: "Status Band" };
+			if (option.value === "box") return { ...option, label: "Rounded Box (Default)" };
+		}
+		return option;
+	});
 	return [...builtins, ...extensionComposerShapes.values()];
 }

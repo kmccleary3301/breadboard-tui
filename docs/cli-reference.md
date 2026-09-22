@@ -261,6 +261,12 @@ setup requires attached ownership and uses a separate temporary engine, leaving
 an existing coding engine untouched. Completion and cancellation close that
 temporary engine.
 
+Information layout comes before glyph and composer-shape selection. BreadBoard
+Balanced, Quiet, and Detailed lead the list; Balanced is recommended. The sample
+preview uses the selected shape, and Space cycles idle, working, and approval
+states. Enter saves a choice; Escape skips without changing it. Unicode, Nerd
+Font, Emoji, and ASCII remain independent of the information layout.
+
 Ordinary attached local-owned launches choose a fresh loopback endpoint when no
 engine URL is configured. Each client retains its own engine ownership; another
 client or a stale process cannot capture that launch. An explicit engine URL
@@ -271,6 +277,8 @@ point includes user edits made since the session opened. Checkpoint credential
 and sandbox safety checks remain enabled.
 Turn completion does not compute a final workspace diff unless JSON snapshot
 output is requested.
+Idle event streams remain open until cancelled; Bun's native five-minute idle
+timeout is disabled for these streams, not for ordinary engine requests.
 
 The chosen default model applies to future sessions; changing the model inside
 an existing BreadBoard session remains temporary. `--model` and `--provider`

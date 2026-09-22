@@ -4,12 +4,15 @@
 
 ### Added
 
+- Added BreadBoard Balanced, Quiet, and Detailed information layouts, with shared live/setup previews and width-aware priority for actionable state.
+- Added an independent Emoji glyph preset alongside restrained Unicode, Nerd Font, and ASCII.
 - Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
 - Added shared OMP subscription authentication for attached local BreadBoard engines through an authenticated loopback inference gateway, retaining BreadBoard tools and permissions without copying provider credentials.
 - Added a caller-workspace launcher with separate per-project runtime state and workspace-contained harness resources; conflicting project resources are never overwritten.
 
 ### Changed
 
+- BreadBoard now defaults to Balanced information in a rounded box without routine context counters, generation hashes, or native cost/reasoning indicators; explicit preferences and native OMP defaults are preserved.
 - Integrated official OMP main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including v18.2.2 and its subsequent CJK edit fix, while retaining BreadBoard execution and shared subscription authentication.
 - BreadBoard-owned sessions now gate unsupported native subagent, prewalk, plan, compaction, advisor, automation, and tool controls while preserving frontend presentation and scoped helpers.
 - The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.
@@ -20,6 +23,8 @@
 
 ### Fixed
 
+- Idle BreadBoard sessions no longer inherit Bun's five-minute event-stream timeout, which permanently disabled inference with `HTTP request failed (0)`.
+- Glyph setup cancels pending previews before restoring the original selection, and waits for persistence before completing.
 - Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
 - Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal, and attached local engines use independent loopback endpoints unless an endpoint is explicitly configured.
 - Explicit BreadBoard setup retains its snake-and-logo startup animation while using a separate metadata-only engine, without creating a coding session or workspace checkpoint; completing or cancelling setup releases its owned resources.

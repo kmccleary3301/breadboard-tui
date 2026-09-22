@@ -83,7 +83,7 @@ If omitted, export code derives defaults from resolved theme colors.
 
 ### `symbols` section (optional)
 
-- `symbols.preset` sets a theme-level default symbol set.
+- `symbols.preset` sets a theme-level default symbol set: `unicode`, `nerd`, `emoji`, or `ascii`. Unicode uses restrained composer glyphs; Emoji provides expressive pictographs.
 - `symbols.overrides` can override individual `SymbolKey` values.
 - `symbols.spinnerFrames` overrides the loading spinner frames. Accepts either a flat `string[]` (applied to both spinner types) or an object `{ "status"?: string[], "activity"?: string[] }` to override each type independently. Any type not specified falls back to the symbol preset's default frames. `status` drives the ~12.5fps spinner used by loaders and tool-execution indicators; `activity` drives the ~30fps spinner used by markdown progress bars and similar high-frequency UI.
 
