@@ -184,7 +184,7 @@ test("a persistently denied drain backs off, stops at the attempt bound, and a n
 			attemptsAt.push(Date.now());
 			return denied ? lifecycleFailure("local-owned", "restart-blocked", "drain_denied") : stopped;
 		},
-		{ initialDelayMs: 20, maxDelayMs: 80, maxAttempts: 4 },
+		{ initialDelayMs: 50, maxDelayMs: 100, maxAttempts: 4 },
 	);
 	try {
 		(await host.lease()).abort();
@@ -192,8 +192,11 @@ test("a persistently denied drain backs off, stops at the attempt bound, and a n
 		await Bun.sleep(300);
 		expect(attemptsAt).toHaveLength(4);
 		expect(host.server.cleanupAbandoned).toMatchObject({ attempts: 4, reason: "drain_denied" });
+		// Timers only fire late under load, so lower bounds on the nominal 50/100/100 ms delays are stable.
 		const gaps = attemptsAt.slice(1).map((at, index) => at - attemptsAt[index]);
-		expect(gaps[1]).toBeGreaterThan(gaps[0]);
+		expect(gaps[0]).toBeGreaterThanOrEqual(45);
+		expect(gaps[1]).toBeGreaterThanOrEqual(95);
+		expect(gaps[2]).toBeGreaterThanOrEqual(95);
 		denied = false;
 		(await host.lease()).abort();
 		expect(host.server.cleanupAbandoned).toBeUndefined();
