@@ -4,6 +4,7 @@ import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { HookSelectorSlider } from "@oh-my-pi/pi-tui/overlays/hook-selector";
 import { PlanReviewOverlay } from "@oh-my-pi/pi-tui/overlays/plan-review-overlay";
 import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";

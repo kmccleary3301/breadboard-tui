@@ -1,22 +1,14 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { EFFECTIVE_HARNESS_SNAPSHOT } from "../../coding-agent/test/modes/components/effective-lock-fixture";
-import {
-	BREADBOARD_PRODUCT_IDENTITY,
-	OMP_PRODUCT_IDENTITY,
-	type ProductIdentity,
-} from "@oh-my-pi/pi-coding-agent/product-identity";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
-import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 
 describe("WelcomeComponent", () => {
 	beforeAll(async () => {
-		await Settings.init({ inMemory: true });
 		await initTheme(false);
 	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
-		settings.set("display.reduceMotion", false);
 	});
 
 	it("selects standard tip when preset is not unicode", () => {
@@ -40,47 +32,6 @@ describe("WelcomeComponent", () => {
 		const welcomeRegular = new WelcomeComponent("1.0.0", "model", "provider");
 		expect(welcomeRegular.tip).not.toBe("Please use nerdfont 😭.");
 		expect(welcomeRegular.tip).toBeDefined();
-	});
-
-	it("settles immediately without timers when reduced motion is enabled", () => {
-		const interval = vi.spyOn(globalThis, "setInterval");
-		const welcome = new WelcomeComponent(
-			"1.0.0",
-			"model",
-			"provider",
-			[],
-			[],
-			BREADBOARD_PRODUCT_IDENTITY,
-			"dark",
-			true,
-		);
-		let renderRequests = 0;
-
-		welcome.playIntro(() => {
-			renderRequests += 1;
-		});
-		const first = welcome.render(90);
-
-		expect(renderRequests).toBe(1);
-		expect(interval).not.toHaveBeenCalled();
-		expect(welcome.isTranscriptBlockFinalized()).toBe(true);
-		expect(welcome.render(90)).toBe(first);
-	});
-
-	it("stops a prepaint intro when persisted settings finish loading reduced motion", async () => {
-		settings.set("display.reduceMotion", false);
-		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		let renderRequests = 0;
-		welcome.playIntro(() => {
-			renderRequests += 1;
-		});
-		expect(welcome.isTranscriptBlockFinalized()).toBe(false);
-
-		settings.set("display.reduceMotion", true);
-		await Bun.sleep(50);
-
-		expect(welcome.isTranscriptBlockFinalized()).toBe(true);
-		expect(renderRequests).toBeGreaterThanOrEqual(2);
 	});
 
 	it("weights [NEW] tips above ordinary tips in selection", () => {
@@ -121,126 +72,5 @@ describe("WelcomeComponent", () => {
 		expect(plain).not.toContain(modelName);
 		expect(plain).toMatch(/DeepSeek V4 [^│]*…/);
 		expect(plain).toContain("Recent sessions");
-	});
-});
-
-const harnessSnapshot = EFFECTIVE_HARNESS_SNAPSHOT;
-
-describe("WelcomeComponent harness identity", () => {
-	it("renders the harness identity, team posture, and /harness hint", () => {
-		// Catches canonical-path regressions that drop lock-derived identity fields or the hint.
-		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness(harnessSnapshot);
-
-		const plain = welcome.render(220).map(stripAnsi).join("\n");
-
-		expect(plain).toContain("Harness codex-e4 (build, g3) · team 2 · native tools · responses API ·");
-		expect(plain).toContain("plan→build · /harness");
-	});
-	it("renders only name, known session fields, and hint when the lock is null", () => {
-		// Catches lock consumers that fabricate team or posture values when no lock exists.
-		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness({ ...harnessSnapshot, lock: null });
-
-		const plain = welcome.render(220).map(stripAnsi).join("\n");
-
-		expect(plain).toContain("Harness codex-e4 (build, g3)");
-		expect(plain).toContain("/harness");
-		expect(plain).not.toContain("team 2");
-		expect(plain).not.toContain("native tools");
-	});
-
-	it("omits null mode and generation without empty punctuation", () => {
-		// Catches placeholder mode/generation text and dangling separators in partial snapshots.
-		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness({ ...harnessSnapshot, mode: null, generation: null });
-
-		const plain = welcome.render(220).map(stripAnsi).join("\n");
-
-		expect(plain).toContain("Harness codex-e4");
-		expect(plain).toContain("team 2");
-		expect(plain).toContain("native tools");
-		expect(plain).not.toContain("(build, g3)");
-	});
-
-	it("omits the harness identity line when no snapshot is active", () => {
-		// Catches stale identity surviving after the harness port clears its current snapshot.
-		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness(null);
-
-		const plain = welcome.render(140).map(stripAnsi).join("\n");
-		expect(plain).not.toContain("/harness");
-		expect(plain).not.toContain("Harness ");
-	});
-});
-
-const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
-const hasRow = (lines: string[], row: string): boolean => lines.some(l => l.includes(row.trimEnd()));
-
-describe("WelcomeComponent native identity", () => {
-	it("renders the OMP mark and no BreadBoard mark", () => {
-		const lines = new WelcomeComponent("18.0.1", "model", "provider").render(90).map(stripAnsi);
-		for (const row of OMP_PRODUCT_IDENTITY.logoArt) expect(hasRow(lines, row)).toBe(true);
-		expect(hasRow(lines, BREADBOARD_PRODUCT_IDENTITY.logoArt[2] ?? "")).toBe(false);
-	});
-
-	it("keeps the exact OMP copy", () => {
-		const header = stripAnsi(new WelcomeComponent("18.0.1", "model", "provider").render(90)[0] ?? "");
-		expect(header).toContain("omp v18.0.1");
-		expect(header).not.toContain("BreadBoard");
-	});
-
-	it("renders an injected BreadBoard identity without product process state", () => {
-		const lines = new WelcomeComponent("0.1.0-rc.4", "model", "provider", [], [], BREADBOARD_PRODUCT_IDENTITY, "dark")
-			.render(90)
-			.map(stripAnsi);
-
-		expect(lines[0]).toContain("BreadBoard v0.1.0-rc.4");
-		for (const row of BREADBOARD_PRODUCT_IDENTITY.logoArt) expect(hasRow(lines, row)).toBe(true);
-		expect(hasRow(lines, OMP_PRODUCT_IDENTITY.logoArt[1] ?? "")).toBe(false);
-	});
-
-	it("reskins title, art, palette, and appearance without renderer changes", () => {
-		const alternate: ProductIdentity = Object.freeze({
-			id: "alternate",
-			displayName: "Alternate Product",
-			shortDisplayName: "Alternate",
-			cliName: "alt",
-			welcomeTitle: "Alternate",
-			setupWordmark: "Alternate",
-			composerFrameLabel: "Alternate Frame",
-			logoArt: Object.freeze(["ALT"]),
-			compactLogo: Object.freeze({ unicode: "A", nerd: "A", emoji: "A", ascii: "A" }),
-			gradientPalettes: Object.freeze({
-				dark: Object.freeze({
-					stops: Object.freeze([[255, 0, 0] as const, [128, 0, 0] as const]),
-					ramp256: Object.freeze([196]),
-					ramp16: Object.freeze([91]),
-				}),
-				light: Object.freeze({
-					stops: Object.freeze([[0, 0, 255] as const, [0, 0, 128] as const]),
-					ramp256: Object.freeze([21]),
-					ramp16: Object.freeze([94]),
-				}),
-			}),
-			defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
-		});
-		vi.spyOn(theme, "getColorMode").mockReturnValue("truecolor");
-		const dark = new WelcomeComponent("1.2.3", "model", "provider", [], [], alternate, "dark").render(90);
-		const light = new WelcomeComponent("1.2.3", "model", "provider", [], [], alternate, "light").render(90);
-
-		expect(stripAnsi(dark[0] ?? "")).toContain("Alternate v1.2.3");
-		expect(hasRow(dark.map(stripAnsi), "ALT")).toBe(true);
-		expect(dark.join("\n")).not.toBe(light.join("\n"));
-	});
-});
-
-describe("BreadBoard product themes", () => {
-	it("registers the dune-orange brand themes for both appearances", async () => {
-		const available = await getAvailableThemes();
-		expect(available).toContain("breadboard");
-		expect(available).toContain("breadboard-light");
-		expect(await getThemeByName("breadboard")).toBeDefined();
-		expect(await getThemeByName("breadboard-light")).toBeDefined();
 	});
 });

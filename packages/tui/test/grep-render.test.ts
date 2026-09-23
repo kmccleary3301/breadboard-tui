@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import { applyHyperlinkSetting } from "../src/render/hyperlink";
 import { getThemeByName } from "@oh-my-pi/pi-tui/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { grepToolRenderer } from "@oh-my-pi/pi-tui/tools/grep";
 

@@ -5,6 +5,7 @@ import {
 	type SpellingDecorationContext,
 } from "@oh-my-pi/pi-tui/prompt/macos-spelling";
 import { setMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
+import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 
 function backend(overrides: Partial<SpellingBackend>): SpellingBackend {
 	return {

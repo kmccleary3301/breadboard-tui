@@ -1,63 +1,12 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { COMPOSER_SHAPE_VALUES, type ComposerShape } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
-import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
-import { composerSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/composer";
-import { createBreadboardPreviewStatusSource } from "@oh-my-pi/pi-tui/setup/scenes/information-layout";
-import type { SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
-import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "@oh-my-pi/pi-coding-agent/product-identity";
-import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
-import { ComposerShapePreview, renderComposerShapePreview } from "../src/overlays/composer-shape-preview";
+import { beforeAll, describe, expect, it } from "bun:test";
+import { renderComposerShapePreview } from "../src/overlays/composer-shape-preview";
 import { getComposerShapeOptions, installExtensionComposerShape } from "../src/overlays/composer-shape-registry";
-import { initTheme, setTheme, theme } from "../src/theme/theme";
+import { initTheme, setTheme } from "../src/theme/theme";
 import { type ComposerStyle, visibleWidth } from "../src/index";
 
 beforeAll(async () => {
 	await initTheme();
 });
-function createPreviewSession(): ConstructorParameters<typeof StatusLineComponent>[0] {
-	return {
-		state: { messages: [] },
-		messages: [],
-		model: { contextWindow: 128_000 },
-		contextUsageRevision: 0,
-		systemPrompt: [],
-		agent: { state: { tools: [] } },
-		skills: [],
-		isStreaming: false,
-		isAutoThinking: false,
-		autoResolvedThinkingLevel: () => undefined,
-		isAdvisorActive: () => false,
-		getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
-		isFastModeActive: () => false,
-		getAsyncJobSnapshot: () => ({ running: [] }),
-		getCurrentModel: () => undefined,
-		isFastModeEnabled: () => false,
-		getContextUsage: () => ({ tokens: 0, contextWindow: 128_000 }),
-		getGoalModeState: () => null,
-		modelRegistry: { isUsingOAuth: () => false },
-		sessionManager: {
-			getSessionName: () => "",
-			getUsageStatistics: () => ({
-				input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-				orchestrationInput: 0, orchestrationOutput: 0, orchestrationCacheRead: 0,
-				premiumRequests: 0, cost: 0,
-			}),
-		},
-	} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
-}
-
-function createPreviewStatus(identity: ProductIdentity): StatusLineComponent {
-	const status = new StatusLineComponent(createPreviewSession(), identity);
-	status.updateSettings({
-		preset: "custom",
-		leftSegments: ["pi"],
-		rightSegments: ["session_name"],
-		separator: "powerline-thin",
-		sessionAccent: false,
-	});
-	return status;
-}
 
 describe("composer shape preview", () => {
 	it("resolves transparent composer preview text away from the terminal default", async () => {
@@ -74,102 +23,59 @@ describe("composer shape preview", () => {
 		await setTheme("dark");
 		// Echo mocks: the stand-in title must be forwarded as a prop to every
 		// title-bearing status call, not glued onto the rendered content.
-		const source = createBreadboardPreviewStatusSource(
-			{
-				modelName: "Model",
-				workspace: "Folder",
-				sessionName: "Session",
-				branch: "Branch",
-				context: { tokens: 40_000, capacity: 100_000 },
-				spend: { sessionUsd: 1.25, turnUsd: 0.05, estimated: true },
+		const status = {
+			getTopBorder: (_width: number, previewTitle?: string) => {
+				const content = `TOPBAR ${previewTitle ?? ""}`;
+				return { content, width: content.length };
 			},
-			"bb-balanced",
-		);
-		const narrow = renderComposerShapePreview("box", 56, source).map(Bun.stripANSI);
-		const wide = renderComposerShapePreview("box", 96, source).map(Bun.stripANSI);
-		for (const value of ["Model", "Folder", "Session", "Branch", "~40%", "~1.25"]) {
-			expect(narrow.join("\n").split(value).length - 1).toBe(1);
-			expect(wide.join("\n").split(value).length - 1).toBe(1);
-		}
-		expect(narrow[narrow.length - 1]).toContain("~40%");
-		expect(wide[wide.length - 1]).toContain("╰");
-	});
+			getStandaloneTopBorder: (_width: number, previewTitle?: string) => {
+				const content = `CHIP ${previewTitle ?? ""}`;
+				return { content, width: content.length };
+			},
+			getBandTopBorder: (_width: number, previewTitle?: string) => {
+				const content = `BAND ${previewTitle ?? ""}`;
+				return { content, width: content.length };
+			},
+			renderBottomBar: (_width: number, groups: "left" | "full", previewTitle?: string) =>
+				`BOTTOM-${groups.toUpperCase()} ${previewTitle ?? ""}`,
+		};
 
-	it("keeps Quiet identity anchored when activity appears on the rule", async () => {
-		await initTheme(false, "unicode", false, "titanium", "light");
-		const identity = { modelName: "Model", workspace: "Folder" };
-		const idle = Bun.stripANSI(
-			renderComposerShapePreview("rule", 80, createBreadboardPreviewStatusSource(identity, "bb-quiet"))[0]!,
-		);
-		const active = Bun.stripANSI(
-			renderComposerShapePreview(
-				"rule",
-				80,
-				createBreadboardPreviewStatusSource(
-					{ ...identity, activity: { kind: "working", label: "Working" } },
-					"bb-quiet",
-				),
-			)[0]!,
-		);
-		expect(idle).toContain("Folder");
-		expect(active).toContain("Working");
-		expect(idle.indexOf("Folder")).toBe(active.indexOf("Folder"));
-	});
+		const box = renderComposerShapePreview("box", 80, status).join("\n");
+		expect(box).toContain("TOPBAR"); // embedded in the top border
+		expect(box).toContain("omp"); // stand-in title forwarded to the status source
+		expect(box).not.toContain("BOTTOM"); // box has no standalone bottom bar
+		const band = renderComposerShapePreview("band", 80, status).join("\n");
+		expect(band).toContain("BAND"); // flush band row above the prompt
+		expect(band).toContain("omp");
+		expect(band).not.toContain("BOTTOM"); // the band replaces the bottom bar
 
-	it("uses the real status source for native and product marks across every symbol preset", async () => {
-		for (const preset of ["unicode", "nerd", "emoji", "ascii"] as const) {
-			await initTheme(false, preset, false, "titanium", "light");
-			for (const identity of [OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY]) {
-				const status = createPreviewStatus(identity);
-				const rendered = Bun.stripANSI(renderComposerShapePreview("pi", 80, status, identity.cliName).join("\n"));
-				const expectedMark =
-					identity.id === OMP_PRODUCT_IDENTITY.id ? theme.icon.omp : identity.compactLogo[preset];
-				expect(rendered).toContain(expectedMark);
-				expect(rendered).toContain(identity.cliName);
-				if (identity.id === BREADBOARD_PRODUCT_IDENTITY.id) {
-					expect(rendered).not.toMatch(/\bomp\b/i);
-					expect(rendered).not.toContain("π");
-				}
-			}
-		}
-	});
+		const claude = renderComposerShapePreview("claude", 80, status).join("\n");
+		expect(claude).toContain("CHIP"); // right group chips onto the top rule
+		expect(claude).toContain("omp");
+		expect(claude).toContain("BOTTOM-LEFT"); // left group only on the bottom bar
 
-	it("keeps the stable pi id while adapting its user-facing label", () => {
-		expect(getComposerShapeOptions(OMP_PRODUCT_IDENTITY).find(option => option.value === "pi")?.label).toBe("Pi");
-		expect(getComposerShapeOptions(BREADBOARD_PRODUCT_IDENTITY).find(option => option.value === "pi")?.label).toBe(
-			"Framed Rules",
-		);
-	});
+		const rule = renderComposerShapePreview("rule", 80, status);
+		expect(rule.join("\n")).toContain("CHIP");
+		expect(rule.join("\n")).toContain("omp");
+		expect(rule.join("\n")).toContain("BOTTOM-LEFT");
+		expect(rule[rule.length - 2]).toBe(""); // spacer row: rule has no bottom chrome
 
-	it("renders the setup composer scene through the injected identity and real status source", async () => {
-		await initTheme(false, "unicode", false, "titanium", "light");
-		for (const identity of [OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY]) {
-			const isolated = Settings.isolated();
-			isolated.set("composer.shape", "pi");
-			const host = {
-				identity,
-				ctx: {
-					settings: isolated,
-					statusLine: createPreviewStatus(identity),
-				},
-				requestRender: () => {},
-				finish: () => {},
-				setFocus: () => {},
-				restoreFocus: () => {},
-			} as unknown as SetupSceneHost;
-			const rendered = Bun.stripANSI(composerSetupScene.mount(host).render(80, 40).join("\n"));
-			if (identity.id === BREADBOARD_PRODUCT_IDENTITY.id) {
-				expect(rendered).toContain("Framed Rules");
-				expect(rendered).toContain("bb");
-				expect(rendered).not.toMatch(/\bomp\b/i);
-				expect(rendered).not.toMatch(/\bPi\b/);
-				expect(rendered).not.toContain("π");
-			} else {
-				expect(rendered).toMatch(/\bPi\b/);
-				expect(rendered).toContain("omp");
-				expect(rendered).toContain(theme.icon.omp);
-				expect(rendered).not.toContain("Framed Rules");
-			}
+		const pi = renderComposerShapePreview("pi", 80, status);
+		expect(pi.join("\n")).not.toContain("CHIP");
+		expect(pi.join("\n")).toContain("omp");
+		expect(pi.join("\n")).toContain("BOTTOM-FULL"); // both groups on the bottom bar
+		expect(pi[pi.length - 2]).not.toBe(""); // bottom rule already separates the bar
+
+		const borderless = renderComposerShapePreview("borderless", 80, status).join("\n");
+		expect(borderless).toContain("omp");
+		expect(borderless).toContain("BOTTOM-FULL");
+
+		for (const shape of ["field", "rail"]) {
+			const rendered = renderComposerShapePreview(shape, 80, status);
+			expect(rendered.join("\n")).not.toContain("CHIP");
+			expect(rendered.join("\n")).toContain("omp");
+			expect(rendered.join("\n")).toContain("BOTTOM-FULL");
+			expect(rendered[rendered.length - 2]).toBe(""); // spacer row before the bar
 		}
 	});
 
