@@ -261,12 +261,19 @@ async function runTextCalls(
 	return formatTextToolResults(results);
 }
 
+function assertNativeHarnessBindings(harness: LoadedNativeHarness): void {
+	for (const tool of harness.registeredToolSurface.native) {
+		if (NATIVE_BINDINGS[tool.name] === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
+	}
+}
+
 function registerFunctionTools(
 	api: ExtensionAPI,
 	harness: LoadedNativeHarness,
 	todos: TodoWriteState,
 	guard: CompletionGuard,
 ): void {
+	assertNativeHarnessBindings(harness);
 	for (const tool of harness.registeredToolSurface.native) {
 		const binding = NATIVE_BINDINGS[tool.name];
 		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
@@ -300,6 +307,7 @@ function registerFunctionTools(
  */
 export function createNativeHarnessExtension(harness: LoadedNativeHarness): ExtensionFactory {
 	return api => {
+		let pendingGeneration: number | undefined;
 		let activeHarness = harness;
 		let pendingHarness = harness;
 		let stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
@@ -322,10 +330,16 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		};
 		const commitPendingHarness = async (): Promise<void> => {
 			if (pendingHarness === activeHarness) return;
-			activeHarness = pendingHarness;
+			const next = pendingHarness;
+			registerFunctionTools(api, next, todos, guard);
+			activeHarness = next;
 			stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
 			policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
 			await applyStage();
+			if (pendingGeneration !== undefined) {
+				recordGeneration(pendingGeneration, activeHarness);
+				pendingGeneration = undefined;
+			}
 		};
 
 		registerSessionTranscriptExport(api, transcript);
@@ -338,23 +352,55 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			return;
 		}
 
-		registerFunctionTools(api, activeHarness, todos, guard);
 		const live = activeHarness.live;
+		live?.setReloadValidator(assertNativeHarnessBindings);
+		registerFunctionTools(api, activeHarness, todos, guard);
 		if (live?.editable) {
 			api.on("session_start", async (_event, context) => {
 				let observedMtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs ?? 0;
+				let reloadInFlight: Promise<void> | undefined;
+				let reloadAgain = false;
+				let debounceTimer: NodeJS.Timeout | undefined;
+				const notifyReloadError = (error: unknown): void => {
+					const message =
+						error instanceof NativeHarnessReloadError
+							? `Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`
+							: `Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`;
+					context.ui.notify(message, "error");
+				};
+				const scheduleReload = (): void => {
+					clearTimeout(debounceTimer);
+					debounceTimer = setTimeout(() => {
+						debounceTimer = undefined;
+						void runReload();
+					}, 150);
+				};
+				const runReload = async (): Promise<void> => {
+					if (reloadInFlight !== undefined) {
+						reloadAgain = true;
+						return;
+					}
+					reloadInFlight = live
+						.reload(next => assertNativeHarnessBindings(next))
+						.then(() => undefined)
+						.catch(notifyReloadError)
+						.finally(() => {
+							reloadInFlight = undefined;
+							if (reloadAgain) {
+								reloadAgain = false;
+								scheduleReload();
+							}
+						});
+					await reloadInFlight;
+				};
 				const poll = async (): Promise<void> => {
 					const mtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs;
 					if (mtime === undefined || mtime <= observedMtime) return;
 					observedMtime = mtime;
-					try {
-						await live.reload();
-					} catch (error) {
-						const message =
-							error instanceof NativeHarnessReloadError
-								? `Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`
-								: `Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`;
-						context.ui.notify(message, "error");
+					if (reloadInFlight !== undefined) {
+						reloadAgain = true;
+					} else {
+						scheduleReload();
 					}
 				};
 				context.setInterval(() => {
@@ -364,8 +410,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		}
 		activeHarness.live?.subscribe(change => {
 			pendingHarness = change.harness;
-			registerFunctionTools(api, change.harness, todos, guard);
-			recordGeneration(change.generation, change.harness);
+			pendingGeneration = change.generation;
 		});
 		api.on("agent_start", async () => {
 			await commitPendingHarness();

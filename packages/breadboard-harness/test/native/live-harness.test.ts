@@ -39,4 +39,23 @@ describe("native harness live state", () => {
 		await expect(harness.live?.reload()).rejects.toBeInstanceOf(NativeHarnessReloadError);
 		expect(harness.live?.generation).toBe(2);
 	});
+
+	it("validates a replacement before publishing its generation", async () => {
+		const root = await workspace();
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		const generations: number[] = [];
+		harness.live?.subscribe(change => generations.push(change.generation));
+		harness.live?.setReloadValidator(() => {
+			throw new Error("native tool binding is unavailable");
+		});
+		const sourcePath = join(root, SPEC);
+		const source = await readFile(sourcePath, "utf8");
+		await writeFile(sourcePath, source.replace("- eval\n", "- eval\n  - TodoWrite\n"));
+		await expect(harness.live?.reload()).rejects.toMatchObject({
+			code: "bind",
+			generation: 1,
+		});
+		expect(harness.live?.generation).toBe(1);
+		expect(generations).toEqual([]);
+	});
 });

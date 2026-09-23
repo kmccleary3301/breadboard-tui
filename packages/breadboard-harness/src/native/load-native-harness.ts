@@ -16,6 +16,7 @@ export type NativeHarnessReloadErrorCode =
 	| "compile"
 	| "lock-mismatch"
 	| "host-surface-refused"
+	| "bind"
 	| "reload-failed";
 
 export class NativeHarnessReloadError extends Error {
@@ -49,7 +50,8 @@ export interface NativeHarnessLiveState {
 	readonly editable: boolean;
 	readonly generation: number;
 	current(): LoadedNativeHarness;
-	reload(): Promise<LoadedNativeHarness>;
+	reload(prepare?: (harness: LoadedNativeHarness) => void | Promise<void>): Promise<LoadedNativeHarness>;
+	setReloadValidator(validator: (harness: LoadedNativeHarness) => void | Promise<void>): void;
 	subscribe(listener: (change: NativeHarnessGenerationChange) => void): () => void;
 }
 
@@ -286,6 +288,7 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 	let current = await loadNativeHarnessOnce(options);
 	const editable = builtinNativeHarness(options.specPath) === undefined;
 	const listeners = new Set<(change: NativeHarnessGenerationChange) => void>();
+	let reloadValidator: ((harness: LoadedNativeHarness) => void | Promise<void>) | undefined;
 	let live: NativeHarnessLiveState;
 	const withLive = (harness: LoadedNativeHarness): LoadedNativeHarness =>
 		Object.freeze({ ...harness, live });
@@ -295,7 +298,7 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 			return generation;
 		},
 		current: () => current,
-		reload: async () => {
+		reload: async (prepare?: (harness: LoadedNativeHarness) => void | Promise<void>) => {
 			if (!editable) {
 				throw new NativeHarnessReloadError(
 					"builtin",
@@ -322,12 +325,26 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 					"Live reload cannot change or introduce a host-surface harness.",
 				);
 			}
+			try {
+				await reloadValidator?.(next);
+				await prepare?.(next);
+			} catch (error) {
+				throw new NativeHarnessReloadError(
+					"bind",
+					generation,
+					`Harness reload rejected (bind): ${error instanceof Error ? error.message : String(error)}`,
+					{ cause: error },
+				);
+			}
 			const previousGeneration = generation;
 			generation += 1;
 			current = withLive(next);
 			const change = { previousGeneration, generation, harness: current } as const;
 			for (const listener of listeners) listener(change);
 			return current;
+		},
+		setReloadValidator(validator) {
+			reloadValidator = validator;
 		},
 		subscribe(listener) {
 			listeners.add(listener);
