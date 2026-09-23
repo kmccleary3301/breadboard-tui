@@ -1,4 +1,4 @@
-import { rename, stat, writeFile } from "node:fs/promises";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { validateBundledSchema, type HarnessValidationFinding } from "../compiler/validate";
 import { type CanonicalJson, isJsonRecord, type JsonRecord } from "../canonical-json";
@@ -43,8 +43,8 @@ export interface SessionTranscriptV2 {
 
 /** The parts of an OMP session the exporter reads: its header and the entries on the active branch, root first. */
 export interface SessionTranscriptSource {
-	readonly header: unknown;
-	readonly branch: readonly unknown[];
+	readonly header: CanonicalJson;
+	readonly branch: readonly CanonicalJson[];
 }
 
 export interface SessionTranscriptOptions {
@@ -103,9 +103,37 @@ function classify(entry: JsonRecord): { kind: string; visibility: TranscriptVisi
 	return { kind: snakeCase(type), visibility: HOST };
 }
 
-/** A JSON copy: what the session file holds, with `undefined` fields dropped. `JSON.parse` yields only JSON values. */
-function jsonCopy(value: unknown): CanonicalJson {
-	return JSON.parse(JSON.stringify(value) ?? "null") as CanonicalJson;
+/**
+ * Read the header and the active branch (root to `leafId`) from an OMP session file. The exporter reads the file,
+ * not the in-memory entries, because persistence rewrites entries on the way to disk (long strings truncated, images
+ * moved to blobs, replayed reasoning signatures dropped); the transcript describes what resume will load.
+ */
+export async function readSessionTranscriptSource(
+	sessionFile: string,
+	leafId: string | null,
+): Promise<SessionTranscriptSource> {
+	let header: CanonicalJson | undefined;
+	const entries = new Map<string, JsonRecord>();
+	for (const [index, line] of (await readFile(sessionFile, "utf8")).split("\n").entries()) {
+		if (line.trim().length === 0) continue;
+		// `JSON.parse` yields only JSON values.
+		const value = JSON.parse(line) as CanonicalJson;
+		if (!isJsonRecord(value)) throw new Error(`${sessionFile}:${index + 1} is not a JSON object`);
+		if (value.type === "session") header = value;
+		else if (typeof value.id === "string") entries.set(value.id, value);
+	}
+	if (header === undefined) throw new Error(`${sessionFile} has no session header`);
+	const branch: JsonRecord[] = [];
+	const seen = new Set<string>();
+	for (let id = leafId; id !== null;) {
+		const entry = entries.get(id);
+		if (entry === undefined) throw new Error(`${sessionFile} does not contain entry ${id} on the active branch`);
+		if (seen.has(id)) throw new Error(`${sessionFile} has a parent cycle at entry ${id}`);
+		seen.add(id);
+		branch.push(entry);
+		id = typeof entry.parentId === "string" ? entry.parentId : null;
+	}
+	return { header, branch: branch.reverse() };
 }
 
 /**
@@ -116,12 +144,11 @@ export function buildSessionTranscript(
 	source: SessionTranscriptSource,
 	options: SessionTranscriptOptions,
 ): SessionTranscriptV2 {
-	const header = jsonCopy(source.header);
+	const header = source.header;
 	if (!isJsonRecord(header) || typeof header.id !== "string" || header.id.length === 0) {
 		throw new Error("OMP session header has no id");
 	}
-	const items = source.branch.map((raw, seq): TranscriptItem => {
-		const entry = jsonCopy(raw);
+	const items = source.branch.map((entry, seq): TranscriptItem => {
 		if (!isJsonRecord(entry)) throw new Error(`OMP session entry ${seq} is not an object`);
 		const item: TranscriptItem = {
 			...classify(entry),
@@ -194,10 +221,8 @@ async function exportFromContext(
 	const sessionFile = context.sessionManager.getSessionFile();
 	// Sessions persist lazily; with no session file on disk there is nothing to sit beside.
 	if (sessionFile === undefined || !(await stat(sessionFile).catch(() => undefined))?.isFile()) return undefined;
-	const transcript = buildSessionTranscript(
-		{ header: context.sessionManager.getHeader(), branch: context.sessionManager.getBranch() },
-		{ reason, ...(harness === undefined ? {} : { harness }) },
-	);
+	const source = await readSessionTranscriptSource(sessionFile, context.sessionManager.getLeafId());
+	const transcript = buildSessionTranscript(source, { reason, ...(harness === undefined ? {} : { harness }) });
 	return writeSessionTranscript(sessionFile, transcript);
 }
 

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	buildSessionTranscript,
+	readSessionTranscriptSource,
 	sessionTranscriptPath,
 	validateSessionTranscript,
 	writeSessionTranscript,
@@ -77,17 +78,19 @@ async function recordedSession(): Promise<{ manager: SessionManager; cwd: string
 	return { manager, cwd, sessionDir, file };
 }
 
-function transcriptOf(manager: SessionManager) {
-	return buildSessionTranscript(
-		{ header: manager.getHeader(), branch: manager.getBranch() },
-		{ reason: "session_end", harness: { specPath: "agent.yaml", graphHash: "abc" } },
-	);
+async function transcriptOf(manager: SessionManager) {
+	const file = manager.getSessionFile();
+	if (file === undefined) throw new Error("session has no file");
+	return buildSessionTranscript(await readSessionTranscriptSource(file, manager.getLeafId()), {
+		reason: "session_end",
+		harness: { specPath: "agent.yaml", graphHash: "abc" },
+	});
 }
 
 describe("bb.session_transcript.v2 export", () => {
 	test("an OMP session exports to a transcript that validates against the bundled closure", async () => {
 		const { manager } = await recordedSession();
-		const transcript = transcriptOf(manager);
+		const transcript = await transcriptOf(manager);
 		expect(validateSessionTranscript(transcript)).toEqual([]);
 		expect(transcript.session_id).toBe(manager.getHeader()?.id ?? "");
 		expect(transcript.items.map(item => item.kind)).toEqual([
@@ -113,7 +116,7 @@ describe("bb.session_transcript.v2 export", () => {
 
 	test("malformed items fail validation, including through the cross-file visibility $ref", async () => {
 		const { manager } = await recordedSession();
-		const valid = transcriptOf(manager);
+		const valid = await transcriptOf(manager);
 		const broken = JSON.parse(JSON.stringify(valid)) as Record<string, unknown> & {
 			items: Record<string, unknown>[];
 		};
@@ -136,7 +139,7 @@ describe("bb.session_transcript.v2 export", () => {
 
 	test("an invalid transcript is refused and nothing is written", async () => {
 		const { manager, file } = await recordedSession();
-		const transcript = transcriptOf(manager);
+		const transcript = await transcriptOf(manager);
 		const [first] = transcript.items;
 		if (!first) throw new Error("expected an item");
 		first.kind = "";
@@ -149,9 +152,9 @@ describe("bb.session_transcript.v2 export", () => {
 	test("the transcript sits beside the session without changing listing or resume", async () => {
 		const { manager, cwd, sessionDir, file } = await recordedSession();
 		const before = await readFile(file, "utf8");
-		const written = await writeSessionTranscript(file, transcriptOf(manager));
+		const written = await writeSessionTranscript(file, await transcriptOf(manager));
 		expect(written).toBe(sessionTranscriptPath(file));
-		expect(JSON.parse(await readFile(written, "utf8"))).toEqual(transcriptOf(manager));
+		expect(JSON.parse(await readFile(written, "utf8"))).toEqual(await transcriptOf(manager));
 		// OMP keeps a hidden lock file beside the session; the export leaves no temporary file.
 		expect((await readdir(sessionDir)).filter(name => !name.startsWith(".")).sort()).toEqual(
 			[basename(file), basename(written)].sort(),
@@ -162,6 +165,25 @@ describe("bb.session_transcript.v2 export", () => {
 		expect(listed.map(session => session.path)).toEqual([file]);
 		const reopened = await SessionManager.open(file, sessionDir);
 		expect(reopened.getBranch().map(entry => entry.id)).toEqual(manager.getBranch().map(entry => entry.id));
-		expect(transcriptOf(reopened)).toEqual(transcriptOf(manager));
+		const transcript = await transcriptOf(manager);
+		expect(transcript.items.map(item => item.event_id)).toEqual(reopened.getBranch().map(entry => entry.id));
+	});
+
+	test("items hold entries as the session file persisted them, not the in-memory copies", async () => {
+		const { manager, file } = await recordedSession();
+		const huge = "x".repeat(600_000);
+		manager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call_2",
+			toolName: "run_shell",
+			content: [{ type: "text", text: huge }],
+			isError: false,
+			timestamp: 6,
+		});
+		await manager.flush();
+		const persisted = (await readFile(file, "utf8")).trimEnd().split("\n").at(-1) ?? "";
+		const transcript = await transcriptOf(manager);
+		expect(transcript.items.at(-1)?.content).toEqual(JSON.parse(persisted));
+		expect(JSON.stringify(transcript.items.at(-1)?.content)).not.toContain(huge);
 	});
 });
