@@ -64,6 +64,14 @@
     },
     {
       "env_gate_ids": [],
+      "path": "prompts.tool_prompt_mode",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "none",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "providers.default_model",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": "openai/gpt-5.1-codex-mini",
@@ -119,7 +127,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:f71fb109440d8f3bf9b428bb818bb150dbe08f535cf0cd95fbf0b90f93d9b406",
+  "graph_hash": "sha256:179cccd3580fb45ef822e93bdec77072bd08866c7e46d262b79dc61a23b6a536",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -138,7 +146,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:133c862b63aed38eddb8ade9bdf83ce1643a2f0ccf1c4ee043912a5eaa66e78e",
+      "layer_hash": "sha256:a93dfde2cd7a19b9c0f9b1b82ed9ef5ff74f8326def399cc0bce896a1e9eb488",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -165,6 +173,7 @@
       "prompts.packs.base.builder",
       "prompts.packs.base.plan",
       "prompts.packs.base.system",
+      "prompts.tool_prompt_mode",
       "providers.default_model",
       "providers.models",
       "schema_version",

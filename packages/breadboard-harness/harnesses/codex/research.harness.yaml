@@ -11,6 +11,7 @@ tools:
   registry:
     paths: [implementations/tools/defs]
 prompts:
+  tool_prompt_mode: none
   packs:
     base:
       system: prompts/system.md

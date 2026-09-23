@@ -18,4 +18,10 @@ describe("native prompt assembly", () => {
 		expect(frameNativeUserMessage("hello", perTurnPrompt)).toBe(await readFile(join(OPENAI, "framed_hello.txt"), "utf8"));
 		expect(frameNativeUserMessage("hello", perTurnPrompt)).not.toStartWith("<system-reminder>");
 	});
+
+	test("suppresses per-turn framing when the compiled pack sets tool_prompt_mode none", async () => {
+		const { perTurnPrompt } = await loadNativeHarness({ specPath: "codex", workspaceRoot: ROOT });
+		expect(perTurnPrompt).toBe("");
+		expect(frameNativeUserMessage("hello", perTurnPrompt)).toBe("hello");
+	});
 });

@@ -197,7 +197,8 @@ export async function assembleNativePrompts(
 		}
 	}
 	const dedupe = nativeLockValue(lock, "prompts.dedupe") === true;
-	return { system: assemble(system, mode, dedupe), perTurn: perTurnCatalog(surface) };
+	const perTurn = nativeLockValue(lock, "prompts.tool_prompt_mode") === "none" ? "" : perTurnCatalog(surface);
+	return { system: assemble(system, mode, dedupe), perTurn };
 }
 
 /**
