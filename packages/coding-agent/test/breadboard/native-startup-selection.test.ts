@@ -24,6 +24,12 @@ function settingsWith(values: {
 }
 
 describe("native startup selection", () => {
+	it("defaults product launches to the native OMP loop", () => {
+		const defaults = settingsWith({});
+		expect(startupBreadboardEngineOwnsTurns({}, defaults, WORKSPACE, true)).toBe(false);
+		expect(resolveNativeHarnessSpec({}, defaults, WORKSPACE, true)).toBe("bb-omp.native");
+	});
+
 	it("keeps turns on OMP's loop in native and off modes only", () => {
 		const native = settingsWith({ engineMode: "native" });
 		expect(startupBreadboardEngineOwnsTurns({}, native, WORKSPACE, true)).toBe(false);
