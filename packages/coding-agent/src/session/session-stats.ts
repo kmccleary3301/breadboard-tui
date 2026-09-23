@@ -36,6 +36,7 @@ interface ContextUsageMemo {
 	messageCount: number;
 	lastFingerprint: string | undefined;
 	contextWindow: number | undefined;
+	model: Model | undefined;
 	revision: number;
 	systemPrompt: readonly string[] | undefined;
 	tools: NonNullable<NonNullable<NonMessageTokenSource["agent"]>["state"]>["tools"];
@@ -457,6 +458,7 @@ export class SessionStatsTracker {
 		const messageCount = messages.length;
 		const lastFingerprint = messageCount > 0 ? messageFingerprint(messages[messageCount - 1]!) : undefined;
 		const contextWindow = options?.contextWindow;
+		const model = this.#host.model();
 		const systemPrompt = this.#host.session.systemPrompt;
 		const tools = this.#host.session.agent?.state?.tools;
 		const skills = this.#host.session.skills;
@@ -467,6 +469,7 @@ export class SessionStatsTracker {
 			memo.messageCount === messageCount &&
 			memo.lastFingerprint === lastFingerprint &&
 			memo.contextWindow === contextWindow &&
+			memo.model === model &&
 			memo.revision === this.#contextUsageRevision &&
 			memo.systemPrompt === systemPrompt &&
 			memo.tools === tools &&
@@ -488,6 +491,7 @@ export class SessionStatsTracker {
 			messageCount,
 			lastFingerprint,
 			contextWindow,
+			model,
 			revision: this.#contextUsageRevision,
 			systemPrompt,
 			tools,
