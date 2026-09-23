@@ -770,6 +770,7 @@ export class AgentSession {
 	 */
 	#fallbackExtensionTimers: ManagedTimers | undefined = undefined;
 	#turnIndex = 0;
+	#turnPrepareMode: string | undefined;
 	#messageEndPersistenceTail: Promise<void> = Promise.resolve();
 	#pendingMessageEndPersistence = new Map<string, Promise<void>>();
 	#persistedMessageKeys: { anchor: string; keys: Set<string> } | undefined;
@@ -1452,13 +1453,13 @@ export class AgentSession {
 		this.#detachTurnPrepare = this.agent.addBeforeModelCall(async (context: Context, signal?: AbortSignal) => {
 			const result = await this.#extensionRunner?.emitTurnPrepare({
 				turnIndex: this.#turnIndex,
-				previousMode: undefined,
-				nextMode: "",
+				previousMode: this.#turnPrepareMode,
 				activeToolNames: this.agent.state.tools.map(tool => tool.name),
 				baseSystemPrompt: this.agent.state.systemPrompt,
 			});
 			signal?.throwIfAborted();
 			if (!result) return;
+			if (result.mode !== undefined) this.#turnPrepareMode = result.mode;
 			if (result.systemPrompt !== undefined) {
 				context.systemPrompt =
 					typeof result.systemPrompt === "string" ? [result.systemPrompt] : [...result.systemPrompt];
@@ -4417,6 +4418,7 @@ export class AgentSession {
 		if (!this.#extensionRunner) return;
 		if (event.type === "agent_start") {
 			this.#turnIndex = 0;
+			this.#turnPrepareMode = undefined;
 			await this.#extensionRunner.emit({ type: "agent_start" });
 			return;
 		}

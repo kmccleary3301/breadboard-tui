@@ -87,9 +87,9 @@ export class NativeStageMachine {
 		return this.#planTurns;
 	}
 
-	/** Advance after a completed plan turn; Python only transitions with an open TODO board. */
-	endTurn(hasOpenTodos: boolean): NativeHarnessStage {
-		if (this.#current.mode !== "plan" || !hasOpenTodos) return this.#current;
+	/** Advance after a completed plan turn; Python requires a non-empty TODO board, regardless of item statuses. */
+	endTurn(hasTodos: boolean): NativeHarnessStage {
+		if (this.#current.mode !== "plan" || !hasTodos) return this.#current;
 		this.#planTurns += 1;
 		if (this.#planLimit !== 0 && this.#planTurns < this.#planLimit) return this.#current;
 		if (this.#features.get("plan") !== true) return this.#current;

@@ -1147,7 +1147,6 @@ export type ExtensionEvent =
 export interface TurnPrepareContext {
 	turnIndex: number;
 	previousMode: string | undefined;
-	nextMode: string;
 	activeToolNames: readonly string[];
 	baseSystemPrompt: readonly string[];
 }

@@ -83,6 +83,10 @@ export class TodoWriteState {
 	get openItems(): readonly string[] {
 		return this.items.filter((item) => (TODO_OPEN_STATUSES as readonly string[]).includes(item.status)).map((item) => item.title);
 	}
+	/** Whether the board contains any item, including completed and canceled entries. */
+	get hasItems(): boolean {
+		return this.items.length > 0;
+	}
 }
 
 /** Return the strict completion-guard text, or undefined when no todo is open. */

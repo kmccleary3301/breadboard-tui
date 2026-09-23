@@ -333,7 +333,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		api.on("tool_call", event => policy.admit(event.toolName));
 		api.on("turn_settle", async (event, context) => {
 			const text = await runTextCalls(event.message, harness, policy, todos, context);
-			stageMachine.endTurn(todos.openItems.length > 0);
+			stageMachine.endTurn(todos.hasItems);
 			const messages = [
 				...(text === undefined ? [] : [{ customType: NATIVE_TEXT_RESULTS_MESSAGE_TYPE, content: text, display: true }]),
 				...guard.takeAdvisories().map(content => ({ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true })),

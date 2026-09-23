@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonRecord } from "../../src/canonical-json";
 import { createNativeStageMachine, type NativeHarnessStage } from "../../src/native/stage-machine";
+import { TodoWriteState } from "../../src/native/todo-write";
 
 function stage(mode: string): NativeHarnessStage {
 	return { mode, systemPrompt: `${mode} prompt`, perTurnPrompt: `${mode} tools`, toolSurface: { mode, native: [], textInvoked: [] } };
@@ -72,6 +73,26 @@ describe("native stage machine", () => {
 			{ prompt: "plan prompt", tools: ["read_file"] },
 			{ prompt: "build prompt", tools: ["run_shell"] },
 		]);
+	});
+	test("transitions when the non-empty TODO board is fully closed", () => {
+		const todos = new TodoWriteState();
+		todos.apply({
+			todos: [
+				{ content: "done work", status: "completed" },
+				{ content: "canceled work", status: "canceled" },
+			],
+		});
+		expect(todos.hasItems).toBe(true);
+		expect(todos.openItems).toEqual([]);
+
+		const machine = createNativeStageMachine(
+			lock([{ if: "features.plan", then: { mode: "plan" } }, { mode: "build" }], true, 1),
+			[stage("plan"), stage("build")],
+		);
+		// Python checks `if not todos`, not whether any individual item remains open
+		// (`guardrails/orchestrator.py:263-274`).
+		machine.endTurn(todos.hasItems);
+		expect(machine.current.mode).toBe("build");
 	});
 
 	test("falls through a disabled conditional in sequence order", () => {

@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type LoadedNativeHarness, loadNativeHarness } from "@breadboard/harness";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -46,7 +47,7 @@ afterAll(() => {
 
 async function nativeSession(
 	responses: MockResponse[],
-	options: { autoApprove?: boolean } = {},
+	options: { autoApprove?: boolean; extensions?: ExtensionFactory[] } = {},
 	configureHarness?: (harness: LoadedNativeHarness) => LoadedNativeHarness,
 ): Promise<{ session: AgentSession; harness: LoadedNativeHarness; calls: ReturnType<typeof createMockModel>["calls"] }> {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), `bb-native-session-${Snowflake.next()}-`));
@@ -81,6 +82,9 @@ async function nativeSession(
 		enableLsp: false,
 	};
 	applyNativeHarnessSessionOptions(sessionOptions, harness, settings, { approvalSelected: false });
+	if (options.extensions) {
+		sessionOptions.extensions = [...(sessionOptions.extensions ?? []), ...options.extensions];
+	}
 	const { session } = await createAgentSession(sessionOptions);
 	sessions.push(session);
 	const mock = createMockModel({ responses });
@@ -269,6 +273,12 @@ describe("native harness session", () => {
 		expect(fs.existsSync(path.join(session.sessionManager.getCwd(), "ran.txt"))).toBe(false);
 	});
 	it("applies the next stage on the continuation provider request", async () => {
+		const prepareEvents: Array<{ previousMode: string | undefined }> = [];
+		const observer: ExtensionFactory = api => {
+			api.on("turn_prepare", event => {
+				prepareEvents.push({ previousMode: event.previousMode });
+			});
+		};
 		const { session, calls } = await nativeSession(
 			[
 				{
@@ -280,7 +290,7 @@ describe("native harness session", () => {
 				},
 				{ content: [{ type: "text", text: "build complete" }], stopReason: "stop" },
 			],
-			{},
+			{ extensions: [observer] },
 			configureStagedHarness,
 		);
 
@@ -289,6 +299,7 @@ describe("native harness session", () => {
 
 		// Python's stage transition waits for the turn boundary after TodoWrite
 		// (`agent_llm_openai.py:3052-3080`, `guardrails/orchestrator.py:269-349`).
+		expect(prepareEvents.map(event => event.previousMode)).toEqual([undefined, "plan"]);
 		expect(calls).toHaveLength(2);
 		expect(calls[0]?.context.systemPrompt).toEqual(["PLAN_STAGE_PROMPT"]);
 		expect(calls[0]?.context.tools?.map(tool => tool.name)).toEqual(["read_file"]);

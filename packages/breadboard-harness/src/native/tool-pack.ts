@@ -107,7 +107,10 @@ function selectedToolNames(mode: JsonRecord, definitions: ReadonlyMap<string, Na
 		Array.isArray(mode.tools_disabled) ? mode.tools_disabled.filter((name): name is string => typeof name === "string") : [],
 	);
 	const selected = enabled.length === 0 || enabled.includes("*") ? [...definitions.keys()] : enabled;
-	return selected.filter(name => !disabled.has(name));
+	const filtered = selected.filter(name => !disabled.has(name));
+	// Python keeps the complete tool list when exclusions accidentally remove every tool
+	// (`agent_llm_openai.py:3095-3111`).
+	return filtered.length === 0 ? selected : filtered;
 }
 
 async function loadNativeToolSurfacesWithDefinitions(

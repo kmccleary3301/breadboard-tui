@@ -4120,7 +4120,7 @@ describe("ExtensionRunner", () => {
 			path.join(extensionsDir, "turn-prepare.ts"),
 			`export default (pi) => {
 				pi.on("turn_prepare", (event) => ({
-					mode: event.nextMode,
+					mode: "build",
 					systemPrompt: ["prepared prompt"],
 					activeToolNames: ["build"],
 					continue: true,
@@ -4134,7 +4134,6 @@ describe("ExtensionRunner", () => {
 			runner.emitTurnPrepare({
 				turnIndex: 1,
 				previousMode: "plan",
-				nextMode: "build",
 				activeToolNames: ["read"],
 				baseSystemPrompt: ["plan prompt"],
 			}),
