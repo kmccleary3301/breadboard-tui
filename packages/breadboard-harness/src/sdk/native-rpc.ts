@@ -277,6 +277,7 @@ export class NativeRpcTransport {
 	#protocolV2Enabled = false;
 	#stderrTail = "";
 	#publicEventSeq = 0;
+	#publicTerminal = false;
 	#cancelRequested = false;
 	#requestId = 0;
 	#resumeSession: string | undefined;
@@ -367,6 +368,7 @@ export class NativeRpcTransport {
 			status: "starting",
 		};
 		this.#publicEventSeq = 0;
+		this.#publicTerminal = false;
 		this.#cancelRequested = false;
 		this.#emitPublic(
 			"session.started",
@@ -512,8 +514,10 @@ export class NativeRpcTransport {
 		payloadSchemaVersion: PublicSessionEvent["payload_schema_version"],
 	): void {
 		const sessionId = this.#session?.session_id;
-		if (!sessionId) return;
+		if (!sessionId || this.#publicTerminal) return;
 		const seq = this.#publicEventSeq++;
+		if (kind === "session.completed" || kind === "session.failed" || kind === "session.canceled")
+			this.#publicTerminal = true;
 		this.#publicEvents.push({
 			schema_version: "bb.public_session_event.v1",
 			event_id: `${sessionId}:${seq}`,
