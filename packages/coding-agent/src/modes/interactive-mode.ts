@@ -7061,7 +7061,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async showProviderSetup(): Promise<void> {
 		const { runProviderSetupWizard } = await import("./setup");
-		await runProviderSetupWizard(this);
+		await runProviderSetupWizard(this, {
+			providerAuthPort: this.providerAuthPort,
+			nativeAuthStorage: this.nativeAuthStorage,
+		});
 	}
 
 	showHookConfirm(title: string, message: string): Promise<boolean> {

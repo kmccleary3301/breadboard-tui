@@ -22,6 +22,12 @@ import { setTerminalGlyphProtocol } from "@oh-my-pi/pi-tui/terminal-capabilities
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { SEARCH_PROVIDER_OPTIONS } from "@oh-my-pi/pi-tui/tools/web-search";
+import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
+
+/** The information-layout scene runs only in the BreadBoard product. */
+function productSceneIds(): string[] {
+	return ALL_SCENES.filter(scene => scene.id !== "information-layout" || IS_BREADBOARD_PRODUCT).map(scene => scene.id);
+}
 
 type SetupApplicationSceneHost = Omit<SetupSceneHost, "ctx"> & { ctx: InteractiveModeContext };
 
@@ -60,7 +66,7 @@ afterEach(async () => {
 describe("setup wizard scene selection", () => {
 	it("runs all v1 scenes for a new user", async () => {
 		const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
-		expect(scenes.map(scene => scene.id)).toEqual(ALL_SCENES.map(scene => scene.id));
+		expect(scenes.map(scene => scene.id)).toEqual(productSceneIds());
 	});
 
 	it("keeps CURRENT_SETUP_VERSION in sync with the highest scene minVersion", () => {
@@ -107,7 +113,7 @@ describe("setup wizard scene selection", () => {
 			resuming: true,
 			force: true,
 		});
-		expect(selected.map(scene => scene.id)).toEqual(ALL_SCENES.map(scene => scene.id));
+		expect(selected.map(scene => scene.id)).toEqual(productSceneIds());
 		expect(await selectSetupScenes(0, ALL_SCENES, ctx, { isTTY: false, force: true })).toEqual([]);
 	});
 
@@ -116,7 +122,7 @@ describe("setup wizard scene selection", () => {
 		try {
 			const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
 			expect(scenes.map(scene => scene.id)).toEqual(
-				ALL_SCENES.map(scene => scene.id).filter(id => id !== "glyph-mode"),
+				productSceneIds().filter(id => id !== "glyph-mode"),
 			);
 		} finally {
 			setTerminalGlyphProtocol(false);
@@ -469,40 +475,6 @@ describe("setup wizard theme previews", () => {
 		await Bun.sleep(20);
 		expect(settings.get("symbolPreset")).toBe("nerd");
 		expect(theme.getSymbolPreset()).toBe("nerd");
-	});
-});
-
-describe("setup wizard glyph scene", () => {
-	it("lists Nerd Font first and commits the chosen preset", async () => {
-		await initTheme(false, "unicode", false, "titanium", "light");
-		const settings = Settings.isolated();
-		const scene = ALL_SCENES.find(s => s.id === "glyph-mode");
-		expect(scene).toBeDefined();
-
-		let finished = false;
-		const host = bindSceneHost({
-			ctx: {
-				settings,
-				ui: { invalidate: () => {}, requestRender: () => {} },
-			},
-			requestRender: () => {},
-			finish: () => {
-				finished = true;
-			},
-			setFocus: () => {},
-			restoreFocus: () => {},
-		} as unknown as SetupApplicationSceneHost);
-
-		const controller = scene!.mount(host);
-		// Row "1" is now Nerd Font (it must lead the list).
-		controller.handleInput?.("1");
-		await Bun.sleep(20);
-		expect(theme.getSymbolPreset()).toBe("nerd");
-
-		controller.handleInput?.("\n");
-		await Bun.sleep(20);
-		expect(settings.get("symbolPreset")).toBe("nerd");
-		expect(finished).toBe(true);
 	});
 });
 

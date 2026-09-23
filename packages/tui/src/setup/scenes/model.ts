@@ -4,6 +4,7 @@ import { Text } from "../../components/text";
 import { WizardStep } from "../../components/wizard-step";
 import { buildBrowserItems, ModelBrowser, resolveRoleAssignments, sortModelItems } from "../../overlays/model-browser";
 import { BROWSER_FRAME_ROWS } from "../../overlays/model-picker";
+import { getProductIdentity } from "../../product-identity";
 import { theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
@@ -11,7 +12,11 @@ const MAX_VISIBLE_MODELS = 10;
 
 class ModelSceneController implements SetupSceneController {
 	title = "Choose your default model";
-	subtitle = "Search configured models and save the model used for new sessions.";
+	get subtitle(): string {
+		return this.#host.ctx.modelSelection.mode === "session"
+			? `Select the model for this ${(this.#host.ctx.identity ?? getProductIdentity()).displayName} session.`
+			: "Search configured models and save the model used for new sessions.";
+	}
 	#browser: ModelBrowser;
 	#status: string | undefined;
 	#selecting = false;
@@ -22,7 +27,9 @@ class ModelSceneController implements SetupSceneController {
 
 	constructor(host: SetupSceneHost) {
 		this.#host = host;
-		this.#browser = new ModelBrowser(host.ctx.modelSource);
+		this.#browser = new ModelBrowser(host.ctx.modelSource, {
+			emptyText: () => (host.ctx.identity ?? getProductIdentity()).setupModelEmptyText,
+		});
 		this.#browser.onActivate = item => {
 			void this.#select(item.model, item.selector);
 		};

@@ -25,6 +25,8 @@ export interface SetupSettingsHost {
 }
 
 export interface SetupModelSelection {
+	/** `session` switches only the running session's model; `default` persists the default role. */
+	readonly mode?: "default" | "session";
 	readonly currentModel: Model | undefined;
 }
 export interface SetupAuthProviderView {
@@ -84,7 +86,8 @@ export interface SetupHost extends SetupUiHost {
 	readonly colorBlindMode: boolean;
 	readonly webSearchOrder: readonly string[];
 	readonly disabledProviders: readonly string[];
-	readonly authStorage: AuthStorage;
+	/** Native credential store; undefined when the product has no store and no broker is bound. */
+	readonly authStorage?: AuthStorage;
 	readonly providerAuth?: SetupProviderAuthPort;
 	readonly modelSource: ModelBrowserSource;
 	getModels(): { available: Model[]; all: Model[]; current: Model | undefined };

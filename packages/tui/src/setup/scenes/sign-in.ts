@@ -12,8 +12,20 @@ import { type SgrMouseEvent } from "../../mouse";
 import { wrapTextWithAnsi } from "../../utils";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { OAuthSelectorComponent, type ProviderAuthReadPort } from "../../overlays/oauth-selector";
+import { getProductIdentity } from "../../product-identity";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
+
+const UNAVAILABLE_PROVIDER_SOURCE: ProviderAuthReadPort = Object.freeze({
+	listProvidersSync: () => [],
+	listCredentialsSync: () => [],
+	async listProviders() {
+		return [];
+	},
+	async listCredentials() {
+		return [];
+	},
+});
 
 function createNativeProviderAuthDataSource(authStorage: AuthStorage): ProviderAuthReadPort {
 	return {
@@ -109,7 +121,8 @@ export class SignInTab implements SetupTab {
 	readonly id = "sign-in";
 	readonly label = "Sign in";
 
-	#authStorage: AuthStorage;
+	/** Undefined when the product has neither a credential broker nor a native store to sign in to. */
+	#authStorage: AuthStorage | undefined;
 	#selector: OAuthSelectorComponent;
 	#statusLines: string[] = [];
 	#authUrl: string | undefined;
@@ -178,7 +191,22 @@ export class SignInTab implements SetupTab {
 		// this panel, so on short screens the rows go to the provider list
 		// instead (17 = full selector: 4 chrome above, 10 rows, 3 below).
 		let intro: Container | undefined;
-		if (this.#loggingInProvider === undefined && (maxLines === undefined || maxLines >= 17 + 2)) {
+		if (this.#loggingInProvider === undefined && this.#providerSetupUnavailable) {
+			const identity = this.#host.ctx.identity ?? getProductIdentity();
+			intro = new Container();
+			intro.addChild(new Text(theme.fg("error", `${identity.displayName} provider setup is unavailable.`), 0, 0));
+			intro.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						`Press Esc to continue; retry with \`${identity.cliName} setup\` when the auth broker is ready.`,
+					),
+					0,
+					0,
+				),
+			);
+			intro.addChild(new Spacer(1));
+		} else if (this.#loggingInProvider === undefined && (maxLines === undefined || maxLines >= 17 + 2)) {
 			intro = new Container();
 			intro.addChild(
 				new Text(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), 0, 0),
@@ -244,10 +272,15 @@ export class SignInTab implements SetupTab {
 		return this.#step.render(width);
 	}
 
+	get #providerSetupUnavailable(): boolean {
+		return !this.#host.ctx.providerAuth && !this.#authStorage;
+	}
+
 	#createSelector(): OAuthSelectorComponent {
 		return new OAuthSelectorComponent(
 			"login",
-			this.#host.ctx.providerAuth ?? createNativeProviderAuthDataSource(this.#authStorage),
+			this.#host.ctx.providerAuth ??
+				(this.#authStorage ? createNativeProviderAuthDataSource(this.#authStorage) : UNAVAILABLE_PROVIDER_SOURCE),
 			providerId => {
 				void this.#login(providerId);
 			},
@@ -320,7 +353,12 @@ export class SignInTab implements SetupTab {
 				});
 				accountLabel = result.accountLabel;
 			} else {
-				const identity = await this.#authStorage.login(providerId as OAuthProvider, {
+				const authStorage = this.#authStorage;
+				if (!authStorage) {
+					const { displayName } = this.#host.ctx.identity ?? getProductIdentity();
+					throw new Error(`${displayName} provider setup is unavailable`);
+				}
+				const identity = await authStorage.login(providerId as OAuthProvider, {
 					signal: this.#loginAbort.signal,
 					onBrowserSession: (request, signal) => this.#host.ctx.captureBrowserSession(request, signal),
 					onAuth: info => {

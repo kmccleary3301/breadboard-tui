@@ -1,24 +1,21 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getWelcomeTips, renderWelcomeTip } from "@oh-my-pi/pi-coding-agent/modes/components/welcome";
-import { ALL_SCENES } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard";
-import { renderSetupOutro } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/outro";
-import { renderSetupSplash, SETUP_SPLASH_MS } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/splash";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import type {
-	SetupScene,
-	SetupSceneHost,
-	SetupWizardContext,
-} from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/scenes/types";
-import { SetupWizardComponent } from "@oh-my-pi/pi-coding-agent/modes/setup-wizard/wizard-overlay";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { ALL_SCENES, createSetupHost, type SetupWizardContext } from "@oh-my-pi/pi-coding-agent/modes/setup";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
 	OMP_PRODUCT_IDENTITY,
 	type ProductIdentity,
 } from "@oh-my-pi/pi-coding-agent/product-identity";
 import { type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+import { getWelcomeTips, renderWelcomeTip } from "@oh-my-pi/pi-tui/prompt/welcome";
+import { renderSetupOutro } from "@oh-my-pi/pi-tui/setup/scenes/outro";
+import { renderSetupSplash, SETUP_SPLASH_MS } from "@oh-my-pi/pi-tui/setup/scenes/splash";
+import type { SetupHost, SetupScene, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
+import { SetupWizardComponent } from "@oh-my-pi/pi-tui/setup/wizard-overlay";
+import { initTheme } from "@oh-my-pi/pi-tui/theme/theme";
 
 beforeAll(async () => {
 	await initTheme(false, "unicode", false, "titanium", "light");
@@ -170,7 +167,7 @@ function wizardContext(rows: number): SetupWizardContext {
 			getAll: () => [],
 			refresh: async () => {},
 			refreshProvider: async () => {},
-		},
+		} as unknown as ModelRegistry,
 		modelSelection: {
 			mode: "default",
 			currentModel: undefined,
@@ -180,6 +177,10 @@ function wizardContext(rows: number): SetupWizardContext {
 		},
 		openInBrowser: () => {},
 	};
+}
+
+function identityHost(ctx: SetupWizardContext, identity: ProductIdentity): SetupHost {
+	return { ...createSetupHost(ctx), identity };
 }
 
 function identityScene(): SetupScene {
@@ -201,8 +202,7 @@ describe("SetupWizardComponent identity boundary", () => {
 		"uses injected $id identity through splash, scene header, and outro",
 		async identity => {
 			let now = 0;
-			const component = new SetupWizardComponent(wizardContext(24), [identityScene()], {
-				identity,
+			const component = new SetupWizardComponent(identityHost(wizardContext(24), identity), [identityScene()], {
 				now: () => now,
 			});
 			const pending = component.run();
@@ -253,7 +253,7 @@ function modelHost(identity: ProductIdentity): SetupSceneHost {
 			getAll: () => [],
 			refresh: async () => {},
 			refreshProvider: async () => {},
-		},
+		} as unknown as ModelRegistry,
 		modelSelection: {
 			mode: "default",
 			currentModel: undefined,
@@ -264,8 +264,7 @@ function modelHost(identity: ProductIdentity): SetupSceneHost {
 		openInBrowser: () => {},
 	};
 	return {
-		identity,
-		ctx,
+		ctx: identityHost(ctx, identity),
 		requestRender: () => {},
 		finish: () => {},
 		setFocus: () => {},

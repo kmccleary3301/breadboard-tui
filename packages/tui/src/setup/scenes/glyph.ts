@@ -16,9 +16,9 @@ const GLYPH_LABELS: Readonly<Record<SymbolPreset, string>> = {
 };
 
 const GLYPH_SAMPLES: Readonly<Record<SymbolPreset, string>> = {
-	unicode: "✔  ✖  📁  ⬢  ╭─╮  ├─  •  ⠋  →",
+	unicode: "✔  ✖  ▱  ◎  ╭─╮  ├─  •  ⠋  →",
 	nerd: "      󰉋  ",
-	emoji: "✅  ❌  📁  🔷  ✨  🔄  ➡️",
+	emoji: "✔  ✖  📁  🎯  🧠  🚀",
 	ascii: "[ok]  [x]  >  +  [D]  +-+  |--  *  ->",
 };
 
@@ -35,15 +35,21 @@ class GlyphSceneController implements SetupSceneController {
 	#selectList: SelectList;
 	#previewRequest = 0;
 	#committing = false;
+	readonly #originalPreset: SymbolPreset;
+	/** Previews apply in order so a slow preview can never land after commit or cancel. */
+	#previewChain: Promise<void> = Promise.resolve();
 	#step: WizardStep | undefined;
 
 	readonly #host: SetupSceneHost;
 
 	constructor(host: SetupSceneHost) {
 		this.#host = host;
-		this.#selectList = new SelectList(GLYPH_ITEMS, GLYPH_ITEMS.length, getSelectListTheme());
-		const current = theme.getSymbolPreset();
-		const currentIndex = GLYPH_PRESETS.indexOf(current);
+		this.#selectList = new SelectList(GLYPH_ITEMS, GLYPH_ITEMS.length, getSelectListTheme(), {
+			wrapDescription: true,
+			maxDescriptionRows: 1,
+		});
+		this.#originalPreset = theme.getSymbolPreset();
+		const currentIndex = GLYPH_PRESETS.indexOf(this.#originalPreset);
 		this.#selectList.setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
 		this.#selectList.onSelectionChange = item => {
 			this.#preview(item.value as SymbolPreset);
@@ -51,7 +57,9 @@ class GlyphSceneController implements SetupSceneController {
 		this.#selectList.onSelect = item => {
 			void this.#commit(item.value as SymbolPreset);
 		};
-		this.#selectList.onCancel = () => host.finish("skipped");
+		this.#selectList.onCancel = () => {
+			void this.#cancel();
+		};
 	}
 
 	invalidate(): void {
@@ -98,15 +106,30 @@ class GlyphSceneController implements SetupSceneController {
 		if (this.#committing) return;
 		this.#committing = true;
 		this.#previewRequest += 1;
+		await this.#previewChain;
 		this.#host.ctx.saveSymbolPreset(preset);
 		await setSymbolPreset(preset);
+		await this.#host.ctx.settings.flush();
 		this.#host.ctx.ui.invalidate();
 		this.#host.finish("done");
 	}
 
+	async #cancel(): Promise<void> {
+		if (this.#committing) return;
+		this.#committing = true;
+		this.#previewRequest += 1;
+		await this.#previewChain;
+		await setSymbolPreset(this.#originalPreset);
+		this.#host.ctx.ui.invalidate();
+		this.#host.requestRender();
+		this.#host.finish("skipped");
+	}
+
 	#preview(preset: SymbolPreset): void {
 		const request = ++this.#previewRequest;
-		void setSymbolPreset(preset).then(() => {
+		this.#previewChain = this.#previewChain.then(async () => {
+			if (request !== this.#previewRequest || this.#committing) return;
+			await setSymbolPreset(preset);
 			if (request !== this.#previewRequest || this.#committing) return;
 			this.#host.ctx.ui.invalidate();
 			this.#host.requestRender();

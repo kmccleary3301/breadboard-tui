@@ -45,10 +45,16 @@ function dissolveFrames(from: string[], to: string[], progress: number, height: 
 	return out;
 }
 
+export interface SetupWizardComponentOptions {
+	/** Animation clock; tests inject a deterministic one. */
+	readonly now?: () => number;
+}
+
 /** Fullscreen onboarding presentation with scene focus and mouse routing. */
 export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	#phase: WizardPhase = "splash";
-	#phaseStartedAt = performance.now();
+	readonly #now: () => number;
+	#phaseStartedAt: number;
 	#sceneIndex = 0;
 	#activeScene: SetupSceneController | undefined;
 	#timer: NodeJS.Timeout | undefined;
@@ -61,11 +67,15 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	constructor(
 		readonly ctx: SetupHost,
 		readonly scenes: readonly SetupScene[],
-	) {}
+		options: SetupWizardComponentOptions = {},
+	) {
+		this.#now = options.now ?? (() => performance.now());
+		this.#phaseStartedAt = this.#now();
+	}
 
 	run(): Promise<void> {
 		this.#phase = this.scenes.length === 0 ? "outro" : "splash";
-		this.#phaseStartedAt = performance.now();
+		this.#phaseStartedAt = this.#now();
 		this.#startTimer();
 		this.ctx.ui.requestRender();
 		return this.#done.promise;
@@ -160,10 +170,10 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		let lines: string[];
 		switch (this.#phase) {
 			case "splash":
-				lines = renderSetupSplash(safeWidth, height, performance.now() - this.#phaseStartedAt, identity, appearance, mode);
+				lines = renderSetupSplash(safeWidth, height, this.#now() - this.#phaseStartedAt, identity, appearance, mode);
 				break;
 			case "transition": {
-				const elapsed = performance.now() - this.#phaseStartedAt;
+				const elapsed = this.#now() - this.#phaseStartedAt;
 				const progress = Math.min(1, elapsed / SCENE_TRANSITION_MS);
 				const splash = renderSetupSplash(safeWidth, height, SETUP_SPLASH_MS + elapsed, identity, appearance, mode);
 				const scene = this.#renderScene(safeWidth, height, identity, appearance, mode);
@@ -174,7 +184,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 				lines = renderSetupOutro(
 					safeWidth,
 					height,
-					performance.now() - this.#phaseStartedAt,
+					this.#now() - this.#phaseStartedAt,
 					identity,
 					appearance,
 					mode,
@@ -205,7 +215,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const header = [
 			"",
 			...logo.map(line => centerLine(line, width)),
-			centerLine(theme.bold(theme.fg("accent", identity.displayName)), width),
+			centerLine(theme.bold(theme.fg("accent", identity.welcomeTitle)), width),
 			centerLine(theme.fg("muted", `Setup step ${this.#sceneIndex + 1} of ${this.scenes.length}`), width),
 			"",
 			indentLine(theme.bold(title), width, SCENE_MARGIN_X),
@@ -242,12 +252,12 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		if (this.#timer) return;
 		this.#timer = setInterval(() => {
 			if (this.#disposed) return;
-			const elapsed = performance.now() - this.#phaseStartedAt;
+			const elapsed = this.#now() - this.#phaseStartedAt;
 			if (this.#phase === "splash" && elapsed >= SETUP_SPLASH_MS) {
 				this.#beginScene();
 			} else if (this.#phase === "transition" && elapsed >= SCENE_TRANSITION_MS) {
 				this.#phase = "scene";
-				this.#phaseStartedAt = performance.now();
+				this.#phaseStartedAt = this.#now();
 				this.ctx.ui.requestRender();
 			} else if (this.#phase === "outro" && elapsed >= SETUP_OUTRO_MS) {
 				this.#complete();
@@ -286,7 +296,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		};
 		this.#activeScene = scene.mount(host);
 		this.#phase = targetPhase;
-		this.#phaseStartedAt = performance.now();
+		this.#phaseStartedAt = this.#now();
 		this.#sceneFocusTarget = undefined;
 		this.ctx.ui.setFocus(this);
 		void this.#activeScene.onMount?.();
@@ -320,7 +330,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		if (this.#phase === "done") return;
 		this.#unmountActiveScene();
 		this.#phase = "outro";
-		this.#phaseStartedAt = performance.now();
+		this.#phaseStartedAt = this.#now();
 		this.ctx.ui.setFocus(this);
 		this.#startTimer();
 		this.ctx.ui.requestRender();

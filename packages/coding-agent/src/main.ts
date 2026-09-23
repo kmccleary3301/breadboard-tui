@@ -93,7 +93,7 @@ import type { PrintModeOptions } from "./modes/print-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
 import type * as SetupWizardModule from "./modes/setup";
-import type { SetupScene, SetupWizardContext } from "@oh-my-pi/pi-tui/setup/wizard";
+import type { SetupScene, SetupWizardContext } from "./modes/setup";
 import { ProcessTerminal, TUI } from "@oh-my-pi/pi-tui";
 import { openPath } from "./utils/open";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
@@ -709,7 +709,7 @@ async function runInteractiveMode(
 			? await setupWizard.selectSetupScenes(
 					storedSetupVersion,
 					setupWizard.ALL_SCENES,
-					setupWizard.createInteractiveSetupContext(mode),
+					mode,
 					{
 						resuming,
 						isTTY: process.stdin.isTTY && process.stdout.isTTY,
@@ -735,7 +735,7 @@ async function runInteractiveMode(
 		}
 
 		if (setupWizard && setupScenes.length > 0) {
-			await setupWizard.runSetupWizard(setupWizard.createInteractiveSetupContext(mode), setupScenes, {
+			await setupWizard.runSetupWizard(mode, setupScenes, {
 				providerAuthPort: breadboard?.providerAuth,
 				nativeAuthStorage: breadboard?.nativeAuthStorage,
 			});
@@ -1957,7 +1957,7 @@ export async function runRootCommand(
 			const restriction = nativeStartupRestriction(parsedArgs, true);
 			if (restriction) throw new Error(restriction);
 			stopPendingStartupComposer();
-			const setupWizard = await logger.time("setup:load", () => import("@oh-my-pi/pi-tui/setup/wizard"));
+			const setupWizard = await logger.time("setup:load", () => import("./modes/setup"));
 			await logger.time(
 				"setup:initTheme",
 				initTheme,
