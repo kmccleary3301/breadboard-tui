@@ -1,3 +1,4 @@
+import { validateBundledSchema } from "../src/compiler/validate";
 import { NativeRpcTransport } from "../src/sdk/native-rpc";
 import type { PublicSessionEvent } from "../src/sdk/public-session-event";
 const binaryPath = Bun.argv[2] ?? Bun.env.BB_BINARY;
@@ -21,7 +22,7 @@ const transport = new NativeRpcTransport({
 });
 
 const events: PublicSessionEvent[] = [];
-const replyTexts: string[] = [];
+let publicEventsSchemaValid = true;
 let approvalRequests = 0;
 let cancelPromise: Promise<void> | undefined;
 let cancelIssuedWhileTurn = false;
@@ -37,6 +38,16 @@ try {
 	const created = await transport.createSession({ task });
 	for await (const event of eventStream) {
 		events.push(event);
+		const findings = validateBundledSchema(
+			"https://breadboard.dev/contracts/public/schemas/bb.public_session_event.v1.schema.json",
+			event,
+		);
+		if (findings.length > 0) {
+			publicEventsSchemaValid = false;
+			throw new Error(
+				`Projected event ${event.event_id} failed schema validation: ${findings[0]?.message ?? findings[0]?.code}`,
+			);
+		}
 		if (event.kind === "approval.requested") approvalRequests += 1;
 		if (event.kind === "assistant_message" && typeof event.payload.text === "string" && event.payload.text)
 			replyTexts.push(event.payload.text);
@@ -55,6 +66,7 @@ try {
 	const result = {
 		session: created,
 		events,
+		publicEventsSchemaValid,
 		replyText: replyTexts.at(-1) ?? null,
 		approvalRequests,
 		approvalPolicy: "deny",
