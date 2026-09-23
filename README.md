@@ -33,7 +33,7 @@ matching R39 profile into that root, runs the one-shot product migration, and re
 checksum marker; it never mutates the R39 root:
 
 ```sh
-bun scripts/native-daily-driver-launcher.ts \
+bun packages/breadboard-harness/scripts/native-daily-driver-launcher.ts \
   /path/to/installed/bb \
   /path/to/native-profile-root \
   /path/to/r39/user/projects \
