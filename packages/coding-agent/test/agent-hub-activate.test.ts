@@ -1,3 +1,4 @@
+import { createAgentHubRuntime } from "@oh-my-pi/pi-coding-agent/modes/agent-hub-runtime";
 /**
  * Hub Enter contract: activating a non-remote agent row delegates to the
  * `focusAgent` dep (session focus proxy) and closes the hub on success; a
@@ -8,10 +9,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import { AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
-import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -53,7 +54,7 @@ function makeHub(focusAgent: (id: string) => Promise<void>) {
 	const done = Promise.withResolvers<void>();
 	const renderRequested = Promise.withResolvers<void>();
 	const hub = new AgentHubOverlayComponent({
-		settings: Settings.isolated(),
+		...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents }),
 		observers: new SessionObserverRegistry(),
 		hubKeys: [],
 		mainStreamOwnsTurnLifecycle: false,
@@ -193,7 +194,7 @@ describe("Agent hub Enter activation", () => {
 		const setFocus = vi.fn();
 		const onDone = vi.fn();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -232,7 +233,7 @@ describe("Agent hub Enter activation", () => {
 		await Bun.write(workerSessionFile, persistedChildJsonl("worker"));
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents, sessionFile }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -270,7 +271,7 @@ describe("Agent hub Enter activation", () => {
 		}
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents, sessionFile }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -294,7 +295,7 @@ describe("Agent hub Enter activation", () => {
 		await Bun.write(path.join(tempDir.path(), "main", "Worker.jsonl"), "");
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents, sessionFile }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -320,7 +321,7 @@ describe("Agent hub Enter activation", () => {
 		await Bun.write(childSessionFile, persistedChildJsonl("child"));
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents, sessionFile }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -364,7 +365,7 @@ describe("Agent hub Enter activation", () => {
 		await fs.utimes(workerSessionFile, lastActivity, lastActivity);
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents, sessionFile }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -444,7 +445,7 @@ describe("Agent hub Enter activation", () => {
 		await fs.utimes(workerSessionFile, lastActivity, lastActivity);
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents, sessionFile }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -551,7 +552,11 @@ describe("Agent hub Enter activation", () => {
 
 		const agents = new AgentRegistry();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({
+				settings: Settings.isolated(),
+				registry: agents,
+				sessionFile: fork.newSessionFile,
+			}),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -858,7 +863,7 @@ describe("Agent hub data refresh coalescing", () => {
 		const observers = new SessionObserverRegistry();
 		const requestRender = vi.fn();
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents }),
 			observers,
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -939,7 +944,7 @@ describe("Agent hub data refresh coalescing", () => {
 			status: "running",
 		});
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents }),
 			observers,
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,
@@ -1001,7 +1006,7 @@ describe("Agent hub data refresh coalescing", () => {
 			status: "idle",
 		});
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents }),
 			observers: new SessionObserverRegistry(),
 			hubKeys: [],
 			mainStreamOwnsTurnLifecycle: false,

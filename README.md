@@ -17,7 +17,7 @@ The engine seam is the pinned `@breadboard/sdk` package. Direct imports from the
 Current product identity:
 
 - BreadBoard: `0.1.0-rc.7`
-- OMP: `18.2.2`, plus upstream main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`
+- OMP: `18.2.11` (`e4151593ace2781d1dc2f06d760301f88af3e9dc`)
 - `@breadboard/sdk`: `0.4.0`
 - SDK engine API range: `>=0.4.0 <0.5.0`
 
@@ -104,7 +104,7 @@ The fork audit compares the product tree with the exact upstream tag and rejects
 
 ## Upstream convergence
 
-The current baseline is `v18.2.2`. The integration target is upstream main `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including the subsequent CJK character-boundary fix in sloppy edits. Those post-release changes remain part of the audited upstream-owned delta.
+The current baseline is the upstream release `v18.2.11` (`e4151593ace2781d1dc2f06d760301f88af3e9dc`).
 
 Each stable OMP train follows one reviewable sequence:
 

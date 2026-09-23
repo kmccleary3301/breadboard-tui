@@ -2,9 +2,9 @@
 	"schemaVersion": "bb-omp.delta-policy.v1",
 	"classes": ["breadboard-owned", "upstream-owned", "generated", "manual-review"],
 	"upstream": {
-		"tag": "v18.2.2",
-		"commit": "60c9a115b2e8decc0f75825459362d14188a8bc0",
-		"tree": "aaeba635247ec3e4b0775848b9603cab4a2c0d33"
+		"tag": "v18.2.11",
+		"commit": "e4151593ace2781d1dc2f06d760301f88af3e9dc",
+		"tree": "4c5b360e80dbb0d3212efb3565eb16d73d0544e2"
 	},
 	"budgets": {
 		"maxTotalChangedPaths": 400,

@@ -68,6 +68,7 @@ providers:
           cacheRead: 0
           cacheWrite: 0
         contextWindow: 128000
+        maxContextWindow: 256000 # optional extended-context window
         maxTokens: 16384
         headers:
           X-Model: value
@@ -85,6 +86,18 @@ providers:
             controller: mlx
 ```
 
+`maxContextWindow` is available on both `models` entries and `modelOverrides`.
+Set `contextWindow` to the normal prompt window and `maxContextWindow` to the
+larger prompt window accepted by the provider. `/extended-context on` selects
+the larger window; `off` restores the normal one. An override specifying only
+`contextWindow` remains fixed in both modes, as before. This changes OMP's
+local context budget, not the provider's server-side limit; verify the endpoint
+accepts requests of the configured size.
+Configured maxima do not replace provider-advertised capacity. Models governed
+by a catalog override ceiling (such as Codex Astra) still clamp to that ceiling.
+Per-model overrides, including retired variant aliases, are resolved before
+selecting the extended window.
+
 ### Compaction options
 
 - `compactionModel` (per model, including `modelOverrides`) — selector for the model used to summarize/compact context when this model's session is compacted, instead of the model itself.
@@ -101,6 +114,10 @@ providers:
 - `google-generative-ai`
 - `google-gemini-cli`
 - `google-vertex`
+- `typesafe`
+- `openrouter-decisions`
+
+`typesafe` and `openrouter-decisions` are judgment APIs, not chat transports: a model declared with one answers System One judgment requests (`{baseUrl}/v1/systemone` and `{baseUrl}/decisions` respectively) and is selected by the `judge` model role. Its `headers` carry gateway routing or custom authentication headers for that traffic.
 
 ### Allowed auth/discovery values
 
@@ -149,11 +166,11 @@ It supports `enabled`, `api`, `endpoint`, `model`, `v2StreamingEnabled`,
 ### Model value checks
 
 - `id` required
-- `contextWindow` and `maxTokens` must be positive if provided
+- `contextWindow` and `maxTokens` must be positive if provided; `maxContextWindow` must be a positive integer no smaller than `contextWindow` when both are set
 
 ### Command-resolved secrets
 
-Provider `apiKey` values and provider/model `headers` values may start with `!` to read a secret from command stdout. The command is run with a 10 s timeout, stdout is trimmed, and empty/failing commands are omitted:
+Provider `apiKey` values and provider/model `headers` values may start with `!` to read a secret from command stdout. Commands run asynchronously with a 10 s timeout; stdout is trimmed, and empty/failing commands are omitted. Loading or inspecting the catalog does not execute them: credentials resolve when a request or online credential probe needs them.
 
 ```yaml
 providers:
@@ -163,7 +180,7 @@ providers:
       X-Team-Key: "!bw get password omp-team-key"
 ```
 
-Successful command outputs are cached for the process lifetime so the command is not re-run for every model.
+Successful command outputs are cached for the process lifetime, and concurrent requests share an in-flight execution. Failures back off for 30 seconds. An explicit model refresh or 401 credential refresh invalidates the relevant cached API keys and headers. Runtime API-key overrides, including `--api-key`, take precedence over configured credentials.
 
 ## Merge and override order
 
@@ -208,7 +225,7 @@ Provider defaults vs per-model overrides:
 - Provider `headers`, `compat`, and `remoteCompaction` are baselines.
 - Model `headers` override provider header keys.
 - `modelOverrides` can override model metadata (`name`, `reasoning`, `thinking`, `input`, `imageInputDecoder`,
-  `tokenizer`, `supportsTools`, `cost`, `premiumMultiplier`, `contextWindow`, `maxTokens`,
+  `tokenizer`, `supportsTools`, `cost`, `premiumMultiplier`, `contextWindow`, `maxContextWindow`, `maxTokens`,
   `omitMaxOutputTokens`, `headers`, `compat`, `contextPromotionTarget`, `compactionModel`, and
   `remoteCompaction`).
 - `compat` is deep-merged for nested routing blocks (`openRouterRouting`, `vercelGatewayRouting`,

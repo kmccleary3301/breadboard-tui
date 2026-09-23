@@ -1,11 +1,12 @@
+import { createModelBrowserSource } from "../src/modes/model-browser-source";
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
+import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ModelHubComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-hub";
-import { SessionSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { ModelHubComponent } from "@oh-my-pi/pi-tui/overlays/model-hub";
+import { SessionSelectorComponent } from "@oh-my-pi/pi-tui/overlays/session-selector";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
 
@@ -93,16 +94,14 @@ describe("component escape bindings", () => {
 
 		const hub = new ModelHubComponent(
 			ui,
-			settings,
+			createModelBrowserSource(settings),
 			modelRegistry,
 			[{ model, thinkingLevel: "off" }],
 			{
 				onAssign: () => {},
-				onSelectModel: () => {},
 				onUnassign: () => {},
 				onCancel,
 			},
-			{ mainStreamOwnsTurnLifecycle: false },
 		);
 
 		hub.handleInput("\x1b");

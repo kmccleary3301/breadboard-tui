@@ -9,39 +9,43 @@ import {
 	type SlashCommand,
 } from "@oh-my-pi/pi-tui";
 import { isEnoent, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
+import { formatModelRoleAlias, roleCandidatePool } from "../../config/model-roles";
+import { resolveModelRoleValue } from "../../config/model-resolver";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { resolveLocalRoot } from "../../internal-urls";
-import { AskDialogComponent } from "../../modes/components/ask-dialog";
-import { AssistantMessageComponent } from "../../modes/components/assistant-message";
-import { extractImagePathFromText } from "../../modes/components/custom-editor";
-import { HistorySearchComponent } from "../../modes/components/history-search";
-import { HookEditorComponent } from "../../modes/components/hook-editor";
-import { ReadToolGroupComponent } from "../../modes/components/read-tool-group";
-import { renderSegmentTrack } from "../../modes/components/segment-track";
-import { TinyTitleDownloadProgressComponent } from "../../modes/components/tiny-title-download-progress";
-import { ToolExecutionComponent } from "../../modes/components/tool-execution";
-import { TreeSelectorComponent } from "../../modes/components/tree-selector";
-import { chipLabel, compactImageMarkers, shiftImageMarkers } from "../../modes/composer-attachments";
-import { expandEmoticons } from "../../modes/emoji-autocomplete";
-import { materializeImageReferenceLinks, setCachedImageDimensions } from "../../modes/image-references";
-import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
-import { parseQueueShorthand, splitQueuedMessages } from "../../modes/queue-input";
+import { AskDialogComponent } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
+import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import { extractImagePathFromText } from "@oh-my-pi/pi-tui/prompt/custom-editor";
+import { HistorySearchComponent } from "@oh-my-pi/pi-tui/overlays/history-search";
+import { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
+import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
+import { renderSegmentTrack } from "@oh-my-pi/pi-tui/chrome/segment-track";
+import { TinyTitleDownloadProgressComponent } from "@oh-my-pi/pi-tui/overlays/tiny-title-download-progress";
+import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
+import { chipLabel, compactImageMarkers, shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
+import { expandEmoticons } from "@oh-my-pi/pi-tui/prompt/emoji-autocomplete";
+import { materializeImageReferenceLinks, setCachedImageDimensions } from "@oh-my-pi/pi-tui/prompt/image-references";
+import { createPromptActionAutocompleteProvider } from "@oh-my-pi/pi-tui/prompt/prompt-action-autocomplete";
+import { createModelMentionSource } from "@oh-my-pi/pi-tui/prompt/model-mention-autocomplete";
+import { createModelBrowserSource } from "../model-browser-source";
+import { parseQueueShorthand, splitQueuedMessages } from "@oh-my-pi/pi-tui/prompt/queue-input";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "../../modes/skill-command";
 import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { AgentRegistry } from "../../registry/agent-registry";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
-import { PINNED_HUD_TOGGLE_ID } from "../composer";
+import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-tui/prompt/composer";
 import { pickRecentFocusableAgentId } from "./session-focus-controller";
 import { nativeCommandRestriction, nativeControlRestriction } from "../../breadboard/native-control-policy";
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { parseSlashCommand } from "../../slash-commands/helpers/parse";
-import { isTinyTitleLocalModelKey } from "../../tiny/models";
+import { getTinyLocalModelSpec, isTinyLocalModelKey } from "../../tiny/models";
 import { tinyTitleClient } from "../../tiny/title-client";
 import type { TinyTitleProgressEvent } from "../../tiny/title-protocol";
 import { resolveReadPath } from "../../tools/path-utils";
-import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
+import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
 import { vocalizer } from "../../tts/vocalizer";
 import {
 	copyToClipboard,
@@ -57,14 +61,11 @@ import {
 } from "../../utils/command-usage";
 import { EnhancedPasteController } from "../../utils/enhanced-paste";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
-import { ensureSupportedImageInput, ImageInputTooLargeError, loadImageInput } from "../../utils/image-loading";
-import {
-	VideoError,
-	buildVideoContactSheetPng,
-	createVideoPreviewImage,
-	isVideoPath,
-	probeVideo,
-} from "../../utils/video";
+import { loadImageInput } from "../../utils/image-loading";
+import { ensureSupportedImageInput, ImageInputTooLargeError } from "@oh-my-pi/pi-tui/chat/image-loading";
+import { type ImageAttachmentSource, tagImageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
+import { VideoError, buildVideoContactSheetPng, probeVideo } from "../../utils/video";
+import { isVideoPath } from "@oh-my-pi/pi-tui/prompt/video";
 import { resizeImage } from "../../utils/image-resize";
 
 /**
@@ -203,9 +204,26 @@ export class InputController {
 		},
 	) {}
 
+	/** Resolve the current tiny role at use time so project/session reloads cannot leave a stale model. */
+	#resolveTinyTitleLocalModelKey(): string | undefined {
+		const model = resolveModelRoleValue(
+			formatModelRoleAlias("tiny"),
+			roleCandidatePool("tiny", this.ctx.settings, this.ctx.session.modelRegistry),
+			{ settings: this.ctx.settings },
+		).model;
+		return model?.api === "local-inference" && isTinyLocalModelKey(model.id) ? model.id : undefined;
+	}
+
+	/** Prewarm only the local worker selected by the current tiny role. */
+	prewarmTinyTitleModel(): void {
+		const modelKey = this.#resolveTinyTitleLocalModelKey();
+		if (modelKey) tinyTitleClient.prewarm(modelKey);
+	}
+
 	/** Session-level title starts (user `/skill:` via promptCustomMessage) reuse this UI. */
 	notifyTitleGenerationStart(): (() => void) | undefined {
-		return this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
+		const modelKey = this.#resolveTinyTitleLocalModelKey();
+		return modelKey ? this.#showTinyTitleDownloadProgress(modelKey) : undefined;
 	}
 
 	#enhancedPaste?: EnhancedPasteController;
@@ -239,9 +257,11 @@ export class InputController {
 	// scoped-input render fast path so the attachment chips band repaints.
 	#lastChipsSignature = "";
 
-	#showTinyTitleDownloadProgress(modelKey: string): (() => void) | undefined {
-		if (!isTinyTitleLocalModelKey(modelKey)) return;
-		const component = new TinyTitleDownloadProgressComponent(modelKey);
+	#showTinyTitleDownloadProgress(modelKey: string | undefined): (() => void) | undefined {
+		if (!modelKey || !isTinyLocalModelKey(modelKey)) return;
+		const spec = getTinyLocalModelSpec(modelKey);
+		if (!spec) return;
+		const component = new TinyTitleDownloadProgressComponent(spec.label);
 		let added = false;
 		let disposed = false;
 		let removeTimer: NodeJS.Timeout | undefined;
@@ -417,6 +437,16 @@ export class InputController {
 					this.toggleToolActivityVisibility();
 					return { consume: true };
 				}
+				if (this.ctx.keybindings.matches(data, "app.display.reset")) {
+					if (this.ctx.ui.hasOverlay()) return undefined;
+					// The tree selector rebinds Alt+L for its `labeled-only` filter
+					// and mounts inline (no overlay), so its own binding stays
+					// authoritative here — same defer as the tools toggle above.
+					if (this.ctx.ui.getFocused() instanceof TreeSelectorComponent && matchesKey(data, "alt+l"))
+						return undefined;
+					this.ctx.resetDisplayAfterAppearanceRefresh();
+					return { consume: true };
+				}
 				return undefined;
 			});
 		}
@@ -524,12 +554,15 @@ export class InputController {
 			}
 
 			if (this.ctx.loopModeEnabled) {
+				// Esc suspends the loop even mid-iteration: abort the live turn,
+				// then drop the captured prompt so the 800ms auto-resubmit never
+				// fires. Loop stays enabled (paused) — the next manual prompt
+				// resumes with a new body.
 				if (this.ctx.session.isStreaming) {
 					this.#abortStreamingTurn();
-				} else {
-					this.ctx.pauseLoop();
-					this.ctx.cancelPendingSubmission();
 				}
+				this.ctx.pauseLoop();
+				this.ctx.cancelPendingSubmission();
 				return;
 			}
 			if (this.ctx.focusedAgentId) {
@@ -1313,9 +1346,10 @@ export class InputController {
 		if (this.#isLocalExtensionCommand(text)) {
 			return;
 		}
-		this.ctx.session.maybeStartTitleGeneration(text, () =>
-			this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel")),
-		);
+		this.ctx.session.maybeStartTitleGeneration(text, () => {
+			const modelKey = this.#resolveTinyTitleLocalModelKey();
+			return modelKey ? this.#showTinyTitleDownloadProgress(modelKey) : undefined;
+		});
 	}
 
 	/** Submit editor text to the focused subagent session (chat-only focus policy). */
@@ -1878,12 +1912,14 @@ export class InputController {
 		return entries.length;
 	}
 
-	async #insertPendingImage(imageData: ImageContent, videoPath?: string): Promise<void> {
-		const image: ImageContent = videoPath
-			? createVideoPreviewImage(imageData, videoPath)
+	async #insertPendingImage(imageData: ImageContent, source?: ImageAttachmentSource): Promise<void> {
+		const image: ImageContent = source
+			? tagImageAttachmentSource(imageData, source.path, source.kind)
 			: { type: "image", data: imageData.data, mimeType: imageData.mimeType };
+		// File-backed attachments link to the original path (so the chip opens the
+		// user's file); clipboard payloads materialize a clickable blob copy.
 		const imageLink =
-			videoPath ??
+			source?.path ??
 			(
 				await materializeImageReferenceLinks([image], this.ctx.sessionManager.putBlob.bind(this.ctx.sessionManager))
 			)?.[0];
@@ -1893,7 +1929,7 @@ export class InputController {
 		const imageNum = this.ctx.editor.pendingImages.length;
 		const dims = await this.#imageDimensions(imageData);
 		setCachedImageDimensions(image, dims ?? null);
-		const kind = videoPath === undefined ? "image" : "video";
+		const kind = source?.kind ?? "image";
 		// The buffer holds the compact chip token; the atom table expands it to the bracketed
 		// marker (the wire/transcript format) on submit.
 		const expansion = dims
@@ -1936,10 +1972,17 @@ export class InputController {
 		return imageData;
 	}
 
-	async #normalizeAndInsertPastedImage(image: ImageContent, unsupportedMessage: string): Promise<boolean> {
+	async #normalizeAndInsertPastedImage(
+		image: ImageContent,
+		unsupportedMessage: string,
+		sourcePath?: string,
+	): Promise<boolean> {
 		const normalized = await this.#normalizePastedImage(image, unsupportedMessage);
 		if (!normalized) return false;
-		await this.#insertPendingImage(normalized);
+		// A filesystem origin tags the attachment so the source path reaches the
+		// model via the hidden companion message (see AgentSession's attachment
+		// source notices); clipboard bitmaps stay untagged.
+		await this.#insertPendingImage(normalized, sourcePath ? { path: sourcePath, kind: "image" } : undefined);
 		return true;
 	}
 
@@ -1971,7 +2014,7 @@ export class InputController {
 				{ type: "image", data: sheet.png.data, mimeType: sheet.png.mimeType },
 				"Unsupported pasted video preview format",
 			);
-			if (preview) await this.#insertPendingImage(preview, absolutePath);
+			if (preview) await this.#insertPendingImage(preview, { path: absolutePath, kind: "video" });
 		} catch (error) {
 			if (error instanceof VideoError) {
 				this.ctx.editor.pasteText(pastedPath);
@@ -2022,6 +2065,7 @@ export class InputController {
 			await this.#normalizeAndInsertPastedImage(
 				{ type: "image", data: image.data, mimeType: image.mimeType },
 				`Unsupported pasted image format: ${image.mimeType}`,
+				image.resolvedPath,
 			);
 		} catch (error) {
 			if (error instanceof ImageInputTooLargeError) {
@@ -2107,7 +2151,18 @@ export class InputController {
 			if (attachedFromFileUrls) return true;
 			// No usable image-file URL (pure bitmap pasteboard: screenshots,
 			// browser copies, or a non-image Finder selection). Fall to the
-			// image representation.
+			// image representation. The text bridge starts alongside the image
+			// bridge: on Windows each is a cold powershell.exe spawn (~100ms+),
+			// so serial awaits stall an empty clipboard by their sum before
+			// "Clipboard is empty" can surface. Image precedence is preserved —
+			// a resolved text payload is discarded unused when an image is present.
+			const textPromise = this.clipboard.readText();
+			// Settle-mark the shared promise so a later image throw (which skips
+			// the text await below) can never surface as an unhandled rejection.
+			textPromise.then(
+				() => {},
+				() => {},
+			);
 			const image = await this.clipboard.readImage();
 			if (image) {
 				if (promptTarget) {
@@ -2128,7 +2183,7 @@ export class InputController {
 			// Hosts that pre-empt the terminal's own paste (VS Code's
 			// integrated terminal, Win+V clipboard history) deliver only
 			// this keypress, so a miss here must not dead-end.
-			const text = await this.clipboard.readText();
+			const text = await textPromise;
 			if (!text) {
 				this.ctx.showStatus("Clipboard is empty");
 				return false;
@@ -2309,6 +2364,11 @@ export class InputController {
 			basePath,
 			commandUsage: getSlashCommandUsage,
 			commandUsageRevision: getSlashCommandUsageRevision,
+			modelMentions: createModelMentionSource({
+				source: createModelBrowserSource(this.ctx.settings),
+				registry: this.ctx.session.modelRegistry,
+				scopedModels: () => this.ctx.session.scopedModels.map(s => s.model),
+			}),
 			// This TUI host uses the default registry; the receiving session can change with focus.
 			internalUrlCaller: () => {
 				const manager = this.ctx.viewSession.sessionManager;

@@ -6,9 +6,16 @@ import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import type { Component, OverlayHandle, ResizeScrollbackMode } from "@oh-my-pi/pi-tui";
 import { Loader, Spacer, setTuiTight, Text } from "@oh-my-pi/pi-tui";
-import { getAgentDir, getProjectDir, normalizePathForComparison } from "@oh-my-pi/pi-utils";
+
 import {
-	type AdvisorConfigScope,
+	getAgentDbPath,
+	getAgentDir,
+	getProjectDir,
+	normalizePathForComparison,
+	sanitizeText,
+} from "@oh-my-pi/pi-utils";
+import {
+	ADVISOR_DEFAULT_TOOL_NAMES,
 	discoverAdvisorConfigs,
 	loadWatchdogConfigFile,
 	resolveAdvisorConfigEditPath,
@@ -18,15 +25,15 @@ import { authenticateProvider } from "../../breadboard/provider-auth-login";
 import { type AuthCredentialView, ProviderAuthError, type ProviderAuthPort } from "../../breadboard/provider-auth-port";
 import { nativeControlRestriction, nativeSettingRestriction } from "../../breadboard/native-control-policy";
 import { reset as resetCapabilities } from "../../capability";
+import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
-import {
-	formatModelSelectorValue,
-	resolveAdvisorRoleSelection,
-	resolveModelRoleValue,
-} from "../../config/model-resolver";
-import { getAllSettingDefs } from "../components/settings-defs";
+import { resolveAdvisorRoleSelection, resolveModelRoleValue } from "../../config/model-resolver";
+import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
+import { getAllSettingDefs } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import { getRoleInfo } from "../../config/model-roles";
 import { settings } from "../../config/settings";
+import { createSettingsHost } from "../../config/settings-ui";
+import { createPluginSettingsHost } from "../../extensibility/plugins/settings-host";
 import type { disableProvider as DisableProvider, enableProvider as EnableProvider } from "../../discovery";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
@@ -46,7 +53,7 @@ import {
 	setSymbolPreset,
 	setTheme,
 	theme,
-} from "../../modes/theme/theme";
+} from "@oh-my-pi/pi-tui/theme";
 import type { AgentHubOpenOptions, InteractiveModeContext } from "../../modes/types";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../../product-identity";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
@@ -62,18 +69,16 @@ import {
 	persistForeignSession,
 } from "../../session/foreign-session-import";
 import type { ForeignSessionInfo, ForeignSessionSource } from "../../session/foreign-session-store";
-import { isTranscriptEntry, isUserRequestEntry, type TranscriptEntry } from "../../session/session-context";
+import { isTranscriptEntry, type TranscriptEntry } from "../../session/session-context";
+import { isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
 import type { SessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { loadPinnedSessionIds } from "../../session/session-pins";
 import { FileSessionStorage } from "../../session/session-storage";
-import { type LogoutAccount, toLogoutAccounts } from "../../slash-commands/helpers/logout";
-import {
-	describeRedeemOutcome,
-	type ResetUsageAccount,
-	toResetUsageAccounts,
-} from "../../slash-commands/helpers/reset-usage";
+import { toLogoutAccounts } from "../../slash-commands/helpers/logout";
+import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
+import { describeRedeemOutcome, toResetUsageAccounts } from "../../slash-commands/helpers/reset-usage";
 import { toSessionPinAccounts } from "../../slash-commands/helpers/session-pin";
 import { loadDailyActivity } from "../../stats/activity-client";
 import {
@@ -81,18 +86,13 @@ import {
 	type ConfiguredThinkingLevel,
 	concreteThinkingLevel,
 	parseConfiguredThinkingLevel,
-} from "../../thinking";
-import {
-	isSearchProviderId,
-	setExcludedSearchProviders,
-	setImageProviderOrder,
-	setSearchProviderOrder,
-	type ToolSession,
-} from "../../tools";
-import { AskTool, type AskToolDetails, type AskToolInput } from "../../tools/ask";
-import { sanitizeDisplayWarnings, shortenPath } from "../../tools/render-utils";
+} from "@oh-my-pi/pi-tui/thinking";
+import type { ToolSession } from "../../tools";
+import { AskTool, type AskToolInput } from "../../tools/ask";
+import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
+import { sanitizeDisplayWarnings, shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import { ToolAbortError } from "../../tools/tool-errors";
-import { applyHyperlinkSetting } from "../../tui/hyperlink";
+import { applyHyperlinkSetting } from "@oh-my-pi/pi-tui/render/hyperlink";
 import { captureBrowserSession } from "../../utils/browser-session";
 import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
@@ -101,35 +101,42 @@ import {
 	setTerminalTitleSpinnerStyle,
 	setTerminalTitleStateEnabled,
 } from "../../utils/title-generator";
-import { getAssistantMessageLinkTargets } from "../utils/interactive-context-helpers";
-import { type AdvisorConfigDeps, AdvisorConfigOverlayComponent } from "../components/advisor-config";
-import { AgentHubOverlayComponent } from "../components/agent-hub";
-import { AgentsHubComponent } from "../components/agents-hub";
-import { AssistantMessageComponent } from "../components/assistant-message";
-import { CopySelectorComponent } from "../components/copy-selector";
-import { ExtensionDashboard } from "../components/extensions";
-import { listLiveToolRecords, liveToolRecordFromSession } from "../components/extensions/live-tool-session";
-import { HistorySearchComponent } from "../components/history-search";
-import type { LoginDialogComponent as LoginDialogComponentType } from "../components/login-dialog";
-import type { LogoutAccountSelectorComponent as LogoutAccountSelectorComponentType } from "../components/logout-account-selector";
-import type { ModelHubComponent as ModelHubComponentType, ModelRoleSelectionScope } from "../components/model-hub";
-import type { ModelPickerComponent as ModelPickerComponentType } from "../components/model-picker";
+import { getAssistantMessageLinkTargets } from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
+import { type AdvisorConfigDeps, AdvisorConfigOverlayComponent } from "@oh-my-pi/pi-tui/overlays/advisor-config";
+import { createAgentsHubDeps } from "../agents-hub-deps";
+import { getEditorCommand, openInEditor } from "../../utils/external-editor";
+import { collapseSharedUsageReports } from "@oh-my-pi/pi-tui/overlays/usage-display";
+import { limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
+import { AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
+import { createAgentHubRuntime } from "../agent-hub-runtime";
+import { AgentsHubComponent } from "@oh-my-pi/pi-tui/overlays/agents-hub";
+import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import { CopySelectorComponent } from "@oh-my-pi/pi-tui/overlays/copy-selector";
+import { ExtensionDashboard } from "@oh-my-pi/pi-tui/overlays/extensions/extension-dashboard";
+import { listLiveToolRecords, liveToolRecordFromSession } from "@oh-my-pi/pi-tui/overlays/extensions/live-tool-session";
+import { createExtensionDashboardRuntime } from "../components/extensions/dashboard-runtime";
+import { HistorySearchComponent } from "@oh-my-pi/pi-tui/overlays/history-search";
+import type { LoginDialogComponent as LoginDialogComponentType } from "@oh-my-pi/pi-tui/overlays/login-dialog";
+import type { LogoutAccountSelectorComponent as LogoutAccountSelectorComponentType } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
+import type { ModelHubComponent as ModelHubComponentType, ModelRoleSelectionScope } from "@oh-my-pi/pi-tui/overlays/model-hub";
+import { createModelBrowserSource } from "../model-browser-source";
+import type { ModelPickerComponent as ModelPickerComponentType } from "@oh-my-pi/pi-tui/overlays/model-picker";
+import type { OAuthSelectorComponent as OAuthSelectorComponentType } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
 import { createNativeProviderAuthDataSource } from "../components/oauth-provider-data-source";
-import type { OAuthSelectorComponent as OAuthSelectorComponentType } from "../components/oauth-selector";
-import { PluginSelectorComponent } from "../components/plugin-selector";
-import { ReadToolGroupComponent } from "../components/read-tool-group";
-import { ResetUsageSelectorComponent } from "../components/reset-usage-selector";
-import { type BranchVariantPath, RewindSelectorComponent } from "../components/rewind-selector";
-import { renderSegmentTrack } from "../components/segment-track";
-import { SessionAccountSelectorComponent } from "../components/session-account-selector";
-import { SessionSelectorComponent, type SessionSelectorOptions } from "../components/session-selector";
-import { SettingsSelectorComponent } from "../components/settings-selector";
-import { ToolExecutionComponent } from "../components/tool-execution";
-import { TranscriptBlock } from "../components/transcript-container";
-import { TreeSelectorComponent } from "../components/tree-selector";
-import { UsageDashboardComponent } from "../components/usage-dashboard";
+import { PluginSelectorComponent } from "@oh-my-pi/pi-tui/overlays/plugin-selector";
+import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
+import { type ResetUsageAccount, ResetUsageSelectorComponent } from "@oh-my-pi/pi-tui/overlays/reset-usage-selector";
+import { type BranchVariantPath, RewindSelectorComponent } from "@oh-my-pi/pi-tui/overlays/rewind-selector";
+import { renderSegmentTrack } from "@oh-my-pi/pi-tui/chrome/segment-track";
+import { SessionAccountSelectorComponent } from "@oh-my-pi/pi-tui/overlays/session-account-selector";
+import { SessionSelectorComponent, type SessionSelectorOptions } from "@oh-my-pi/pi-tui/overlays/session-selector";
+import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
+import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { TranscriptBlock } from "@oh-my-pi/pi-tui/chrome/transcript-container";
+import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
+import { UsageDashboardComponent } from "@oh-my-pi/pi-tui/overlays/usage-dashboard";
 import { renderUsageReports } from "./command-controller";
-import type { SessionObserverRegistry } from "../session-observer-registry";
+import type { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 
 const MANUAL_LOGIN_PROMPT = "Paste the authorization code (or full redirect URL), then press Enter:";
 
@@ -141,8 +148,8 @@ interface ModelOverlayModules {
 /** Synchronous first-use boundary for model overlays; key callbacks require immediate mounting. */
 function loadModelOverlayComponents(): ModelOverlayModules {
 	return {
-		ModelHubComponent: require("../components/model-hub").ModelHubComponent,
-		ModelPickerComponent: require("../components/model-picker").ModelPickerComponent,
+		ModelHubComponent: require("@oh-my-pi/pi-tui/overlays/model-hub.js").ModelHubComponent,
+		ModelPickerComponent: require("@oh-my-pi/pi-tui/overlays/model-picker.js").ModelPickerComponent,
 	};
 }
 
@@ -159,9 +166,10 @@ function loadProviderAuthUi(): ProviderAuthUiModules {
 	return {
 		PASTE_CODE_LOGIN_PROVIDERS: require("@oh-my-pi/pi-ai/index.js").PASTE_CODE_LOGIN_PROVIDERS,
 		getOAuthProviders: require("@oh-my-pi/pi-ai/registry/oauth/index.js").getOAuthProviders,
-		LoginDialogComponent: require("../components/login-dialog").LoginDialogComponent,
-		LogoutAccountSelectorComponent: require("../components/logout-account-selector").LogoutAccountSelectorComponent,
-		OAuthSelectorComponent: require("../components/oauth-selector").OAuthSelectorComponent,
+		LoginDialogComponent: require("@oh-my-pi/pi-tui/overlays/login-dialog.js").LoginDialogComponent,
+		LogoutAccountSelectorComponent: require("@oh-my-pi/pi-tui/overlays/logout-account-selector.js")
+			.LogoutAccountSelectorComponent,
+		OAuthSelectorComponent: require("@oh-my-pi/pi-tui/overlays/oauth-selector.js").OAuthSelectorComponent,
 	};
 }
 
@@ -276,7 +284,8 @@ export class SelectorController {
 					providers: [...new Set(this.ctx.session.getAvailableModels().map(model => model.provider))].sort(
 						(a, b) => a.localeCompare(b),
 					),
-					cwd: getProjectDir(),
+					settings: createSettingsHost(),
+					plugins: createPluginSettingsHost(getProjectDir()),
 					model: this.ctx.session.model,
 					composerPreviewStatus: this.ctx.statusLine,
 					harness: this.ctx.harnessPort?.current() ?? null,
@@ -418,8 +427,13 @@ export class SelectorController {
 			);
 			const defaultAdvisorModel = advisorRoleSel?.model;
 			const deps: AdvisorConfigDeps = {
-				modelRegistry: this.ctx.session.modelRegistry,
-				settings: this.ctx.settings,
+				getAvailableModels: () => this.ctx.session.modelRegistry.getAvailable(),
+				browserSource: createModelBrowserSource(this.ctx.settings),
+				defaultToolNames: ADVISOR_DEFAULT_TOOL_NAMES,
+				externalEditor: text => {
+					const command = getEditorCommand();
+					return command ? openInEditor(command, text) : Promise.resolve(null);
+				},
 				scopedModels: this.ctx.session.scopedModels,
 				availableToolNames: this.ctx.session.getAdvisorAvailableToolNames(),
 				defaultModelLabel: defaultAdvisorModel
@@ -456,12 +470,17 @@ export class SelectorController {
 				// were already shown above, so only newly activated files arrive here.
 				warn: message => this.ctx.showWarning(message),
 				getAdvisorStats: () => this.ctx.session.getAdvisorStats().advisors,
-				getUsageReports: async () => this.ctx.session.fetchUsageReports?.() ?? null,
-				resolveActiveAccount: (provider, sessionId) =>
-					this.ctx.session.modelRegistry.authStorage.getOAuthAccountIdentity(
+				getUsageReports: async () => {
+					const reports = await this.ctx.session.fetchUsageReports?.();
+					return reports ? collapseSharedUsageReports(reports) : null;
+				},
+				getQuotaLimitFilter: (provider, sessionId) => {
+					const identity = this.ctx.session.modelRegistry.authStorage.getOAuthAccountIdentity(
 						provider,
 						sessionId ?? this.ctx.session.sessionId,
-					),
+					);
+					return identity ? (report, limit) => limitMatchesActiveAccount(report, limit, identity) : undefined;
+				},
 			});
 			const overlayHandle = this.ctx.ui.showOverlay(overlay, {
 				anchor: "bottom-center",
@@ -507,18 +526,20 @@ export class SelectorController {
 			return;
 		}
 		const dashboard = await ExtensionDashboard.create({
-			cwd: getProjectDir(),
-			settings: this.ctx.settings,
+			runtime: createExtensionDashboardRuntime({
+				cwd: getProjectDir(),
+				settings: this.ctx.settings,
+				mcpManager: this.ctx.mcpManager,
+				eventBus: this.ctx.eventBus,
+				onMcpToolsChanged: tools => this.ctx.session.refreshMCPTools(tools),
+				browserMcpFilterEnabled: () =>
+					this.ctx.session.getEvalPreludes().some(definition => definition.name === "browser"),
+			}),
 			terminalHeight: this.ctx.ui.terminal.rows,
-			mcpManager: this.ctx.mcpManager,
-			eventBus: this.ctx.eventBus,
 			toolSource: {
 				getLiveTool: name => liveToolRecordFromSession(this.ctx.session, name),
 				listLiveTools: () => listLiveToolRecords(this.ctx.session),
 			},
-			onMcpToolsChanged: tools => this.ctx.session.refreshMCPTools(tools),
-			browserMcpFilterEnabled: () =>
-				this.ctx.session.getEvalPreludes().some(definition => definition.name === "browser"),
 		});
 		// Fullscreen dashboard on the alternate screen (the /settings idiom): the
 		// overlay borrows the terminal's alt buffer and enables mouse tracking for
@@ -580,14 +601,14 @@ export class SelectorController {
 		};
 		const hub = await AgentsHubComponent.create(
 			this.ctx.ui,
-			getProjectDir(),
-			this.ctx.settings,
-			{
-				modelRegistry: this.ctx.session.modelRegistry,
+			createAgentsHubDeps(
+				getProjectDir(),
+				this.ctx.settings,
+				this.ctx.session.modelRegistry,
+				() => this.ctx.session.effectiveExtensionRoots,
 				activeModelPattern,
 				defaultModelPattern,
-				extensionRoots: () => this.ctx.session.effectiveExtensionRoots,
-			},
+			),
 			{ onCancel: () => done() },
 		);
 		const overlayHandle = this.#showFullscreenMenu(hub);
@@ -909,23 +930,6 @@ export class SelectorController {
 				break;
 			}
 
-			// Provider settings - update runtime preferences
-			case "providers.webSearchOrder":
-				if (Array.isArray(value)) {
-					setSearchProviderOrder(value.filter(isSearchProviderId));
-				}
-				break;
-			case "providers.webSearchExclude":
-				if (Array.isArray(value)) {
-					setExcludedSearchProviders(value.filter(isSearchProviderId));
-				}
-				break;
-			case "providers.imageOrder":
-				if (Array.isArray(value)) {
-					setImageProviderOrder(value.filter((entry): entry is string => typeof entry === "string"));
-				}
-				break;
-
 			// MCP update injection - live subscribe/unsubscribe
 			case "mcp.notifications":
 				this.ctx.mcpManager?.setNotificationsEnabled(value as boolean);
@@ -1030,7 +1034,7 @@ export class SelectorController {
 		};
 		const picker = new ModelPickerComponent(
 			this.ctx.ui,
-			this.ctx.settings,
+			createModelBrowserSource(this.ctx.settings),
 			this.ctx.session.modelRegistry,
 			this.ctx.session.scopedModels,
 			{
@@ -1127,7 +1131,7 @@ export class SelectorController {
 		};
 		const hub = new ModelHubComponent(
 			this.ctx.ui,
-			this.ctx.settings,
+			createModelBrowserSource(this.ctx.settings),
 			this.ctx.session.modelRegistry,
 			this.ctx.session.scopedModels,
 			{
@@ -1955,7 +1959,7 @@ export class SelectorController {
 		}
 		let sessions: SessionInfo[];
 		let onSelectSession: (session: SessionInfo) => Promise<boolean>;
-		let selectorOptions: SessionSelectorOptions;
+		let selectorOptions: SessionSelectorOptions<SessionInfo>;
 
 		if (source) {
 			const sourceName = foreignSessionSourceName(source);
@@ -2002,7 +2006,7 @@ export class SelectorController {
 			};
 		} else {
 			const [loadedSessions, pinnedIds] = await Promise.all([
-				SessionManager.list(this.ctx.sessionManager.getCwd(), this.ctx.sessionManager.getSessionDir()),
+				SessionManager.listForPicker(this.ctx.sessionManager.getCwd(), this.ctx.sessionManager.getSessionDir()),
 				loadPinnedSessionIds(),
 			]);
 			sessions = loadedSessions;
@@ -2028,7 +2032,7 @@ export class SelectorController {
 					}
 				},
 				historyMatcher,
-				loadAllSessions: () => SessionManager.listAll(),
+				loadAllSessions: () => SessionManager.listAllForPicker(),
 				pinnedIds,
 				// Live getter so detach/newSession stays accurate; tolerant of partial
 				// contexts and in-memory sessions (undefined file means no marker).
@@ -2215,12 +2219,17 @@ export class SelectorController {
 			this.ctx.ui.setFocus(this.ctx.editor);
 			this.ctx.ui.requestRender();
 		};
-		const dialog = new LoginDialogComponent(this.ctx.ui, providerId, (_success, message) => {
-			// Fires on Esc: unblock the editor immediately; the aborted flow's
-			// rejection settles the awaited login below.
-			restoreEditor();
-			if (message) this.ctx.showStatus(message);
-		});
+		const dialog = new LoginDialogComponent(
+			this.ctx.ui,
+			providerId,
+			(_success, message) => {
+				// Fires on Esc: unblock the editor immediately; the aborted flow's
+				// rejection settles the awaited login below.
+				restoreEditor();
+				if (message) this.ctx.showStatus(message);
+			},
+			openPath,
+		);
 		this.ctx.editorContainer.clear();
 		this.ctx.editorContainer.addChild(dialog);
 		this.ctx.ui.setFocus(dialog);
@@ -2707,7 +2716,8 @@ export class SelectorController {
 					this.ctx.ui.requestRender();
 				},
 				{
-					validateAuth: async selectedProviderId => {
+					disabledProviders: settings.get("disabledProviders"),
+					validateAuth: async (selectedProviderId: string) => {
 						if (this.providerAuthPort) {
 							const credentials = await this.providerAuthPort.listCredentials(selectedProviderId);
 							return credentials.some(credential => credential.status === "active");
@@ -2800,12 +2810,19 @@ export class SelectorController {
 		try {
 			statuses = await session.listResetCredits();
 		} catch (error) {
-			this.ctx.showError(`Could not load saved resets: ${error instanceof Error ? error.message : String(error)}`);
+			this.ctx.showError(
+				sanitizeText(
+					`Could not load saved resets: ${error instanceof Error ? error.message : String(error)}`.replace(
+						/[\r\n\t]+/g,
+						" ",
+					),
+				),
+			);
 			return;
 		}
 		const accounts = toResetUsageAccounts(statuses);
 		if (accounts.length === 0) {
-			this.ctx.showStatus("No Codex accounts found. Use /login to add one.");
+			this.ctx.showStatus("No provider accounts found. Use /login to add one.");
 			return;
 		}
 		if (!accounts.some(account => account.availableCount > 0)) {
@@ -2833,17 +2850,25 @@ export class SelectorController {
 	}
 
 	async #redeemReset(account: ResetUsageAccount): Promise<void> {
-		this.ctx.showStatus(`Spending 1 saved reset for ${account.label}…`, { dim: true });
+		this.ctx.showStatus(
+			`Spending 1 saved reset for ${sanitizeText(account.label.replace(/[\r\n\t]+/g, " "))} (${account.providerLabel})…`,
+			{ dim: true },
+		);
 		let outcome: ResetCreditRedeemOutcome;
 		try {
 			outcome = await this.ctx.session.redeemResetCredit(account.target);
 		} catch (error) {
 			this.ctx.showError(
-				`Reset failed for ${account.label}: ${error instanceof Error ? error.message : String(error)}`,
+				sanitizeText(
+					`Reset failed for ${account.label}: ${error instanceof Error ? error.message : String(error)}`.replace(
+						/[\r\n\t]+/g,
+						" ",
+					),
+				),
 			);
 			return;
 		}
-		const message = describeRedeemOutcome(outcome, account.label);
+		const message = sanitizeText(describeRedeemOutcome(outcome, account.label).replace(/[\r\n\t]+/g, " "));
 		if (outcome.ok) {
 			this.ctx.showStatus(message);
 			// Refresh the status-line usage so the freshly-reset window shows.
@@ -2882,15 +2907,19 @@ export class SelectorController {
 		};
 
 		const hub = new AgentHubOverlayComponent({
+			...createAgentHubRuntime({
+				settings: this.ctx.settings,
+				registry: this.ctx.collabGuest?.agentRegistry,
+				remote: this.ctx.collabGuest?.hubRemote,
+				sessionFile: this.ctx.sessionManager.getSessionFile() ?? null,
+			}),
 			observers,
-			settings: this.ctx.settings,
 			hubKeys,
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
 			initialSection: options?.initialSection,
 			initialHarnessPanel: options?.initialHarnessPanel,
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
-			registry: this.ctx.collabGuest?.agentRegistry,
 			remote: this.ctx.collabGuest?.hubRemote,
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),

@@ -5,9 +5,10 @@ import type {
 	AuthProviderView,
 	ProviderAuthReadPort,
 } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { OAuthSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/oauth-selector";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { OAuthSelectorComponent } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 
 beforeAll(async () => {
 	await initTheme();
@@ -226,6 +227,7 @@ describe("OAuthSelectorComponent", () => {
 				providerDataSource(),
 				() => {},
 				() => {},
+				{ disabledProviders: settings.get("disabledProviders") },
 			);
 			await component.ready;
 			for (const char of victim.id) {
@@ -252,6 +254,7 @@ describe("OAuthSelectorComponent", () => {
 				providerDataSource(),
 				() => {},
 				() => {},
+				{ disabledProviders: settings.get("disabledProviders") },
 			);
 			await component.ready;
 			for (const char of alias.id) {
@@ -274,6 +277,7 @@ describe("OAuthSelectorComponent", () => {
 				providerDataSource(["opencode-go"]),
 				providerId => selected.push(providerId),
 				() => {},
+				{ disabledProviders: settings.get("disabledProviders") },
 			);
 			await component.ready;
 			for (const char of "opencode-go") {

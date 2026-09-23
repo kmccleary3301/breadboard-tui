@@ -87,7 +87,10 @@ async function runCommand(
 async function main(): Promise<void> {
 	const product = resolveBinaryProduct(Bun.env.BUILD_PRODUCT);
 	const crossBuild = resolveCrossBuild(Bun.env.CROSS_TARGET);
-	const shouldAdhocSign = process.platform === "darwin" && !crossBuild && Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
+const shouldAdhocSign =
+		process.platform === "darwin" &&
+		(!crossBuild || crossBuild.platform === "darwin") &&
+		Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
 	const outName = crossBuild ? `${product}-${crossBuild.id}` : product;
 	const entrypointName = product === "bb" ? "bb.ts" : "omp.ts";
 	const outputPath = path.join(packageDir, "dist", outName);
@@ -136,7 +139,15 @@ async function main(): Promise<void> {
 			});
 
 			if (shouldAdhocSign) {
-				await runCommand(["codesign", "--force", "--sign", "-", outputPath]);
+				await runCommand([
+					"codesign",
+					"--force",
+					"--sign",
+					"-",
+					"--entitlements",
+					path.join(repoRoot, "scripts", "macos-entitlements.plist"),
+					outputPath,
+				]);
 			}
 			if (engineDistribution) await stageInstalledEngineSidecar(outputPath, engineDistribution);
 		} finally {

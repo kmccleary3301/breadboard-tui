@@ -1,3 +1,4 @@
+import { type IrcMessage, type IrcDeliveryReceipt } from "@oh-my-pi/pi-tui/tools/hub";
 /**
  * IrcBus - Process-global mailbox bus for agent-to-agent messaging.
  *
@@ -53,7 +54,6 @@ export interface IrcDeliveryReceipt {
 	outcome: "injected" | "woken" | "revived" | "failed";
 	error?: string;
 }
-
 interface IrcWaiter {
 	from?: string;
 	resolve: (msg: IrcMessage) => void;
