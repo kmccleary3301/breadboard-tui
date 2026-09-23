@@ -1475,7 +1475,9 @@ export class AgentSession {
 		this.#slashCommands = config.slashCommands ?? [];
 		this.#extensionRunner = config.extensionRunner;
 		this.#detachTurnPrepare = this.agent.addBeforeModelCall(async (context: Context, signal?: AbortSignal) => {
-			const result = await this.#extensionRunner?.emitTurnPrepare({
+			const runner = this.#extensionRunner;
+			if (!runner?.hasHandlers("turn_prepare")) return;
+			const result = await runner.emitTurnPrepare({
 				turnIndex: this.#turnIndex,
 				previousMode: this.#turnPrepareMode,
 				activeToolNames: this.agent.state.tools.map(tool => tool.name),
