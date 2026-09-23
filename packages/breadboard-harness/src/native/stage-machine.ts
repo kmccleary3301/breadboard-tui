@@ -1,4 +1,4 @@
-import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
+import { isJsonRecord, type JsonRecord } from "../canonical-json";
 import { nativeLockValue } from "./lock-values";
 import type { NativeToolSurfacePack } from "./types";
 
@@ -14,9 +14,6 @@ interface StageStep {
 	readonly condition?: string;
 }
 
-function stringValue(value: CanonicalJson | undefined): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
 
 function modeFromStep(step: JsonRecord): string | undefined {
 	if (typeof step.mode === "string") return step.mode;
@@ -123,9 +120,6 @@ export function createNativeStageMachine(
 	return new NativeStageMachine(lock, new Map(stages.map(stage => [stage.mode, stage])));
 }
 
-export function stageToolNames(stage: NativeHarnessStage): readonly string[] {
-	return stage.toolSurface.native.map(tool => tool.name);
-}
 
 export function allNativeToolSurface(stages: readonly NativeHarnessStage[]): NativeToolSurfacePack {
 	const mode = stages[0]?.mode ?? "";
