@@ -1,7 +1,6 @@
-import type { LoadedNativeHarness } from "@breadboard/harness";
+import { createNativeHarnessExtension, type LoadedNativeHarness, nativeToolDelegates } from "@breadboard/harness";
 import type { Settings } from "../config/settings";
 import type { CreateAgentSessionOptions } from "../sdk";
-import { createNativeHarnessExtension, nativeToolDelegates } from "./native-harness-extension";
 
 /**
  * Configure an OMP session to run a compiled harness: its system prompt, exactly its function

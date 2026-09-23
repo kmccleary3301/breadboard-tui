@@ -109,6 +109,20 @@
 			"layer": 3
 		},
 		{
+			"path": "docs/extensions.md",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
+		},
+		{
+			"path": "docs/system-prompt-customization.md",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
+		},
+		{
 			"path": "docs/task-agent-discovery.md",
 			"class": "manual-review",
 			"rule": "manual-review-boundaries",

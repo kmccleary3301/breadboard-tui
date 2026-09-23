@@ -243,7 +243,9 @@
 				"entrypoint",
 				"entrypoint.*",
 				"**/entrypoint",
-				"**/entrypoint.*"
+				"**/entrypoint.*",
+				"docs/extensions.md",
+				"docs/system-prompt-customization.md"
 			]
 		},
 		{
@@ -366,7 +368,9 @@
 				"packages/tui/CHANGELOG.md",
 				"docs/task-agent-discovery.md",
 				"docs/tools/eval.md",
-				"docs/tools/task.md"
+				"docs/tools/task.md",
+				"docs/extensions.md",
+				"docs/system-prompt-customization.md"
 			]
 		}
 	],
@@ -414,6 +418,7 @@
 			"packages/coding-agent/test/retry-ambiguous-replay.test.ts"
 		],
 		"endpointAndSchemaLiterals": [
+			"packages/breadboard-harness/**",
 			"packages/coding-agent/src/activity/index.ts",
 			"packages/coding-agent/src/config/settings-schema.ts",
 			"packages/coding-agent/src/slash-commands/builtin-registry.ts",

@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@babel/parser": "catalog:",
-    "@breadboard/harness": "workspace:*",
+    "@breadboard/harness": "catalog:",
     "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz",
     "@oh-my-pi/omp-stats": "catalog:",
     "@oh-my-pi/omptype": "catalog:",

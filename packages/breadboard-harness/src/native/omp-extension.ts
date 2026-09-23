@@ -1,29 +1,18 @@
-import {
-	applyUnifiedPatchAdapter,
-	createFileFromBlockAdapter,
-	evalOutcomeFromOmp,
-	formatEvalResult,
-	formatRunShellResult,
-	formatTextToolResults,
-	frameNativeUserMessage,
-	isJsonRecord,
-	type JsonRecord,
-	type LoadedNativeHarness,
-	listDirAdapter,
-	markTaskCompleteAdapter,
-	NativeTurnPolicy,
-	type NativeToolResult,
-	type OmpBashDetails,
-	type OmpEvalDetails,
-	parseCanonicalJson,
-	parseTextToolCalls,
-	readFileAdapter,
-	runShellOutcomeFromBash,
-	TodoWriteState,
-	todoCompletionGuardReason,
-} from "@breadboard/harness";
+import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
+import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
+import { type LoadedNativeHarness } from "./load-native-harness";
+import { frameNativeUserMessage } from "./prompt-assembly";
+import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
+import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
+import { TodoWriteState, todoCompletionGuardReason } from "./todo-write";
+import { NativeTurnPolicy } from "./turn-policy";
+import { type NativeToolResult } from "./types";
 import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "../extensibility/extensions/types";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+	ExtensionFactory,
+} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 
 /** Custom message type carrying text-dialect tool results; the model receives it as a user message. */
 export const NATIVE_TEXT_RESULTS_MESSAGE_TYPE = "breadboard-native-text-results";
@@ -202,7 +191,7 @@ const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	mark_task_complete: {
 		approval: "read",
 		async run(call) {
-			const output = await markTaskCompleteAdapter();
+			const output = markTaskCompleteAdapter();
 			// Strict todos hold completion while items are open (`guardrails/orchestrator.py:495-510`);
 			// the call still returns its normal result (`conductor/turn_runtime.py:583-615`).
 			const reason =

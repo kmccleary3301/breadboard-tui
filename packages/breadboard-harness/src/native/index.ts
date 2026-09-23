@@ -2,6 +2,7 @@ export * from "./adapters";
 export * from "./load-native-harness";
 export * from "./lock-loader";
 export * from "./lock-values";
+export * from "./omp-extension";
 export * from "./prompt-assembly";
 export * from "./shell-eval-results";
 export * from "./text-calls";
