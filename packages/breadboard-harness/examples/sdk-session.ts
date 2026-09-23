@@ -11,7 +11,6 @@ const transport = new NativeRpcTransport({
 	env: {
 		PI_CODING_AGENT_DIR: Bun.env.PI_CODING_AGENT_DIR ?? "",
 		BREADBOARD_CONFIG_DIR: Bun.env.BREADBOARD_CONFIG_DIR ?? "",
-		BREADBOARD_OMP_AGENT_DIR: Bun.env.BREADBOARD_OMP_AGENT_DIR ?? "",
 		OMP_SKIP_SETUP: Bun.env.OMP_SKIP_SETUP ?? "1",
 	},
 	approval: {
