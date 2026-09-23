@@ -66,62 +66,12 @@ import { handleSystemOne } from "./routes/systemone";
 import { handleTranscriptions } from "./routes/transcriptions";
 import { handleVideoContent, handleVideoPoll, handleVideoSubmit } from "./routes/video";
 import { AuthGatewaySessionStateStore } from "./session-state";
-
 import type {
 	AuthGatewayServerHandle,
 	AuthGatewayFormatModule as FormatModule,
 	AuthGatewayParsedRequest as ParsedFormatRequest,
 } from "./types";
 import { DEFAULT_AUTH_GATEWAY_BIND } from "./types";
-
-export type ObservedGatewayEffort = Effort | "off" | null;
-export interface GatewayEffortObservation {
-	readonly sessionKey: string;
-	readonly effort: ObservedGatewayEffort;
-}
-type EffortListener = (observation: GatewayEffortObservation) => void;
-const effortListeners = new Set<EffortListener>();
-const observedGatewayEffort = new Map<string, ObservedGatewayEffort>();
-const MAX_OBSERVED_GATEWAY_EFFORT = 256;
-
-/** Undefined means unobserved; null means the latest request omitted an explicit effort. */
-export function readObservedGatewayEffort(sessionKey: string): ObservedGatewayEffort | undefined {
-	return observedGatewayEffort.get(sessionKey);
-}
-
-function notifyEffortListener(listener: EffortListener, observation: GatewayEffortObservation): void {
-	try {
-		listener(observation);
-	} catch (error) {
-		logger.warn("Auth gateway effort observer failed", { error: String(error) });
-	}
-}
-
-/** Replay retained request facts, then observe updates until unsubscribed. */
-export function subscribeGatewayEffort(listener: EffortListener): () => void {
-	effortListeners.add(listener);
-	for (const [sessionKey, effort] of observedGatewayEffort) {
-		notifyEffortListener(listener, { sessionKey, effort });
-	}
-	return () => {
-		effortListeners.delete(listener);
-	};
-}
-
-function rememberGatewayEffort(sessionKey: string, options: SimpleStreamOptions): void {
-	const effort: ObservedGatewayEffort = options.disableReasoning === true ? "off" : (options.reasoning ?? null);
-	observedGatewayEffort.delete(sessionKey);
-	observedGatewayEffort.set(sessionKey, effort);
-	while (observedGatewayEffort.size > MAX_OBSERVED_GATEWAY_EFFORT) {
-		const oldest = observedGatewayEffort.keys().next().value;
-		if (typeof oldest !== "string") break;
-		observedGatewayEffort.delete(oldest);
-	}
-	if (effortListeners.size > 0) {
-		const observation = { sessionKey, effort };
-		for (const listener of effortListeners) notifyEffortListener(listener, observation);
-	}
-}
 
 // `parseBind` lives in ../utils/parse-bind so the gateway and broker can't
 // drift on accepted inputs (e.g. empty hostname, IPv6 brackets).
@@ -245,7 +195,6 @@ function buildStreamOptions(parsed: ParsedFormatRequest, api: Api, signal: Abort
 		};
 		opts.reasoning ??= effort;
 	}
-	rememberGatewayEffort(promptCacheKey, opts);
 	// Fields that don't yet have a matching pi-ai `SimpleStreamOptions` slot.
 	// Surfaced once in debug logs so they show up when wiring a new provider,
 	// but NEVER widened into `options.extra` — every consumer would have to

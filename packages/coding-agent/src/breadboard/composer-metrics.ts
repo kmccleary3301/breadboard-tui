@@ -1,6 +1,5 @@
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { readObservedGatewayEffort } from "@oh-my-pi/pi-ai/auth-gateway";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
@@ -8,8 +7,6 @@ import { breadboardProjectionEventId } from "./e4-agent-stream";
 import { lockValue } from "./harness-lock-view";
 import type { HarnessSnapshot } from "./harness-port";
 import { isBreadboardProviderFreeModel } from "./provider-free-model";
-import { readBreadboardSessionBinding } from "./session-binding";
-import { readSharedEngineEffort } from "./shared-engine-client";
 
 export interface BreadboardComposerSpend {
 	readonly sessionUsd: number | null;
@@ -26,7 +23,6 @@ interface TranscriptMetrics {
 	readonly revision: number;
 	readonly leafId: ReturnType<AgentSession["sessionManager"]["getLeafId"]>;
 	readonly model: AgentSession["model"];
-	readonly engineSessionId: string | undefined;
 	readonly spend: BreadboardComposerSpend | null;
 }
 const transcriptMetrics = new WeakMap<AgentSession, TranscriptMetrics>();
@@ -52,16 +48,8 @@ function effortValue(value: unknown): ThinkingLevel | undefined {
 	}
 }
 
-function readHarnessEffort(
-	session: AgentSession,
-	harness: HarnessSnapshot | null,
-	engineSessionId: string | undefined,
-): ThinkingLevel | undefined {
-	const sessionKey = engineSessionId === undefined ? undefined : `bb:${engineSessionId}`;
-	const shared = sessionKey === undefined ? undefined : readSharedEngineEffort(sessionKey);
-	const observed = shared !== undefined || sessionKey === undefined ? shared : readObservedGatewayEffort(sessionKey);
-	// An observed omission must clear a previous explicit effort, not revive a lock default.
-	if (observed !== undefined) return effortValue(observed);
+/** The effort the verified harness lock configures for the session's model. */
+function readHarnessEffort(session: AgentSession, harness: HarnessSnapshot | null): ThinkingLevel | undefined {
 	if (
 		!harness?.lock ||
 		!harness.verifiedIdentity ||
@@ -167,12 +155,11 @@ export function readBreadboardComposerMetrics(
 			revision,
 			leafId,
 			model,
-			engineSessionId: readBreadboardSessionBinding(session.sessionManager)?.sessionId,
 			spend: readSpend(session),
 		};
 		transcriptMetrics.set(session, cached);
 	}
-	const effort = readHarnessEffort(session, harness, cached.engineSessionId);
+	const effort = readHarnessEffort(session, harness);
 	return {
 		effort: effort ?? (session.mainStreamOwnsTurnLifecycle ? null : session.thinkingLevel),
 		spend: cached.spend,

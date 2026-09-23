@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import * as path from "node:path";
-import type { ObservedGatewayEffort } from "@oh-my-pi/pi-ai/auth-gateway";
-import { Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import {
 	parseSelectedBreadboardConfig,
@@ -37,9 +35,7 @@ export interface SharedEngineInfo {
 	readonly osProcessStartToken: string;
 }
 
-export type SharedEngineEvent =
-	| { readonly kind: "ready"; readonly info: SharedEngineInfo }
-	| { readonly kind: "effort"; readonly sessionKey: string; readonly effort: ObservedGatewayEffort };
+export type SharedEngineEvent = { readonly kind: "ready"; readonly info: SharedEngineInfo };
 
 function requiredString(record: Record<string, unknown>, field: string): string {
 	const value = record[field];
@@ -132,22 +128,8 @@ export function parseSharedEngineInfo(value: unknown): SharedEngineInfo {
 	});
 }
 
-function parseEffort(value: unknown): ObservedGatewayEffort {
-	if (value === null || value === "off") return value;
-	const effort: Effort | undefined = THINKING_EFFORTS.find(candidate => candidate === value);
-	if (effort !== undefined) return effort;
-	throw new Error("shared engine effort is invalid");
-}
-
 export function parseSharedEngineEvent(value: unknown): SharedEngineEvent {
 	if (!isRecord(value)) throw new Error("shared engine event must be an object");
 	if (value.kind === "ready") return { kind: "ready", info: parseSharedEngineInfo(value.info) };
-	if (value.kind === "effort") {
-		return {
-			kind: "effort",
-			sessionKey: requiredString(value, "sessionKey"),
-			effort: parseEffort(value.effort),
-		};
-	}
 	throw new Error("unknown shared engine event kind");
 }

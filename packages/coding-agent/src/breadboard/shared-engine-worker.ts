@@ -2,7 +2,6 @@ import * as net from "node:net";
 import { chmodSync, realpathSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isAbsolute } from "node:path";
-import { subscribeGatewayEffort } from "@oh-my-pi/pi-ai/auth-gateway";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
@@ -151,7 +150,6 @@ export class SharedEngineLeaseServer {
 			if (released) return;
 			released = true;
 			this.#leases.delete(close);
-			unsubscribe();
 			this.#scheduleCleanup(CLEANUP_GRACE_MS);
 		};
 		const send = (event: SharedEngineEvent): void => {
@@ -164,7 +162,6 @@ export class SharedEngineLeaseServer {
 		response.once("error", close);
 		response.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-store" });
 		send({ kind: "ready", info: this.options.info });
-		const unsubscribe = subscribeGatewayEffort(observation => send({ kind: "effort", ...observation }));
 	}
 
 	#scheduleCleanup(delay: number): void {

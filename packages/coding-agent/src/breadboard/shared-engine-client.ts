@@ -1,6 +1,5 @@
 import { realpathSync } from "node:fs";
 import * as path from "node:path";
-import type { ObservedGatewayEffort } from "@oh-my-pi/pi-ai/auth-gateway";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { createDaemonBrokerClient, DaemonBrokerRejectedError, type DaemonBrokerClient } from "../launch/client";
 import { daemonRuntimeDir } from "../launch/paths";
@@ -29,9 +28,8 @@ import {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const START_RETRY_MS = 100;
-const MAX_EFFORT_OBSERVATIONS = 256;
-const SHARED_ENGINE_DAEMON_PREFIX = "omp.shared.bb.v2.";
-const effortSources = new Set<Map<string, ObservedGatewayEffort>>();
+// v3: leases carry only the admission event, so a v2 owner (which also streams effort events) is never reused.
+const SHARED_ENGINE_DAEMON_PREFIX = "omp.shared.bb.v3.";
 
 export interface AcquiredSharedBreadboardEngine {
 	readonly config: BreadboardRunConfig;
@@ -216,7 +214,6 @@ async function consumeLease(
 	signal: AbortSignal,
 	info: SharedEngineInfo,
 	ready: () => void,
-	efforts: Map<string, ObservedGatewayEffort>,
 ): Promise<void> {
 	if (!response.body) throw new Error("Shared engine lease response had no body");
 	const reader = response.body.getReader();
@@ -239,19 +236,9 @@ async function consumeLease(
 				buffer = buffer.slice(newline + 1);
 				if (!line) continue;
 				const event = parseSharedEngineEvent(JSON.parse(line));
-				if (event.kind === "ready") {
-					if (admitted || !sameEngine(event.info, info)) throw new Error("Shared engine lease identity changed");
-					admitted = true;
-					ready();
-				} else {
-					if (!admitted) throw new Error("Shared engine sent metadata before admitting this client");
-					efforts.delete(event.sessionKey);
-					efforts.set(event.sessionKey, event.effort);
-					if (efforts.size > MAX_EFFORT_OBSERVATIONS) {
-						const oldest = efforts.keys().next();
-						if (!oldest.done) efforts.delete(oldest.value);
-					}
-				}
+				if (admitted || !sameEngine(event.info, info)) throw new Error("Shared engine lease identity changed");
+				admitted = true;
+				ready();
 			}
 		}
 	} finally {
@@ -272,13 +259,10 @@ export async function acquireSharedBreadboardEngine(
 	let leaseTask: Promise<void> | undefined;
 	let leaseFailure: unknown;
 	let closePromise: Promise<void> | undefined;
-	const efforts = new Map<string, ObservedGatewayEffort>();
 	const close = (): Promise<void> => {
 		closePromise ??= (async () => {
 			leaseAbort?.abort();
 			await leaseTask;
-			effortSources.delete(efforts);
-			efforts.clear();
 			broker.close();
 			if (leaseFailure !== undefined) throw leaseFailure;
 		})();
@@ -316,11 +300,10 @@ export async function acquireSharedBreadboardEngine(
 			}
 			const ready = Promise.withResolvers<void>();
 			const signal = leaseAbort.signal;
-			leaseTask = consumeLease(response, signal, info, ready.resolve, efforts).catch(error => {
+			leaseTask = consumeLease(response, signal, info, ready.resolve).catch(error => {
 				ready.reject(error);
 				if (!signal.aborted) {
 					leaseFailure = error;
-					effortSources.delete(efforts);
 					logger.error("BreadBoard shared engine connection lost", { error: String(error) });
 				}
 			});
@@ -329,7 +312,6 @@ export async function acquireSharedBreadboardEngine(
 			} finally {
 				clearTimeout(admissionTimer);
 			}
-			effortSources.add(efforts);
 			const acquiredConfig = resolveBreadboardRunConfig({
 				selectedConfig: {
 					engineMode: "local-external",
@@ -367,13 +349,4 @@ export async function acquireSharedBreadboardEngine(
 		}
 		throw error;
 	}
-}
-
-export function readSharedEngineEffort(sessionKey: string): ObservedGatewayEffort | undefined {
-	let observed: ObservedGatewayEffort | undefined;
-	for (const source of effortSources) {
-		const effort = source.get(sessionKey);
-		if (effort !== undefined) observed = effort;
-	}
-	return observed;
 }
