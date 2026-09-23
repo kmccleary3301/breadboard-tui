@@ -34,9 +34,9 @@ function fakePeer(): FakePeer {
 						emit({
 							type: "extension_ui_request",
 							id: "approval-1",
-							method: "confirm",
-							title: "Run shell?",
-							message: "echo ok",
+							method: "select",
+							title: "Allow tool: bash",
+							options: ["Approve", "Deny"],
 						});
 					if (command.message === "/bb-transcript")
 						emit({
@@ -127,14 +127,15 @@ describe("NativeRpcTransport", () => {
 			binaryPath: "/tmp/bb",
 			approval: {
 				kind: "forward",
-				decide: async request => (request.message === "echo ok" ? { decision: "allow" } : { decision: "deny" }),
+				decide: async request =>
+					request.options?.includes("Approve") ? { decision: "allow" } : { decision: "deny" },
 			},
 			spawn: async () => approved.process,
 		});
 		await allow.start();
 		await allow.prompt("ask");
 		await eventually(() => approved.writes.find(line => line.includes("approval-1")));
-		expect(approved.writes.at(-1)).toContain('"confirmed":true');
+		expect(approved.writes.at(-1)).toContain('"value":"Approve"');
 		await allow.stop();
 
 		const denied = fakePeer();
@@ -142,7 +143,7 @@ describe("NativeRpcTransport", () => {
 		await deny.start();
 		await deny.prompt("ask");
 		await eventually(() => denied.writes.find(line => line.includes("approval-1")));
-		expect(denied.writes.at(-1)).toContain('"confirmed":false');
+		expect(denied.writes.at(-1)).toContain('"value":"Deny"');
 		await deny.stop();
 	});
 

@@ -25,15 +25,17 @@ export function normalizeHarnessSelection(selection: string | NativeHarnessSelec
 		: { kind: "builtin", id: selection };
 }
 
-/** A typed policy result for an OMP extension `confirm` request. */
+/** A typed policy result for an OMP extension approval request. */
 export type NativeApprovalDecision =
 	| { readonly decision: "allow" }
 	| { readonly decision: "deny"; readonly reason?: string };
 
 export interface NativeApprovalRequest {
 	readonly id: string;
+	readonly method: "confirm" | "select";
 	readonly title: string;
-	readonly message: string;
+	readonly message?: string;
+	readonly options?: readonly string[];
 	readonly timeout?: number;
 }
 
@@ -42,9 +44,9 @@ export type NativeApprovalHandler = (
 ) => NativeApprovalDecision | Promise<NativeApprovalDecision>;
 
 /**
- * Headless approval is fail-closed by default. `deny` answers OMP's confirm
- * request with `confirmed: false`; `forward` delegates the typed request to
- * the SDK caller and sends the caller's allow/deny decision back over RPC.
+ * Headless approval is fail-closed by default. `deny` answers OMP's confirm or
+ * select request with the protocol's false/deny value; `forward` delegates the
+ * typed request to the SDK caller and sends the caller's allow/deny decision.
  */
 export type NativeApprovalPolicy =
 	| { readonly kind: "deny"; readonly reason?: string }
@@ -144,6 +146,7 @@ type ResponseData<Command extends RpcCommandBody["type"]> =
 
 type UiNotifyRequest = Extract<RpcExtensionUIRequest, { readonly method: "notify" }>;
 type UiConfirmRequest = Extract<RpcExtensionUIRequest, { readonly method: "confirm" }>;
+type UiSelectRequest = Extract<RpcExtensionUIRequest, { readonly method: "select" }>;
 
 class AsyncQueue<T> {
 	#values: T[] = [];
@@ -495,7 +498,7 @@ export class NativeRpcTransport {
 		}
 		if (isUiRequest(value)) {
 			this.#events.push({ kind: "ui", frame: value });
-			if (value.method === "confirm") void this.#resolveApproval(value);
+			if (value.method === "confirm" || value.method === "select") void this.#resolveApproval(value);
 			if (value.method === "notify") {
 				for (const waiter of [...this.#notifyWaiters]) waiter(value);
 			}
@@ -508,23 +511,33 @@ export class NativeRpcTransport {
 		if (isSessionEvent(value)) this.#events.push({ kind: "session", frame: value });
 	}
 
-	async #resolveApproval(request: UiConfirmRequest): Promise<void> {
+	async #resolveApproval(request: UiConfirmRequest | UiSelectRequest): Promise<void> {
 		const policy = this.#options.approval ?? { kind: "deny" as const };
-		let response: RpcExtensionUIResponse;
+		let allowed = false;
 		if (policy.kind === "forward") {
 			const decision = await policy.decide({
 				id: request.id,
+				method: request.method,
 				title: request.title,
-				message: request.message,
+				...(request.method === "confirm" ? { message: request.message } : { options: request.options }),
 				...(request.timeout === undefined ? {} : { timeout: request.timeout }),
 			});
-			response =
-				decision.decision === "allow"
-					? { type: "extension_ui_response", id: request.id, confirmed: true }
-					: { type: "extension_ui_response", id: request.id, confirmed: false };
-		} else {
-			response = { type: "extension_ui_response", id: request.id, confirmed: false };
+			allowed = decision.decision === "allow";
 		}
+		const response: RpcExtensionUIResponse =
+			request.method === "confirm"
+				? { type: "extension_ui_response", id: request.id, confirmed: allowed }
+				: {
+						type: "extension_ui_response",
+						id: request.id,
+						value: allowed
+							? (request.options.find(option => option.toLowerCase() === "approve") ??
+								request.options[0] ??
+								"Approve")
+							: (request.options.find(option => option.toLowerCase() === "deny") ??
+								request.options.at(-1) ??
+								"Deny"),
+					};
 		this.#process?.stdin.write(`${encodeRpcFrame(response)}\n`);
 	}
 }

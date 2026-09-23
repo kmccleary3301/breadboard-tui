@@ -23,12 +23,22 @@ const transport = new NativeRpcTransport({
 const events: string[] = [];
 const replyTexts: string[] = [];
 let approvalRequests = 0;
+let cancelPromise: Promise<void> | undefined;
+let cancelIssuedWhileTurn = false;
 const eventStream = transport.events();
 try {
+	const cancelTimer = setTimeout(
+		() => {
+			cancelIssuedWhileTurn = true;
+			cancelPromise = transport.cancel({ reason: "SDK example cancels the running turn" });
+		},
+		Number(Bun.env.BB_CANCEL_AFTER_MS ?? "4000"),
+	);
 	const created = await transport.createSession({ task });
 	for await (const event of eventStream) {
 		events.push(event.kind);
-		if (event.kind === "ui" && event.frame.method === "confirm") approvalRequests += 1;
+		if (event.kind === "ui" && (event.frame.method === "confirm" || event.frame.method === "select"))
+			approvalRequests += 1;
 		if (event.kind === "session" && event.frame.type === "message_end" && event.frame.message.role === "assistant") {
 			const text = event.frame.message.content
 				.filter(part => part.type === "text")
@@ -38,9 +48,11 @@ try {
 		}
 		if (event.kind === "session" && event.frame.type === "agent_end") break;
 	}
+	clearTimeout(cancelTimer);
 	let cancelExitCode = 0;
 	try {
-		await transport.cancel({ reason: "SDK example complete" });
+		if (cancelPromise === undefined) await transport.cancel({ reason: "SDK example complete" });
+		else await cancelPromise;
 	} catch {
 		cancelExitCode = 1;
 	}
@@ -51,6 +63,7 @@ try {
 		replyText: replyTexts.at(-1) ?? null,
 		approvalRequests,
 		approvalPolicy: "deny",
+		cancelIssuedWhileTurn,
 		transcriptPath,
 		exitCodes: { create: 0, cancel: cancelExitCode, transcript: transcriptPath === undefined ? 1 : 0 },
 	};
