@@ -29,7 +29,7 @@ import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-confi
 import { showGitOverlay } from "../../cli/git-tui";
 import { resolveAdvisorRoleSelection, resolveModelRoleValue } from "../../config/model-resolver";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
-import { getUi, type SettingPath } from "../../config/settings-schema";
+import { getUi, SETTINGS_SCHEMA, type SettingPath } from "../../config/settings-schema";
 import { getRoleInfo } from "../../config/model-roles";
 import { settings } from "../../config/settings";
 import { createSettingsHost } from "../../config/settings-ui";
@@ -620,7 +620,8 @@ export class SelectorController {
 	 * This handles side effects and session-specific settings.
 	 */
 	handleSettingChange(id: string, value: unknown): void {
-		const ui = getUi(id as SettingPath);
+		// Selector-only ids (autoCompact, discovery.*) are not schema paths.
+		const ui = id in SETTINGS_SCHEMA ? getUi(id as SettingPath) : undefined;
 		const restriction = ui
 			? nativeSettingRestriction(id as SettingPath, ui.group, this.ctx.session.mainStreamOwnsTurnLifecycle)
 			: undefined;
