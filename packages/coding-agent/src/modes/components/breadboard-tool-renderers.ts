@@ -21,6 +21,7 @@ const BINDING_BY_EFFECTIVE_ID: Readonly<Record<string, BreadBoardToolRendererBin
 export const BREADBOARD_TOOL_RENDERER_BINDINGS = BINDING_BY_EFFECTIVE_ID;
 
 for (const binding of Object.values(BINDING_BY_EFFECTIVE_ID)) {
+	if (!binding) continue;
 	const renderer = toolRenderers[binding.ompToolId];
 	if (renderer) registerToolRenderer(binding.effectiveToolId, renderer, binding.label);
 }

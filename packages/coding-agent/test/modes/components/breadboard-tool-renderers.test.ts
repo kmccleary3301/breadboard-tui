@@ -3,7 +3,7 @@ import {
 	getBreadBoardToolLabel,
 	getBreadBoardToolRenderer,
 } from "@oh-my-pi/pi-coding-agent/modes/components/breadboard-tool-renderers";
-import { toolRenderers } from "@oh-my-pi/pi-coding-agent/tools/renderers";
+import { toolRenderers } from "@oh-my-pi/pi-tui/tools";
 
 describe("BreadBoard tool renderer aliases", () => {
 	it("resolves the effective run_shell id to the existing bash renderer", () => {

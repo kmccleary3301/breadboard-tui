@@ -215,7 +215,7 @@ describe("StatusLineComponent repaints when an async VCS fetch resolves", () => 
 		const fresh = Promise.withResolvers<GitStatus | null>();
 		gitControls.statusSummary.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
 
-		const component = new StatusLineComponent(makeSession());
+		const component = new StatusLineComponent(makeSession(), statusLineHost);
 		component.updateSettings(gitSegment);
 		component.watchBranch(vi.fn());
 		component.getTopBorder(80);

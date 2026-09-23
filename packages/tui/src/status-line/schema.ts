@@ -31,7 +31,6 @@ export const STATUS_LINE_SEGMENT_IDS = [
 	"longrun",
 	"bb_activity",
 	"bb_policy",
-	"overflow",
 ] as const;
 /** One identifier from the supported status-line segment catalog. */
 export type StatusLineSegmentId = (typeof STATUS_LINE_SEGMENT_IDS)[number];

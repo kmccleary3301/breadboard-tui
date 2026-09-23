@@ -8,7 +8,8 @@ import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
 import type { SegmentContext } from "@oh-my-pi/pi-tui/status-line/segments";
 import { renderSegment } from "@oh-my-pi/pi-tui/status-line/segments";
-import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import { initTheme, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-tui/theme/session-color";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
@@ -540,7 +541,7 @@ describe("overflow: path survives before model", () => {
 
 describe("band width budget", () => {
 	it("includes the one-cell gauge when overflow leaves only one segment group", () => {
-		const component = new StatusLineComponent(createStatusLineSession(""));
+		const component = new StatusLineComponent(createStatusLineSession(""), statusLineHost);
 		component.updateSettings({
 			preset: "default",
 			segmentOptions: { path: { abbreviate: true, maxLength: 40, stripWorkPrefix: false } },
