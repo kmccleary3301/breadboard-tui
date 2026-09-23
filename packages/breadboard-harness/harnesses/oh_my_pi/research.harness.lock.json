@@ -1,0 +1,149 @@
+{
+  "effective_values": [
+    {
+      "env_gate_ids": [],
+      "path": "loop.sequence",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "mode": "build"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "modes",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "name": "build",
+          "prompt": "@pack(base).system",
+          "tools_enabled": [
+            "*"
+          ]
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.system",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "prompts/system.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.default_model",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "openai-codex/gpt-5.6-luna",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.models",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "adapter": "openai_responses",
+          "id": "openai-codex/gpt-5.6-luna"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "schema_version",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "bb.harness_definition.v1",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.registry.paths",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "config/e4_targets/oh_my_pi/16.2.13"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "version",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.root",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": ".",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    }
+  ],
+  "env_gates": [],
+  "graph_hash": "sha256:4a5adb674de6c41aabdf1428cbd67fed99b4a176867cf3d78545bee2ad39acea",
+  "graph_id": "agent_config:research.harness",
+  "merge_policy": {
+    "conflict_resolution": "highest-precedence",
+    "policy_id": "precedence_order_deep_merge",
+    "strategy": "deep-merge"
+  },
+  "migrations": [
+    {
+      "applied": true,
+      "from_version": "agent-config-yaml",
+      "migration_id": "agent-config-yaml-to-effective-config-graph-v1",
+      "to_version": "bb.effective_config_graph.v1"
+    }
+  ],
+  "schema_version": "bb.effective_config_graph.v1",
+  "source_layers": [
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:d0097d70a69457acb281a01d956a04153edafc4908310732f6397b957892e138",
+      "layer_id": "agent-config:0000:research.harness.yaml",
+      "model_visible": true,
+      "precedence": 0,
+      "scope": "agent",
+      "source_kind": "project",
+      "source_ref": "oh_my_pi/research.harness.yaml"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:0d96613a7492b5c30a5c83eedde8c5747c6a9d35d7d0c9b8dd0a5c44f7a77123",
+      "layer_id": "harness-resource:0000",
+      "model_visible": true,
+      "precedence": 10,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": "oh_my_pi/research.harness.yaml::prompts/system.md"
+    }
+  ],
+  "visibility": {
+    "host_only_paths": [],
+    "model_visible_paths": [
+      "loop.sequence",
+      "modes",
+      "prompts.packs.base.system",
+      "providers.default_model",
+      "providers.models",
+      "schema_version",
+      "tools.registry.paths",
+      "version",
+      "workspace.root"
+    ],
+    "redacted_paths": []
+  }
+}

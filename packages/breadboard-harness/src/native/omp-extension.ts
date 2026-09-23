@@ -1,5 +1,6 @@
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
+import { RESEARCH_NATIVE_BINDINGS } from "./research-bindings";
 import { type LoadedNativeHarness } from "./load-native-harness";
 import { frameNativeUserMessage } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
@@ -137,6 +138,7 @@ async function invokeBuiltin(call: NativeCall, params: Record<string, unknown>):
  * tool definitions; execution is OMP's (`bash`, `eval`) or an adapter tested against Python fixtures.
  */
 export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
+	...RESEARCH_NATIVE_BINDINGS,
 	read_file: {
 		approval: "read",
 		run: call =>

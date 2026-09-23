@@ -2,6 +2,7 @@ import { type CanonicalJson, isJsonRecord as isRecord, type JsonRecord } from ".
 import { parseHarnessYaml } from "../compiler";
 import { loadEngineDataSnapshot } from "../engine-data";
 import { nativeLockValue } from "./lock-values";
+import { RESEARCH_TOOL_DEFINITIONS, type ResearchToolFamily } from "./research-tool-definitions";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
 const TOOL_DEFINITION_PREFIX = "implementations/tools/defs/";
@@ -96,6 +97,37 @@ async function vendoredToolDefinitions(): Promise<ReadonlyMap<string, NativeTool
 	return byName;
 }
 
+function researchToolFamily(lock: JsonRecord): ResearchToolFamily | undefined {
+	const paths = nativeLockValue(lock, "tools.registry.paths");
+	const sourceRefs = Array.isArray(lock.source_layers)
+		? lock.source_layers
+				.filter(isRecord)
+				.map(layer => layer.source_ref)
+				.filter((ref): ref is string => typeof ref === "string")
+				.join(" ")
+		: "";
+	const joined = `${sourceRefs} ${Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").join(" ") : ""}`;
+	if (joined.includes("claude_code") || joined.includes("defs_cc")) return "claude_code";
+	if (joined.includes("oh_my_opencode") || joined.includes("defs_omo")) return "oh_my_opencode";
+	if (joined.includes("opencode") || joined.includes("defs_oc")) return "opencode";
+	if (joined.includes("codex")) return "codex";
+	if (joined.includes("e4_targets/pi/")) return "pi";
+	if (joined.includes("oh_my_pi")) return "oh_my_pi";
+	return undefined;
+}
+function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
+	const family = researchToolFamily(lock);
+	if (family === undefined) return base;
+	const definitions = new Map(base);
+	const additions = family === "codex" ? RESEARCH_TOOL_DEFINITIONS.opencode : RESEARCH_TOOL_DEFINITIONS[family];
+	for (const definition of additions) definitions.set(definition.name, definition);
+	return definitions;
+}
+
+async function vendoredToolDefinitionsForLock(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolDefinition>> {
+	return definitionsForLock(lock, await vendoredToolDefinitions());
+}
+
 function modeRecords(lock: JsonRecord): readonly JsonRecord[] {
 	const modes = nativeLockValue(lock, "modes");
 	return Array.isArray(modes) ? modes.filter(isRecord) : [];
@@ -149,7 +181,7 @@ function caseInsensitiveOrder(left: NativeToolDefinition, right: NativeToolDefin
  * inclusion, matching `agent_llm_openai.py:3093-3111`.
  */
 export async function loadNativeToolSurfaces(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolSurfacePack>> {
-	return loadNativeToolSurfacesWithDefinitions(lock, await vendoredToolDefinitions());
+	return loadNativeToolSurfacesWithDefinitions(lock, await vendoredToolDefinitionsForLock(lock));
 }
 
 /** Build the first declared mode surface for single-stage callers. */

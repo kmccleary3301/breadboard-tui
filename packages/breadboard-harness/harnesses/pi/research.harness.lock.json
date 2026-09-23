@@ -1,0 +1,149 @@
+{
+  "effective_values": [
+    {
+      "env_gate_ids": [],
+      "path": "loop.sequence",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "mode": "build"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "modes",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "name": "build",
+          "prompt": "@pack(base).system",
+          "tools_enabled": [
+            "*"
+          ]
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.system",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "prompts/system.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.default_model",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "openai-codex/gpt-5.6-luna",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.models",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "adapter": "openai_responses",
+          "id": "openai-codex/gpt-5.6-luna"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "schema_version",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "bb.harness_definition.v1",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.registry.paths",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "config/e4_targets/pi/0.57.1"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "version",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.root",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": ".",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    }
+  ],
+  "env_gates": [],
+  "graph_hash": "sha256:e1806fdd85646dc962a671d15f86f4c01cae0d8ca3133e620cdac082497828e5",
+  "graph_id": "agent_config:research.harness",
+  "merge_policy": {
+    "conflict_resolution": "highest-precedence",
+    "policy_id": "precedence_order_deep_merge",
+    "strategy": "deep-merge"
+  },
+  "migrations": [
+    {
+      "applied": true,
+      "from_version": "agent-config-yaml",
+      "migration_id": "agent-config-yaml-to-effective-config-graph-v1",
+      "to_version": "bb.effective_config_graph.v1"
+    }
+  ],
+  "schema_version": "bb.effective_config_graph.v1",
+  "source_layers": [
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:1dfce74a207343639b6e4f458ab093bf92b25f5686cf08bbc77b52dcd234aa9a",
+      "layer_id": "agent-config:0000:research.harness.yaml",
+      "model_visible": true,
+      "precedence": 0,
+      "scope": "agent",
+      "source_kind": "project",
+      "source_ref": "pi/research.harness.yaml"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:223ae5bd2b036f97abc63b55ecbecf698b1b284176e62a012cbc982042263005",
+      "layer_id": "harness-resource:0000",
+      "model_visible": true,
+      "precedence": 10,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": "pi/research.harness.yaml::prompts/system.md"
+    }
+  ],
+  "visibility": {
+    "host_only_paths": [],
+    "model_visible_paths": [
+      "loop.sequence",
+      "modes",
+      "prompts.packs.base.system",
+      "providers.default_model",
+      "providers.models",
+      "schema_version",
+      "tools.registry.paths",
+      "version",
+      "workspace.root"
+    ],
+    "redacted_paths": []
+  }
+}

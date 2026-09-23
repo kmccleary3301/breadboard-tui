@@ -1,0 +1,23 @@
+schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: openai-codex/gpt-5.6-luna
+  models:
+    - id: openai-codex/gpt-5.6-luna
+      adapter: openai_responses
+tools:
+  registry:
+    paths: [config/e4_targets/oh_my_pi/16.2.13]
+prompts:
+  packs:
+    base:
+      system: prompts/system.md
+modes:
+  - name: build
+    prompt: '@pack(base).system'
+    tools_enabled: ['*']
+loop:
+  sequence:
+    - mode: build
