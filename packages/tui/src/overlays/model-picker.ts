@@ -9,7 +9,7 @@ import { addKeyAliases, canonicalKeyId } from "../keybindings";
 import { type KeyId, parseKey } from "../keys";
 import type { Component, TUI } from "../tui";
 import { type ThemeColor, theme } from "../theme/theme";
-import { buildSessionModelScope, ModelBrowser, type ModelBrowserItem } from "./model-browser";
+import { buildBrowserItems, buildSessionModelScope, ModelBrowser, sortModelItems, type ModelBrowserItem } from "./model-browser";
 import type { ModelBrowserRegistry, ModelBrowserSource } from "./model-browser";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { ScopedModelItem } from "./model-hub";
@@ -217,31 +217,25 @@ export class ModelPickerComponent implements Component {
 
 	/** Rebuild model items and role chips from the registry's in-memory state. */
 	#syncFromRegistryState(): void {
-		let models: ReadonlyArray<Model>;
-		if (this.#mainStreamOwnsTurnLifecycle || this.#scopedModels.length > 0) {
-			models = this.#scopedModels.map(scoped => scoped.model);
+		if (this.#mainStreamOwnsTurnLifecycle) {
 			this.#configError = undefined;
+			this.#modelItems = buildBrowserItems(this.#scopedModels.map(scoped => scoped.model));
+			sortModelItems(this.#modelItems, { mruOrder: this.#settings.mruOrder });
+			this.#browser.setRoles({});
+			this.#browser.setMruOrder(this.#settings.mruOrder);
+			this.#browser.setPerfStats(this.#settings.modelPerf);
 		} else {
-			const loadError = this.#registry.getError();
-			this.#configError = loadError ? String(loadError) : undefined;
-			try {
-				models = this.#registry.getAvailable();
-			} catch (error) {
-				this.#configError = error instanceof Error ? error.message : String(error);
-				models = [];
-			}
+			const scope = buildSessionModelScope(
+				this.#settings,
+				this.#registry,
+				this.#scopedModels.map(scoped => scoped.model),
+			);
+			this.#configError = scope.error;
+			this.#modelItems = scope.items;
+			this.#browser.setRoles(scope.roles);
+			this.#browser.setMruOrder(scope.mruOrder);
+			this.#browser.setPerfStats(this.#settings.modelPerf);
 		}
-
-		const allModels =
-			this.#mainStreamOwnsTurnLifecycle || this.#scopedModels.length > 0 ? models : this.#registry.getAll();
-		const roles = this.#mainStreamOwnsTurnLifecycle ? {} : resolveRoleAssignments(this.#settings, allModels, models);
-		const storage = this.#settings.getStorage();
-		const mruOrder = storage?.getModelUsageOrder() ?? [];
-		this.#modelItems = buildBrowserItems(models);
-		sortModelItems(this.#modelItems, { roles, mruOrder });
-		this.#browser.setRoles(roles);
-		this.#browser.setMruOrder(mruOrder);
-		this.#browser.setPerfStats(storage?.getModelPerf() ?? new Map());
 		this.#syncItemsForQuery(this.#browser.query, true);
 	}
 
