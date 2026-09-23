@@ -69,5 +69,14 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	write: writeToolRenderer,
 };
 
+/** Register an application-specific renderer without making TUI depend on its host package. */
+export function registerToolRenderer(name: string, renderer: ToolRenderer, label?: string): void {
+	toolRenderers[name] = renderer;
+	if (label !== undefined) toolRendererLabels[name] = label;
+}
+
+/** Optional labels for host-provided renderer aliases. */
+export const toolRendererLabels: Record<string, string> = {};
+
 // Wire the xd:// render delegation without the xdev module importing this registry.
 setXdevRendererLookup(name => toolRenderers[name]);

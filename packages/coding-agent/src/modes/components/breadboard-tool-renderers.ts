@@ -1,5 +1,5 @@
-import type { ToolRenderer } from "../../tools/renderers";
-import { toolRenderers } from "../../tools/renderers";
+import type { ToolRenderer } from "@oh-my-pi/pi-tui/tools";
+import { registerToolRenderer, toolRenderers } from "@oh-my-pi/pi-tui/tools";
 
 /**
  * Presentation aliases emitted by BreadBoard's effective tool bindings.
@@ -19,6 +19,11 @@ const BINDING_BY_EFFECTIVE_ID: Readonly<Record<string, BreadBoardToolRendererBin
 
 /** Stable alias metadata for tests, activity labels, and presentation callers. */
 export const BREADBOARD_TOOL_RENDERER_BINDINGS = BINDING_BY_EFFECTIVE_ID;
+
+for (const binding of Object.values(BINDING_BY_EFFECTIVE_ID)) {
+	const renderer = toolRenderers[binding.ompToolId];
+	if (renderer) registerToolRenderer(binding.effectiveToolId, renderer, binding.label);
+}
 
 /** Resolve a BreadBoard effective tool id to the existing OMP renderer. */
 export function getBreadBoardToolRenderer(effectiveToolId: string): ToolRenderer | undefined {

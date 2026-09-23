@@ -14,6 +14,7 @@ import {
 	type FirstResultViewportRepaint,
 	type ToolActivitySummary,
 	type ToolRenderer,
+	toolRendererLabels,
 	toolRenderers,
 } from "../tools/index";
 import { BASH_DEFAULT_PREVIEW_LINES } from "../tools/bash";
@@ -29,7 +30,6 @@ import { isFramedBlockComponent, markFramedBlockComponent, renderStatusLine, Wid
 import { convertImageToPng } from "./image-loading";
 import { sanitizeWithOptionalSixelPassthrough } from "../render/sixel";
 import { renderDiff } from "../chrome/diff";
-import { getBreadBoardToolLabel, getBreadBoardToolRenderer } from "@oh-my-pi/pi-coding-agent/modes/components/breadboard-tool-renderers";
 import { type AnimationFrame, trimBlankEdges } from "../chrome/transcript-container";
 
 /** Resolves the canonical renderer key while retaining the provider's wire name in message history. */
@@ -351,11 +351,10 @@ export class ToolExecutionComponent extends Container {
 	) {
 		super();
 		ensureThemeSync();
-		this.#toolName = toolName;
-		const breadBoardRenderer = getBreadBoardToolRenderer(toolName);
-		this.#toolLabel = tool?.label ?? getBreadBoardToolLabel(toolName) ?? toolName;
-		this.#renderer =
-			options.useBuiltInRenderer === false ? undefined : (toolRenderers[toolName] ?? breadBoardRenderer);
+		const canonicalName = toolRenderName(toolName, tool);
+		this.#toolName = canonicalName;
+		this.#toolLabel = tool?.label ?? toolRendererLabels[canonicalName] ?? canonicalName;
+		this.#renderer = options.useBuiltInRenderer === false ? undefined : toolRenderers[canonicalName];
 		this.#showImages = options.showImages ?? true;
 		this.#tool = tool;
 		this.#ui = ui;
