@@ -21,17 +21,17 @@
           "name": "plan",
           "prompt": "@pack(base).plan",
           "tools_enabled": [
-            "read_file",
-            "list_dir",
-            "glob",
-            "grep"
+            "shell_command",
+            "apply_patch",
+            "update_plan"
           ]
         },
         {
           "name": "build",
-          "prompt": "@pack(base).builder",
           "tools_enabled": [
-            "*"
+            "shell_command",
+            "apply_patch",
+            "update_plan"
           ]
         }
       ],
@@ -119,7 +119,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:b327e09789ee5eb752609b08aecf46772280d09e30856ec8c98d5fc1cb73214a",
+  "graph_hash": "sha256:f71fb109440d8f3bf9b428bb818bb150dbe08f535cf0cd95fbf0b90f93d9b406",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -138,7 +138,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:7cc9f5daf6ed3948b529782af4f72835c82749f5565eaf5970155c849ea8239b",
+      "layer_hash": "sha256:133c862b63aed38eddb8ade9bdf83ce1643a2f0ccf1c4ee043912a5eaa66e78e",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
