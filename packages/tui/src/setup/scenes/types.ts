@@ -17,10 +17,24 @@ export interface SetupUiHost {
 	};
 }
 
+export interface SetupSettingsHost {
+	get<T = unknown>(key: string): T;
+	set(key: string, value: unknown): void;
+	getGroup(group: string): Record<string, unknown>;
+	flush(): Promise<void>;
+}
+
+export interface SetupModelSelection {
+	readonly currentModel: Model | undefined;
+}
+
 /** Application-owned preferences and effects consumed by setup scenes. */
 export interface SetupHost extends SetupUiHost {
-	readonly identity?: ProductIdentity;
-	readonly statusLine: ComposerPreviewStatusSource | undefined;
+	readonly settings: SetupSettingsHost;
+	readonly modelSelection: SetupModelSelection;
+	readonly statusLine:
+		| (ComposerPreviewStatusSource & { updateSettings?: (settings: Record<string, unknown>) => void })
+		| undefined;
 	readonly composerShape: ComposerShape;
 	readonly symbolPreset: SymbolPreset;
 	readonly colorBlindMode: boolean;
