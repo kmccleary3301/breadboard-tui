@@ -9,7 +9,7 @@ import { nativeLockValue } from "./lock-values";
 import { assembleNativePrompts } from "./prompt-assembly";
 import { loadNativeToolSurfaces } from "./tool-pack";
 import { allNativeToolSurface, createNativeStageMachine, type NativeHarnessStage } from "./stage-machine";
-import type { NativeToolSurfacePack } from "./types";
+import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
 export type NativeHarnessReloadErrorCode =
 	| "builtin"
@@ -163,6 +163,20 @@ interface HarnessSource {
 	readonly cachePath?: string;
 }
 
+function bindWorkspaceDescription(tool: NativeToolDefinition, workspaceRoot: string): NativeToolDefinition {
+	const description = tool.description.replace(/All commands run in\s+.*?\s+by default\./su, `All commands run in ${workspaceRoot} by default.`);
+	return description === tool.description ? tool : { ...tool, description };
+}
+
+function bindWorkspaceSurface(surface: NativeToolSurfacePack, workspaceRoot: string): NativeToolSurfacePack {
+	const bind = (tool: NativeToolDefinition): NativeToolDefinition => bindWorkspaceDescription(tool, workspaceRoot);
+	return Object.freeze({
+		mode: surface.mode,
+		native: Object.freeze(surface.native.map(bind)),
+		textInvoked: Object.freeze(surface.textInvoked.map(bind)),
+	});
+}
+
 async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeHarness> {
 	const promptTexts = new Map<string, Uint8Array>();
 	const resourceInputs = new Map<string, Uint8Array>();
@@ -190,7 +204,8 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 	const hostMode = nativeHostSurfaceMode(lock);
 	const stages: NativeHarnessStage[] = [];
 	if (hostMode === undefined) {
-		for (const [mode, toolSurface] of await loadNativeToolSurfaces(lock)) {
+		for (const [mode, rawToolSurface] of await loadNativeToolSurfaces(lock)) {
+			const toolSurface = bindWorkspaceSurface(rawToolSurface, input.workspaceRoot);
 			const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode);
 			stages.push(
 				Object.freeze({
