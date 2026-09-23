@@ -11,7 +11,8 @@ export type SettingTab =
 	| "shell"
 	| "tools"
 	| "tasks"
-	| "providers";
+	| "providers"
+	| "breadboard";
 
 /** Tab display metadata - icon is resolved via theme.symbol() */
 export type TabMetadata = { label: string; icon: Extract<SymbolKey, `tab.${string}`> };
@@ -28,6 +29,7 @@ export const SETTING_TABS: SettingTab[] = [
 	"tools",
 	"tasks",
 	"providers",
+	"breadboard",
 ];
 
 /** Tab display metadata - icon is a symbol key from theme.ts (tab.*) */
@@ -42,6 +44,7 @@ export const TAB_METADATA: Record<SettingTab, TabMetadata> = {
 	tools: { label: "Tools", icon: "tab.tools" },
 	tasks: { label: "Tasks", icon: "tab.tasks" },
 	providers: { label: "Providers", icon: "tab.providers" },
+	breadboard: { label: "BreadBoard", icon: "tab.breadboard" },
 };
 
 /**
@@ -84,6 +87,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	],
 	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
 	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
+	breadboard: ["Harness", "Engine", "Providers", "Subagents"],
 };
 
 /** Submenu choice metadata. */
@@ -136,6 +140,15 @@ export interface SettingsHost {
 	set(path: string, value: unknown): void;
 	normalizeProviderLimits(value: unknown): Record<string, number>;
 	validateProviderLimits(value: unknown): Record<string, number>;
+}
+
+/** Optional host-owned BreadBoard settings policy and runtime values. */
+export interface SettingsBreadboardContext {
+	readonly enabled?: boolean;
+	readonly teamSize?: number | null;
+	readonly harness?: { readonly lock?: Readonly<Record<string, unknown>> | null } | null;
+	readonly nativeSettingRestriction?: (path: string, group: string | undefined) => string | undefined;
+	readonly nativeSettingsGroupRestriction?: (group: string) => string | undefined;
 }
 
 /** Primitive value displayed by a settings control. */
