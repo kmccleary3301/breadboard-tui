@@ -102,7 +102,15 @@ function pythonicFunctionPrompt(tools: readonly NativeToolDefinition[]): string 
 }
 
 function perTurnCatalog(surface: NativeToolSurfacePack, persistent = false): string {
-	const nativeTools = persistent ? [...surface.native, ...surface.textInvoked] : surface.native;
+	const nativeTools: NativeToolDefinition[] = persistent ? [...surface.native, ...surface.textInvoked] : [...surface.native];
+	if (persistent) {
+		const todoIndex = nativeTools.findIndex(tool => tool.name === "TodoWrite");
+		const webSearchIndex = nativeTools.findIndex(tool => tool.name === "WebSearch");
+		if (todoIndex >= 0 && webSearchIndex >= 0 && todoIndex > webSearchIndex) {
+			const [todo] = nativeTools.splice(todoIndex, 1);
+			nativeTools.splice(webSearchIndex, 0, todo!);
+		}
+	}
 	const textTools = persistent ? [] : surface.textInvoked;
 	const sections = ["\n\nSYSTEM MESSAGE - AVAILABLE TOOLS\n"];
 	if (nativeTools.length > 0) {
