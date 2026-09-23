@@ -45,14 +45,12 @@ export class LoginDialogComponent extends OverlayPanel {
 	#createInput(secret = false): TextFormField {
 		return new TextFormField({
 			theme: formTheme,
-			secret,
-			empty: "submit",
-			spaceBeforeControl: false,
-			spaceAfterControl: false,
 			onSubmit: value => {
 				const resolve = this.#inputResolver;
 				if (!resolve) return;
 				this.#clearInputHandlers();
+				this.#input.setValue("");
+				this.#input.input.mask = false;
 				resolve(value);
 			},
 			onCancel: () => {
@@ -69,7 +67,7 @@ export class LoginDialogComponent extends OverlayPanel {
 	#cancel(): void {
 		this.#abortController.abort();
 		this.#input.setValue("");
-		this.#input.mask = false;
+		this.#input.input.mask = false;
 		const reject = this.#inputRejecter;
 		this.#clearInputHandlers();
 		reject?.(new Error("Login cancelled"));
@@ -137,8 +135,7 @@ export class LoginDialogComponent extends OverlayPanel {
 			this.#contentContainer.addChild(this.#input);
 			this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 0, 0));
 		}
-
-		this.#tui.requestRender();
+		this.#input.input.mask = false;
 
 		if (signal?.aborted) {
 			return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Login input cancelled"));
@@ -190,7 +187,7 @@ export class LoginDialogComponent extends OverlayPanel {
 		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel, Enter to submit)"), 0, 0));
 
 		this.#input.setValue("");
-		this.#input.mask = prompt.secret === true;
+		this.#input.input.mask = prompt.secret === true;
 		this.#tui.requestRender();
 
 		this.#inputAbortCleanup?.();

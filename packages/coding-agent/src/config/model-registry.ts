@@ -2770,8 +2770,6 @@ export class ModelRegistry {
 		options?: { signal?: AbortSignal },
 	): Promise<string | undefined> {
 		if (isBreadboardProviderFreeModel(model)) return kNoAuth;
-		const commandKey = this.#resolveCommandBackedApiKey(model.provider);
-		if (commandKey.configured) return commandKey.value;
 		if (this.#keylessProviders.has(model.provider) && !this.authStorage.hasAuth(model.provider)) {
 			return kNoAuth;
 		}

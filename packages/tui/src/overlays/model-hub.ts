@@ -126,7 +126,7 @@ export interface ModelHubCallbacks {
 		scope?: ModelRoleSelectionScope,
 	) => void | boolean | Promise<void | boolean>;
 	/** Select an engine-scoped model for an externally owned session. */
-	onSelectModel: (model: Model, selector: string) => void | Promise<void>;
+	onSelectModel?: (model: Model, selector: string) => void | Promise<void>;
 	/** Clear a configured role back to auto-selection. */
 	onUnassign: (role: string, scope?: ModelRoleSelectionScope) => void;
 	/** Persist a `retry.fallbackChains` entry — keyed by a role, `provider/model-id`, or `provider/*`; an empty chain clears the key. */
@@ -139,8 +139,8 @@ export interface ModelHubCallbacks {
 }
 
 export interface ModelHubOptions {
-	/** Whether an external BreadBoard stream owns model selection and native controls. */
-	mainStreamOwnsTurnLifecycle: boolean;
+	/** Whether an external stream owns model selection and native controls. */
+	mainStreamOwnsTurnLifecycle?: boolean;
 	/** Preselect this provider's sidebar entry (e.g. when reopening after /login). */
 	initialProviderId?: string;
 }
@@ -217,7 +217,7 @@ export class ModelHubComponent implements Component {
 	#settings: ModelHubSource;
 	#registry: ModelHubRegistry;
 	#scopedModels: ReadonlyArray<ScopedModelItem>;
-	#mainStreamOwnsTurnLifecycle: boolean;
+	#mainStreamOwnsTurnLifecycle = false;
 	#callbacks: ModelHubCallbacks;
 
 	#browser: ModelBrowser;
@@ -303,13 +303,13 @@ export class ModelHubComponent implements Component {
 		registry: ModelHubRegistry,
 		scopedModels: ReadonlyArray<ScopedModelItem>,
 		callbacks: ModelHubCallbacks,
-		options: ModelHubOptions,
+		options: ModelHubOptions = {},
 	) {
 		this.#tui = tui;
 		this.#settings = settings;
 		this.#registry = registry;
 		this.#scopedModels = scopedModels;
-		this.#mainStreamOwnsTurnLifecycle = options.mainStreamOwnsTurnLifecycle;
+		this.#mainStreamOwnsTurnLifecycle = options.mainStreamOwnsTurnLifecycle === true;
 		this.#callbacks = callbacks;
 
 		this.#browser = new ModelBrowser(settings, {
@@ -330,8 +330,12 @@ export class ModelHubComponent implements Component {
 		} else {
 			this.#setActiveEntry("all");
 		}
-
 		if (!this.#mainStreamOwnsTurnLifecycle && this.#scopedModels.length === 0) {
+		// Reconcile catalogs in the background. This is online discovery only —
+		// it must not re-run `!command` credential helpers (F5 / `omp models
+		// refresh` pass refreshCommandCredentials for that). A --models scope is
+		// registry-independent, so the reload would only repeat the hydration
+		// above.
 			this.#registry
 				.refresh("online")
 				.then(() => this.#syncFromRegistryState())
@@ -362,6 +366,7 @@ export class ModelHubComponent implements Component {
 	// ═══════════════════════════════════════════════════════════════════════
 	// Data pipeline
 	// ═══════════════════════════════════════════════════════════════════════
+
 	#usesScopedCatalog(): boolean {
 		return this.#mainStreamOwnsTurnLifecycle || this.#scopedModels.length > 0;
 	}
@@ -370,13 +375,12 @@ export class ModelHubComponent implements Component {
 		return this.#settings.knownRoleIds.filter(role => !this.#settings.getRoleInfo(role).hidden);
 	}
 
-	/** Resolve every known role: configured values first, auto-selection for the rest. */
 	#reloadRoles(autoCandidates: ReadonlyArray<Model>): void {
 		if (this.#mainStreamOwnsTurnLifecycle) {
 			this.#roles = {};
 			return;
 		}
-		const allModels = this.#scopedModels.length > 0 ? autoCandidates : this.#registry.getAll();
+		const allModels = this.#scopedModels.length > 0 ? autoCandidates : this.#registry.getAll("all");
 		this.#roles = resolveRoleAssignments(this.#settings, allModels, autoCandidates);
 	}
 
@@ -405,11 +409,7 @@ export class ModelHubComponent implements Component {
 		}
 
 		this.#reloadRoles(availableModels);
-		if (this.#mainStreamOwnsTurnLifecycle) {
-			this.#rolesRows = [];
-		} else {
-			this.#buildRolesRows();
-		}
+		this.#buildRolesRows();
 
 		const mruOrder = this.#settings.mruOrder;
 		this.#availableItems = buildBrowserItems(availableModels);
@@ -432,7 +432,7 @@ export class ModelHubComponent implements Component {
 	}
 
 	#buildSidebar(allModels: ReadonlyArray<Model>, availableModels: ReadonlyArray<Model>): void {
-		const scoped = this.#usesScopedCatalog();
+		const scoped = this.#scopedModels.length > 0;
 		let disabledProviders: ReadonlySet<string>;
 		try {
 			disabledProviders = new Set(this.#settings.disabledProviders);
@@ -495,23 +495,24 @@ export class ModelHubComponent implements Component {
 			catalogCount: catalogCounts.get(providerId) ?? 0,
 		});
 
-		const visibleRoles = this.#mainStreamOwnsTurnLifecycle ? [] : this.#visibleRoleIds();
+		const visibleRoles = this.#visibleRoleIds();
 		let assignedCount = 0;
 		for (const role of visibleRoles) {
 			const assignment = this.#roles[role];
 			if (assignment && !assignment.autoSelected) assignedCount++;
 		}
 
-		const fixed: SidebarEntry[] = [];
-		if (!this.#mainStreamOwnsTurnLifecycle) {
-			fixed.push({
+		// Roles leads the fixed section so downward hops from Recent head into
+		// model scopes instead of being captured by the roles view.
+		const fixed: SidebarEntry[] = [
+			{
 				id: "roles",
 				kind: "roles",
 				label: "Roles",
 				annotation: `${assignedCount}/${visibleRoles.length}`,
-			});
-		}
-		fixed.push({ id: "all", kind: "all", label: "All models", annotation: String(availableModels.length) });
+			},
+			{ id: "all", kind: "all", label: "All models", annotation: String(availableModels.length) },
+		];
 
 		this.#fixedEntries = fixed;
 		this.#unlockedProviderEntries = [...unlocked]
@@ -822,6 +823,7 @@ export class ModelHubComponent implements Component {
 
 	#cancelScheduledRefreshesExcept(keepProviderId?: string): void {
 		// Hover debounce only. An explicit F5 queued behind an in-flight catalog
+		// fetch must still re-mint credentials after that fetch settles, even if
 		// the user has moved to All models or another provider.
 		for (const [providerId, timer] of this.#scheduledProviderRefreshes) {
 			if (providerId === keepProviderId) continue;
@@ -832,7 +834,7 @@ export class ModelHubComponent implements Component {
 	}
 
 	#scheduleProviderRefresh(providerId: string, options?: { force?: boolean }): void {
-		if (this.#usesScopedCatalog() || !providerId) return;
+		if (this.#scopedModels.length > 0 || !providerId) return;
 		const force = options?.force === true;
 		if (force) {
 			const pending = this.#scheduledProviderRefreshes.get(providerId);
@@ -937,12 +939,6 @@ export class ModelHubComponent implements Component {
 	// ═══════════════════════════════════════════════════════════════════════
 
 	#activateItem(item: ModelBrowserItem): void {
-		if (this.#mainStreamOwnsTurnLifecycle) {
-			this.#finishAssignment(this.#callbacks.onSelectModel(item.model, item.selector), () =>
-				this.#tui.requestRender(),
-			);
-			return;
-		}
 		if (this.#assigning) {
 			const target = this.#assigning;
 			this.#assigning = null;
@@ -955,15 +951,18 @@ export class ModelHubComponent implements Component {
 			}
 			return;
 		}
+		if (this.#mainStreamOwnsTurnLifecycle) {
+			void this.#callbacks.onSelectModel?.(item.model, item.selector);
+			return;
+		}
 		this.#openRoleStrip(item);
 	}
 
 	#roleForScope(role: string, scope: ModelRoleSelectionScope): ResolvedModelRoleValue {
 		const roleValue =
 			scope === "project" ? this.#settings.getProjectModelRole(role) : this.#settings.getGlobalModelRole(role);
-		const allModels = this.#usesScopedCatalog()
-			? this.#scopedModels.map(scoped => scoped.model)
-			: this.#registry.getAll();
+		const allModels =
+			this.#scopedModels.length > 0 ? this.#scopedModels.map(scoped => scoped.model) : this.#registry.getAll("all");
 		const roleLookup: ModelRoleLookup = {
 			getModelRole: scopedRole =>
 				scope === "project"
@@ -2060,11 +2059,7 @@ export class ModelHubComponent implements Component {
 			);
 		}
 		const entry = this.#activeEntry();
-		const scopedSuffix = this.#mainStreamOwnsTurnLifecycle
-			? " · engine catalog"
-			: this.#usesScopedCatalog()
-				? " · --models scope"
-				: "";
+		const scopedSuffix = this.#scopedModels.length > 0 ? " · --models scope" : "";
 		let text: string;
 		switch (entry.kind) {
 			case "recent":
@@ -2272,9 +2267,7 @@ export class ModelHubComponent implements Component {
 		const catalogCount = entry.catalogCount ?? 0;
 		if (catalogCount > 0) {
 			lines.push(truncateToWidth(theme.fg("dim", `  ${catalogCount} models in catalog:`), width));
-			const preview = this.#usesScopedCatalog()
-				? this.#scopedModels.map(scoped => scoped.model)
-				: this.#registry.getAll();
+			const preview = this.#scopedModels.length > 0 ? [] : this.#registry.getAll("all");
 			for (const model of preview) {
 				if (model.provider !== entry.providerId) continue;
 				if (lines.length >= rows) break;
@@ -2304,10 +2297,6 @@ export class ModelHubComponent implements Component {
 				default:
 					return "Enter assign · ↑/↓ providers · type to search · Alt+←/→ kind · Esc cancel";
 			}
-		}
-		if (this.#mainStreamOwnsTurnLifecycle) {
-			const arrows = this.#focus === "scope" ? "↑/↓ providers · → models" : "↑/↓ models · ← providers";
-			return `Enter select model · ${arrows} · type to search · Esc close`;
 		}
 		const entry = this.#activeEntry();
 		if (entry.kind === "roles") {
