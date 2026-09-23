@@ -2150,6 +2150,7 @@ export class EventController {
 		this.#approvalAttentionToolCallIds.clear();
 		this.#setBreadboardActivity(null);
 		this.ctx.statusLine.markActivityEnd();
+		this.#lastAgentEndAt = Date.now();
 		this.#streamingReveal.stop();
 		this.#toolArgsReveal.flushAll();
 		if (this.ctx.loadingAnimation) {
