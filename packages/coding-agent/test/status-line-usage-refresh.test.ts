@@ -338,7 +338,7 @@ describe("StatusLineComponent usage refresh", () => {
 			messages: [],
 			model: { id: "claude-old", contextWindow: 200_000, provider: "anthropic" },
 		};
-		const component = new StatusLineComponent(base as unknown as AgentSession);
+		const component = new StatusLineComponent(base as unknown as AgentSession, statusLineHost);
 		component.updateSettings({
 			preset: "custom",
 			leftSegments: ["usage"],
