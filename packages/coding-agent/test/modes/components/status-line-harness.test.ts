@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
 import { createGallerySegmentContext } from "@oh-my-pi/pi-coding-agent/cli/gallery-fixtures/segments";
-import { ALL_SEGMENT_IDS, renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
-import { getPreset } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/presets";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { renderSegment } from "@oh-my-pi/pi-tui/status-line/segments";
+import { getPreset } from "@oh-my-pi/pi-tui/status-line/presets";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 const snapshot = EFFECTIVE_HARNESS_SNAPSHOT;
 
