@@ -1,6 +1,7 @@
+import { stat } from "node:fs/promises";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
-import { type LoadedNativeHarness } from "./load-native-harness";
+import { NativeHarnessReloadError, type LoadedNativeHarness } from "./load-native-harness";
 import { frameNativeUserMessage } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
@@ -338,6 +339,29 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		}
 
 		registerFunctionTools(api, activeHarness, todos, guard);
+		const live = activeHarness.live;
+		if (live?.editable) {
+			api.on("session_start", async (_event, context) => {
+				let observedMtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs ?? 0;
+				const poll = async (): Promise<void> => {
+					const mtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs;
+					if (mtime === undefined || mtime <= observedMtime) return;
+					observedMtime = mtime;
+					try {
+						await live.reload();
+					} catch (error) {
+						const message =
+							error instanceof NativeHarnessReloadError
+								? `Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`
+								: `Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`;
+						context.ui.notify(message, "error");
+					}
+				};
+				context.setInterval(() => {
+					void poll();
+				}, 1000);
+			});
+		}
 		activeHarness.live?.subscribe(change => {
 			pendingHarness = change.harness;
 			registerFunctionTools(api, change.harness, todos, guard);
