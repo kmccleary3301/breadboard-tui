@@ -424,10 +424,16 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 		const initialInfo = await statFile(options.specPath).catch(() => undefined);
 		const initialSource = await readSource(options.specPath).catch(() => undefined);
 		if (disposed) return;
+		const loadedHash = options.live.current().sourceHash;
+		lastPublishedHash = loadedHash;
+		lastObservedHash = loadedHash;
 		if (initialInfo !== undefined && initialSource !== undefined) {
 			observed = initialInfo;
-			lastPublishedHash = sha256Source(initialSource);
-			lastObservedHash = lastPublishedHash;
+			const diskHash = sha256Source(initialSource);
+			if (diskHash !== loadedHash) {
+				lastObservedHash = diskHash;
+				scheduleReload(diskHash);
+			}
 		}
 		intervalTimer = options.context.setInterval(() => {
 			void poll();

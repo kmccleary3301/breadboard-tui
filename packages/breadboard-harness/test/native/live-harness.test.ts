@@ -322,14 +322,15 @@ describe("native harness live state", () => {
 		const fakeLive = {
 			editable: true,
 			generation: 1,
-			current: () => harness,
+			current: () => ({ ...harness, sourceHash: "one" }),
 			reload: async (prepare?: (next: typeof harness) => void | Promise<void>) => {
 				await new Promise<void>(resolve => {
 					releaseReload = resolve;
 				});
-				await prepare?.(harness);
+				const loaded = { ...harness, sourceHash: "one" };
+				await prepare?.(loaded);
 				published = true;
-				return harness;
+				return loaded;
 			},
 			setReloadValidator() {},
 			subscribe() {
@@ -351,11 +352,56 @@ describe("native harness live state", () => {
 		for (let attempt = 0; attempt < 10 && releaseReload === undefined; attempt++) await Promise.resolve();
 		expect(releaseReload).toBeDefined();
 		watcher.dispose();
-		expect(clearCount).toBe(1);
+		expect(clearCount).toBe(2);
 		releaseReload?.();
 		for (let attempt = 0; attempt < 3; attempt++) await Promise.resolve();
 		expect(published).toBe(false);
 		expect(notifyCount).toBe(0);
+	});
+	it("schedules startup disk drift against the loaded source hash", async () => {
+		const root = await workspace();
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		let timeoutCallback: (() => void) | undefined;
+		let reloadCount = 0;
+		const context = {
+			ui: { notify() {} },
+			setInterval() {
+				return {} as Timer;
+			},
+			setTimeout(callback: () => void) {
+				timeoutCallback = callback;
+				return {} as Timer;
+			},
+			clearTimer() {},
+		};
+		const fakeLive = {
+			editable: true,
+			generation: 1,
+			current: () => ({ ...harness, sourceHash: "loaded" }),
+			reload: async (prepare?: (next: typeof harness) => void | Promise<void>) => {
+				reloadCount += 1;
+				const loaded = { ...harness, sourceHash: "two" };
+				await prepare?.(loaded);
+				return loaded;
+			},
+			setReloadValidator() {},
+			subscribe() {
+				return () => {};
+			},
+		};
+		const watcher = startNativeHarnessWatcher({
+			live: fakeLive,
+			specPath: "harness.yaml",
+			context: context as never,
+			statFile: async () => ({ mtimeMs: 1, size: 3 }),
+			readSource: async () => new TextEncoder().encode("two"),
+		});
+		await watcher.ready;
+		expect(timeoutCallback).toBeDefined();
+		timeoutCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		expect(reloadCount).toBe(1);
+		watcher.dispose();
 	});
 	it("does not install a timer when shutdown races initial source loading", async () => {
 		const root = await workspace();
