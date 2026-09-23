@@ -13,7 +13,7 @@ import type { ProductIdentity } from "../../prompt/welcome";
 export interface SetupUiHost {
 	readonly identity?: ProductIdentity;
 	readonly ui: Pick<TUI, "showOverlay" | "setFocus" | "requestRender" | "invalidate"> & {
-		readonly terminal: { readonly rows: number };
+		readonly terminal: { readonly rows: number; readonly columns?: number };
 	};
 }
 
