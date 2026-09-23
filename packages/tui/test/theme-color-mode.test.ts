@@ -1,6 +1,10 @@
 import * as path from "node:path";
 import { describe, expect, it } from "bun:test";
-import { colorToAnsi, detectColorMode } from "@oh-my-pi/pi-tui/theme/color";
+import { bgAnsi, colorToAnsi, detectColorMode, fgAnsi, paintAnsi } from "@oh-my-pi/pi-tui/theme/color";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+
+const SGR = /\x1b\[[0-9;]*m/u;
+const EXTENDED_COLOR = /\x1b\[(?:38|48);[25];/u;
 
 describe("theme color mode", () => {
 	it("emits 256-color SGR for macOS Terminal.app", () => {
@@ -44,4 +48,60 @@ describe("theme color mode", () => {
 		expect(exitCode, stderr).toBe(0);
 		expect(stdout).toBe("\x1b[38;5;223m");
 	});
+});
+
+describe("theme color encoding", () => {
+	it.each([
+		["none", "", "", ""],
+		["16color", "\x1b[91m", "\x1b[101m", "\x1b[91m"],
+		["256color", "\x1b[38;5;196m", "\x1b[48;5;196m", "\x1b[38;5;196m"],
+		["truecolor", "\x1b[38;2;255;0;0m", "\x1b[48;2;255;0;0m", "\x1b[38;2;255;0;0m"],
+	] as const)("encodes red exactly in %s", (mode, fg, bg, direct) => {
+		expect(fgAnsi("#ff0000", mode)).toBe(fg);
+		expect(bgAnsi("#ff0000", mode)).toBe(bg);
+		expect(colorToAnsi("#ff0000", mode)).toBe(direct);
+		expect(paintAnsi(fg, "red", "\x1b[39m")).toBe(fg ? `${fg}red\x1b[39m` : "red");
+	});
+
+	it("never emits extended color sequences in 16-color mode", () => {
+		const output = [
+			fgAnsi("#4f8cff", "16color"),
+			bgAnsi("#4f8cff", "16color"),
+			fgAnsi(67, "16color"),
+			bgAnsi(67, "16color"),
+		].join("");
+		expect(output).toMatch(SGR);
+		expect(output).not.toMatch(EXTENDED_COLOR);
+	});
+});
+
+describe("Theme capability ownership", () => {
+	const dark = getBuiltinThemes().dark;
+	if (!dark) throw new Error("dark theme unavailable");
+
+	it.each(["none", "16color", "256color", "truecolor"] as const)(
+		"routes semantic, custom, and style paint through %s",
+		mode => {
+			const theme = createTheme(dark, { mode });
+			const rendered = [
+				theme.fg("accent", "accent"),
+				theme.fgResolved("text", "resolved"),
+				theme.bg("userMessageBg", "background"),
+				theme.customColor("#ff0000", "custom"),
+				theme.customBg("#00ff00", "custom background"),
+				theme.bold("bold"),
+				theme.underline("underline"),
+				theme.strikethrough("strike"),
+			].join("|");
+
+			expect(theme.getColorMode()).toBe(mode);
+			if (mode === "none") {
+				expect(rendered).not.toMatch(SGR);
+				expect(rendered).toBe("accent|resolved|background|custom|custom background|bold|underline|strike");
+			} else {
+				expect(rendered).toMatch(SGR);
+				if (mode === "16color") expect(rendered).not.toMatch(EXTENDED_COLOR);
+			}
+		},
+	);
 });
