@@ -815,11 +815,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/components/oauth-provider-data-source.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/modes/controllers/command-controller.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1125,6 +1120,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/breadboard/provider-auth-ui.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/breadboard/research-compare-failure-journey.py",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1252,6 +1252,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/test/modes/components/breadboard-provider-auth-selector.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1270,11 +1275,6 @@
 			"path": "packages/coding-agent/test/modes/components/login-dialog.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/components/oauth-selector.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/test/modes/components/settings-defs-breadboard.test.ts",
@@ -1571,6 +1571,11 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/tui/src/overlays/breadboard-provider-auth-selector.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/tui/src/overlays/composer-shape-preview.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1589,11 +1594,6 @@
 			"path": "packages/tui/src/overlays/logout-account-selector.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/overlays/oauth-selector.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/tui/src/overlays/plan-save-overlay.ts",
