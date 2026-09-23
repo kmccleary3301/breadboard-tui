@@ -2262,6 +2262,9 @@ export class TUI extends Container {
 	}
 
 	#runScheduledRender = (): void => {
+		if (this.#renderInProgress) {
+			return;
+		}
 		this.#renderTimer = undefined;
 		if (this.#stopped || !this.#renderRequested) {
 			return;
@@ -2297,7 +2300,14 @@ export class TUI extends Container {
 			this.#runScheduledRender();
 			return;
 		}
-		this.#renderTimer = this.#renderScheduler.scheduleRender(this.#runScheduledRender, delay);
+		let callbackRanSynchronously = false;
+		const timer = this.#renderScheduler.scheduleRender(() => {
+			callbackRanSynchronously = true;
+			this.#runScheduledRender();
+		}, delay);
+		if (!callbackRanSynchronously) {
+			this.#renderTimer = timer;
+		}
 	}
 
 	/**
@@ -3806,7 +3816,7 @@ export class TUI extends Container {
 			);
 		}
 		buffer += this.#paintEndSequence;
-		this.terminal.write(buffer);
+		this.#writeFrame(buffer);
 		this.#altPreviousLines = prepared.lines;
 		this.#altPreparedRows = prepared.rows;
 		this.#debugPaint = { lines: prepared.lines, windowTop: 0, altScreen: true };
