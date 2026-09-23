@@ -48,8 +48,8 @@ export interface ModelPickerCallbacks {
 }
 
 export interface ModelPickerOptions {
-	/** Whether an external BreadBoard stream owns model selection and native controls. */
-	mainStreamOwnsTurnLifecycle: boolean;
+	/** Whether an external host stream owns model selection and native controls. Defaults to false. */
+	mainStreamOwnsTurnLifecycle?: boolean;
 	/** Session token count; native models with smaller windows are grayed and compact-first on pick. */
 	currentContextTokens?: number;
 	/** `provider/id` of the session's active model; highlighted and preselected. */
@@ -118,13 +118,13 @@ export class ModelPickerComponent implements Component {
 		registry: ModelPickerRegistry,
 		scopedModels: ReadonlyArray<ScopedModelItem>,
 		callbacks: ModelPickerCallbacks,
-		options: ModelPickerOptions,
+		options: ModelPickerOptions = {},
 	) {
 		this.#tui = tui;
 		this.#settings = settings;
 		this.#registry = registry;
 		this.#scopedModels = scopedModels;
-		this.#mainStreamOwnsTurnLifecycle = options.mainStreamOwnsTurnLifecycle;
+		this.#mainStreamOwnsTurnLifecycle = options.mainStreamOwnsTurnLifecycle === true;
 		this.#currentSelector = options.currentSelector;
 		this.#currentQuickRoleSelector =
 			!this.#mainStreamOwnsTurnLifecycle && options.currentQuickRole ? `@${options.currentQuickRole}` : undefined;
