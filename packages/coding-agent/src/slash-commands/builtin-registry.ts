@@ -110,7 +110,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<TuiBuiltinSlashCommand> = BUI
 export function buildTuiBuiltinSlashCommands(runtime: TuiSlashCommandRuntime): ReadonlyArray<TuiBuiltinSlashCommand> {
 	const commands = BUILTIN_SLASH_COMMAND_DEFS.filter(
 		command =>
-			nativeCommandAvailabilityRestriction(command.name, runtime.ctx.session.mainStreamOwnsTurnLifecycle) ===
+			nativeCommandAvailabilityRestriction(command.name, runtime.ctx.session?.mainStreamOwnsTurnLifecycle === true) ===
 			undefined,
 	);
 	return commands.map(cmd => materializeTuiBuiltinSlashCommand(cmd, runtime));
@@ -139,7 +139,7 @@ export async function executeBuiltinSlashCommand(
 	const command = BUILTIN_SLASH_COMMAND_LOOKUP.get(parsed.name);
 	const restriction = nativeCommandRestriction(
 		command?.name ?? parsed.name,
-		runtime.ctx.session.mainStreamOwnsTurnLifecycle,
+		runtime.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 		parsed.args,
 	);
 	if (restriction) {
