@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { relativeLuminance } from "@oh-my-pi/pi-utils";
-import { resolveVarRefs } from "../src/modes/theme/color";
-import { loadTheme, loadThemeJson } from "../src/modes/theme/loader";
-import type { ThemeColor } from "../src/modes/theme/theme";
+import { resolveVarRefs } from "@oh-my-pi/pi-tui/theme/color";
+import { loadTheme, loadThemeJson } from "@oh-my-pi/pi-tui/theme/loader";
+import type { ThemeColor } from "@oh-my-pi/pi-tui/theme/theme";
 
 const NORMAL_TEXT_TOKENS: readonly ThemeColor[] = [
 	"accent",

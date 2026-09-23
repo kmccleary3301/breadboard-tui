@@ -1526,12 +1526,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		const skillCommandList = this.#rebuildSkillCommandsFromSession();
 
-		const builtinCommands: SlashCommand[] = buildTuiBuiltinSlashCommands({
-			ctx: this,
-		}).map(cmd => ({
-			...cmd,
-			icon: getSlashCommandTypeIcon(cmd.icon ?? "action"),
-		}));
+		const builtinCommands = buildTuiBuiltinSlashCommands({ ctx: this });
 		// Store pending commands for init() where file commands are loaded async.
 		this.#staticSlashCommands = [...builtinCommands, ...hookCommands, ...customCommands, ...skillCommandList];
 		this.#pendingSlashCommands = [...this.#staticSlashCommands];

@@ -376,7 +376,6 @@ describe("tool path arrays", () => {
 			requestRender: () => {},
 			onClose: () => {},
 			onHubClose: () => {},
-			mainStreamOwnsTurnLifecycle: false,
 		});
 		const rendered = Bun.stripANSI(viewer.render(120).join("\n"));
 		viewer.dispose();

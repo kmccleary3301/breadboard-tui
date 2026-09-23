@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createTheme } from "@oh-my-pi/pi-tui/theme";
-import { getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import {
 	dispatchResolutionDevice,

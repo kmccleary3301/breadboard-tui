@@ -9,6 +9,7 @@ import { editToolRenderer, renderStreamingFallback } from "@oh-my-pi/pi-tui/tool
 import { renderDiff } from "@oh-my-pi/pi-tui/chrome/diff";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import * as themeModule from "@oh-my-pi/pi-tui/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import { type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";

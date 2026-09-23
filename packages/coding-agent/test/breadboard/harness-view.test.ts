@@ -6,7 +6,7 @@ import {
 	projectHarnessEffectiveRowsByPanel,
 	type HarnessPanel,
 } from "../../src/modes/components/agent-hub/harness-view";
-import { initTheme } from "../../src/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme/theme";
 
 const lockFixture = JSON.parse(
 	await Bun.file(new URL("./fixtures/codex_e4.lock.json", import.meta.url)).text(),

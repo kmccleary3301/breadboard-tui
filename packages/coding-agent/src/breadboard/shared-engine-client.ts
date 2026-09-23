@@ -4,7 +4,7 @@ import type { ObservedGatewayEffort } from "@oh-my-pi/pi-ai/auth-gateway";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { createDaemonBrokerClient, DaemonBrokerRejectedError, type DaemonBrokerClient } from "../launch/client";
 import { daemonRuntimeDir } from "../launch/paths";
-import type { DaemonSpec } from "../launch/protocol";
+import type { DaemonSpec } from "@oh-my-pi/pi-tui/tools/hub";
 import { resolveWorkerSpawnCmd, workerEnvFromParent } from "../subprocess/worker-client";
 import { LocalAuthorityStore } from "./lifecycle/local-authority-store";
 import {

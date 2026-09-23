@@ -65,7 +65,6 @@ function makeViewer(sessionFile: string, observed: ObservableSession[]): AgentTr
 		requestRender: () => {},
 		onClose: () => {},
 		onHubClose: () => {},
-		mainStreamOwnsTurnLifecycle: false,
 	});
 }
 

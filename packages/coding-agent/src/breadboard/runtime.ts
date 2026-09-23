@@ -14,7 +14,7 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import { getProjectDir, IS_BREADBOARD_PRODUCT, logger, postmortem } from "@oh-my-pi/pi-utils";
 import type { Args } from "../cli/args";
 import type { ModelRegistry } from "../config/model-registry";
-import { parseModelString } from "../config/model-resolver";
+import { parseModelString } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { type Settings, settings } from "../config/settings";
 import type { ExtensionUIContext } from "../extensibility/extensions/types";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";

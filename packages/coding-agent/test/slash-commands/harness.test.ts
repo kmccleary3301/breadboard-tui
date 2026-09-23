@@ -5,7 +5,7 @@ import type { HarnessSnapshot } from "../../src/breadboard/harness-port";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { Settings, resetSettingsForTest } from "../../src/config/settings";
 import { rejectBreadboardSessionTransition } from "../../src/breadboard/runtime";
-import { initTheme } from "../../src/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { InteractiveModeContext } from "../../src/modes/types";
 import { InteractiveMode } from "../../src/modes/interactive-mode";
 import { SessionManager } from "../../src/session/session-manager";
