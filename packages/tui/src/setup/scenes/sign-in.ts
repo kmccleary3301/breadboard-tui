@@ -27,6 +27,22 @@ const UNAVAILABLE_PROVIDER_SOURCE: ProviderAuthReadPort = Object.freeze({
 	},
 });
 
+interface ProviderAuthFailure {
+	readonly code: string;
+	readonly message: string;
+	readonly nextAction: string;
+}
+
+function isProviderAuthFailure(error: unknown): error is ProviderAuthFailure {
+	if (typeof error !== "object" || error === null) return false;
+	const candidate = error as { code?: unknown; message?: unknown; nextAction?: unknown };
+	return (
+		typeof candidate.code === "string" &&
+		typeof candidate.message === "string" &&
+		typeof candidate.nextAction === "string"
+	);
+}
+
 function createNativeProviderAuthDataSource(authStorage: AuthStorage): ProviderAuthReadPort {
 	return {
 		listProvidersSync: () =>
@@ -386,9 +402,13 @@ export class SignInTab implements SetupTab {
 			}
 			if (this.#disposed) return;
 			const account = accountLabel ? ` as ${accountLabel}` : "";
+			const brokerName = this.#host.ctx.identity?.displayName ?? "auth";
 			this.#statusLines = [
 				theme.fg("success", `${theme.status.success} Signed in to ${providerId}${account}`),
-				theme.fg("dim", providerAuth ? "Credentials managed by the auth broker" : `Credentials saved to ${getAgentDbPath()}`),
+				theme.fg(
+					"dim",
+					providerAuth ? `Credentials managed by ${brokerName} auth broker` : `Credentials saved to ${getAgentDbPath()}`,
+				),
 			];
 			this.#authUrl = undefined;
 			this.#authLaunchUrl = undefined;
@@ -402,6 +422,11 @@ export class SignInTab implements SetupTab {
 			if (this.#disposed) return;
 			if (this.#loginAbort?.signal.aborted) {
 				this.#statusLines = [theme.fg("dim", "Login cancelled.")];
+			} else if (isProviderAuthFailure(error)) {
+				this.#statusLines = [
+					theme.fg("error", `Login failed [${error.code}]: ${error.message}`),
+					theme.fg("dim", error.nextAction),
+				];
 			} else {
 				const message = error instanceof Error ? error.message : String(error);
 				this.#statusLines = [

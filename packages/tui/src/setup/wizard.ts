@@ -1,3 +1,4 @@
+import { isReducedMotionEnabled } from "../reduced-motion";
 import { CURRENT_SETUP_VERSION } from "./setup-version";
 import type { SetupHost } from "./scenes/types";
 import { composerSetupScene } from "./scenes/composer";
@@ -8,8 +9,6 @@ import { informationLayoutSetupScene } from "./scenes/information-layout";
 import { themeSetupScene } from "./scenes/theme";
 import type { SetupScene } from "./scenes/types";
 import { SetupWizardComponent } from "./wizard-overlay";
-
-export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
 
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
@@ -79,7 +78,7 @@ export async function runSetupWizard(
 	options: RunSetupWizardOptions = {},
 ): Promise<void> {
 	if (scenes.length === 0) return;
-	const component = new SetupWizardComponent(ctx, scenes);
+	const component = new SetupWizardComponent(ctx, scenes, { reduceMotion: isReducedMotionEnabled() });
 	const overlay = ctx.ui.showOverlay(component, {
 		width: "100%",
 		maxHeight: "100%",
