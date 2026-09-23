@@ -208,6 +208,18 @@ export async function assembleNativePrompts(
 	return { system: assembledSystem, perTurn };
 }
 
+export type NativeUserTextBlock = { readonly type: "text"; readonly text: string };
+
+/**
+ * Frame user content with the same block structure as Python's persistent per-turn mode:
+ * the compiled system is inside BREADBOARD_INTERNAL, followed by a separate tool-catalog text block.
+ */
+export function frameNativeUserContent(userText: string, stage: { readonly perTurnPrompt: string; readonly toolPromptMode?: string; readonly toolSurface: NativeToolSurfacePack }): string | NativeUserTextBlock[] {
+	const framed = frameNativeUserMessage(userText, stage.perTurnPrompt);
+	if (stage.toolPromptMode !== "system_compiled_and_persistent_per_turn") return framed;
+	return [{ type: "text", text: framed }, { type: "text", text: perTurnCatalog(stage.toolSurface) }];
+}
+
 /**
  * Frame the initial user message exactly as Python does at
  * `agent_llm_openai.py:6442-6453`: the caller's text followed by the internal per-turn block.

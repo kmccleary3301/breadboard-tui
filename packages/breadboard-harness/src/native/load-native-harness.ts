@@ -192,13 +192,29 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 	if (hostMode === undefined) {
 		for (const [mode, toolSurface] of await loadNativeToolSurfaces(lock)) {
 			const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode);
-			stages.push(Object.freeze({ mode, systemPrompt: prompts.system, perTurnPrompt: prompts.perTurn, toolSurface }));
+			stages.push(
+				Object.freeze({
+					mode,
+					systemPrompt: prompts.system,
+					perTurnPrompt: prompts.perTurn,
+					toolPromptMode: stringValue(lock, "prompts.tool_prompt_mode"),
+					toolSurface,
+				}),
+			);
 		}
 	} else {
 		// The host's own tools answer every turn, so there is no harness tool catalog to frame into messages.
 		const toolSurface: NativeToolSurfacePack = Object.freeze({ mode: hostMode, native: [], textInvoked: [] });
 		const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, hostMode);
-		stages.push(Object.freeze({ mode: hostMode, systemPrompt: prompts.system, perTurnPrompt: "", toolSurface }));
+		stages.push(
+			Object.freeze({
+				mode: hostMode,
+				systemPrompt: prompts.system,
+				perTurnPrompt: "",
+				toolPromptMode: stringValue(lock, "prompts.tool_prompt_mode"),
+				toolSurface,
+			}),
+		);
 	}
 	const initialStage = createNativeStageMachine(lock, stages).current;
 	const defaultModel = stringValue(lock, "providers.default_model");

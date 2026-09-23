@@ -2,7 +2,7 @@ import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
 import { RESEARCH_NATIVE_BINDINGS } from "./research-bindings";
 import { type LoadedNativeHarness } from "./load-native-harness";
-import { frameNativeUserMessage } from "./prompt-assembly";
+import { frameNativeUserContent } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
 import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
@@ -396,18 +396,22 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				}
 				if (message.role !== "user" || message.attribution === "agent") return message;
 				if (typeof message.content === "string") {
-					return { ...message, content: frameNativeUserMessage(message.content, stageMachine.current.perTurnPrompt) };
+					return { ...message, content: frameNativeUserContent(message.content, stageMachine.current) };
 				}
 				const first = message.content.findIndex(block => block.type === "text");
 				if (first < 0) return message;
-				return {
-					...message,
-					content: message.content.map((block, index) =>
-						index === first && block.type === "text"
-							? { ...block, text: frameNativeUserMessage(block.text, stageMachine.current.perTurnPrompt) }
-							: block,
-					),
-				};
+				const block = message.content[first];
+				if (block.type !== "text") return message;
+				const framed = frameNativeUserContent(block.text, stageMachine.current);
+				if (typeof framed === "string") {
+					return {
+						...message,
+						content: message.content.map((candidate, index) =>
+							index === first && candidate.type === "text" ? { ...candidate, text: framed } : candidate,
+						),
+					};
+				}
+				return { ...message, content: [...message.content.slice(0, first), ...framed, ...message.content.slice(first + 1)] };
 			}),
 		}));
 	};
