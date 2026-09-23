@@ -336,8 +336,9 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 	let lastPublishedHash: string | undefined;
 	let lastObservedHash: string | undefined;
 	let reloadInFlight: Promise<void> | undefined;
-	let reloadAgain = false;
 	let pendingHash: string | undefined;
+	let reloadAgain = false;
+	/** Once quiescent, the published generation's sourceHash equals the current disk hash. */
 	let debounceTimer: Timer | undefined;
 	let intervalTimer: Timer | undefined;
 	const notifyReloadError = (error: unknown): void => {
@@ -361,8 +362,16 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 				if (disposed || lifecycle !== reloadLifecycle) throw new Error("harness watcher disposed");
 				assertNativeHarnessBindings(next);
 			})
-			.then(() => {
-				if (!disposed && lifecycle === reloadLifecycle) lastPublishedHash = sourceHash;
+			.then(async loaded => {
+				if (disposed || lifecycle !== reloadLifecycle) return;
+				lastPublishedHash = loaded.sourceHash;
+				const currentSource = await readSource(options.specPath).catch(() => undefined);
+				if (disposed || lifecycle !== reloadLifecycle || currentSource === undefined) return;
+				const currentHash = sha256Source(currentSource);
+				if (currentHash !== loaded.sourceHash) {
+					reloadAgain = true;
+					pendingHash = currentHash;
+				}
 			})
 			.catch(notifyReloadError)
 			.finally(() => {

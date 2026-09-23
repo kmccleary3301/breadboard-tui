@@ -113,6 +113,77 @@ describe("native harness live state", () => {
 		expect(reloadSources).toEqual(["three"]);
 		watcher.dispose();
 	});
+	it("rechecks disk after joining a manual reload and publishes the newer source", async () => {
+		const root = await workspace();
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		let bytes = new TextEncoder().encode("one");
+		let releaseFirst: (() => void) | undefined;
+		let inFlight: Promise<typeof harness> | undefined;
+		let intervalCallback: (() => void) | undefined;
+		let timeoutCallback: (() => void) | undefined;
+		const publishedHashes: string[] = [];
+		const context = {
+			ui: { notify() {} },
+			setInterval(callback: () => void) {
+				intervalCallback = callback;
+				return {} as Timer;
+			},
+			setTimeout(callback: () => void) {
+				timeoutCallback = callback;
+				return {} as Timer;
+			},
+			clearTimer() {},
+		};
+		const fakeLive = {
+			editable: true,
+			generation: 1,
+			current: () => harness,
+			reload: (prepare?: (next: typeof harness) => void | Promise<void>) => {
+				if (inFlight !== undefined) return inFlight;
+				const sourceHash = new TextDecoder().decode(bytes);
+				const operation = (async () => {
+					if (publishedHashes.length === 0) {
+						await new Promise<void>(resolve => {
+							releaseFirst = resolve;
+						});
+					}
+					const loaded = { ...harness, sourceHash };
+					await prepare?.(loaded);
+					publishedHashes.push(sourceHash);
+					return loaded;
+				})();
+				inFlight = operation.finally(() => {
+					inFlight = undefined;
+				});
+				return inFlight;
+			},
+			setReloadValidator() {},
+			subscribe() {
+				return () => {};
+			},
+		};
+		const watcher = startNativeHarnessWatcher({
+			live: fakeLive,
+			specPath: "harness.yaml",
+			context: context as never,
+			statFile: async () => ({ mtimeMs: 1, size: 3 }),
+			readSource: async () => bytes,
+		});
+		await watcher.ready;
+		const manualReload = fakeLive.reload();
+		bytes = new TextEncoder().encode("two");
+		intervalCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		timeoutCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		releaseFirst?.();
+		await manualReload;
+		for (let attempt = 0; attempt < 10; attempt++) await Promise.resolve();
+		timeoutCallback?.();
+		for (let attempt = 0; attempt < 10; attempt++) await Promise.resolve();
+		expect(publishedHashes).toEqual(["one", "two"]);
+		watcher.dispose();
+	});
 	it("keeps in-flight turn tools stable and commits a staged generation at the next turn", async () => {
 		const root = await workspace();
 		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });

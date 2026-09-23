@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { isJsonRecord, type JsonRecord } from "../canonical-json";
@@ -64,6 +65,8 @@ export interface LoadedNativeHarness {
 	readonly workspaceRoot: string;
 	readonly lock: JsonRecord;
 	readonly graphHash: string;
+	/** SHA-256 of the exact harness spec source compiled for this generation. */
+	readonly sourceHash: string;
 	/** Path of the precompiled lock that was verified against this compilation, if one exists. */
 	readonly verifiedCachePath?: string;
 	/**
@@ -204,12 +207,14 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 	}
 	const initialStage = createNativeStageMachine(lock, stages).current;
 	const defaultModel = stringValue(lock, "providers.default_model");
+	const sourceHash = createHash("sha256").update(input.source).digest("hex");
 	return Object.freeze({
 		harnessId: input.harnessId,
 		specPath: input.specPath,
 		workspaceRoot: input.workspaceRoot,
 		lock,
 		graphHash,
+		sourceHash,
 		...(verifiedCachePath === undefined ? {} : { verifiedCachePath }),
 		hostSurface: hostMode !== undefined,
 		systemPrompt: initialStage.systemPrompt,
