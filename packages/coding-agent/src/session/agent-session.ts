@@ -1476,6 +1476,7 @@ export class AgentSession {
 		this.#extensionRunner = config.extensionRunner;
 		this.#detachTurnPrepare = this.agent.addBeforeModelCall(async (context: Context, signal?: AbortSignal) => {
 			const runner = this.#extensionRunner;
+			// Fork hooks run on every model call; runner shapes that predate them (no hasHandlers) opt out.
 			if (!runner?.hasHandlers?.("turn_prepare")) return;
 			const result = await runner.emitTurnPrepare({
 				turnIndex: this.#turnIndex,

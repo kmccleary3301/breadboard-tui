@@ -452,7 +452,8 @@ export interface SessionMaintenanceHost {
 		customInstructions?: string,
 		options?: SessionHandoffOptions,
 	): Promise<HandoffResult | undefined>;
-	beforeHandoff(): void | Promise<void>;
+	/** Fork hook: runs before a handoff replaces the session; hosts without a transition guard omit it. */
+	beforeHandoff?(): void | Promise<void>;
 	removeAssistantMessageFromActiveContext(message: AssistantMessage): void;
 	dropPersistedAssistantTurn(message: AssistantMessage): Promise<string | undefined>;
 	runRecoveryCompactionWithRollback(
