@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { isJsonRecord, type JsonRecord } from "../canonical-json";
-import { compileHarnessYaml, parseHarnessYaml } from "../compiler";
+import { compileHarnessYaml, HarnessCompileError, parseHarnessYaml } from "../compiler";
 import { builtinNativeHarness } from "./builtin-harnesses";
 import { HOST_MODEL, nativeHostSurfaceMode } from "./host-surface";
 import { loadNativeLock, nativeLockPathForSpec } from "./lock-loader";
@@ -11,6 +12,27 @@ import { loadNativeToolSurfaces } from "./tool-pack";
 import { allNativeToolSurface, createNativeStageMachine, type NativeHarnessStage } from "./stage-machine";
 import type { NativeToolSurfacePack } from "./types";
 
+export type NativeHarnessReloadErrorCode =
+	| "builtin"
+	| "compile"
+	| "lock-mismatch"
+	| "host-surface-refused"
+	| "bind"
+	| "reload-failed";
+
+export class NativeHarnessReloadError extends Error {
+	override readonly name = "NativeHarnessReloadError";
+
+	constructor(
+		readonly code: NativeHarnessReloadErrorCode,
+		readonly generation: number,
+		message: string,
+		options?: { readonly cause?: unknown },
+	) {
+		super(message, options);
+	}
+}
+
 export interface LoadNativeHarnessOptions {
 	/**
 	 * A built-in harness id (`bb-omp.native`), or a harness spec (`bb.harness_definition.v1` YAML).
@@ -19,6 +41,21 @@ export interface LoadNativeHarnessOptions {
 	readonly specPath: string;
 	readonly workspaceRoot: string;
 }
+export interface NativeHarnessGenerationChange {
+	readonly previousGeneration: number;
+	readonly generation: number;
+	readonly harness: LoadedNativeHarness;
+}
+
+export interface NativeHarnessLiveState {
+	readonly editable: boolean;
+	readonly generation: number;
+	current(): LoadedNativeHarness;
+	reload(prepare?: (harness: LoadedNativeHarness) => void | Promise<void>): Promise<LoadedNativeHarness>;
+	setReloadValidator(validator: (harness: LoadedNativeHarness) => void | Promise<void>): void;
+	subscribe(listener: (change: NativeHarnessGenerationChange) => void): () => void;
+}
+
 
 export interface LoadedNativeHarness {
 	/** The built-in id, or the spec path relative to the workspace (`/`-separated). */
@@ -28,6 +65,8 @@ export interface LoadedNativeHarness {
 	readonly workspaceRoot: string;
 	readonly lock: JsonRecord;
 	readonly graphHash: string;
+	/** SHA-256 of the exact harness spec source compiled for this generation. */
+	readonly sourceHash: string;
 	/** Path of the precompiled lock that was verified against this compilation, if one exists. */
 	readonly verifiedCachePath?: string;
 	/**
@@ -49,6 +88,8 @@ export interface LoadedNativeHarness {
 	readonly defaultModel?: string;
 	readonly permissions: { readonly mode?: string; readonly shell?: string };
 	readonly todos: { readonly enabled: boolean; readonly strict: boolean };
+	/** Shared live-edit state; built-in harnesses expose it only to return a typed refusal. */
+	readonly live?: NativeHarnessLiveState;
 }
 
 function contained(root: string, candidate: string): boolean {
@@ -166,12 +207,14 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 	}
 	const initialStage = createNativeStageMachine(lock, stages).current;
 	const defaultModel = stringValue(lock, "providers.default_model");
+	const sourceHash = createHash("sha256").update(input.source).digest("hex");
 	return Object.freeze({
 		harnessId: input.harnessId,
 		specPath: input.specPath,
 		workspaceRoot: input.workspaceRoot,
 		lock,
 		graphHash,
+		sourceHash,
 		...(verifiedCachePath === undefined ? {} : { verifiedCachePath }),
 		hostSurface: hostMode !== undefined,
 		systemPrompt: initialStage.systemPrompt,
@@ -199,7 +242,7 @@ const BUILTIN_HARNESS_ROOT = resolve(import.meta.dir, "../../harnesses");
  * carry a precompiled lock beside it; that lock is only a cache and must match this compilation's
  * `graph_hash`. A built-in harness compiles from the sources embedded in the product.
  */
-export async function loadNativeHarness(options: LoadNativeHarnessOptions): Promise<LoadedNativeHarness> {
+async function loadNativeHarnessOnce(options: LoadNativeHarnessOptions): Promise<LoadedNativeHarness> {
 	const workspaceRoot = resolve(options.workspaceRoot);
 	const builtin = builtinNativeHarness(options.specPath);
 	if (builtin !== undefined) {
@@ -229,4 +272,98 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 		readResource: resource => readResource(specDirectory, resource),
 		cachePath: nativeLockPathForSpec(specPath),
 	});
+}
+
+function reloadErrorCode(error: unknown): NativeHarnessReloadErrorCode {
+	if (error instanceof HarnessCompileError) return "compile";
+	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes(" is stale:")) return "lock-mismatch";
+	if (message.includes("host token") || message.includes("host-surface") || message.includes("host-surface harness")) {
+		return "host-surface-refused";
+	}
+	return "reload-failed";
+}
+
+/**
+ * Compile a harness into its effective lock and session inputs. Workspace specs receive a shared
+ * live state so an explicit reload can publish the next generation without replacing the session.
+ */
+export async function loadNativeHarness(options: LoadNativeHarnessOptions): Promise<LoadedNativeHarness> {
+	let generation = 1;
+	let current = await loadNativeHarnessOnce(options);
+	const editable = builtinNativeHarness(options.specPath) === undefined;
+	const listeners = new Set<(change: NativeHarnessGenerationChange) => void>();
+	let reloadValidator: ((harness: LoadedNativeHarness) => void | Promise<void>) | undefined;
+	let reloadInFlight: Promise<LoadedNativeHarness> | undefined;
+	let live: NativeHarnessLiveState;
+	const withLive = (harness: LoadedNativeHarness): LoadedNativeHarness =>
+		Object.freeze({ ...harness, live });
+	live = {
+		editable,
+		get generation() {
+			return generation;
+		},
+		current: () => current,
+		reload: (prepare?: (harness: LoadedNativeHarness) => void | Promise<void>) => {
+			if (reloadInFlight !== undefined) return reloadInFlight;
+			const operation = (async () => {
+				if (!editable) {
+					throw new NativeHarnessReloadError(
+						"builtin",
+						generation,
+						`Harness ${current.harnessId} is built in and cannot be live-edited.`,
+				);
+			}
+			let next: LoadedNativeHarness;
+			try {
+				next = await loadNativeHarnessOnce(options);
+			} catch (error) {
+				const code = reloadErrorCode(error);
+				throw new NativeHarnessReloadError(
+					code,
+					generation,
+					`Harness reload rejected (${code}): ${error instanceof Error ? error.message : String(error)}`,
+					{ cause: error },
+				);
+			}
+			if (current.hostSurface || next.hostSurface) {
+				throw new NativeHarnessReloadError(
+					"host-surface-refused",
+					generation,
+					"Live reload cannot change or introduce a host-surface harness.",
+				);
+			}
+			try {
+				await reloadValidator?.(next);
+				await prepare?.(next);
+			} catch (error) {
+				throw new NativeHarnessReloadError(
+					"bind",
+					generation,
+					`Harness reload rejected (bind): ${error instanceof Error ? error.message : String(error)}`,
+					{ cause: error },
+				);
+			}
+			const previousGeneration = generation;
+			generation += 1;
+			current = withLive(next);
+			const change = { previousGeneration, generation, harness: current } as const;
+			for (const listener of listeners) listener(change);
+			return current;
+			})();
+			reloadInFlight = operation.finally(() => {
+				reloadInFlight = undefined;
+			});
+			return reloadInFlight;
+		},
+		setReloadValidator(validator) {
+			reloadValidator = validator;
+		},
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+	current = withLive(current);
+	return current;
 }

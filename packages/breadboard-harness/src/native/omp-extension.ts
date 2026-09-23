@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
-import { type LoadedNativeHarness } from "./load-native-harness";
+import { NativeHarnessReloadError, type LoadedNativeHarness, type NativeHarnessLiveState } from "./load-native-harness";
 import { frameNativeUserMessage } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
@@ -21,6 +23,7 @@ export const NATIVE_TEXT_RESULTS_MESSAGE_TYPE = "breadboard-native-text-results"
 
 /** Custom message type for Python's completion-guard advisory, also sent as a user message. */
 export const NATIVE_GUARD_MESSAGE_TYPE = "breadboard-native-completion-guard";
+export const NATIVE_HARNESS_GENERATION_ENTRY = "breadboard-native-harness-generation";
 
 /** Details key marking a `mark_task_complete` result the completion guard held (Python `_completion_guard_blocked`). */
 const GUARD_BLOCKED = "completion_guard_blocked";
@@ -70,7 +73,7 @@ class CompletionGuard {
 const PERMISSION_REJECTED =
 	"The user rejected permission to use this specific tool call. You may try again with different parameters.";
 
-interface NativeCall {
+export interface NativeCall {
 	readonly input: JsonRecord;
 	readonly harness: LoadedNativeHarness;
 	readonly context: ExtensionContext;
@@ -80,7 +83,7 @@ interface NativeCall {
 	readonly guard: CompletionGuard;
 }
 
-interface NativeBinding {
+export interface NativeBinding {
 	/** OMP approval tier. `always-ask` prompts for `write` and `exec`, as Python's prompt mode asks for edit and shell. */
 	readonly approval: "read" | "write" | "exec";
 	/** Built-in whose implementation this tool's `ctx.invokeTool` runs. */
@@ -135,7 +138,7 @@ async function invokeBuiltin(call: NativeCall, params: Record<string, unknown>):
  * How each R39 function tool executes. Names, schemas and descriptions come from the vendored
  * tool definitions; execution is OMP's (`bash`, `eval`) or an adapter tested against Python fixtures.
  */
-const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
+export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	read_file: {
 		approval: "read",
 		run: call =>
@@ -259,12 +262,19 @@ async function runTextCalls(
 	return formatTextToolResults(results);
 }
 
+function assertNativeHarnessBindings(harness: LoadedNativeHarness): void {
+	for (const tool of harness.registeredToolSurface.native) {
+		if (NATIVE_BINDINGS[tool.name] === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
+	}
+}
+
 function registerFunctionTools(
 	api: ExtensionAPI,
 	harness: LoadedNativeHarness,
 	todos: TodoWriteState,
 	guard: CompletionGuard,
 ): void {
+	assertNativeHarnessBindings(harness);
 	for (const tool of harness.registeredToolSurface.native) {
 		const binding = NATIVE_BINDINGS[tool.name];
 		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
@@ -290,6 +300,162 @@ function registerFunctionTools(
 		});
 	}
 }
+interface NativeHarnessSourceInfo {
+	readonly mtimeMs: number;
+	readonly size: number;
+}
+
+interface NativeHarnessWatchOptions {
+	readonly live: NativeHarnessLiveState;
+	readonly specPath: string;
+	readonly context: ExtensionContext;
+	readonly statFile?: (path: string) => Promise<NativeHarnessSourceInfo>;
+	readonly readSource?: (path: string) => Promise<Uint8Array>;
+}
+
+function sha256Source(source: Uint8Array): string {
+	return createHash("sha256").update(source).digest("hex");
+}
+
+export interface NativeHarnessWatcherHandle {
+	readonly ready: Promise<void>;
+	readonly dispose: () => void;
+}
+
+export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): NativeHarnessWatcherHandle {
+	const statFile =
+		options.statFile ??
+		(async (path: string): Promise<NativeHarnessSourceInfo> => {
+			const info = await stat(path);
+			return { mtimeMs: info.mtimeMs, size: info.size };
+		});
+	const readSource = options.readSource ?? (async (path: string): Promise<Uint8Array> => readFile(path));
+	let disposed = false;
+	let lifecycle = 0;
+	let observed: NativeHarnessSourceInfo | undefined;
+	let lastPublishedHash: string | undefined;
+	let lastObservedHash: string | undefined;
+	let reloadInFlight: Promise<void> | undefined;
+	let pendingHash: string | undefined;
+	let reloadAgain = false;
+	/** Once quiescent, the published generation's sourceHash equals the current disk hash. */
+	let debounceTimer: Timer | undefined;
+	let intervalTimer: Timer | undefined;
+	const notifyReloadError = (error: unknown): void => {
+		if (disposed) return;
+		const message =
+			error instanceof NativeHarnessReloadError
+				? `Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`
+				: `Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`;
+		options.context.ui.notify(message, "error");
+	};
+	const runReload = async (sourceHash: string): Promise<void> => {
+		if (disposed) return;
+		if (reloadInFlight !== undefined) {
+			reloadAgain = true;
+			pendingHash = sourceHash;
+			return;
+		}
+		const reloadLifecycle = lifecycle;
+		reloadInFlight = options.live
+			.reload(next => {
+				if (disposed || lifecycle !== reloadLifecycle) throw new Error("harness watcher disposed");
+				assertNativeHarnessBindings(next);
+			})
+			.then(async loaded => {
+				if (disposed || lifecycle !== reloadLifecycle) return;
+				lastPublishedHash = loaded.sourceHash;
+				const currentSource = await readSource(options.specPath).catch(() => undefined);
+				if (disposed || lifecycle !== reloadLifecycle || currentSource === undefined) return;
+				const currentHash = sha256Source(currentSource);
+				if (currentHash !== loaded.sourceHash) {
+					reloadAgain = true;
+					pendingHash = currentHash;
+				}
+			})
+			.catch(notifyReloadError)
+			.finally(() => {
+				reloadInFlight = undefined;
+				if (!disposed && reloadAgain) {
+					reloadAgain = false;
+					const nextHash = pendingHash ?? lastObservedHash;
+					pendingHash = undefined;
+					if (nextHash !== undefined) scheduleReload(nextHash);
+				}
+			});
+		await reloadInFlight;
+	};
+	const scheduleReload = (sourceHash: string): void => {
+		if (disposed) return;
+		if (debounceTimer !== undefined) {
+			options.context.clearTimer(debounceTimer);
+			debounceTimer = undefined;
+		}
+		pendingHash = sourceHash;
+		debounceTimer = options.context.setTimeout(() => {
+			debounceTimer = undefined;
+			if (!disposed) {
+				const hash = pendingHash;
+				pendingHash = undefined;
+				if (hash !== undefined) void runReload(hash);
+			}
+		}, 150);
+	};
+	const poll = async (): Promise<void> => {
+		if (disposed) return;
+		const info = await statFile(options.specPath).catch(() => undefined);
+		if (disposed || info === undefined) return;
+		const source = await readSource(options.specPath).catch(() => undefined);
+		if (disposed || source === undefined) return;
+		const sourceHash = sha256Source(source);
+		const metadataChanged =
+			observed === undefined || observed.mtimeMs !== info.mtimeMs || observed.size !== info.size;
+		observed = info;
+		if (!metadataChanged && sourceHash === lastObservedHash) return;
+		lastObservedHash = sourceHash;
+		if (reloadInFlight !== undefined) {
+			reloadAgain = true;
+			pendingHash = sourceHash;
+		} else {
+			scheduleReload(sourceHash);
+		}
+	};
+	const ready = (async (): Promise<void> => {
+		const initialInfo = await statFile(options.specPath).catch(() => undefined);
+		const initialSource = await readSource(options.specPath).catch(() => undefined);
+		if (disposed) return;
+		const loadedHash = options.live.current().sourceHash;
+		lastPublishedHash = loadedHash;
+		lastObservedHash = loadedHash;
+		if (initialInfo !== undefined && initialSource !== undefined) {
+			observed = initialInfo;
+			const diskHash = sha256Source(initialSource);
+			if (diskHash !== loadedHash) {
+				lastObservedHash = diskHash;
+				scheduleReload(diskHash);
+			}
+		}
+		intervalTimer = options.context.setInterval(() => {
+			void poll();
+		}, 1000);
+	})();
+	const dispose = (): void => {
+		if (disposed) return;
+		disposed = true;
+		lifecycle += 1;
+		reloadAgain = false;
+		pendingHash = undefined;
+		if (debounceTimer !== undefined) {
+			options.context.clearTimer(debounceTimer);
+			debounceTimer = undefined;
+		}
+		if (intervalTimer !== undefined) {
+			options.context.clearTimer(intervalTimer);
+			intervalTimer = undefined;
+		}
+	};
+	return { ready, dispose };
+}
 
 /**
  * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
@@ -298,36 +464,83 @@ function registerFunctionTools(
  */
 export function createNativeHarnessExtension(harness: LoadedNativeHarness): ExtensionFactory {
 	return api => {
-		const transcript = { specPath: harness.harnessId, graphHash: harness.graphHash };
-		if (harness.hostSurface) {
-			registerSessionTranscriptExport(api, transcript);
-			const blocks = harness.systemPrompt ? [harness.systemPrompt] : [];
-			api.on("before_agent_start", event => ({ systemPrompt: [...event.systemPrompt, ...blocks] }));
-			return;
-		}
+		let pendingGeneration: number | undefined;
+		let activeHarness = harness;
+		let pendingHarness = harness;
+		let stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
+		let policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
 		const todos = new TodoWriteState();
-		const policy = new NativeTurnPolicy(harness.registeredToolSurface);
-		const stageMachine = createNativeStageMachine(harness.lock, harness.stages);
+		const guard = new CompletionGuard();
 		const promptOverride = [stageMachine.current.systemPrompt];
+		const transcript = { specPath: harness.harnessId, graphHash: harness.graphHash };
+		const recordGeneration = (generation: number, current: LoadedNativeHarness): void => {
+			api.appendEntry(NATIVE_HARNESS_GENERATION_ENTRY, {
+				generation,
+				spec_path: current.harnessId,
+				graph_hash: current.graphHash,
+			});
+		};
 		const applyStage = async (): Promise<void> => {
 			const stage = stageMachine.current;
 			promptOverride.splice(0, promptOverride.length, stage.systemPrompt);
 			await api.setActiveTools(stage.toolSurface.native.map(tool => tool.name));
 		};
-		const guard = new CompletionGuard();
-		registerFunctionTools(api, harness, todos, guard);
+		const commitPendingHarness = async (): Promise<void> => {
+			if (pendingHarness === activeHarness) return;
+			const next = pendingHarness;
+			const generation = pendingGeneration;
+			registerFunctionTools(api, next, todos, guard);
+			activeHarness = next;
+			stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
+			policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
+			await applyStage();
+			if (generation !== undefined) {
+				recordGeneration(generation, activeHarness);
+				if (pendingHarness === next && pendingGeneration === generation) pendingGeneration = undefined;
+			}
+		};
+
 		registerSessionTranscriptExport(api, transcript);
+		api.on("session_start", () => {
+			recordGeneration(activeHarness.live?.generation ?? 1, activeHarness);
+		});
+		if (activeHarness.hostSurface) {
+			const blocks = activeHarness.systemPrompt ? [activeHarness.systemPrompt] : [];
+			api.on("before_agent_start", event => ({ systemPrompt: [...event.systemPrompt, ...blocks] }));
+			return;
+		}
+		const live = activeHarness.live;
+		live?.setReloadValidator(assertNativeHarnessBindings);
+		registerFunctionTools(api, activeHarness, todos, guard);
+		if (live?.editable) {
+			api.on("session_start", async (_event, context) => {
+				const watcher = startNativeHarnessWatcher({
+					live,
+					specPath: activeHarness.specPath,
+					context,
+				});
+				api.on("session_shutdown", watcher.dispose);
+				await watcher.ready;
+			});
+		}
+		activeHarness.live?.subscribe(change => {
+			pendingHarness = change.harness;
+			pendingGeneration = change.generation;
+		});
 		api.on("agent_start", async () => {
+			await commitPendingHarness();
 			stageMachine.reset();
 			guard.beginRun();
 			await applyStage();
 		});
 		api.on("before_agent_start", () => ({ systemPrompt: promptOverride }));
 		api.on("turn_start", async () => {
+			await commitPendingHarness();
 			policy.beginTurn();
 			await applyStage();
 		});
-		api.on("turn_prepare", () => {
+		api.on("turn_prepare", async () => {
+			await commitPendingHarness();
 			const stage = stageMachine.current;
 			return {
 				mode: stage.mode,
@@ -337,7 +550,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		});
 		api.on("tool_call", event => policy.admit(event.toolName));
 		api.on("turn_settle", async (event, context) => {
-			const text = await runTextCalls(event.message, harness, policy, todos, context);
+			const text = await runTextCalls(event.message, activeHarness, policy, todos, context);
 			stageMachine.endTurn(todos.hasItems);
 			const messages = [
 				...(text === undefined ? [] : [{ customType: NATIVE_TEXT_RESULTS_MESSAGE_TYPE, content: text, display: true }]),

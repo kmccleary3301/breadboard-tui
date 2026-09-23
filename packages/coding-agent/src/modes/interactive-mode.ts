@@ -1944,11 +1944,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				if (event.type === "config_warnings_changed") {
 					this.#syncConfigWarningHeader();
 				}
-				if (event.type === "agent_end" && this.harnessPort) {
-					void this.harnessPort.refresh("turn-boundary").catch(error => {
-						logger.warn("BreadBoard harness refresh failed at turn boundary", { error: String(error) });
-					});
-				}
 				void this.#handleGoalSessionEvent(event);
 			}),
 			onStatusLineSessionAccentChanged(() => {

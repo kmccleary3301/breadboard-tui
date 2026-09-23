@@ -8,9 +8,9 @@ import type { BreadboardClient } from "@breadboard/sdk/engine";
  * session open and once per generation change (`bb-2j1u.22/proposal.md` §2.1-2.5, performance guardrail §5). It never runs on the frame
  * path: renderers read `current()` synchronously and re-render from `subscribe` notifications.
  *
- * The SDK AgentSession event union exposes `agent_end` but no effective-lock or
- * generation-change event, so `turn-boundary` is the documented fallback refresh
- * reason until that public event exists.
+ * The SDK AgentSession event union exposes no public effective-lock or
+ * generation-change event. Native sessions publish generations through their
+ * live harness state; bridge sessions continue to refresh from the control plane.
  */
 
 export interface HarnessProvenance {
@@ -29,9 +29,8 @@ export interface HarnessSnapshot {
 	readonly lockHash: string | null;
 	/** Identity verified by comparing the loaded lock graph hash to `lockHash`. */
 	readonly verifiedIdentity?: { readonly harnessId: string; readonly lockHash: string } | null;
-	/** Session `generation_id`, when known. */
+	/** Session generation number encoded as a string for bridge/TUI compatibility. */
 	readonly generation: string | null;
-	/** Active mode name from the lock's `modes[]` and the session's current mode, when known. */
 	readonly mode: string | null;
 	/** Effective lock as returned by `harness_lock.get`; consumers read known sections defensively. */
 	readonly lock: Readonly<Record<string, unknown>> | null;
@@ -49,8 +48,7 @@ export interface HarnessCommandSpec {
 	/** Why the command is dimmed or unavailable, when it is not enabled. */
 	readonly reason?: string;
 }
-
-export type HarnessRefreshReason = "session-open" | "harness-use" | "generation-change" | "turn-boundary" | "manual";
+export type HarnessRefreshReason = "session-open" | "harness-use" | "generation-change" | "manual";
 
 export interface HarnessPort {
 	/** Last loaded snapshot; `null` before the first successful load or when no harness is bound. */
@@ -60,6 +58,8 @@ export interface HarnessPort {
 	/** Notified after every `refresh` that changed the snapshot; returns the unsubscribe function. */
 	subscribe(listener: (snapshot: HarnessSnapshot | null) => void): () => void;
 	/** Update the source identity used by the next snapshot refresh. */
+	/** Reload the workspace spec and publish its next generation at the next turn boundary. */
+	readonly reloadNativeHarness?: () => Promise<HarnessSnapshot | null>;
 	readonly setHarnessId?: (harnessId: string) => void;
 	/** Apply a live engine mode override to the bound session. */
 	readonly setSessionMode?: (mode: string) => Promise<void>;
