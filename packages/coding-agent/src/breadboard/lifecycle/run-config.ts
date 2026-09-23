@@ -8,7 +8,7 @@ import {
 	parseEngineRuntimeBundleRelativePath,
 } from "./engine-runtime-bundle";
 import type { InstalledEngineIdentity } from "./installed-engine-manifest";
-export const BREADBOARD_ENGINE_MODES = ["local-owned", "local-external", "remote", "off"] as const;
+export const BREADBOARD_ENGINE_MODES = ["local-owned", "local-external", "remote", "native", "off"] as const;
 export type BreadboardEngineMode = (typeof BREADBOARD_ENGINE_MODES)[number];
 export type ConfigSource = "cli" | "environment" | "selected-config" | "derived-installed-artifact" | "derived-default";
 export type OwnerExitPolicy = "attached" | "detached";
@@ -218,7 +218,11 @@ function pick<T>(
 
 function parseMode(value: unknown, field: RunConfigField = "mode"): BreadboardEngineMode {
 	if (typeof value !== "string" || !BREADBOARD_ENGINE_MODES.includes(value as BreadboardEngineMode)) {
-		fail("invalid_mode", field, "engine mode must be local-owned, local-external, remote, or off");
+		fail(
+			"invalid_mode",
+			field,
+			"engine mode must be local-owned, local-external, remote, native, or off",
+		);
 	}
 	return value as BreadboardEngineMode;
 }
@@ -568,7 +572,8 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 			source: "derived-default",
 			explicit: false,
 		};
-
+	let endpoint = normalizedEndpoint;
+	let tls: BreadboardTls | undefined;
 	const selectedAuth = hasOwn(selected, "auth") ? selected.auth : undefined;
 	const envAuth = environmentAuth(environment);
 	const authChoice =
@@ -634,16 +639,13 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 	const startupTimeoutMs = parseTimeout(startupChoice.value, "startupTimeoutMs", DEFAULT_STARTUP_TIMEOUT_MS);
 	const requestTimeoutMs = parseTimeout(requestChoice.value, "requestTimeoutMs", DEFAULT_REQUEST_TIMEOUT_MS);
 	const ownerExitPolicy = parseExitPolicy(exitChoice.value);
-
 	const mode = modeChoice.value;
-	let endpoint = normalizedEndpoint;
-	let tls: BreadboardTls | undefined;
-	if (mode === "off") {
-		if (endpointChoice.explicit) fail("mode_endpoint_conflict", "endpoint", "off mode forbids an engine endpoint");
-		if (authChoice.explicit) fail("mode_auth_conflict", "auth", "off mode forbids authentication");
+	if (mode === "off" || mode === "native") {
+		if (endpointChoice.explicit) fail("mode_endpoint_conflict", "endpoint", `${mode} mode forbids an engine endpoint`);
+		if (authChoice.explicit) fail("mode_auth_conflict", "auth", `${mode} mode forbids authentication`);
 		if (artifactChoice.value !== undefined)
-			fail("invalid_artifact", "engineArtifact", "off mode forbids an engine artifact");
-		if (exitChoice.explicit) fail("invalid_exit_policy", "ownerExitPolicy", "off mode forbids an owner exit policy");
+			fail("invalid_artifact", "engineArtifact", `${mode} mode forbids an engine artifact`);
+		if (exitChoice.explicit) fail("invalid_exit_policy", "ownerExitPolicy", `${mode} mode forbids an owner exit policy`);
 		endpoint = undefined;
 	} else if (mode === "local-owned") {
 		endpoint ??= DEFAULT_ENDPOINT;

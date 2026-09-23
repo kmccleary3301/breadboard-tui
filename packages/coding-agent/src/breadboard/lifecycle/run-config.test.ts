@@ -189,6 +189,24 @@ describe("resolveBreadboardRunConfig", () => {
 			sessionConfigPath: "selected-config",
 		});
 	});
+	test("native mode resolves without an engine artifact or endpoint", () => {
+		const config = resolveBreadboardRunConfig({
+			...baseInput,
+			cli: { engineMode: "native" },
+		});
+		expect(config.mode).toBe("native");
+		expect(config.endpoint).toBeUndefined();
+		expect(config.engineArtifact).toBeUndefined();
+		expect(config.ownerExitPolicy).toBeUndefined();
+		expect(
+			configError(() =>
+				resolveBreadboardRunConfig({
+					...baseInput,
+					cli: { engineMode: "native", engineUrl: "http://127.0.0.1:7777" },
+				}),
+			).code,
+		).toBe("mode_endpoint_conflict");
+	});
 
 	test("infers only the three governed defaults and requires explicit local-external endpoint", () => {
 		const localExternal = resolveBreadboardRunConfig({ ...baseInput, cli: { engineUrl: "http://127.0.0.2:9000" } });
