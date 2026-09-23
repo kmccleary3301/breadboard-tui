@@ -66,7 +66,7 @@ export default class Engine extends Command {
 				return;
 			}
 			let execution: LifecycleActionExecution;
-			if (config.mode === "off") {
+			if (config.mode === "off" || config.mode === "native") {
 				const result: LifecycleResult =
 					action === "status"
 						? {

@@ -4,6 +4,7 @@ import { isJsonRecord, type JsonRecord } from "../canonical-json";
 import { compileHarnessYaml, parseHarnessYaml } from "../compiler";
 import { loadNativeLock, nativeLockPathForSpec } from "./lock-loader";
 import { nativeLockValue } from "./lock-values";
+import { assembleNativePrompts } from "./prompt-assembly";
 import { loadNativeToolSurface } from "./tool-pack";
 import type { NativeToolSurfacePack } from "./types";
 
@@ -20,15 +21,16 @@ export interface LoadedNativeHarness {
 	readonly graphHash: string;
 	/** Path of the precompiled lock that was verified against this compilation, if one exists. */
 	readonly verifiedCachePath?: string;
+	/** The compiled system prompt (`system_prompt_compiler.py` order, todo packs included). */
 	readonly systemPrompt: string;
+	/** The per-turn tool catalog Python frames into each user message. */
+	readonly perTurnPrompt: string;
 	readonly toolSurface: NativeToolSurfacePack;
 	/** `providers.default_model`, an OMP `provider/model` selector. */
 	readonly defaultModel?: string;
 	readonly permissions: { readonly mode?: string; readonly shell?: string };
 	readonly todos: { readonly enabled: boolean; readonly strict: boolean };
 }
-
-const PACK_REFERENCE = /^@pack\(([^()]+)\)\.([A-Za-z0-9_]+)$/u;
 
 function contained(root: string, candidate: string): boolean {
 	const rest = relative(root, candidate);
@@ -64,21 +66,6 @@ async function readResource(specDirectory: string, resource: string): Promise<Ui
 function stringValue(lock: JsonRecord, path: string): string | undefined {
 	const value = nativeLockValue(lock, path);
 	return typeof value === "string" ? value : undefined;
-}
-
-/** The locked mode's prompt, resolved from its `@pack(<name>).<role>` reference. */
-function modePrompt(lock: JsonRecord, mode: string, resources: ReadonlyMap<string, Uint8Array>): string {
-	const modes = nativeLockValue(lock, "modes");
-	const selected = Array.isArray(modes) ? modes.find(entry => isJsonRecord(entry) && entry.name === mode) : undefined;
-	const reference = isJsonRecord(selected) ? selected.prompt : undefined;
-	if (typeof reference !== "string") throw new Error(`native harness mode ${mode} has no prompt`);
-	const match = PACK_REFERENCE.exec(reference);
-	if (match === null) throw new Error(`native harness mode ${mode} prompt must be @pack(<name>).<role>: ${reference}`);
-	const resource = stringValue(lock, `prompts.packs.${match[1]}.${match[2]}`);
-	if (resource === undefined) throw new Error(`native harness prompt ${reference} names no pack resource`);
-	const bytes = resources.get(resource);
-	if (bytes === undefined) throw new Error(`native harness prompt resource was not compiled: ${resource}`);
-	return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -123,13 +110,15 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 	}
 
 	const toolSurface = await loadNativeToolSurface(lock);
+	const prompts = await assembleNativePrompts(lock, resources, toolSurface);
 	return Object.freeze({
 		specPath,
 		workspaceRoot,
 		lock,
 		graphHash,
 		...(verifiedCachePath === undefined ? {} : { verifiedCachePath }),
-		systemPrompt: modePrompt(lock, toolSurface.mode, resources),
+		systemPrompt: prompts.system,
+		perTurnPrompt: prompts.perTurn,
 		toolSurface,
 		...(stringValue(lock, "providers.default_model") === undefined
 			? {}

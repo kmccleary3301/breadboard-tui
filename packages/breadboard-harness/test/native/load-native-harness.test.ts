@@ -28,7 +28,9 @@ describe("loadNativeHarness", () => {
 		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: R39_WORKSPACE });
 		expect(harness.graphHash).toBe(R39_GRAPH_HASH);
 		expect(harness.verifiedCachePath).toBe(join(R39_WORKSPACE, R39_LOCK));
-		expect(harness.systemPrompt).toBe(await readFile(join(R39_WORKSPACE, R39_DIR, "prompts/daily_driver_system.md"), "utf8"));
+		// Oracle bytes from the R39 QC run's compiled system prompt and first per-turn catalog.
+		expect(harness.systemPrompt).toBe(await readFile(join(import.meta.dir, "fixtures/r39-openai/compiled_system.md"), "utf8"));
+		expect(harness.perTurnPrompt).toBe(await readFile(join(import.meta.dir, "fixtures/r39-openai/per_turn/turn_1.md"), "utf8"));
 		expect(harness.defaultModel).toBe("openai-codex/gpt-5.6-luna");
 		expect(harness.permissions).toEqual({ mode: "prompt", shell: "ask" });
 		expect(harness.todos).toEqual({ enabled: true, strict: true });

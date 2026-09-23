@@ -154,16 +154,43 @@ export function resolveNativeSurfaceEngineSelection(
 	}
 }
 
-export function startupBreadboardModeIsOff(
+/**
+ * The harness spec a native-mode session runs, or undefined outside native mode. Precedence:
+ * `--harness`, the selected config's `sessionConfigPath`, then `breadboard.harness.default`.
+ */
+export function resolveNativeHarnessSpec(
+	parsed: Pick<Args, "engineMode" | "engineUrl" | "harness">,
+	activeSettings: Settings,
+	workspacePath: string,
+	isBreadboardProduct: boolean,
+): string | undefined {
+	const selection = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath, isBreadboardProduct);
+	if (selection.engineMode !== "native") return undefined;
+	const effective = resolveBreadboardRunConfig({
+		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },
+		selectedConfig: parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard")),
+		workspacePath,
+	});
+	const spec = parsed.harness ?? effective.sessionConfigPath ?? configuredHarnessId(activeSettings);
+	if (!/\.ya?ml$/u.test(spec)) {
+		throw new BreadboardRunConfigError(
+			"invalid_session_config",
+			"sessionConfigPath",
+			`native mode runs a harness spec (.yaml); "${spec}" is not one. Pass --harness <path/to/harness.yaml>.`,
+		);
+	}
+	return spec;
+}
+
+/** Whether the selected mode hands turns to a BreadBoard engine; `off` and `native` run OMP's own loop. */
+export function startupBreadboardEngineOwnsTurns(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
 	activeSettings: Settings,
 	workspacePath: string,
 	isBreadboardProduct: boolean,
 ): boolean {
-	return (
-		resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath, isBreadboardProduct).engineMode ===
-		"off"
-	);
+	const mode = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath, isBreadboardProduct).engineMode;
+	return mode !== "off" && mode !== "native";
 }
 
 const ALLOW_STARTUP_FORK = (): void => {};
@@ -177,7 +204,7 @@ export function createBreadboardStartupForkPolicy(
 ): () => void {
 	if (!canPrepareBreadboardRuntime) return ALLOW_STARTUP_FORK;
 	return () => {
-		if (startupBreadboardModeIsOff(parsed, activeSettings, workspacePath, isBreadboardProduct)) return;
+		if (!startupBreadboardEngineOwnsTurns(parsed, activeSettings, workspacePath, isBreadboardProduct)) return;
 		throw new BreadboardSessionTransitionError(
 			"BreadBoard cannot fork an OMP session at startup because the current E4 SDK cannot atomically rebind the bridge to the forked transcript. Start a new OMP session or run with BreadBoard mode off.",
 		);
@@ -1144,7 +1171,7 @@ export async function prepareBreadboardSetup(
 	const workspacePath = fsSync.realpathSync(getProjectDir());
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
 	let config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
-	if (config.mode === "off") return null;
+	if (config.mode === "off" || config.mode === "native") return null;
 	if (
 		authority?.ompAgentDir !== undefined &&
 		(config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")
@@ -1253,7 +1280,7 @@ export async function prepareBreadboardRuntime(
 	const selected = resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath);
 	let config = await resolveEffectiveBreadboardRunConfig(selected, activeSettings, workspacePath);
 	let shared: AcquiredSharedBreadboardEngine | undefined;
-	if (config.mode === "off") return null;
+	if (config.mode === "off" || config.mode === "native") return null;
 	if (
 		authority.ompAgentDir !== undefined &&
 		(config.mode !== "local-owned" || config.ownerExitPolicy !== "attached")

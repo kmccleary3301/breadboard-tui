@@ -1132,6 +1132,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		) => Promise<boolean>,
 		breadboardSessionId?: () => string,
 		private readonly nativeAuthStorage?: AuthStorage,
+		nativeHarnessPort?: HarnessPort,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -1150,14 +1151,15 @@ export class InteractiveMode implements InteractiveModeContext {
 				}
 			: undefined;
 		this.harnessPort =
-			harnessClient && harnessId && breadboardSessionId
+			nativeHarnessPort ??
+			(harnessClient && harnessId && breadboardSessionId
 				? createHarnessPort({
 						client: harnessClient,
 						sessionId: breadboardSessionId,
 						harnessId,
 						setSessionModel: setHarnessSessionModel,
 					})
-				: undefined;
+				: undefined);
 		const preferences = {
 			quiet: settings.get("startup.quiet"),
 			composerShape: settings.get("composer.shape") ?? "band",

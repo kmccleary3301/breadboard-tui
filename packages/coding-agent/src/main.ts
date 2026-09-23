@@ -22,8 +22,12 @@ import { $env, isBunTestRuntime, setInteractiveHost } from "@oh-my-pi/pi-utils/e
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import { type LoadedNativeHarness, loadNativeHarness } from "@breadboard/harness";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
+import type { HarnessPort } from "./breadboard/harness-port";
+import { createNativeHarnessPort } from "./breadboard/native-harness-port";
+import { applyNativeHarnessSessionOptions } from "./breadboard/native-harness-session";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
 import { nativeControlRestriction, nativeStartupRestriction } from "./breadboard/native-control-policy";
 import { resolveBreadboardOmpAgentDir } from "./breadboard/omp-auth-gateway";
@@ -38,8 +42,9 @@ import {
 	prepareBreadboardRuntime,
 	prepareBreadboardSetup,
 	rejectBreadboardSessionTransition,
+	resolveNativeHarnessSpec,
 	resolveNativeSurfaceEngineSelection,
-	startupBreadboardModeIsOff,
+	startupBreadboardEngineOwnsTurns,
 } from "./breadboard/runtime";
 import { BreadboardSessionTransitionError } from "./breadboard/session-binding";
 import { reset as resetCapabilities } from "./capability";
@@ -620,6 +625,8 @@ async function runInteractiveMode(
 		) => Promise<boolean>;
 		readonly sessionId: () => string;
 	},
+	/** Native mode: the harness hub, palette and status read the session's loaded lock. */
+	nativeHarnessPort?: HarnessPort,
 ): Promise<void> {
 	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
 	let mode: InteractiveMode;
@@ -642,6 +649,7 @@ async function runInteractiveMode(
 			breadboard?.switchHarnessSession,
 			breadboard?.sessionId,
 			breadboard?.nativeAuthStorage,
+			nativeHarnessPort,
 		);
 		breadboard?.bindPermissionActivity?.(pending => {
 			if (pending) mode.eventController.markBreadboardApproval();
@@ -1286,6 +1294,17 @@ export function applyResolvedSystemPromptInputs(
 	}
 }
 
+/** Loads the harness a native-mode startup runs; undefined outside native mode. */
+export async function loadStartupNativeHarness(
+	parsed: Args,
+	activeSettings: Settings,
+): Promise<LoadedNativeHarness | undefined> {
+	const workspacePath = parsed.cwd ?? getProjectDir();
+	const specPath = resolveNativeHarnessSpec(parsed, activeSettings, workspacePath, IS_BREADBOARD_PRODUCT);
+	if (specPath === undefined) return undefined;
+	return await loadNativeHarness({ specPath, workspaceRoot: fsSync.realpathSync(workspacePath) });
+}
+
 /** Builds startup session options from parsed CLI flags, scoped models, and resolved session lineage. */
 export async function buildSessionOptions(
 	parsed: Args,
@@ -1293,8 +1312,9 @@ export async function buildSessionOptions(
 	sessionManager: SessionManager | undefined,
 	modelRegistry: ModelRegistry,
 	activeSettings: Settings,
+	nativeHarness?: LoadedNativeHarness,
 ): Promise<CreateAgentSessionOptions> {
-	const externalTurnLifecycle = !startupBreadboardModeIsOff(
+	const externalTurnLifecycle = startupBreadboardEngineOwnsTurns(
 		parsed,
 		activeSettings,
 		parsed.cwd ?? getProjectDir(),
@@ -1680,6 +1700,12 @@ export async function buildSessionOptions(
 	}
 	if (externalTurnLifecycle) delete options.thinkingLevel;
 
+	if (nativeHarness !== undefined) {
+		applyNativeHarnessSessionOptions(options, nativeHarness, activeSettings, {
+			approvalSelected: parsed.approvalMode !== undefined || parsed.autoApprove === true,
+		});
+	}
+
 	return options;
 }
 
@@ -1827,7 +1853,7 @@ export async function runRootCommand(
 		}
 
 		const settingsInstance = await settingsPromise;
-		const breadboardProductModeSelected = !startupBreadboardModeIsOff(
+		const breadboardProductModeSelected = startupBreadboardEngineOwnsTurns(
 			parsedArgs,
 			settingsInstance,
 			cwd,
@@ -2294,6 +2320,12 @@ export async function runRootCommand(
 			});
 		}
 
+		const nativeHarness = await logger.time(
+			"loadStartupNativeHarness",
+			loadStartupNativeHarness,
+			parsedArgs,
+			settingsInstance,
+		);
 		const sessionOptions = await logger.time(
 			"buildSessionOptions",
 			buildSessionOptions,
@@ -2302,6 +2334,7 @@ export async function runRootCommand(
 			sessionManager,
 			modelRegistry,
 			settingsInstance,
+			nativeHarness,
 		);
 		sessionOptions.authStorage = authStorage;
 		sessionOptions.modelRegistry = modelRegistry;
@@ -2715,6 +2748,7 @@ export async function runRootCommand(
 									sessionId: () => breadboardRuntime.sessionId,
 								}
 							: undefined,
+						nativeHarness ? createNativeHarnessPort(nativeHarness) : undefined,
 					);
 				} finally {
 					breadboardPermissionActivity = undefined;

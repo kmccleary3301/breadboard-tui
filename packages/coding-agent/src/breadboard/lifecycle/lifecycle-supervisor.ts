@@ -3310,7 +3310,7 @@ export class LifecycleSupervisor {
 		readonly config: BreadboardRunConfig,
 		dependencies: LifecycleSupervisorDependencies,
 	) {
-		if (config.mode === "off") this.#strategy = new OffModeStrategy(config, dependencies);
+		if (config.mode === "off" || config.mode === "native") this.#strategy = new OffModeStrategy(config, dependencies);
 		else if (config.mode === "local-owned") this.#strategy = new LocalOwnedModeStrategy(config, dependencies);
 		else this.#strategy = new ConnectOnlyModeStrategy(config, dependencies);
 	}

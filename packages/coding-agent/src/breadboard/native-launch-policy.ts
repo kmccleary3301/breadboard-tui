@@ -16,7 +16,8 @@ export function resolveNativeLaunchPolicy(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
 	surface: NativeLaunchSurface,
 ): NativeLaunchPolicy {
-	if ((parsed.engineMode === undefined || parsed.engineMode === "off") && parsed.engineUrl === undefined) {
+	const ompLoop = parsed.engineMode === undefined || parsed.engineMode === "off" || parsed.engineMode === "native";
+	if (ompLoop && parsed.engineUrl === undefined) {
 		return { kind: "native" };
 	}
 	return {

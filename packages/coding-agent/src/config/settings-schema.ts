@@ -548,6 +548,7 @@ export const SETTINGS_SCHEMA = {
 				{ value: "local-owned", label: "Local (owned)" },
 				{ value: "local-external", label: "Local (external)" },
 				{ value: "remote", label: "Remote" },
+				{ value: "native", label: "Native (OMP loop)" },
 				{ value: "off", label: "Off" },
 			],
 		},
