@@ -19,24 +19,32 @@ import {
 	graphContentHash,
 	sha256Json,
 } from "../canonical-json";
+import {
+	type HarnessValidationFinding,
+	validateHarnessDefinition,
+} from "./validate";
+
+export { validateHarnessDefinition } from "./validate";
 
 export type JsonRecord = { [key: string]: CanonicalJson };
 export type HarnessDefinition = JsonRecord;
-
 export interface HarnessCompileErrorOptions {
 	readonly code?: string;
 	readonly stage?: "parse" | "compile" | "validation";
+	readonly findings?: readonly HarnessValidationFinding[];
 }
 
 export class HarnessCompileError extends Error {
 	readonly code: string;
 	readonly stage: "parse" | "compile" | "validation";
+	readonly findings: readonly HarnessValidationFinding[];
 
 	constructor(message: string, options: HarnessCompileErrorOptions = {}) {
 		super(message);
 		this.name = "HarnessCompileError";
 		this.code = options.code ?? "compile_error";
 		this.stage = options.stage ?? "compile";
+		this.findings = Object.freeze(options.findings === undefined ? [] : [...options.findings]);
 	}
 }
 
@@ -287,42 +295,14 @@ function resourceEntries(inputs: HarnessCompileOptions["resourceInputs"], startP
 }
 
 function validateDefinition(document: JsonRecord): void {
-	const schemaVersion = document.schema_version;
-	const version = document.version;
-	if (schemaVersion !== "bb.harness_definition.v1") {
-		throw new HarnessCompileError("invalid Harness Definition: /schema_version [unsupported_schema_version]", {
-			code: "definition_invalid",
-			stage: "validation",
-		});
-	}
-	if (version !== 1) {
-		throw new HarnessCompileError("invalid Harness Definition: /version [unsupported_version]", {
-			code: "definition_invalid",
-			stage: "validation",
-		});
-	}
-	const required = ["workspace", "providers", "modes", "loop"] as const;
-	for (const key of required) {
-		if (!(key in document)) {
-			throw new HarnessCompileError(`invalid Harness Definition: /${key} [required]`, {
-				code: "definition_invalid",
-				stage: "validation",
-			});
-		}
-	}
-	const allowed = new Set([
-		"completion", "concurrency", "dossier", "enhanced_tools", "features", "guardrails", "long_running", "loop",
-		"modes", "multi_agent", "permissions", "prompts", "provider_tools", "providers", "replay", "schema_version",
-		"tools", "turn_strategy", "version", "workspace",
-	]);
-	for (const key of Object.keys(document)) {
-		if (!allowed.has(key) && key !== "extends") {
-			throw new HarnessCompileError(`invalid Harness Definition: /${key} [additionalProperties]`, {
-				code: "definition_invalid",
-				stage: "validation",
-			});
-		}
-	}
+	const findings = validateHarnessDefinition(document);
+	if (findings.length === 0) return;
+	const detail = findings.map(finding => `${finding.pointer} [${finding.code}]`).join("; ");
+	throw new HarnessCompileError(`invalid Harness Definition: ${detail}`, {
+		code: "definition_invalid",
+		stage: "validation",
+		findings,
+	});
 }
 
 function fieldStrings(value: CanonicalJson): string[] {
@@ -490,7 +470,13 @@ function compileDocument(definition: JsonRecord, options: HarnessCompileOptions)
 		try {
 			validateDefinition(authorRecord);
 		} catch (error) {
-			if (error instanceof HarnessCompileError) throw new HarnessCompileError(`invalid Harness Definition: ${error.message.replace(/^invalid Harness Definition: /, "")}`, { code: "definition_invalid", stage: "validation" });
+			if (error instanceof HarnessCompileError) {
+				throw new HarnessCompileError(`invalid Harness Definition: ${error.message.replace(/^invalid Harness Definition: /, "")}`, {
+					code: "definition_invalid",
+					stage: "validation",
+					findings: error.findings,
+				});
+			}
 			throw error;
 		}
 	}

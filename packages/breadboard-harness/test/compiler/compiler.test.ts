@@ -63,7 +63,54 @@ describe("harness compiler", () => {
 
 	test("rejects an incomplete canonical definition before producing a lock", () => {
 		expect(() => compileHarnessDefinition({ schema_version: "bb.harness_definition.v1", version: 1 }, { sourceRef: "invalid.yaml" })).toThrow(
-			new HarnessCompileError("invalid Harness Definition: /workspace [required]", { code: "definition_invalid", stage: "validation" }),
+			"invalid Harness Definition: /loop [required]; /modes [required]; /providers [required]; /workspace [required]",
 		);
+	});
+
+	test("reports all nested type findings in deterministic pointer order", () => {
+		try {
+			compileHarnessDefinition({
+				schema_version: "bb.harness_definition.v1",
+				version: 1,
+				workspace: null,
+				providers: null,
+				modes: null,
+				loop: null,
+			}, { sourceRef: "invalid.yaml" });
+			throw new Error("expected validation to reject");
+		} catch (error) {
+			expect(error).toMatchObject({
+				code: "definition_invalid",
+				stage: "validation",
+				findings: [
+					{ pointer: "/loop", code: "type" },
+					{ pointer: "/modes", code: "type" },
+					{ pointer: "/providers", code: "type" },
+					{ pointer: "/workspace", code: "type" },
+				],
+			});
+		}
+	});
+
+	test("reports escaped unknown keys and oneOf branch failures", () => {
+		try {
+			compileHarnessDefinition({
+				schema_version: "bb.harness_definition.v1",
+				version: 1,
+				workspace: { root: ".", "a/b~c": true },
+				providers: { default_model: "main", models: [{ id: "main", adapter: "openai" }] },
+				modes: [{ name: "build" }],
+				loop: { sequence: [{ mode: "build" }] },
+				features: { plan: [] },
+			}, { sourceRef: "invalid.yaml" });
+			throw new Error("expected validation to reject");
+		} catch (error) {
+			expect(error).toMatchObject({
+				findings: [
+					{ pointer: "/features/plan", code: "oneOf" },
+					{ pointer: "/workspace/a~1b~0c", code: "additionalProperties" },
+				],
+			});
+		}
 	});
 });
