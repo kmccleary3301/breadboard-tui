@@ -1,0 +1,149 @@
+{
+  "effective_values": [
+    {
+      "env_gate_ids": [],
+      "path": "loop.sequence",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        {
+          "mode": "default"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "modes",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        {
+          "name": "default",
+          "tools_enabled": [
+            "@host.tools"
+          ]
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.injection.system_order",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        "@host.system",
+        "@pack(base).system"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.system",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "prompts/identity.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.default_model",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "@host.model",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.models",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        {
+          "adapter": "host",
+          "id": "@host.model"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "schema_version",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "bb.harness_definition.v1",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "version",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.root",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": ".",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    }
+  ],
+  "env_gates": [],
+  "graph_hash": "sha256:964f0fc8ca5200238aeb1c657bdf187bf28c7cefdd1253415749ceb46f7739d8",
+  "graph_id": "agent_config:bb-omp.harness",
+  "merge_policy": {
+    "conflict_resolution": "highest-precedence",
+    "policy_id": "precedence_order_deep_merge",
+    "strategy": "deep-merge"
+  },
+  "migrations": [
+    {
+      "applied": true,
+      "from_version": "agent-config-yaml",
+      "migration_id": "agent-config-yaml-to-effective-config-graph-v1",
+      "to_version": "bb.effective_config_graph.v1"
+    }
+  ],
+  "schema_version": "bb.effective_config_graph.v1",
+  "source_layers": [
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:f9b22aae96deac6e7efb41a4e3a43839a947f086995b3c9d31d37e333872bd88",
+      "layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "model_visible": true,
+      "precedence": 0,
+      "scope": "agent",
+      "source_kind": "project",
+      "source_ref": "bb-omp.native/bb-omp.harness.yaml"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:0970bd0e7b01c1a1507ed7fe78f4452256aecd923985153e99970c7fb405f6ef",
+      "layer_id": "harness-resource:0000",
+      "model_visible": true,
+      "precedence": 10,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": "bb-omp.native/bb-omp.harness.yaml::prompts/identity.md"
+    }
+  ],
+  "visibility": {
+    "host_only_paths": [],
+    "model_visible_paths": [
+      "loop.sequence",
+      "modes",
+      "prompts.injection.system_order",
+      "prompts.packs.base.system",
+      "providers.default_model",
+      "providers.models",
+      "schema_version",
+      "version",
+      "workspace.root"
+    ],
+    "redacted_paths": []
+  }
+}

@@ -2,6 +2,8 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { isJsonRecord, type JsonRecord } from "../canonical-json";
 import { compileHarnessYaml, parseHarnessYaml } from "../compiler";
+import { builtinNativeHarness } from "./builtin-harnesses";
+import { HOST_MODEL, nativeHostSurfaceMode } from "./host-surface";
 import { loadNativeLock, nativeLockPathForSpec } from "./lock-loader";
 import { nativeLockValue } from "./lock-values";
 import { assembleNativePrompts } from "./prompt-assembly";
@@ -10,18 +12,30 @@ import { allNativeToolSurface, createNativeStageMachine, type NativeHarnessStage
 import type { NativeToolSurfacePack } from "./types";
 
 export interface LoadNativeHarnessOptions {
-	/** Harness spec (`bb.harness_definition.v1` YAML). Relative paths resolve against `workspaceRoot`. */
+	/**
+	 * A built-in harness id (`bb-omp.native`), or a harness spec (`bb.harness_definition.v1` YAML).
+	 * Relative spec paths resolve against `workspaceRoot`.
+	 */
 	readonly specPath: string;
 	readonly workspaceRoot: string;
 }
+
 export interface LoadedNativeHarness {
+	/** The built-in id, or the spec path relative to the workspace (`/`-separated). */
+	readonly harnessId: string;
+	/** Absolute spec path; for a built-in, its path under the package's `harnesses/` directory. */
 	readonly specPath: string;
 	readonly workspaceRoot: string;
 	readonly lock: JsonRecord;
 	readonly graphHash: string;
 	/** Path of the precompiled lock that was verified against this compilation, if one exists. */
 	readonly verifiedCachePath?: string;
-	/** The initial stage's compiled system prompt. */
+	/**
+	 * The session keeps the host's own tools, system prompt and, with `@host.model`, model selection.
+	 * The harness adds no tools; `systemPrompt` holds the blocks it appends after the host prompt.
+	 */
+	readonly hostSurface: boolean;
+	/** The initial stage's compiled system prompt; on a host surface, the blocks appended to the host prompt. */
 	readonly systemPrompt: string;
 	/** The initial stage's per-turn tool catalog. */
 	readonly perTurnPrompt: string;
@@ -31,7 +45,7 @@ export interface LoadedNativeHarness {
 	readonly stages: readonly NativeHarnessStage[];
 	/** The union registered with OMP so later stages can activate their tools. */
 	readonly registeredToolSurface: NativeToolSurfacePack;
-	/** `providers.default_model`, an OMP `provider/model` selector. */
+	/** `providers.default_model`, an OMP `provider/model` selector; absent for `@host.model`. */
 	readonly defaultModel?: string;
 	readonly permissions: { readonly mode?: string; readonly shell?: string };
 	readonly todos: { readonly enabled: boolean; readonly strict: boolean };
@@ -69,13 +83,16 @@ function promptResourceCandidates(definition: JsonRecord): Set<string> {
 	return candidates;
 }
 
+/** A prompt resource's bytes; `file` is false for a path `_load_text` cannot read as text (a directory). */
+type PromptResource = { bytes: Uint8Array; file: boolean };
+
 /**
  * What `_load_text` yields for a prompt string: `undefined` when it names no path and so stays literal text, empty
  * bytes for a path it cannot read as text (a directory), else the file. Python resolves against the working directory
  * and the config's directories; a native harness resolves only inside its spec directory, and refuses a string that
  * names an existing path outside it.
  */
-async function readResource(specDirectory: string, resource: string): Promise<{ bytes: Uint8Array; file: boolean } | undefined> {
+async function readResource(specDirectory: string, resource: string): Promise<PromptResource | undefined> {
 	const path = resolve(specDirectory, resource);
 	const info = await stat(path).catch(() => undefined);
 	if (info === undefined) return undefined;
@@ -99,64 +116,70 @@ async function exists(path: string): Promise<boolean> {
 	}
 }
 
-/**
- * Compile a harness spec into its effective lock and the session inputs it implies. A precompiled
- * lock beside the spec is only a cache: it must verify and match this compilation's `graph_hash`.
- */
-export async function loadNativeHarness(options: LoadNativeHarnessOptions): Promise<LoadedNativeHarness> {
-	const workspaceRoot = resolve(options.workspaceRoot);
-	const specPath = resolve(workspaceRoot, options.specPath);
-	if (!contained(workspaceRoot, specPath)) throw new Error(`native harness spec must be inside the workspace: ${specPath}`);
-	const source = await readFile(specPath, "utf8");
-	const sourceRef = posixRelative(workspaceRoot, specPath);
-	const specDirectory = dirname(specPath);
+interface HarnessSource {
+	readonly harnessId: string;
+	readonly specPath: string;
+	readonly workspaceRoot: string;
+	readonly source: string;
+	readonly sourceRef: string;
+	readonly readResource: (resource: string) => Promise<PromptResource | undefined>;
+	/** A precompiled lock beside a workspace spec, verified as a cache. */
+	readonly cachePath?: string;
+}
+
+async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeHarness> {
 	const promptTexts = new Map<string, Uint8Array>();
 	const resourceInputs = new Map<string, Uint8Array>();
-	for (const resource of promptResourceCandidates(parseHarnessYaml(source))) {
-		const loaded = await readResource(specDirectory, resource);
+	for (const resource of promptResourceCandidates(parseHarnessYaml(input.source))) {
+		const loaded = await input.readResource(resource);
 		if (loaded === undefined) continue;
 		promptTexts.set(resource, loaded.bytes);
-		if (loaded.file) resourceInputs.set(`${sourceRef}::${resource}`, loaded.bytes);
+		if (loaded.file) resourceInputs.set(`${input.sourceRef}::${resource}`, loaded.bytes);
 	}
-	const { lock } = compileHarnessYaml(source, { sourceRef, resourceInputs });
+	const { lock } = compileHarnessYaml(input.source, { sourceRef: input.sourceRef, resourceInputs });
 	const graphHash = lock.graph_hash;
 	if (typeof graphHash !== "string") throw new Error("native harness compilation produced no graph_hash");
 
-	const cachePath = nativeLockPathForSpec(specPath);
 	let verifiedCachePath: string | undefined;
-	if (await exists(cachePath)) {
-		const cached = await loadNativeLock(cachePath);
+	if (input.cachePath !== undefined && (await exists(input.cachePath))) {
+		const cached = await loadNativeLock(input.cachePath);
 		if (cached.graphHash !== graphHash) {
 			throw new Error(
-				`native harness lock ${cachePath} is stale: it records ${cached.graphHash}, the spec compiles to ${graphHash}`,
+				`native harness lock ${input.cachePath} is stale: it records ${cached.graphHash}, the spec compiles to ${graphHash}`,
 			);
 		}
-		verifiedCachePath = cachePath;
+		verifiedCachePath = input.cachePath;
 	}
 
-	const surfaces = await loadNativeToolSurfaces(lock);
+	const hostMode = nativeHostSurfaceMode(lock);
 	const stages: NativeHarnessStage[] = [];
-	for (const [mode, toolSurface] of surfaces) {
-		const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode);
-		stages.push(Object.freeze({ mode, systemPrompt: prompts.system, perTurnPrompt: prompts.perTurn, toolSurface }));
+	if (hostMode === undefined) {
+		for (const [mode, toolSurface] of await loadNativeToolSurfaces(lock)) {
+			const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode);
+			stages.push(Object.freeze({ mode, systemPrompt: prompts.system, perTurnPrompt: prompts.perTurn, toolSurface }));
+		}
+	} else {
+		// The host's own tools answer every turn, so there is no harness tool catalog to frame into messages.
+		const toolSurface: NativeToolSurfacePack = Object.freeze({ mode: hostMode, native: [], textInvoked: [] });
+		const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, hostMode);
+		stages.push(Object.freeze({ mode: hostMode, systemPrompt: prompts.system, perTurnPrompt: "", toolSurface }));
 	}
-	const stageMachine = createNativeStageMachine(lock, stages);
-	const initialStage = stageMachine.current;
-	const registeredToolSurface = allNativeToolSurface(stages);
+	const initialStage = createNativeStageMachine(lock, stages).current;
+	const defaultModel = stringValue(lock, "providers.default_model");
 	return Object.freeze({
-		specPath,
-		workspaceRoot,
+		harnessId: input.harnessId,
+		specPath: input.specPath,
+		workspaceRoot: input.workspaceRoot,
 		lock,
 		graphHash,
 		...(verifiedCachePath === undefined ? {} : { verifiedCachePath }),
+		hostSurface: hostMode !== undefined,
 		systemPrompt: initialStage.systemPrompt,
 		perTurnPrompt: initialStage.perTurnPrompt,
 		toolSurface: initialStage.toolSurface,
 		stages: Object.freeze(stages),
-		registeredToolSurface,
-		...(stringValue(lock, "providers.default_model") === undefined
-			? {}
-			: { defaultModel: stringValue(lock, "providers.default_model") }),
+		registeredToolSurface: allNativeToolSurface(stages),
+		...(defaultModel === undefined || defaultModel === HOST_MODEL ? {} : { defaultModel }),
 		permissions: Object.freeze({
 			mode: stringValue(lock, "permissions.options.mode"),
 			shell: stringValue(lock, "permissions.shell.default"),
@@ -165,5 +188,45 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 			enabled: nativeLockValue(lock, "features.todos.enabled") === true,
 			strict: nativeLockValue(lock, "features.todos.strict") === true,
 		}),
+	});
+}
+
+/** The package's `harnesses/` directory; built-in `source_ref`s are relative to it. */
+const BUILTIN_HARNESS_ROOT = resolve(import.meta.dir, "../../harnesses");
+
+/**
+ * Compile a harness into its effective lock and the session inputs it implies. A workspace spec may
+ * carry a precompiled lock beside it; that lock is only a cache and must match this compilation's
+ * `graph_hash`. A built-in harness compiles from the sources embedded in the product.
+ */
+export async function loadNativeHarness(options: LoadNativeHarnessOptions): Promise<LoadedNativeHarness> {
+	const workspaceRoot = resolve(options.workspaceRoot);
+	const builtin = builtinNativeHarness(options.specPath);
+	if (builtin !== undefined) {
+		const encoder = new TextEncoder();
+		return compileNativeHarness({
+			harnessId: builtin.id,
+			specPath: resolve(BUILTIN_HARNESS_ROOT, builtin.sourceRef),
+			workspaceRoot,
+			source: builtin.source,
+			sourceRef: builtin.sourceRef,
+			readResource: async resource => {
+				const text = builtin.resources.get(resource);
+				return text === undefined ? undefined : { bytes: encoder.encode(text), file: true };
+			},
+		});
+	}
+	const specPath = resolve(workspaceRoot, options.specPath);
+	if (!contained(workspaceRoot, specPath)) throw new Error(`native harness spec must be inside the workspace: ${specPath}`);
+	const specDirectory = dirname(specPath);
+	const sourceRef = posixRelative(workspaceRoot, specPath);
+	return compileNativeHarness({
+		harnessId: sourceRef,
+		specPath,
+		workspaceRoot,
+		source: await readFile(specPath, "utf8"),
+		sourceRef,
+		readResource: resource => readResource(specDirectory, resource),
+		cachePath: nativeLockPathForSpec(specPath),
 	});
 }

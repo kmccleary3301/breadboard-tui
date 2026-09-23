@@ -1,4 +1,6 @@
 export * from "./adapters";
+export * from "./builtin-harnesses";
+export * from "./host-surface";
 export * from "./load-native-harness";
 export * from "./lock-loader";
 export * from "./lock-values";

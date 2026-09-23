@@ -1,5 +1,6 @@
 import { readEngineDataFile } from "../engine-data";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
+import { HOST_SYSTEM_PROMPT } from "./host-surface";
 import { nativeLockValue } from "./lock-values";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
@@ -162,6 +163,8 @@ export async function assembleNativePrompts(
 	};
 	const resolveToken = (token: string, mode: string): string => {
 		if (token === "mode_specific") return modePrompt(mode);
+		// The host renders its own prompt in this slot; the harness contributes nothing to it.
+		if (token === HOST_SYSTEM_PROMPT) return "";
 		return token.startsWith("@pack(") ? resolvePackReference(token) : loadText(token);
 	};
 	const assemble = (order: readonly string[], mode: string, dedupe: boolean): string => {

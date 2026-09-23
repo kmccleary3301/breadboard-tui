@@ -25,6 +25,7 @@
   "files": [
     "src",
     "engine-data",
+    "harnesses",
     "README.md"
   ],
   "exports": {

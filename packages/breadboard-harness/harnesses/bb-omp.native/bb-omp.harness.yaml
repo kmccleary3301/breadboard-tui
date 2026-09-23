@@ -1,0 +1,27 @@
+# bb-omp.native: the daily-driver harness. The session keeps Oh My Pi's own tools, system prompt
+# and model selection (`@host.*` tokens, see src/native/host-surface.ts) and appends the
+# BreadBoard identity pack after the host prompt.
+schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: "@host.model"
+  models:
+    - id: "@host.model"
+      adapter: host
+prompts:
+  packs:
+    base:
+      system: prompts/identity.md
+  injection:
+    system_order:
+      - "@host.system"
+      - "@pack(base).system"
+modes:
+  - name: default
+    tools_enabled:
+      - "@host.tools"
+loop:
+  sequence:
+    - mode: default

@@ -1,4 +1,3 @@
-import { relative, sep } from "node:path";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
 import { type LoadedNativeHarness } from "./load-native-harness";
@@ -294,10 +293,18 @@ function registerFunctionTools(
 
 /**
  * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
- * transitions between continuation requests.
+ * transitions between continuation requests. On a host surface it leaves OMP's tools and turns
+ * alone and appends the harness prompt blocks after OMP's own system prompt.
  */
 export function createNativeHarnessExtension(harness: LoadedNativeHarness): ExtensionFactory {
 	return api => {
+		const transcript = { specPath: harness.harnessId, graphHash: harness.graphHash };
+		if (harness.hostSurface) {
+			registerSessionTranscriptExport(api, transcript);
+			const blocks = harness.systemPrompt ? [harness.systemPrompt] : [];
+			api.on("before_agent_start", event => ({ systemPrompt: [...event.systemPrompt, ...blocks] }));
+			return;
+		}
 		const todos = new TodoWriteState();
 		const policy = new NativeTurnPolicy(harness.registeredToolSurface);
 		const stageMachine = createNativeStageMachine(harness.lock, harness.stages);
@@ -309,10 +316,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		};
 		const guard = new CompletionGuard();
 		registerFunctionTools(api, harness, todos, guard);
-		registerSessionTranscriptExport(api, {
-			specPath: relative(harness.workspaceRoot, harness.specPath).split(sep).join("/"),
-			graphHash: harness.graphHash,
-		});
+		registerSessionTranscriptExport(api, transcript);
 		api.on("agent_start", async () => {
 			stageMachine.reset();
 			guard.beginRun();
