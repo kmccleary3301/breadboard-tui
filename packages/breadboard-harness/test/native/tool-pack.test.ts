@@ -24,7 +24,7 @@ describe("R39 tool surface", () => {
 		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: R39_WORKSPACE });
 		expect(harness.toolSurface.textInvoked.map(tool => tool.name)).toEqual(["apply_unified_patch", "TodoWrite"]);
 	});
-	test("preserves enabled order after exclusions and falls back when exclusions remove every tool", async () => {
+	test("preserves enabled order after exclusions and falls back to complete definitions", async () => {
 		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: R39_WORKSPACE });
 		const lock = JSON.parse(JSON.stringify(harness.lock)) as JsonRecord;
 		const modes = lock.effective_values;
@@ -33,11 +33,17 @@ describe("R39 tool surface", () => {
 		if (!isJsonRecord(modesEntry)) throw new Error("fixture lock has no modes entry");
 		modesEntry.value = [
 			{ name: "ordered", tools_enabled: ["run_shell", "read_file"], tools_disabled: ["read_file"] },
-			{ name: "fallback", tools_enabled: ["run_shell", "read_file"], tools_disabled: ["run_shell", "read_file"] },
+			{ name: "fallback", tools_enabled: ["run_shell"], tools_disabled: ["run_shell"] },
+			{ name: "complete", tools_enabled: [], tools_disabled: [] },
 		];
 
 		const surfaces = await loadNativeToolSurfaces(lock);
 		expect(surfaces.get("ordered")?.native.map(tool => tool.name)).toEqual(["run_shell"]);
-		expect(surfaces.get("fallback")?.native.map(tool => tool.name)).toEqual(["read_file", "run_shell"]);
+		expect(surfaces.get("fallback")?.native.map(tool => tool.name)).toEqual(
+			surfaces.get("complete")?.native.map(tool => tool.name),
+		);
+		expect(surfaces.get("fallback")?.textInvoked.map(tool => tool.name)).toEqual(
+			surfaces.get("complete")?.textInvoked.map(tool => tool.name),
+		);
 	});
 });

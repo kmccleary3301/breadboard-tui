@@ -314,6 +314,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			graphHash: harness.graphHash,
 		});
 		api.on("agent_start", async () => {
+			stageMachine.reset();
 			guard.beginRun();
 			await applyStage();
 		});
