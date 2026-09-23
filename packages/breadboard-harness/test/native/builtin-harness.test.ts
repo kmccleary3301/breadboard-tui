@@ -102,7 +102,35 @@ describe("built-in native harnesses", () => {
 					'      - "@host.system"\n      - "Appended block."\n',
 					'      - "Prepended block."\n      - "@host.system"\n',
 				),
+				/system_order\[1\] uses host token @host\.system outside the slot/,
+			],
+			[
+				"no-host-prompt",
+				HOST_SPEC.replace('      - "@host.system"\n', ""),
 				/starts prompts\.injection\.system_order with @host\.system/,
+			],
+			[
+				"host-token-in-pack",
+				HOST_SPEC.replace("prompts:\n", 'prompts:\n  packs:\n    base:\n      system: "@host.system"\n'),
+				/prompts\.packs\.base\.system uses host token @host\.system outside the slot/,
+			],
+			[
+				"host-token-per-turn",
+				HOST_SPEC.replace("  injection:\n", '  injection:\n    per_turn_order:\n      - "@host.system"\n'),
+				/per_turn_order\[0\] uses host token @host\.system outside the slot/,
+			],
+			[
+				"per-turn-block",
+				HOST_SPEC.replace("  injection:\n", '  injection:\n    per_turn_order:\n      - "Turn block."\n'),
+				/no per-turn prompt/,
+			],
+			[
+				"host-tools-disabled",
+				HOST_SPEC.replace(
+					"modes:\n  - name: default\n",
+					'modes:\n  - name: default\n    tools_disabled:\n      - "@host.tools"\n',
+				),
+				/tools_disabled\[0\] uses host token @host\.tools outside the slot/,
 			],
 			[
 				"second-mode",
