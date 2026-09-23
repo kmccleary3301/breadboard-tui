@@ -43,6 +43,7 @@ import { type Settings as SettingsCapabilityItem, settingsCapability } from "../
 import type { ModelRole } from "../config/model-roles";
 import { loadCapability } from "../discovery";
 
+import { migrateNativeProfile, writeNativeProfileMigrationReceipt } from "../breadboard/product-settings";
 import { AgentStorage } from "../session/agent-storage";
 import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
 import MODEL_PRIO from "../priority.json" with { type: "json" };
@@ -1496,7 +1497,6 @@ export class Settings {
 
 		this.#project = projectResult.value;
 		this.#configOverlay = await this.#loadConfigOverlays();
-
 		// Build merged view (global → project → overrides; project wins over global)
 		this.#rebuildMerged();
 		this.#fireAllHooks();
@@ -1512,9 +1512,9 @@ export class Settings {
 			await this.#migrateFromLegacy();
 			this.#global = await this.#loadYaml(this.#configPath!);
 		}
-		if (this.#nativeProfileMigrationRequested && this.#migrateR39Profile(this.#global) && this.#configPath) {
+		if (this.#nativeProfileMigrationRequested && this.#configPath && migrateNativeProfile(this.#global)) {
 			await this.#writeYamlAtomically(this.#configPath, this.#global);
-			await this.#writeNativeProfileMigrationReceipt();
+			await writeNativeProfileMigrationReceipt();
 		}
 		await this.#seedLastChangelogVersionMarker();
 	}
@@ -2110,50 +2110,7 @@ export class Settings {
 		}
 	}
 
-	async #writeNativeProfileMigrationReceipt(): Promise<void> {
-		const receiptPath = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
-		if (!receiptPath) return;
-		const temporaryPath = `${receiptPath}.${process.pid}.${randomUUID()}.tmp`;
-		await fs.promises.mkdir(path.dirname(receiptPath), { recursive: true });
-		try {
-			await fs.promises.writeFile(
-				temporaryPath,
-				`${JSON.stringify({ schema: "bb.native_profile_migration.receipt.v1" })}\n`,
-				{ mode: 0o600 },
-			);
-			await replaceFileAtomically(temporaryPath, receiptPath);
-		} finally {
-			await fs.promises.unlink(temporaryPath).catch(() => {});
-		}
-	}
-
-	/** Apply or recognize the one-shot R39-to-native rewrite to the global profile only. */
-	#migrateR39Profile(raw: RawSettings): boolean {
-		if (process.env.BREADBOARD_PRODUCT !== "1" || !isRecord(raw.breadboard)) return false;
-		const breadboard = raw.breadboard;
-		const harness = isRecord(breadboard.harness) ? breadboard.harness : undefined;
-		const defaultHarness = harness?.default;
-		const legacyKeys = [
-			"engineMode",
-			"baseUrl",
-			"auth",
-			"tls",
-			"engineArtifact",
-			"ownerExitPolicy",
-			"sessionConfigPath",
-		];
-		const isNativeProfile =
-			defaultHarness === "daily_driver" && !legacyKeys.some((key) => key in breadboard);
-		if (isNativeProfile) return true;
-		const isR39Harness = typeof defaultHarness === "string" && /(?:^|[/\\])r39(?:[/\\])/.test(defaultHarness);
-		if (harness === undefined || !isR39Harness || breadboard.engineMode !== "local-owned") return false;
-		for (const key of legacyKeys) {
-			delete breadboard[key];
-		}
-		harness.default = "daily_driver";
-		return true;
-	}
-	/** Apply schema migrations to raw settings. */
+	/** Apply schema migrations to raw settings */
 	#migrateRawSettings(raw: RawSettings, captureLegacyChangelogVersion = true): RawSettings {
 		// queueMode -> steeringMode
 		if ("queueMode" in raw && !("steeringMode" in raw)) {
