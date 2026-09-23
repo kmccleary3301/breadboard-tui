@@ -127,7 +127,7 @@ function createSettingsSelectField(
 export class BreadboardCustomizeSubmenu extends Container {
 	#selectList!: SelectList;
 	#selectListLineOffset = 0;
-	#editor: SelectSubmenu | null = null;
+	#editor: SelectFormField | null = null;
 	#draft: BreadboardFieldSettings;
 	readonly #original: BreadboardFieldSettings;
 
@@ -163,7 +163,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 			...presets.filter(option => !isBreadboardPreset(option.value)),
 		];
 		this.clear();
-		this.#editor = new SelectSubmenu(
+		this.#editor = createSettingsSelectField(
 			"Information layout",
 			"Choose a preset or customize individual fields.",
 			choices,
@@ -175,15 +175,16 @@ export class BreadboardCustomizeSubmenu extends Container {
 					return;
 				}
 				const choice = presets.find(option => option.value === value);
-				if (choice) onSelect(choice.value);
+				if (choice) onSelect(choice.value as StatusLinePreset);
 			},
 			onCancel,
 			value => {
 				const choice = presets.find(option => option.value === value);
-				onPreview(choice?.value ?? current);
+				onPreview((choice?.value ?? current) as StatusLinePreset);
 			},
 			undefined,
 			this.preview,
+			this.requestRender,
 		);
 		this.addChild(this.#editor);
 		this.requestRender?.();
@@ -272,7 +273,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 		const definition = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
 		if (!definition) return;
 		this.clear();
-		this.#editor = new SelectSubmenu(
+		this.#editor = createSettingsSelectField(
 			definition.label,
 			"Choose Preset to follow the selected layout, or pin this field independently.",
 			definition.options.map(option => ({
@@ -299,6 +300,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 			},
 			undefined,
 			this.preview,
+			this.requestRender,
 		);
 		this.addChild(this.#editor);
 		this.requestRender?.();
@@ -813,7 +815,7 @@ export class SettingsSelectorComponent implements Component {
 		this.#context.harness = harness;
 		if (this.#context.breadboard) this.#context.breadboard = { ...this.#context.breadboard, harness };
 		if (this.#currentTabId === "breadboard") {
-			this.#refreshCurrentTabItems(getSettingsForTab("breadboard"));
+			this.#refreshCurrentTabItems(getSettingsForTab(this.#context.settings.entries, "breadboard"));
 		}
 		this.invalidate();
 	}
@@ -1282,10 +1284,10 @@ export class SettingsSelectorComponent implements Component {
 		done: (value?: string) => void,
 	): Component {
 		if (def.path === "statusLine.preset" && this.#context.breadboard?.enabled === true) {
-			const original = this.#context.settings.get("statusLine.breadboard");
-			const originalPreset = this.#context.settings.get("statusLine.preset");
+			const original = this.#context.settings.get("statusLine.breadboard") as BreadboardFieldSettings;
+			const originalPreset = this.#context.settings.get("statusLine.preset") as StatusLinePreset;
 			const preset = isBreadboardPreset(originalPreset) ? originalPreset : "bb-balanced";
-			const preview = new ComposerShapePreview(this.#context.settings.get("composer.shape"), {
+			const preview = new ComposerShapePreview(String(this.#context.settings.get("composer.shape")), {
 				requestRender: this.#context.requestRender,
 				status: this.#context.composerPreviewStatus,
 			});
@@ -1310,11 +1312,12 @@ export class SettingsSelectorComponent implements Component {
 			customizer.showPresets(
 				originalPreset,
 				value => {
-					this.#context.settings.set("statusLine.preset", value);
-					this.#callbacks.onChange("statusLine.preset", value);
-					done(value);
+					const selectedPreset = value as StatusLinePreset;
+					this.#context.settings.set("statusLine.preset", selectedPreset);
+					this.#callbacks.onChange("statusLine.preset", selectedPreset);
+					done(selectedPreset);
 				},
-				value => this.#callbacks.onStatusLinePreview?.({ preset: value, breadboard: original }),
+				value => this.#callbacks.onStatusLinePreview?.({ preset: value as StatusLinePreset, breadboard: original }),
 				cancel,
 				def.options,
 			);

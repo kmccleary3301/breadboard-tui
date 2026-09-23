@@ -391,6 +391,7 @@ export class ModelHubComponent implements Component {
 		// its nearest survivor — stays put after #buildSidebar reshuffles entries.
 		const anchor = this.#captureSidebarAnchor();
 		let allModels: ReadonlyArray<Model>;
+		let availableModels: ReadonlyArray<Model>;
 		if (this.#usesScopedCatalog()) {
 			allModels = this.#scopedModels.map(scoped => scoped.model);
 			availableModels = allModels;
@@ -948,6 +949,10 @@ export class ModelHubComponent implements Component {
 			} else {
 				this.#commitFallback(item, target);
 			}
+			return;
+		}
+		if (this.#mainStreamOwnsTurnLifecycle) {
+			void this.#callbacks.onSelectModel?.(item.model, item.selector);
 			return;
 		}
 		this.#openRoleStrip(item);

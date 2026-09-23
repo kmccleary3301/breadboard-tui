@@ -7,6 +7,7 @@ import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
 import { Ellipsis, padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
 
+import { ScrollView } from "./scroll-view";
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
@@ -175,6 +176,7 @@ export class SelectList implements Component, MouseRoutable {
 		private readonly theme: SelectListTheme,
 		private readonly layout: SelectListLayoutOptions = {},
 	) {
+		this.#itemSnapshot = [...items];
 		this.#maxVisible = Math.max(1, Math.trunc(maxVisible));
 		this.#selection = new MenuSelection(items, {
 			getKey: item => item.value,
@@ -270,10 +272,10 @@ export class SelectList implements Component, MouseRoutable {
 	 * Returns quickly for stable provider-owned item arrays.
 	 */
 	refreshItems(): void {
-		let membershipChanged = this.#itemSnapshot.length !== this.items.length;
+		let membershipChanged = this.#itemSnapshot.length !== this.#selection.items.length;
 		if (!membershipChanged) {
-			for (let i = 0; i < this.items.length; i++) {
-				if (this.#itemSnapshot[i] !== this.items[i]) {
+			for (let i = 0; i < this.#selection.items.length; i++) {
+				if (this.#itemSnapshot[i] !== this.#selection.items[i]) {
 					membershipChanged = true;
 					break;
 				}
@@ -281,12 +283,12 @@ export class SelectList implements Component, MouseRoutable {
 		}
 		if (membershipChanged) {
 			this.invalidate();
-			this.#itemSnapshot.length = this.items.length;
-			for (let i = 0; i < this.items.length; i++) this.#itemSnapshot[i] = this.items[i]!;
+			this.#itemSnapshot.length = this.#selection.items.length;
+			for (let i = 0; i < this.#selection.items.length; i++) this.#itemSnapshot[i] = this.#selection.items[i]!;
 		}
 
 		let changed = membershipChanged;
-		for (const item of this.items) {
+		for (const item of this.#selection.items) {
 			const hadDisplayValue = this.#displayValues.has(item);
 			const previousDisplayValue = this.#displayValues.get(item);
 			const displayValue = this.#getDisplayValue(item);
@@ -600,7 +602,36 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	#getDisplayValue(item: SelectItem): string {
-		return this.#sanitizedLabel(item);
+		const source = item.label || item.value;
+		if (this.#displaySources.get(item) === source && this.#displayValues.has(item)) {
+			return this.#displayValues.get(item)!;
+		}
+		const value = sanitizeSingleLine(source);
+		this.#displaySources.set(item, source);
+		this.#displayValues.set(item, value);
+		return value;
+	}
+
+	#getDescription(item: SelectItem): string | undefined {
+		const source = item.description;
+		if (this.#descriptionSources.get(item) === source && this.#descriptions.has(item)) {
+			return this.#descriptions.get(item);
+		}
+		const description = source ? sanitizeSingleLine(source) : undefined;
+		this.#descriptionSources.set(item, source);
+		this.#descriptions.set(item, description);
+		return description;
+	}
+
+	#getIconWidth(item: SelectItem): number {
+		const source = item.icon;
+		if (this.#iconSources.get(item) === source && this.#iconWidths.has(item)) {
+			return this.#iconWidths.get(item)!;
+		}
+		const width = source ? visibleWidth(source) : 0;
+		this.#iconSources.set(item, source);
+		this.#iconWidths.set(item, width);
+		return width;
 	}
 
 	#sanitizedLabel(item: SelectItem): string {
