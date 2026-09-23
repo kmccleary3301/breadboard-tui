@@ -2,6 +2,7 @@ import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
 import { RESEARCH_NATIVE_BINDINGS } from "./research-bindings";
 import { type LoadedNativeHarness } from "./load-native-harness";
+import { nativeLockValue } from "./lock-values";
 import { frameNativeUserContent } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
@@ -294,6 +295,19 @@ function registerFunctionTools(
 	}
 }
 
+function developerRolePayload(payload: unknown): unknown {
+	if (!isJsonRecord(payload as never)) return payload;
+	const record = payload as JsonRecord;
+	if (!Array.isArray(record.input)) return payload;
+	const input = (record.input as unknown[]).map((item: unknown) => {
+		if (!isJsonRecord(item as never)) return item;
+		const itemRecord = item as JsonRecord;
+		if (itemRecord.role !== "developer" || typeof itemRecord.content !== "string") return item;
+		return { ...itemRecord, content: [{ type: "input_text", text: itemRecord.content }] };
+	});
+	return { ...record, input };
+}
+
 /**
  * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
  * transitions between continuation requests. On a host surface it leaves OMP's tools and turns
@@ -316,6 +330,10 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				graph_hash: current.graphHash,
 			});
 		};
+		api.on("before_provider_request", event => {
+			if (nativeLockValue(activeHarness.lock, "provider_tools.responses_use_developer_role") !== true) return undefined;
+			return developerRolePayload(event.payload);
+		});
 		const applyStage = async (): Promise<void> => {
 			const stage = stageMachine.current;
 			promptOverride.splice(0, promptOverride.length, stage.systemPrompt);
