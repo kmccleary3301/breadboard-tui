@@ -42,6 +42,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 			"model",
 			"mode",
 			"collab",
+			"stream",
 			"harness",
 			"longrun",
 			"path",

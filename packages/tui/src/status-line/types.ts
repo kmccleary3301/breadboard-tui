@@ -1,16 +1,9 @@
-import type { HarnessSnapshot } from "../../../breadboard/harness-port";
-import type { CollabSessionState } from "../../../collab/protocol";
-import type {
-	ContextLineMode,
-	StatusLinePreset,
-	StatusLineSegmentId,
-	StatusLineSeparatorStyle,
-} from "../../../config/settings-schema";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { SessionState } from "@oh-my-pi/pi-wire";
+import type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "./schema";
 import type { BreadboardFieldSettings } from "./breadboard-fields";
-import type { AgentSession } from "../../../session/agent-session";
-import type { ActiveRepoContext } from "../../../utils/active-repo-context";
-import type { LoopConditionConfig } from "../../loop-condition";
-import type { LoopLimitRuntime } from "../../loop-limit";
+import type { ActiveRepoContext, StatusLineSession } from "./host";
+import type { LoopConditionConfig, LoopLimitRuntime } from "./loop";
 
 export type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle };
 
@@ -18,6 +11,39 @@ export interface BreadboardComposerActivity {
 	readonly kind: "working" | "tool" | "approval" | "cancelling" | "error";
 	readonly label: string;
 }
+
+export interface HarnessSnapshot {
+	readonly harnessId: string;
+	readonly name: string;
+	readonly lockHash: string | null;
+	readonly verifiedIdentity?: { readonly harnessId: string; readonly lockHash: string } | null;
+	readonly generation: string | null;
+	readonly mode: string | null;
+	readonly lock: Readonly<Record<string, unknown>> | null;
+	readonly provenance: Readonly<Record<string, { readonly source: string; readonly line: number | null }>>;
+	readonly loadedAt: number;
+}
+
+/** Context-window occupancy shown by the status line and exposed to extensions. */
+export interface ContextUsage {
+	/** Estimated context tokens. */
+	tokens: number;
+	contextWindow: number;
+	/** Context usage as percentage of context window. */
+	percent: number;
+}
+
+/** Debounced footer snapshot a collab host broadcasts to guests. */
+export type CollabSessionState = SessionState & {
+	/**
+	 * Host model (full catalog object). Guests apply it to their replica
+	 * agent state so model display and context-window math are native.
+	 */
+	model?: Model;
+	/** Host status-line context numbers (guest system prompt/tools differ, so local estimates drift). */
+	contextUsage?: ContextUsage;
+};
+
 /** Collab session indicator + (guest-only) host-state override for segments. */
 export interface CollabStatus {
 	role: "host" | "guest";
@@ -54,7 +80,7 @@ export interface StatusLineSettings {
 	 *  gauge as percentage and window labels. Box composer only. */
 	contextLine?: ContextLineMode;
 	/** Per-field BreadBoard information choices; omitted means canonical defaults. */
-	breadboard?: BreadboardFieldSettings;
+	breadboard?: Partial<BreadboardFieldSettings>;
 }
 
 export type EffectiveStatusLineSettings = Required<
@@ -80,17 +106,17 @@ export interface SegmentContext {
 	sessionAccent?: boolean;
 	/** Stand-in session title for previews; `session_name` renders it when the session is unnamed. */
 	previewTitle?: string;
-	/** Active product mark for the stable `pi` segment id. */
-	identityMark?: string;
 	/** Replace dynamic values with ellipses while preserving each segment's icon, color, and static text. */
 	startupPlaceholder?: boolean;
+	activeRepo: ActiveRepoContext | null;
+	width: number;
+	/** Active product mark for the stable `pi` segment id. */
+	identityMark?: string;
 	/** Active BreadBoard harness identity, when this session is running on BreadBoard. */
 	harness?: HarnessSnapshot | null;
 	/** Engine-owned turns must not expose native reasoning, billing, or compaction state. */
 	breadboardOwned?: boolean;
 	breadboardActivity?: BreadboardComposerActivity | null;
-	activeRepo: ActiveRepoContext | null;
-	width: number;
 	options: StatusLineSegmentOptions;
 	/** Render the model segment's thinking level as a compact leading glyph. */
 	compactThinkingLevel: boolean;
@@ -201,6 +227,7 @@ export interface SegmentContext {
 			unavailableReason?: string;
 		};
 	} | null;
+	longRun?: { totalCostUsd?: number; totalTokens?: number } | null;
 }
 
 export interface RenderedSegment {

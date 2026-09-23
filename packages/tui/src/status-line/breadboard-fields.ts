@@ -1,4 +1,4 @@
-import type { StatusLinePreset } from "../../../config/settings-schema";
+import type { StatusLinePreset } from "./schema";
 
 export const BREADBOARD_FIELD_KEYS = [
 	"folder",
