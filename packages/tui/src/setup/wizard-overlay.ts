@@ -1,28 +1,14 @@
-import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import {
-	type Component,
-	matchesKey,
-	type OverlayFocusOwner,
-	padding,
-	routeSgrMouseInput,
-	type SgrMouseEvent,
-	truncateToWidth,
-	visibleWidth,
-} from "@oh-my-pi/pi-tui";
-import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
-import type { ProductAppearance, ProductIdentity } from "../../product-identity";
-import { isReducedMotionEnabled } from "../../utils/reduced-motion";
-import { gradientLogo } from "../components/welcome";
+import { type Component, type OverlayFocusOwner } from "../tui";
+import { matchesKey } from "../keys";
+import { centerLine, padding } from "../utils";
+import { padToWidth } from "../render/utils";
+import { routeSgrMouseInput, type SgrMouseEvent } from "../mouse";
+import { DEFAULT_PRODUCT_IDENTITY, gradientLogo } from "../prompt/welcome";
 import { theme } from "../theme/theme";
+import type { SetupHost } from "./scenes/types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
-import type {
-	SetupScene,
-	SetupSceneController,
-	SetupSceneHost,
-	SetupSceneResult,
-	SetupWizardContext,
-} from "./scenes/types";
+import type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
 
 type WizardPhase = "splash" | "transition" | "scene" | "outro" | "done";
 
@@ -31,29 +17,6 @@ const MIN_CONTENT_WIDTH = 20;
 /** Cross-dissolve duration from the splash into the first scene. */
 const SCENE_TRANSITION_MS = 420;
 
-export interface SetupWizardComponentOptions {
-	readonly identity: ProductIdentity;
-	readonly providerAuthPort?: ProviderAuthPort;
-	readonly nativeAuthStorage?: AuthStorage;
-	readonly now?: () => number;
-	readonly reduceMotion?: boolean;
-}
-
-function currentAppearance(): ProductAppearance {
-	return theme.isLight ? "light" : "dark";
-}
-
-function centerLine(line: string, width: number): string {
-	const lineWidth = visibleWidth(line);
-	if (lineWidth >= width) return truncateToWidth(line, width);
-	const left = Math.floor((width - lineWidth) / 2);
-	return padding(left) + line + padding(width - left - lineWidth);
-}
-
-function clampLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
-}
 function indentLine(line: string, width: number, indent: number): string {
 	const prefix = padding(Math.min(indent, Math.max(0, width - 1)));
 	return width > 0 ? padToWidth(prefix + line, width) : "";
@@ -84,7 +47,7 @@ function dissolveFrames(from: string[], to: string[], progress: number, height: 
 /** Fullscreen onboarding presentation with scene focus and mouse routing. */
 export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	#phase: WizardPhase = "splash";
-	#phaseStartedAt: number;
+	#phaseStartedAt = performance.now();
 	#sceneIndex = 0;
 	#activeScene: SetupSceneController | undefined;
 	#timer: NodeJS.Timeout | undefined;
@@ -93,41 +56,17 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	/** Screen row where the active scene's body began in the last rendered frame. */
 	#bodyRowStart = 0;
 	#sceneFocusTarget: Component | undefined;
-	readonly #now: () => number;
 
 	constructor(
-		readonly ctx: SetupWizardContext,
+		readonly ctx: SetupHost,
 		readonly scenes: readonly SetupScene[],
-		private readonly options: SetupWizardComponentOptions,
-	) {
-		this.#now = options.now ?? (() => performance.now());
-		this.#phaseStartedAt = this.#now();
-	}
+	) {}
 
 	run(): Promise<void> {
-		if (this.scenes.length === 0) {
-			this.#phase = "outro";
-			this.#phaseStartedAt = this.#now();
-			if (isReducedMotionEnabled(this.options.reduceMotion)) {
-				this.#complete();
-			} else {
-				this.#startTimer();
-			}
-			this.ctx.ui.requestRender();
-			return this.#done.promise;
-		}
-		if (
-			isReducedMotionEnabled(this.options.reduceMotion) ||
-			this.ctx.ui.terminal.columns < 56 ||
-			this.ctx.ui.terminal.rows < 18
-		) {
-			this.#mountSceneController("scene");
-		} else {
-			this.#phase = "splash";
-			this.#phaseStartedAt = this.#now();
-			this.#startTimer();
-			this.ctx.ui.requestRender();
-		}
+		this.#phase = this.scenes.length === 0 ? "outro" : "splash";
+		this.#phaseStartedAt = performance.now();
+		this.#startTimer();
+		this.ctx.ui.requestRender();
 		return this.#done.promise;
 	}
 
@@ -214,32 +153,19 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	render(width: number): readonly string[] {
 		const safeWidth = Math.max(1, width);
 		const height = Math.max(1, this.ctx.ui.terminal.rows);
-		const appearance = currentAppearance();
+		const identity = this.ctx.identity ?? DEFAULT_PRODUCT_IDENTITY;
+		const appearance = theme.isLight ? "light" : "dark";
 		const mode = theme.getColorMode();
 		let lines: string[];
 		switch (this.#phase) {
 			case "splash":
-				lines = renderSetupSplash(
-					safeWidth,
-					height,
-					this.#now() - this.#phaseStartedAt,
-					this.options.identity,
-					appearance,
-					mode,
-				);
+				lines = renderSetupSplash(safeWidth, height, performance.now() - this.#phaseStartedAt, identity, appearance, mode);
 				break;
 			case "transition": {
-				const elapsed = this.#now() - this.#phaseStartedAt;
+				const elapsed = performance.now() - this.#phaseStartedAt;
 				const progress = Math.min(1, elapsed / SCENE_TRANSITION_MS);
-				const splash = renderSetupSplash(
-					safeWidth,
-					height,
-					SETUP_SPLASH_MS + elapsed,
-					this.options.identity,
-					appearance,
-					mode,
-				);
-				const scene = this.#renderScene(safeWidth, height, appearance);
+				const splash = renderSetupSplash(safeWidth, height, SETUP_SPLASH_MS + elapsed, identity, appearance, mode);
+				const scene = this.#renderScene(safeWidth, height, identity, appearance, mode);
 				lines = dissolveFrames(splash, scene, progress, height);
 				break;
 			}
@@ -247,14 +173,14 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 				lines = renderSetupOutro(
 					safeWidth,
 					height,
-					this.#now() - this.#phaseStartedAt,
-					this.options.identity,
+					performance.now() - this.#phaseStartedAt,
+					identity,
 					appearance,
 					mode,
 				);
 				break;
 			case "scene":
-				lines = this.#renderScene(safeWidth, height, appearance);
+				lines = this.#renderScene(safeWidth, height, identity, appearance, mode);
 				break;
 			case "done":
 				lines = [];
@@ -263,23 +189,22 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		return this.#fitToScreen(lines, safeWidth, height);
 	}
 
-	#renderScene(width: number, height: number, appearance: ProductAppearance): string[] {
+	#renderScene(
+		width: number,
+		height: number,
+		identity: NonNullable<SetupHost["identity"]>,
+		appearance: "dark" | "light",
+		mode: Parameters<typeof renderSetupSplash>[5],
+	): string[] {
 		const scene = this.scenes[this.#sceneIndex];
 		const title = this.#activeScene?.title ?? scene?.title ?? "Setup";
 		const subtitle = this.#activeScene?.subtitle;
 		const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - SCENE_MARGIN_X * 2);
-		const identity = this.options.identity;
-		const logo = gradientLogo(
-			identity.logoArt,
-			0,
-			undefined,
-			identity.gradientPalettes[appearance],
-			theme.getColorMode(),
-		);
+		const logo = gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes[appearance], mode);
 		const header = [
 			"",
 			...logo.map(line => centerLine(line, width)),
-			centerLine(theme.bold(theme.fg("accent", identity.welcomeTitle)), width),
+			centerLine(theme.bold(theme.fg("accent", identity.displayName)), width),
 			centerLine(theme.fg("muted", `Setup step ${this.#sceneIndex + 1} of ${this.scenes.length}`), width),
 			"",
 			indentLine(theme.bold(title), width, SCENE_MARGIN_X),
@@ -316,12 +241,12 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		if (this.#timer) return;
 		this.#timer = setInterval(() => {
 			if (this.#disposed) return;
-			const elapsed = this.#now() - this.#phaseStartedAt;
+			const elapsed = performance.now() - this.#phaseStartedAt;
 			if (this.#phase === "splash" && elapsed >= SETUP_SPLASH_MS) {
 				this.#beginScene();
 			} else if (this.#phase === "transition" && elapsed >= SCENE_TRANSITION_MS) {
 				this.#phase = "scene";
-				this.#phaseStartedAt = this.#now();
+				this.#phaseStartedAt = performance.now();
 				this.ctx.ui.requestRender();
 			} else if (this.#phase === "outro" && elapsed >= SETUP_OUTRO_MS) {
 				this.#complete();
@@ -347,9 +272,6 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		const scene = this.scenes[this.#sceneIndex];
 		const host: SetupSceneHost = {
 			ctx: this.ctx,
-			identity: this.options.identity,
-			providerAuthPort: this.options.providerAuthPort,
-			nativeAuthStorage: this.options.nativeAuthStorage,
 			requestRender: () => this.ctx.ui.requestRender(),
 			finish: (_result: SetupSceneResult) => this.#finishScene(),
 			setFocus: component => {
@@ -363,7 +285,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		};
 		this.#activeScene = scene.mount(host);
 		this.#phase = targetPhase;
-		this.#phaseStartedAt = this.#now();
+		this.#phaseStartedAt = performance.now();
 		this.#sceneFocusTarget = undefined;
 		this.ctx.ui.setFocus(this);
 		void this.#activeScene.onMount?.();
@@ -372,7 +294,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 
 	/** Enter the first scene through a dissolve from the splash. */
 	#beginScene(): void {
-		this.#mountSceneController(isReducedMotionEnabled(this.options.reduceMotion) ? "scene" : "transition");
+		this.#mountSceneController("transition");
 	}
 
 	#mountCurrentScene(): void {
@@ -397,13 +319,9 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		if (this.#phase === "done") return;
 		this.#unmountActiveScene();
 		this.#phase = "outro";
-		this.#phaseStartedAt = this.#now();
+		this.#phaseStartedAt = performance.now();
 		this.ctx.ui.setFocus(this);
-		if (isReducedMotionEnabled(this.options.reduceMotion)) {
-			this.#complete();
-		} else {
-			this.#startTimer();
-		}
+		this.#startTimer();
 		this.ctx.ui.requestRender();
 	}
 

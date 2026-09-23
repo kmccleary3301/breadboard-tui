@@ -2,11 +2,21 @@ import { basename } from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent, visibleWidth } from "@oh-my-pi/pi-tui";
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
-import { SETTINGS_SCHEMA, type StatusLinePreset } from "../../../config/settings-schema";
+type StatusLinePreset =
+	| "bb-balanced"
+	| "bb-quiet"
+	| "bb-detailed"
+	| "default"
+	| "minimal"
+	| "compact"
+	| "full"
+	| "nerd"
+	| "ascii"
+	| "custom";
+import type { ComposerShape } from "../../overlays/composer-shape-registry";
 import { BreadboardCustomizeSubmenu } from "../../overlays/settings-selector";
 import { renderComposerShapePreview, type ComposerPreviewStatusSource } from "../../overlays/composer-shape-preview";
 import {
-	isBreadboardPreset,
 	renderBreadboardStatusLine,
 	renderBreadboardStatusRows,
 	type BreadboardStatusSnapshot,
@@ -16,8 +26,22 @@ import type { BreadboardFieldSettings } from "../../status-line/breadboard-field
 import { getSelectListTheme, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
-export const PRESENTATION_PRESETS = SETTINGS_SCHEMA["statusLine.preset"].ui.options;
-const BREADBOARD_PRESETS = PRESENTATION_PRESETS.filter(choice => isBreadboardPreset(choice.value));
+export const PRESENTATION_PRESETS: readonly SelectItem[] = [
+	{ value: "bb-balanced", label: "BreadBoard Balanced", description: "Folder, session, model, compact context and available spend" },
+	{ value: "bb-quiet", label: "BreadBoard Quiet", description: "Folder and model, with activity and context pressure when needed" },
+	{ value: "bb-detailed", label: "BreadBoard Detailed", description: "Identity, harness, token counts, available spend and timing" },
+	{ value: "default", label: "Default", description: "Model, path, git, context, tokens, cost" },
+	{ value: "minimal", label: "Minimal", description: "Path and git only" },
+	{ value: "compact", label: "Compact", description: "Model, git, cost, context" },
+	{ value: "full", label: "Full", description: "All segments including time" },
+	{ value: "nerd", label: "Nerd", description: "Maximum info with Nerd Font icons" },
+	{ value: "ascii", label: "ASCII", description: "No special characters" },
+	{ value: "custom", label: "Custom", description: "User-defined segments" },
+];
+function isBreadboardPreset(value: string | undefined): value is StatusLinePreset {
+	return value === "bb-balanced" || value === "bb-quiet" || value === "bb-detailed";
+}
+const BREADBOARD_PRESETS = PRESENTATION_PRESETS.filter(choice => choice.value.startsWith("bb-"));
 const PREVIEW_ACTIVITIES: readonly (BreadboardComposerActivity | null)[] = [
 	null,
 	{ kind: "tool", label: "Running tests" },
@@ -99,8 +123,8 @@ class InformationLayoutSceneController implements SetupSceneController {
 
 	constructor(private readonly host: SetupSceneHost) {
 		this.#snapshot = previewSnapshot(host);
-		this.#currentPreset = host.ctx.settings.get("statusLine.preset");
-		this.#previewFields = host.ctx.settings.get("statusLine.breadboard");
+		this.#currentPreset = host.ctx.settings.get<StatusLinePreset>("statusLine.preset");
+		this.#previewFields = host.ctx.settings.get<BreadboardFieldSettings>("statusLine.breadboard");
 		this.#selectList = new SelectList(PRESENTATION_ITEMS, 5, getSelectListTheme());
 		this.#selectList.setSelectedIndex(
 			Math.max(
@@ -111,18 +135,18 @@ class InformationLayoutSceneController implements SetupSceneController {
 		this.#selectList.onSelectionChange = item => {
 			const choice = PRESENTATION_PRESETS.find(candidate => candidate.value === item.value);
 			if (!choice) return;
-			this.#currentPreset = choice.value;
+			this.#currentPreset = choice.value as StatusLinePreset;
 			this.host.requestRender();
 		};
 		this.#selectList.onSelect = item => {
 			if (item.value === "__customize") {
-				const saved = this.host.ctx.settings.get("statusLine.preset");
+				const saved = this.host.ctx.settings.get<StatusLinePreset>("statusLine.preset");
 				this.#currentPreset = isBreadboardPreset(saved) ? saved : "bb-balanced";
 				this.#openCustomizer();
 				return;
 			}
 			const choice = PRESENTATION_PRESETS.find(candidate => candidate.value === item.value);
-			if (choice) void this.#commit(choice.value);
+			if (choice) void this.#commit(choice.value as StatusLinePreset);
 		};
 		this.#selectList.onCancel = () => this.host.finish("skipped");
 	}
@@ -157,7 +181,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 			lines.push(theme.fg("dim", "Sample preview · Space switches idle / working / approval"), "");
 			lines.push(
 				...renderComposerShapePreview(
-					this.host.ctx.settings.get("composer.shape") ?? "box",
+					this.host.ctx.settings.get<ComposerShape>("composer.shape") ?? "box",
 					width,
 					createBreadboardPreviewStatusSource(snapshot, this.#currentPreset, this.#previewFields),
 				),
@@ -173,7 +197,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 			lines.push(theme.fg("dim", "Sample preview · Space switches idle / working / approval"), "");
 			lines.push(
 				...renderComposerShapePreview(
-					this.host.ctx.settings.get("composer.shape") ?? "box",
+					this.host.ctx.settings.get<ComposerShape>("composer.shape") ?? "box",
 					width,
 					createBreadboardPreviewStatusSource(snapshot, this.#currentPreset, this.#previewFields),
 				),
@@ -187,11 +211,11 @@ class InformationLayoutSceneController implements SetupSceneController {
 		return lines;
 	}
 	#openCustomizer(): void {
-		this.#previewFields = this.host.ctx.settings.get("statusLine.breadboard");
+		this.#previewFields = this.host.ctx.settings.get<BreadboardFieldSettings>("statusLine.breadboard");
 		const original = this.#previewFields;
 		this.#customizer = new BreadboardCustomizeSubmenu(
 			original,
-			this.#currentPreset,
+			this.#currentPreset as ConstructorParameters<typeof BreadboardCustomizeSubmenu>[1],
 			fields => {
 				this.#previewFields = fields;
 				this.host.requestRender();
@@ -211,8 +235,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 		this.#committing = true;
 		this.host.ctx.settings.set("statusLine.preset", this.#currentPreset);
 		this.host.ctx.settings.set("statusLine.breadboard", fields);
-		await this.host.ctx.settings.flush();
-		this.host.ctx.statusLine?.updateSettings({
+		this.host.ctx.statusLine?.updateSettings?.({
 			...this.host.ctx.settings.getGroup("statusLine"),
 			breadboard: fields,
 		});
@@ -223,8 +246,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 		if (this.#committing) return;
 		this.#committing = true;
 		this.host.ctx.settings.set("statusLine.preset", preset);
-		await this.host.ctx.settings.flush();
-		this.host.ctx.statusLine?.updateSettings(this.host.ctx.settings.getGroup("statusLine"));
+		this.host.ctx.statusLine?.updateSettings?.(this.host.ctx.settings.getGroup("statusLine"));
 		this.host.finish("done");
 	}
 }

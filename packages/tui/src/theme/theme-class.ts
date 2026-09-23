@@ -1,7 +1,6 @@
 import { colorLuma, relativeLuminance } from "@oh-my-pi/pi-utils/color";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import { Chalk, type ChalkInstance, type ColorLevel } from "@oh-my-pi/pi-utils/chalk";
-import type { SessionAccentTheme } from "../../utils/session-color";
 import { bgAnsi, colorToAnsi, fgAnsi, resolveToHex } from "./color";
 import { type ColorMode, isValidThemeColor, type ThemeBg, type ThemeColor } from "./schema";
 import type { SessionAccentTheme } from "./session-color";
@@ -120,8 +119,8 @@ const langMap: Record<string, SymbolKey> = {
  * Brand colors for language icons, keyed by the resolved `lang.*` SymbolKey.
  * Used by {@link Theme.getLangIconStyled} so eval-kernel cell headers tint each
  * language with its recognizable hue (JS yellow, Ruby red, Julia purple, Python
- * blue) instead of a flat muted gray. Encoded through the active color mode;
- * languages without an entry fall back to the muted theme color.
+ * blue) instead of a flat muted gray. Applied as truecolor/256 per the active
+ * color mode; languages without an entry fall back to the muted theme color.
  */
 const LANG_BRAND_COLORS: Partial<Record<SymbolKey, string>> = {
 	"lang.javascript": "#f7df1e",
@@ -303,6 +302,7 @@ export class Theme {
 		const ansi = this.#fgColors[color];
 		return ansi ? `${ansi}${text}\x1b[39m` : text;
 	}
+
 	/** Encode and paint an arbitrary CSS color through this theme's frozen capability mode. */
 	customColor(color: string, text: string): string {
 		const ansi = colorToAnsi(color, this.mode);
@@ -312,6 +312,7 @@ export class Theme {
 	getCustomColorAnsi(color: string): string {
 		return colorToAnsi(color, this.mode);
 	}
+
 	/** Encode and paint an arbitrary CSS background through this theme's frozen capability mode. */
 	customBg(color: string, text: string): string {
 		const ansi = bgAnsi(color, this.mode);
@@ -326,7 +327,6 @@ export class Theme {
 	fgResolved(color: ThemeColor, text: string): string {
 		if (!(color in this.#fgColors)) throw new Error(`Unknown theme color: ${color}`);
 		const ansi = this.#fgColors[color];
-		// Color mode `none` (NO_COLOR, TERM=dumb) encodes every color as "": paint nothing, like `fg`.
 		if (!ansi) return text;
 		const resolved = ansi === "\x1b[39m" ? colorToAnsi(this.getColorHex(color), this.mode) : ansi;
 		return `${resolved}${text.replace(FOREGROUND_RESET_PATTERN, `$&${resolved}`)}\x1b[39m`;
@@ -360,7 +360,6 @@ export class Theme {
 		if (!ansi) return text;
 		return `${ansi}${text.replace(FOREGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[39m`;
 	}
-
 	bold(text: string): string {
 		return this.#chalk.bold(text);
 	}
@@ -431,6 +430,7 @@ export class Theme {
 	getColorMode(): ColorMode {
 		return this.mode;
 	}
+
 
 	/** Border color for a thinking/effort level name (`off`…`max`); unknown levels fall back to `thinkingOff`. */
 	getThinkingBorderColor(level: string): (str: string) => string {

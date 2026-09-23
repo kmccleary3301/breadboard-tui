@@ -73,17 +73,14 @@ export function renderSegmentTrack(segments: TrackSegment[], activeIndex: number
 			track += i === activeIndex || i - 1 === activeIndex ? "  " : ` ${thinSep} `;
 		}
 		const color = palette[i % palette.length];
+		const fg = theme.getFgAnsi(color);
 		if (i !== activeIndex) {
-			track += theme.fg(color, segment.label);
+			track += `${fg}${segment.label}${FG_RESET}`;
 			return;
 		}
-		const bg = theme.getCustomBgAnsi(theme.getColorHex(color));
-		const label = paintAnsi(
-			bg,
-			paintAnsi(theme.getContrastFgAnsi(color), theme.bold(` ${segment.label} `), "\x1b[39m"),
-			"\x1b[49m",
-		);
-		track += theme.fg(color, capLeft) + label + theme.fg(color, capRight);
+		const bg = fg.replace("\x1b[38;", "\x1b[48;");
+		const label = `${bg}${theme.getContrastFgAnsi(color)}\x1b[1m ${segment.label} \x1b[22m${BG_RESET}`;
+		track += `${fg}${capLeft}${label}${fg}${capRight}${FG_RESET}`;
 	});
 	return track;
 }

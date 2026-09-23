@@ -1,6 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { ProductAppearance, ProductIdentity } from "../../../product-identity";
-import { gradientEscape, gradientLogo } from "../../components/welcome";
+import { DEFAULT_PRODUCT_IDENTITY, gradientEscape, gradientLogo, type ProductAppearance, type ProductIdentity } from "../../prompt/welcome";
 import { paintAnsi } from "../../theme/color";
 import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
@@ -181,9 +180,9 @@ export function renderSetupSplash(
 	width: number,
 	height: number,
 	elapsedMs: number,
-	identity: ProductIdentity,
-	appearance: ProductAppearance,
-	mode: ColorMode,
+	identity: ProductIdentity = DEFAULT_PRODUCT_IDENTITY,
+	appearance: ProductAppearance = theme.isLight ? "light" : "dark",
+	mode: ColorMode = theme.getColorMode(),
 ): string[] {
 	const w = Math.max(1, width);
 	const h = Math.max(1, height);

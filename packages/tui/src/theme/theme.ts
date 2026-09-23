@@ -5,7 +5,7 @@ import type { Terminal, TerminalAppearance } from "../terminal";
 import { colorLuma } from "@oh-my-pi/pi-utils/color";
 import { getCustomThemesDir } from "@oh-my-pi/pi-utils/dirs";
 import * as logger from "@oh-my-pi/pi-utils/logger";
-import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
+import type { ProductIdentity } from "../prompt/welcome";
 import { ansi256ToHex, detectColorMode, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
 import type { ColorMode, ThemeColor, ThemeJson } from "./schema";
@@ -33,6 +33,13 @@ export {
 	setMarkdownMermaidRendering,
 	warmHighlighter,
 } from "./tui-adapters";
+
+/** Product defaults are supplied by the host; the fallback keeps standalone TUI usage native-safe. */
+var themeProductIdentity: Pick<ProductIdentity, "defaultThemes"> = { defaultThemes: { dark: "dark", light: "light" } };
+
+export function setThemeProductIdentity(identity: Pick<ProductIdentity, "defaultThemes">): void {
+	themeProductIdentity = identity;
+}
 
 /** Appearance detected via OSC 11 background color query, or undefined if not yet available. */
 var terminalReportedAppearance: "dark" | "light" | undefined;
@@ -146,9 +153,8 @@ function configureTheme(
 	lightTheme?: string,
 	mode?: ColorMode,
 ): string {
-	autoDetectedTheme = true;
-	autoDarkTheme = darkTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.dark;
-	autoLightTheme = lightTheme ?? ACTIVE_PRODUCT_IDENTITY.defaultThemes.light;
+	autoDarkTheme = darkTheme ?? themeProductIdentity.defaultThemes.dark;
+	autoLightTheme = lightTheme ?? themeProductIdentity.defaultThemes.light;
 	currentSymbolPresetOverride = symbolPreset;
 	currentColorBlindMode = colorBlindMode ?? false;
 	currentColorMode = mode ?? detectColorMode();

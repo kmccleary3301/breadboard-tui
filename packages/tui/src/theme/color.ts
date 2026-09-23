@@ -1,15 +1,10 @@
 import { paletteToRgb, rgbToHex } from "@oh-my-pi/pi-utils/color";
-import { detectTerminalId, getTerminalInfo } from "../terminal-capabilities";
+import { type ColorLevel, detectColorLevel } from "@oh-my-pi/pi-utils/chalk";
 import type { ColorMode, ColorValue } from "./schema";
-
-/** SGR reset for the foreground color only, leaving other attributes intact. */
+import { detectTerminalId, getTerminalInfo } from "../terminal-capabilities";
 export const FG_RESET = "\x1b[39m";
 /** SGR reset for the background color only, leaving other attributes intact. */
 export const BG_RESET = "\x1b[49m";
-
-// ============================================================================
-// Color Utilities
-// ============================================================================
 
 const RGBA_PATTERN = /^rgba\(\s*(\d+),\s*(\d+),\s*(\d+),/u;
 
@@ -58,7 +53,8 @@ export function colorToAnsi(color: string, mode: ColorMode): string {
 		const [red, green, blue] = colorToRgb(color);
 		return `\x1b[${rgbToAnsi16Code(red, green, blue)}m`;
 	}
-	const ansi = Bun.color(color, mode === "truecolor" ? "ansi-16m" : "ansi-256");
+	const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
+	const ansi = Bun.color(color, format);
 	if (ansi === null) throw new Error(`Invalid color value: ${color}`);
 	return ansi;
 }
@@ -91,6 +87,7 @@ export function bgAnsi(color: string | number, mode: ColorMode): string {
 export function paintAnsi(ansi: string, text: string, reset = "\x1b[0m"): string {
 	return ansi ? `${ansi}${text}${reset}` : text;
 }
+
 
 export function resolveVarRefs(
 	value: ColorValue,

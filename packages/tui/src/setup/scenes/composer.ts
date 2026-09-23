@@ -1,10 +1,12 @@
-import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
-import type { ComposerShape } from "../../../config/settings-schema";
-import { renderComposerShapePreview, type ComposerPreviewStatusSource } from "../../overlays/composer-shape-preview";
+import { type SgrMouseEvent } from "../../mouse";
+import { type SelectItem, SelectList } from "../../components/select-list";
+import { Container } from "../../tui";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
+import type { ComposerShape } from "../../overlays/composer-shape-registry";
+import { renderComposerShapePreview } from "../../overlays/composer-shape-preview";
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
-import { isBreadboardPreset } from "../../status-line/breadboard-presentation";
 import { getSelectListTheme, theme } from "../../theme/theme";
-import { createBreadboardPreviewStatusSource, previewSnapshot } from "./information-layout";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 class ComposerSceneController implements SetupSceneController {
@@ -15,11 +17,13 @@ class ComposerSceneController implements SetupSceneController {
 	#items: readonly SelectItem[];
 	#currentShape: ComposerShape = "band";
 	#committing = false;
-	#listRowStart = 0;
-	#previewStatus?: ComposerPreviewStatusSource;
+	#step: WizardStep | undefined;
 
-	constructor(private readonly host: SetupSceneHost) {
-		const choices = getComposerShapeOptions(host.identity);
+	readonly #host: SetupSceneHost;
+
+	constructor(host: SetupSceneHost) {
+		this.#host = host;
+		const choices = getComposerShapeOptions(host.ctx.identity);
 		this.#shapes = choices.map(choice => choice.value);
 		this.#items = choices.map((choice, index) => ({
 			value: choice.value,
@@ -30,12 +34,6 @@ class ComposerSceneController implements SetupSceneController {
 		const initialShape = this.#shapes.includes(configuredShape) ? configuredShape : "band";
 		this.#currentShape = initialShape;
 		const initialIndex = Math.max(0, this.#shapes.indexOf(initialShape));
-		const configuredPreset = host.ctx.settings.get("statusLine.preset");
-		this.#previewStatus =
-			host.ctx.statusLine ??
-			(host.identity.id === "breadboard" && isBreadboardPreset(configuredPreset)
-				? createBreadboardPreviewStatusSource(previewSnapshot(host), configuredPreset)
-				: undefined);
 
 		const selectListTheme = getSelectListTheme();
 		this.#selectList = new SelectList(this.#items, this.#items.length, selectListTheme);
@@ -74,17 +72,15 @@ class ComposerSceneController implements SetupSceneController {
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const budget = maxLines ?? Number.POSITIVE_INFINITY;
-		const lines = [theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."), ""];
-
-		const previewLines = renderComposerShapePreview(
-			this.#currentShape,
-			width,
-			this.#previewStatus,
-			this.host.identity.cliName,
+		const intro = new Text(
+			theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."),
+			0,
+			0,
 		);
-		if (budget - lines.length - previewLines.length - 2 >= this.#items.length) {
-			lines.push(theme.fg("muted", "Preview:"), ...previewLines, "");
+		const preview = new Container();
+		preview.addChild(new Text(theme.fg("muted", "Preview:"), 0, 0));
+		for (const line of renderComposerShapePreview(this.#currentShape, width, this.#host.ctx.statusLine)) {
+			preview.addChild(new Text(line, 0, 0));
 		}
 		const items = this.#items.length;
 		if (!this.#step) {

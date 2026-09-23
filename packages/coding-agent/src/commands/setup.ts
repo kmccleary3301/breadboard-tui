@@ -8,14 +8,11 @@ import { setupHelp as commandHelp } from "../cli/command-help";
 import { runSetupCommand, type SetupCommandArgs, type SetupComponent } from "../cli/setup-cli";
 import { runRootCommand } from "../main";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import { launchHelp } from "./launch-help";
 
 const COMPONENTS: SetupComponent[] = ["python", "speech"];
 
 export interface OnboardingSetupDependencies {
 	runRoot?: typeof runRootCommand;
-	/** Launch-surface argv forwarded by the CLI before the setup command token. */
-	launchArgs?: readonly string[];
 	stdinIsTTY?: boolean;
 	stdoutIsTTY?: boolean;
 	writeStderr?: (text: string) => void;
@@ -30,12 +27,10 @@ export async function runOnboardingSetup(deps: OnboardingSetupDependencies = {})
 		(deps.exit ?? process.exit)(1);
 		return;
 	}
-	const launchArgs = [...(deps.launchArgs ?? [])];
-	await (deps.runRoot ?? runRootCommand)(parseArgs(launchArgs), launchArgs, { forceSetupWizard: true });
+	await (deps.runRoot ?? runRootCommand)(parseArgs([]), [], { forceSetupWizard: true });
 }
 
 export default class Setup extends Command {
-	static strict = false;
 	static description = commandHelp.description;
 	static args = {
 		component: Args.string({
@@ -46,8 +41,6 @@ export default class Setup extends Command {
 	};
 
 	static flags = {
-		...launchHelp.flags,
-		continue: { ...launchHelp.flags.continue, char: undefined },
 		check: Flags.boolean({ char: "c", description: "Check if dependencies are installed" }),
 		json: Flags.boolean({ description: "Output status as JSON" }),
 	};
@@ -61,7 +54,7 @@ export default class Setup extends Command {
 				// exit 0, which would mask failures in scripted `--json` health checks.
 				throw new CliUsageError("setup --check/--json requires a COMPONENT (python|speech)");
 			}
-			await runOnboardingSetup({ launchArgs: this.argv });
+			await runOnboardingSetup();
 			return;
 		}
 		const cmd: SetupCommandArgs = {
