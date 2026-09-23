@@ -592,6 +592,13 @@ export interface CreateAgentSessionOptions {
 	skipPythonPreflight?: boolean;
 	/** Tool names explicitly requested (enables disabled-by-default tools) */
 	toolNames?: string[];
+	/**
+	 * Extension tool name → built-in tool whose native implementation that tool's `ctx.invokeTool`
+	 * runs. Lets an extension present a built-in under another model-facing name and schema. Each
+	 * target is created with the session's other built-ins but stays inactive unless named in
+	 * {@link toolNames}.
+	 */
+	toolDelegates?: Readonly<Record<string, string>>;
 	/** Limit the session to explicitly supplied tool names, without discovered extras. */
 	restrictToolNames?: boolean;
 	/**
@@ -2043,8 +2050,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			options.parentTaskPrefix ? { parentPrefix: options.parentTaskPrefix } : undefined,
 		);
 
-		// Create built-in tools (already wrapped with meta notice formatting)
-		await logger.time("createAllTools", createTools, toolSession, options.toolNames);
+		// Create built-in tools (already wrapped with meta notice formatting). Delegate targets are
+		// created with an explicit tool list so `ctx.invokeTool` can reach them; the active set below
+		// still comes from `options.toolNames` alone.
+		const delegateTargets = Object.values(options.toolDelegates ?? {});
+		const createdToolNames =
+			options.toolNames && delegateTargets.length > 0
+				? [...new Set([...options.toolNames, ...delegateTargets])]
+				: options.toolNames;
+		await logger.time("createAllTools", createTools, toolSession, createdToolNames);
 		const initialBrowserPreludeAvailable = shouldFilterBrowserMCPForPrelude({
 			restrictToolNames,
 			browserEnabled: settings.get("browser.enabled"),
@@ -2988,7 +3002,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// the override loop so the map holds the natives, not the extension replacements. The context
 		// factory is the loop's own tool context, so a delegated native call sees ordinary session state.
 		extensionRunner.setNativeToolResolver(name => {
-			const tool = nativeToolsByName.get(name);
+			const tool = nativeToolsByName.get(options.toolDelegates?.[name] ?? name);
 			return tool ? { tool, makeContext: () => toolContextStore.getContext() } : undefined;
 		});
 		if (deferMCPDiscoveryForUI && mcpManager) {
