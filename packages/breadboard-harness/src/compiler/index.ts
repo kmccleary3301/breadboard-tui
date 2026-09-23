@@ -26,7 +26,7 @@ import {
 	validateHarnessDefinition,
 } from "./validate";
 
-export { validateHarnessDefinition } from "./validate";
+export { type HarnessValidationFinding, validateBundledSchema, validateHarnessDefinition } from "./validate";
 export type HarnessDefinition = JsonRecord;
 export interface HarnessCompileErrorOptions {
 	readonly code?: string;

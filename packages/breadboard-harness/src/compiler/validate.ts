@@ -138,7 +138,9 @@ function resolveRef(ref: string, root: JsonSchema): JsonSchema {
 	const separator = ref.indexOf("#");
 	const base = separator < 0 ? ref : ref.slice(0, separator);
 	const fragment = separator < 0 ? "" : ref.slice(separator + 1);
-	const target = base.length === 0 ? root : schemas().get(base);
+	// A relative reference resolves against the enclosing schema's `$id` (Draft 2020-12 §8.2.1).
+	const id = base.length === 0 || typeof root.$id !== "string" ? base : new URL(base, root.$id).href;
+	const target = base.length === 0 ? root : schemas().get(id);
 	if (target === undefined) throw new Error(`Unknown schema reference: ${ref}`);
 	let value: unknown = target;
 	if (fragment.startsWith("/")) {
@@ -356,6 +358,18 @@ export function validateHarnessDefinition(document: unknown): readonly HarnessVa
 
 export function hasHarnessValidationFindings(document: unknown): boolean {
 	return validateHarnessDefinition(document).length > 0;
+}
+
+/**
+ * Validate a JSON value against a bundled contract schema by `$id`, with the same Draft 2020-12 evaluator as
+ * `validateHarnessDefinition`. Findings are sorted by pointer, then code; an empty list means the value conforms.
+ */
+export function validateBundledSchema(schemaId: string, value: unknown): readonly HarnessValidationFinding[] {
+	const root = schemas().get(schemaId);
+	if (root === undefined) throw new Error(`No bundled schema has $id ${schemaId}`);
+	const domain = jsonDomainFindings(value);
+	if (domain.length > 0) return sortFindings(domain);
+	return sortFindings(validateSchema(value, root, [], root).flatMap(transformError));
 }
 
 export const harnessValidationKeywords = [

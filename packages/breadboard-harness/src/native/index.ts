@@ -4,6 +4,7 @@ export * from "./lock-loader";
 export * from "./lock-values";
 export * from "./omp-extension";
 export * from "./prompt-assembly";
+export * from "./session-transcript";
 export * from "./shell-eval-results";
 export * from "./text-calls";
 export * from "./todo-write";

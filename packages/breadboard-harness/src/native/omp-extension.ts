@@ -1,3 +1,4 @@
+import { relative, sep } from "node:path";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
 import { type LoadedNativeHarness } from "./load-native-harness";
@@ -5,6 +6,7 @@ import { frameNativeUserMessage } from "./prompt-assembly";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
 import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
 import { TodoWriteState, todoCompletionGuardReason } from "./todo-write";
+import { registerSessionTranscriptExport } from "./session-transcript";
 import { NativeTurnPolicy } from "./turn-policy";
 import { type NativeToolResult } from "./types";
 import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
@@ -303,6 +305,10 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		const policy = new NativeTurnPolicy(harness.toolSurface);
 		const guard = new CompletionGuard();
 		registerFunctionTools(api, harness, todos, guard);
+		registerSessionTranscriptExport(api, {
+			specPath: relative(harness.workspaceRoot, harness.specPath).split(sep).join("/"),
+			graphHash: harness.graphHash,
+		});
 		api.on("agent_start", () => {
 			guard.beginRun();
 		});
