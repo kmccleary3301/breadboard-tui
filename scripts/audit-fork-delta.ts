@@ -788,6 +788,19 @@ export async function writeReceipts(receipt: ForkDeltaReceipt, receiptDir: strin
 	await Bun.write(path.join(receiptDir, "fork-delta-audit.md"), markdownReceipt(receipt));
 }
 
+/**
+ * Count changed upstream entrypoints. A path added by the fork does not exist upstream, so it cannot
+ * be a modified upstream entrypoint even when its name matches an entrypoint pattern.
+ */
+export function countUpstreamEntrypointPaths(
+	records: readonly ChangedPathRecord[],
+	patterns: readonly string[],
+): number {
+	return records.filter(
+		record => !record.status.startsWith("A") && patterns.some(pattern => matchesPolicyPattern(record.path, pattern)),
+	).length;
+}
+
 export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDeltaReceipt> {
 	const repoRoot = path.resolve(options.repoRoot ?? path.resolve(import.meta.dir, ".."));
 	let receipt: ForkDeltaReceipt;
@@ -800,9 +813,7 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 		const state: AuditState = { policy, manifest, identity, records: collected.records, paths: collected.paths };
 		const declarationAudit = auditDeclarations(collected.records, manifest, policy);
 		const violations: AuditViolation[] = [...validateIdentity(identity, policy), ...declarationAudit.violations];
-		const upstreamEntrypointPaths = collected.paths.filter(pathValue =>
-			policy.upstreamEntrypoints.some(pattern => matchesPolicyPattern(pathValue, pattern)),
-		).length;
+		const upstreamEntrypointPaths = countUpstreamEntrypointPaths(collected.records, policy.upstreamEntrypoints);
 		if (collected.paths.length > policy.budgets.maxTotalChangedPaths)
 			violations.push({
 				code: "budget",

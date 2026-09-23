@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
 	assertManifestUpstreamIdentity,
 	auditDeclarations,
+	countUpstreamEntrypointPaths,
 	type ForkLayerManifest,
 	loadDeltaPolicy,
 	readChangedPathPatch,
@@ -95,5 +96,16 @@ describe("fork delta audit declarations", () => {
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("fork delta entrypoint budget", () => {
+	test("counts modified upstream entrypoints but not fork-added paths that match a pattern", () => {
+		const records = [
+			{ status: "M", path: "packages/coding-agent/src/main.ts" },
+			{ status: "A", path: "packages/breadboard-harness/src/index.ts" },
+			{ status: "M", path: "packages/coding-agent/src/sdk.ts" },
+		];
+		expect(countUpstreamEntrypointPaths(records, policy.upstreamEntrypoints)).toBe(1);
 	});
 });
