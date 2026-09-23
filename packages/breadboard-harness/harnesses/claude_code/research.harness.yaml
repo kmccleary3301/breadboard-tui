@@ -21,10 +21,10 @@ prompts:
 modes:
   - name: plan
     prompt: '@pack(base).plan'
-    tools_enabled: [AskUserQuestion, Bash, Edit, EnterPlanMode, ExitPlanMode, Glob, Grep, KillShell, NotebookEdit, Read, Skill, SlashCommand, TaskOutput, WebFetch, WebSearch, Write]
+    tools_enabled: [TaskOutput, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, TodoWrite, WebSearch, KillShell, AskUserQuestion, Skill, SlashCommand, EnterPlanMode]
   - name: build
     prompt: '@pack(base).builder'
-    tools_enabled: [AskUserQuestion, Bash, Edit, EnterPlanMode, ExitPlanMode, Glob, Grep, KillShell, NotebookEdit, Read, Skill, SlashCommand, TaskOutput, WebFetch, WebSearch, Write]
+    tools_enabled: [TaskOutput, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, TodoWrite, WebSearch, KillShell, AskUserQuestion, Skill, SlashCommand, EnterPlanMode]
 loop:
   sequence:
     - if: features.plan

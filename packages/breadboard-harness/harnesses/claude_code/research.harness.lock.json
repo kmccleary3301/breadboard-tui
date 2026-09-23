@@ -43,44 +43,46 @@
           "name": "plan",
           "prompt": "@pack(base).plan",
           "tools_enabled": [
-            "AskUserQuestion",
+            "TaskOutput",
             "Bash",
-            "Edit",
-            "EnterPlanMode",
-            "ExitPlanMode",
             "Glob",
             "Grep",
-            "KillShell",
-            "NotebookEdit",
+            "ExitPlanMode",
             "Read",
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "WebFetch",
+            "TodoWrite",
+            "WebSearch",
+            "KillShell",
+            "AskUserQuestion",
             "Skill",
             "SlashCommand",
-            "TaskOutput",
-            "WebFetch",
-            "WebSearch",
-            "Write"
+            "EnterPlanMode"
           ]
         },
         {
           "name": "build",
           "prompt": "@pack(base).builder",
           "tools_enabled": [
-            "AskUserQuestion",
+            "TaskOutput",
             "Bash",
-            "Edit",
-            "EnterPlanMode",
-            "ExitPlanMode",
             "Glob",
             "Grep",
-            "KillShell",
-            "NotebookEdit",
+            "ExitPlanMode",
             "Read",
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "WebFetch",
+            "TodoWrite",
+            "WebSearch",
+            "KillShell",
+            "AskUserQuestion",
             "Skill",
             "SlashCommand",
-            "TaskOutput",
-            "WebFetch",
-            "WebSearch",
-            "Write"
+            "EnterPlanMode"
           ]
         }
       ],
@@ -184,7 +186,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:9d01eced82a13ff50814843f489dbcf18e957b3a6db95a710aa653c7dd035d49",
+  "graph_hash": "sha256:d29f32d27afefe864ca92848bd40601308b1188cff1e7c18566e1b78900cd818",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -203,7 +205,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:daa76f14ddb0f309b822e63e18e3670e938695267d8020fff878c5cab0e0c582",
+      "layer_hash": "sha256:13c148ffb686981408cf752d96890fceafaedf5c2979cb578791b9cea3c49cb5",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,

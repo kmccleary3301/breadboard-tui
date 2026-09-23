@@ -198,7 +198,7 @@ async function loadNativeToolSurfacesWithDefinitions(
 			if (definition === undefined) throw new Error(`native harness tool ${name} has no vendored definition`);
 			return definition;
 		});
-		const ordered = [...enabled].sort(caseInsensitiveOrder);
+		const ordered = researchToolFamily(lock) === undefined ? [...enabled].sort(caseInsensitiveOrder) : enabled;
 		surfaces.set(
 			modeName,
 			Object.freeze({
@@ -211,12 +211,12 @@ async function loadNativeToolSurfacesWithDefinitions(
 	return surfaces;
 }
 
+
 function caseInsensitiveOrder(left: NativeToolDefinition, right: NativeToolDefinition): number {
 	const a = left.name.toLowerCase();
 	const b = right.name.toLowerCase();
 	return a < b ? -1 : a > b ? 1 : 0;
 }
-
 /**
  * Build the locked mode tool surfaces from vendored definitions. Disabled names are removed after
  * inclusion, matching `agent_llm_openai.py:3093-3111`.
