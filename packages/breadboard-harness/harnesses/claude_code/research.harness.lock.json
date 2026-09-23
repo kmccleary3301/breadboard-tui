@@ -43,14 +43,44 @@
           "name": "plan",
           "prompt": "@pack(base).plan",
           "tools_enabled": [
-            "*"
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "KillShell",
+            "NotebookEdit",
+            "Read",
+            "Skill",
+            "SlashCommand",
+            "TaskOutput",
+            "WebFetch",
+            "WebSearch",
+            "Write"
           ]
         },
         {
           "name": "build",
           "prompt": "@pack(base).builder",
           "tools_enabled": [
-            "*"
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "Glob",
+            "Grep",
+            "KillShell",
+            "NotebookEdit",
+            "Read",
+            "Skill",
+            "SlashCommand",
+            "TaskOutput",
+            "WebFetch",
+            "WebSearch",
+            "Write"
           ]
         }
       ],
@@ -154,7 +184,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:dc9e0893eef68b680170fdfd4cef131ee24e9354cac8053308d8196f3ad54424",
+  "graph_hash": "sha256:9d01eced82a13ff50814843f489dbcf18e957b3a6db95a710aa653c7dd035d49",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -173,7 +203,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:8eb567abbb0af33caaa1ed1e79f61a39f2cbfebea2b071d759a634c707b5d8c7",
+      "layer_hash": "sha256:daa76f14ddb0f309b822e63e18e3670e938695267d8020fff878c5cab0e0c582",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
