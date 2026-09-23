@@ -311,6 +311,7 @@ interface StatusLineExternalInputs {
 interface CachedStatusLine {
 	content: string;
 	dimmedContent: string;
+	overflow?: string;
 	width: number;
 	availableWidth: number;
 	renderRevision: number;
@@ -452,6 +453,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#standalone: false | "full" | "left-only" = false;
 	#topAttachment: ComposerStyle["statusAttachment"] = "top-border";
 	#standaloneGap = false;
+	#topBorderWidth: (width: number) => number = width => width;
 	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#renderRevision = 0;
 	/** Fully rendered bars for the current revision/clock tick, keyed by layout. */
@@ -548,6 +550,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#recording = false;
 	#harness: HarnessSnapshot | null = null;
 	#breadboardActivity: BreadboardComposerActivity | null = null;
+	#longRunBudgets: { totalCostUsd?: number; totalTokens?: number } | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -621,6 +624,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 	#gitEnabled(): boolean {
 		return this.host.gitEnabled();
+	}
+	#isBreadboardOwned(): boolean {
+		return this.host.isBreadboardOwned?.(this.session) ?? false;
 	}
 	#hasGitBackedSegment(): boolean {
 		const effectiveSettings = this.#resolveSettings();
@@ -2130,9 +2136,10 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		previewTitle?: string,
 	): SegmentContext {
 		const state = this.session.state;
+		const breadboardOwned = this.#isBreadboardOwned();
 
-		// Trigger background fetch (5-min TTL); render uses cached value
-		this.refreshUsageInBackground();
+		// Trigger background fetch (5-min TTL); render uses cached value.
+		if (!breadboardOwned) this.refreshUsageInBackground();
 
 		// Get usage statistics
 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
@@ -2194,7 +2201,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			previewTitle,
 			identityMark: this.host.getIdentityMark?.(),
 			harness: this.#harness ?? this.host.getHarness?.(this.session) ?? null,
-			breadboardOwned: this.host.isBreadboardOwned?.(this.session) ?? false,
+			breadboardOwned,
 			breadboardActivity: this.#breadboardActivity ?? this.host.getBreadboardActivity?.(this.session) ?? null,
 			activeRepo: activeRepoCache.activeRepo,
 			width,
@@ -2212,14 +2219,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			vibeMode: this.#vibeModeStatus,
 			vim: this.#vimStatus,
 			collab: this.#collabStatus,
-			stream: this.#streamStatus,
-			recording: this.#recording,
+			autoCompactEnabled: !breadboardOwned && this.#autoCompactEnabled,
+			compactionSpeculation: breadboardOwned ? "idle" : compactionSpeculation,
 			usageStats,
 			contextPercent,
 			contextTokens,
 			contextWindow,
-			autoCompactEnabled: this.#autoCompactEnabled,
-			compactionSpeculation,
 			speculationBlinkOn: this.#speculationBlinkOn,
 			subagentCount: this.#subagentCount,
 			activeMs: this.getActiveMs(),
@@ -2233,7 +2238,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			},
 			worktree: activeRepoCache.worktree,
 			usage: this.#cachedUsage,
-			longRun: this.host.getLongRunBudgets?.(this.session) ?? null,
+			longRun: this.#longRunBudgets ?? this.host.getLongRunBudgets?.(this.session) ?? null,
 		};
 	}
 
@@ -2513,10 +2518,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return cached;
 		}
 
-		const content = this.#renderStatusLine(width, layout, previewTitle, options, nowMs);
+		const rendered = this.#renderStatusLine(width, layout, previewTitle, options, nowMs);
+		const content = rendered.content;
 		const result = {
 			content,
 			dimmedContent: this.#dimWhileFocusProxied(content),
+			overflow: rendered.overflow,
 			width: visibleWidth(content),
 			availableWidth: width,
 			renderRevision: this.#renderRevision,
@@ -2542,17 +2549,15 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * - `plain-right`: right segments only (claude composer's top rule).
 	 *
 	 * `previewTitle` is a stand-in session title for composer previews; the
-	 * `session_name` segment renders it when the session is unnamed.
-	 */
 	#renderStatusLine(
 		width: number,
 		layout: StatusLineLayout,
 		previewTitle: string | undefined,
 		options: { readonly placeholders?: boolean } | undefined,
 		nowMs: number,
-	): string {
+	): { content: string; overflow?: string } {
 		const effectiveSettings = this.#resolveSettings();
-		this.#syncPricingTimer();
+		if (!this.#isBreadboardOwned()) this.#syncPricingTimer();
 		const placeholders = options?.placeholders === true;
 		const plain = layout !== "box" && layout !== "band";
 		const includePath =
@@ -2586,13 +2591,17 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
 				inputTokens: placeholders ? undefined : ctx.usageStats.input,
 				outputTokens: placeholders ? undefined : ctx.usageStats.output,
-				vim: ctx.vim?.display !== "none" ? ctx.vim?.mode : undefined,
+				vim:
+					ctx.vim && ctx.vim.display !== "none"
+						? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
+						: undefined,
 			};
 			const preset = effectiveSettings.preset ?? "bb-balanced";
 			if (layout === "box" || layout === "band" || layout === "plain-right") {
-				return renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard).top;
+				const rows = renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard);
+				return { content: rows.top, overflow: rows.bottom || undefined };
 			}
-			return renderBreadboardStatusLine(snapshot, preset, width, layout, effectiveSettings.breadboard);
+			return { content: renderBreadboardStatusLine(snapshot, preset, width, layout, effectiveSettings.breadboard) };
 		}
 		const separatorDef = plain
 			? { left: "·", right: "·" }
