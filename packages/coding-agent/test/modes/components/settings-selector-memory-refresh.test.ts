@@ -51,6 +51,7 @@ function createSelector(onCancel: () => void = () => {}): SettingsSelectorCompon
 			providers: [],
 			settings: createSettingsHost(),
 			plugins: createPluginSettingsHost(process.cwd()),
+			mainStreamOwnsTurnLifecycle: false,
 		},
 		{
 			onChange: () => {},

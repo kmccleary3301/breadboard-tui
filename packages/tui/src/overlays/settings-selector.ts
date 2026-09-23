@@ -1516,7 +1516,12 @@ export class SettingsSelectorComponent implements Component {
 					return option ? [option.label] : [];
 				})
 			: [];
-		if (labels.length === 0) return def.ordered ? "default" : "none";
+		if (labels.length === 0) {
+			// Compaction's empty list means the built-in fallback chain; show its
+			// leading method instead of the generic "default" placeholder.
+			if (def.path === "compaction.methodOrder") return options[0]?.label ?? "default";
+			return def.ordered ? "default" : "none";
+		}
 		return def.ordered ? labels.join(" → ") : labels.join(", ");
 	}
 
