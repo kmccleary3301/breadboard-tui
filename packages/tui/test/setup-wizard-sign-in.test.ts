@@ -2,9 +2,32 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
 import { SignInTab } from "@oh-my-pi/pi-tui/setup/scenes/sign-in";
-import type { SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
+import type { SetupHost, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { Component } from "@oh-my-pi/pi-tui";
+
+function createNativeSignInHost(options: {
+	authStorage: AuthStorage;
+	copyToClipboard: (text: string) => Promise<void>;
+	openInBrowser?: (url: string) => void;
+	refreshProvider?: (provider: string) => Promise<void>;
+	setFocus?: (component: Component | null) => void;
+}): SetupSceneHost {
+	const ctx = {
+		authStorage: options.authStorage,
+		disabledProviders: [],
+		copyToClipboard: options.copyToClipboard,
+		refreshProvider: options.refreshProvider ?? (async () => {}),
+		openInBrowser: options.openInBrowser ?? (() => {}),
+	} as unknown as SetupHost;
+	return {
+		ctx,
+		requestRender: () => {},
+		finish: () => {},
+		setFocus: options.setFocus ?? (() => {}),
+		restoreFocus: () => {},
+	};
+}
 
 beforeAll(async () => {
 	await initTheme();
@@ -39,23 +62,16 @@ describe("SignInTab", () => {
 			},
 		} as unknown as AuthStorage;
 
-		const host = {
-			ctx: {
-				authStorage,
-				disabledProviders: [],
-				copyToClipboard: copySpy,
-				refreshProvider: async () => {},
-				openInBrowser(openedUrl: string): void {
-					openedUrls.push(openedUrl);
-				},
+		const host = createNativeSignInHost({
+			authStorage,
+			copyToClipboard: copySpy,
+			openInBrowser: openedUrl => {
+				openedUrls.push(openedUrl);
 			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(component: Component | null): void {
+			setFocus: component => {
 				focusTarget = component ?? undefined;
 			},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+		});
 
 		const tab = new SignInTab(host);
 		try {
@@ -115,19 +131,10 @@ describe("SignInTab", () => {
 				loginCompleted.resolve();
 			},
 		} as unknown as AuthStorage;
-		const host = {
-			ctx: {
-				authStorage,
-				disabledProviders: [],
-				copyToClipboard: copySpy,
-				refreshProvider: async () => {},
-				openInBrowser(): void {},
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+		const host = createNativeSignInHost({
+			authStorage,
+			copyToClipboard: copySpy,
+		});
 
 		const tab = new SignInTab(host);
 		try {
@@ -157,19 +164,10 @@ describe("SignInTab", () => {
 			},
 		} as unknown as AuthStorage;
 
-		const host = {
-			ctx: {
-				authStorage,
-				disabledProviders: [],
-				copyToClipboard: copySpy,
-				refreshProvider: async () => {},
-				openInBrowser(): void {},
-			},
-			requestRender(): void {},
-			finish(): void {},
-			setFocus(): void {},
-			restoreFocus(): void {},
-		} as unknown as SetupSceneHost;
+		const host = createNativeSignInHost({
+			authStorage,
+			copyToClipboard: copySpy,
+		});
 
 		const tab = new SignInTab(host);
 		try {

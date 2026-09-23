@@ -1,4 +1,5 @@
 import { type Component, type OverlayFocusOwner } from "../tui";
+import { isReducedMotionEnabled } from "../reduced-motion";
 import { matchesKey } from "../keys";
 import { centerLine, padding } from "../utils";
 import { padToWidth } from "../render/utils";
@@ -48,12 +49,15 @@ function dissolveFrames(from: string[], to: string[], progress: number, height: 
 export interface SetupWizardComponentOptions {
 	/** Animation clock; tests inject a deterministic one. */
 	readonly now?: () => number;
+	/** Skip decorative splash, dissolve, and outro timers when motion is reduced. */
+	readonly reduceMotion?: boolean;
 }
 
 /** Fullscreen onboarding presentation with scene focus and mouse routing. */
 export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	#phase: WizardPhase = "splash";
 	readonly #now: () => number;
+	readonly #reduceMotion: boolean;
 	#phaseStartedAt: number;
 	#sceneIndex = 0;
 	#activeScene: SetupSceneController | undefined;
@@ -70,13 +74,19 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		options: SetupWizardComponentOptions = {},
 	) {
 		this.#now = options.now ?? (() => performance.now());
+		this.#reduceMotion = isReducedMotionEnabled(options.reduceMotion);
 		this.#phaseStartedAt = this.#now();
 	}
 
 	run(): Promise<void> {
 		this.#phase = this.scenes.length === 0 ? "outro" : "splash";
 		this.#phaseStartedAt = this.#now();
-		this.#startTimer();
+		if (this.#reduceMotion) {
+			if (this.scenes.length === 0) this.#complete();
+			else this.#mountCurrentScene();
+		} else {
+			this.#startTimer();
+		}
 		this.ctx.ui.requestRender();
 		return this.#done.promise;
 	}
@@ -115,7 +125,8 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 				matchesKey(data, "space") ||
 				matchesKey(data, "escape")
 			) {
-				this.#beginScene();
+				if (this.#reduceMotion) this.#mountCurrentScene();
+				else this.#beginScene();
 			}
 			return;
 		}
@@ -249,7 +260,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	}
 
 	#startTimer(): void {
-		if (this.#timer) return;
+		if (this.#reduceMotion || this.#timer) return;
 		this.#timer = setInterval(() => {
 			if (this.#disposed) return;
 			const elapsed = this.#now() - this.#phaseStartedAt;
@@ -332,6 +343,10 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		this.#phase = "outro";
 		this.#phaseStartedAt = this.#now();
 		this.ctx.ui.setFocus(this);
+		if (this.#reduceMotion) {
+			this.#complete();
+			return;
+		}
 		this.#startTimer();
 		this.ctx.ui.requestRender();
 	}
