@@ -14,7 +14,7 @@ import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { type AgentHubDeps, AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, type AgentRef } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -46,12 +46,11 @@ function stubStdoutGeometry(cols: number): GeometryStub {
 	};
 }
 
-function makeHub(agents: AgentRegistry, overrides: Partial<AgentHubDeps> = {}) {
-	return new AgentHubOverlayComponent({
+function makeHub(agents: AgentRegistry, overrides: Partial<AgentHubDeps<AgentRef>> = {}) {
+	return new AgentHubOverlayComponent<AgentRef>({
 		...createAgentHubRuntime({ settings: Settings.isolated(), registry: agents }),
 		observers: new SessionObserverRegistry(),
 		hubKeys: [],
-		mainStreamOwnsTurnLifecycle: false,
 		onDone: () => {},
 		requestRender: () => {},
 		registry: agents,

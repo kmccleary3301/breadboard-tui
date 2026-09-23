@@ -1,6 +1,6 @@
 import { matchesKey, padding, visibleWidth } from "@oh-my-pi/pi-tui";
 import { Snowflake } from "@oh-my-pi/pi-utils";
-import type { IrcBus, IrcHistoryRecord, IrcReadCursor } from "../../../irc/bus";
+import type { IrcBus, IrcHistoryRecord, IrcMessage, IrcReadCursor } from "../../../irc/bus";
 import { deriveIrcConversations, type IrcConversation } from "../../../irc/conversations";
 import { type AgentRegistry, MAIN_AGENT_ID } from "../../../registry/agent-registry";
 import { truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
@@ -578,15 +578,18 @@ export class AgentHubMessagesView {
 							(ref.status === "running" || ref.status === "idle"),
 					);
 				const broadcastId = Snowflake.next();
+				const broadcastMessage: Pick<IrcMessage, "from" | "body" | "replyTo" | "broadcastId"> = {
+					from: MAIN_AGENT_ID,
+					body,
+					replyTo: this.#messageReplyTo,
+					broadcastId,
+				};
 				const receipts = await Promise.all(
 					targets.map(ref =>
 						this.#irc.send({
-							from: MAIN_AGENT_ID,
+							...broadcastMessage,
 							to: ref.id,
-							body,
-							replyTo: this.#messageReplyTo,
-							broadcastId,
-						} as Parameters<IrcBus["send"]>[0]),
+						}),
 					),
 				);
 				const failed = receipts.filter(receipt => receipt.outcome === "failed").length;

@@ -140,7 +140,7 @@ describe("Agent hub Enter activation", () => {
 		const registry = new AgentRegistry();
 		let closed = false;
 		const hub = new AgentHubOverlayComponent({
-			settings: Settings.isolated(),
+			...createAgentHubRuntime({ registry }),
 			registry,
 			observers: new SessionObserverRegistry(),
 			irc: new IrcBus(registry),
