@@ -24,4 +24,9 @@ describe("native prompt assembly", () => {
 		expect(perTurnPrompt).toBe("");
 		expect(frameNativeUserMessage("hello", perTurnPrompt)).toBe("hello");
 	});
+
+	test("repeats the compiled system for persistent per-turn prompt mode", async () => {
+		const { systemPrompt, perTurnPrompt } = await loadNativeHarness({ specPath: "claude_code", workspaceRoot: ROOT });
+		expect(perTurnPrompt).toBe(systemPrompt);
+	});
 });

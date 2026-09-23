@@ -197,8 +197,15 @@ export async function assembleNativePrompts(
 		}
 	}
 	const dedupe = nativeLockValue(lock, "prompts.dedupe") === true;
-	const perTurn = nativeLockValue(lock, "prompts.tool_prompt_mode") === "none" ? "" : perTurnCatalog(surface);
-	return { system: assemble(system, mode, dedupe), perTurn };
+	const assembledSystem = assemble(system, mode, dedupe);
+	const toolPromptMode = nativeLockValue(lock, "prompts.tool_prompt_mode");
+	const perTurn =
+		toolPromptMode === "none"
+			? ""
+			: toolPromptMode === "system_compiled_and_persistent_per_turn"
+				? assembledSystem
+				: perTurnCatalog(surface);
+	return { system: assembledSystem, perTurn };
 }
 
 /**
