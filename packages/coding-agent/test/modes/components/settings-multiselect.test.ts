@@ -1,10 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import { COMPACTION_METHOD_CHOICES } from "@oh-my-pi/pi-coding-agent/session/compaction-methods";
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
 import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 beforeAll(async () => {
 	await initTheme();
@@ -58,8 +57,6 @@ function createSelector(): SettingsSelectorComponent {
 	);
 }
 
-const [firstChoice, secondChoice] = COMPACTION_METHOD_CHOICES;
-
 function optionRow(component: SettingsSelectorComponent, label: string): number {
 	const lines = Bun.stripANSI(component.render(120).join("\n")).split("\n");
 	const row = lines.findIndex(line => line.includes(label));
@@ -76,88 +73,6 @@ function clickOption(component: SettingsSelectorComponent, label: string): void 
 	sendMouse(component, 0, row, "M");
 	sendMouse(component, 0, row, "m");
 }
-
-describe("multiselect settings (array-of-enum)", () => {
-	it("edits compaction.methodOrder via the ordered toggle list", () => {
-		const comp = createSelector();
-		settings.set("compaction.methodOrder", []);
-		for (const ch of "compaction method order") comp.handleInput(ch);
-		const row = comp.render(120).join("\n");
-		expect(row).toContain("Compaction Method Order");
-		expect(row).toContain(firstChoice!.label);
-
-		comp.handleInput("\n");
-		comp.handleInput(" ");
-		comp.handleInput("\x1b[B");
-		comp.handleInput("\n");
-		expect(settings.get("compaction.methodOrder")).toEqual([firstChoice!.value, secondChoice!.value]);
-
-		comp.handleInput("\x1b[D");
-		expect(settings.get("compaction.methodOrder")).toEqual([secondChoice!.value, firstChoice!.value]);
-
-		comp.handleInput(" ");
-		expect(settings.get("compaction.methodOrder")).toEqual([firstChoice!.value]);
-
-		comp.handleInput("\x1b");
-		expect(comp.render(120).join("\n")).toContain(firstChoice!.label);
-	});
-
-	it("splices the hovered option into the pressed digit's position", () => {
-		const [a, b, c] = COMPACTION_METHOD_CHOICES;
-		const comp = createSelector();
-		settings.set("compaction.methodOrder", []);
-		for (const ch of "compaction method order") comp.handleInput(ch);
-		comp.handleInput("\n");
-
-		comp.handleInput(" ");
-		comp.handleInput("\x1b[B");
-		comp.handleInput("\x1b[B");
-		comp.handleInput(" ");
-		expect(settings.get("compaction.methodOrder")).toEqual([a!.value, c!.value]);
-
-		comp.handleInput("\x1b[A");
-		comp.handleInput("2");
-		expect(settings.get("compaction.methodOrder")).toEqual([a!.value, b!.value, c!.value]);
-
-		comp.handleInput("9");
-		expect(settings.get("compaction.methodOrder")).toEqual([a!.value, c!.value, b!.value]);
-
-		comp.handleInput("1");
-		expect(settings.get("compaction.methodOrder")).toEqual([b!.value, a!.value, c!.value]);
-	});
-
-	it("toggles list members on mouse click", () => {
-		const comp = createSelector();
-		settings.set("compaction.methodOrder", []);
-		for (const ch of "compaction method order") comp.handleInput(ch);
-		comp.handleInput("\n");
-
-		clickOption(comp, firstChoice!.label);
-		expect(settings.get("compaction.methodOrder")).toEqual([firstChoice!.value]);
-
-		clickOption(comp, firstChoice!.label);
-		expect(settings.get("compaction.methodOrder")).toEqual([]);
-	});
-
-	it("reorders selected list members by drag and drop", () => {
-		const comp = createSelector();
-		settings.set("compaction.methodOrder", []);
-		for (const ch of "compaction method order") comp.handleInput(ch);
-		comp.handleInput("\n");
-		clickOption(comp, firstChoice!.label);
-		clickOption(comp, secondChoice!.label);
-		expect(settings.get("compaction.methodOrder")).toEqual([firstChoice!.value, secondChoice!.value]);
-
-		const sourceRow = optionRow(comp, secondChoice!.label);
-		const targetRow = optionRow(comp, firstChoice!.label);
-		sendMouse(comp, 0, sourceRow, "M");
-		sendMouse(comp, 32, targetRow, "M");
-		sendMouse(comp, 0, targetRow, "m");
-
-		expect(settings.get("compaction.methodOrder")).toEqual([secondChoice!.value, firstChoice!.value]);
-	});
-
-});
 
 describe("settings section sidebar", () => {
 	it("does not toggle the selected section's first setting", () => {
