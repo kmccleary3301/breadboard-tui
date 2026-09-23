@@ -153,38 +153,6 @@ function claudeCodeDefinition(definition: NativeToolDefinition): NativeToolDefin
 	return { ...definition, parameters };
 }
 
-function codexPythonSchemaOrder(definition: NativeToolDefinition): NativeToolDefinition {
-	if (definition.name === "shell_command") {
-		return {
-			...definition,
-			parameters: {
-				...definition.parameters,
-				required: ["command", "justification", "timeout_ms", "with_escalated_permissions", "workdir"],
-			},
-		};
-	}
-	if (definition.name === "update_plan") {
-		const plan = definition.parameters.properties;
-		if (!isRecord(plan)) return definition;
-		const planSchema = plan.plan;
-		if (!isRecord(planSchema) || !isRecord(planSchema.items)) return definition;
-		return {
-			...definition,
-			parameters: {
-				...definition.parameters,
-				properties: {
-					...plan,
-					plan: {
-						...planSchema,
-						items: { ...planSchema.items, required: ["status", "step"] },
-					},
-				},
-			},
-		};
-	}
-	return definition;
-}
-
 function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
 	const family = researchToolFamily(lock);
 	if (family === undefined) return base;
@@ -193,9 +161,6 @@ function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeTo
 	for (const definition of additions) {
 		const selected = family === "claude_code" ? claudeCodeDefinition(definition) : definition;
 		definitions.set(selected.name, selected);
-	}
-	if (family === "codex") {
-		for (const [name, definition] of definitions) definitions.set(name, codexPythonSchemaOrder(definition));
 	}
 	return definitions;
 }
