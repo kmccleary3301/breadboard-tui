@@ -67,8 +67,8 @@ describe("native harness live state", () => {
 		harness.live?.subscribe(change => generations.push(change.generation));
 		const sourcePath = join(root, SPEC);
 		const source = await readFile(sourcePath, "utf8");
-		const firstSource = source.replace("- eval\n", "- eval\n  - TodoWrite\n");
-		const secondSource = firstSource.replace("- TodoWrite\n", "- TodoWrite\n  - TodoWrite\n");
+		const firstSource = source.replace("  - eval\n", "  - eval\n  - TodoWrite\n");
+		const secondSource = firstSource.replace("  - run_shell\n", "");
 		await writeFile(sourcePath, firstSource);
 		const firstReload = harness.live?.reload();
 		await writeFile(sourcePath, secondSource);
@@ -85,6 +85,8 @@ describe("native harness live state", () => {
 		const registeredTools: string[] = [];
 		const activeTools: string[][] = [];
 		const entries: Array<{ type: string; data: unknown }> = [];
+		let blockNextActiveTools = false;
+		let releaseActiveTools: (() => void) | undefined;
 		const api = {
 			on(event: string, handler: unknown) {
 				const list = handlers.get(event) ?? [];
@@ -97,6 +99,11 @@ describe("native harness live state", () => {
 			},
 			setActiveTools(names: string[]) {
 				activeTools.push([...names]);
+				if (!blockNextActiveTools) return;
+				blockNextActiveTools = false;
+				return new Promise<void>(resolve => {
+					releaseActiveTools = resolve;
+				});
 			},
 			appendEntry(type: string, data: unknown) {
 				entries.push({ type, data });
@@ -112,7 +119,7 @@ describe("native harness live state", () => {
 		const sourcePath = join(root, SPEC);
 		const source = await readFile(sourcePath, "utf8");
 		await writeFile(sourcePath, source.replace("  - list_dir\n", ""));
-		await harness.live?.reload();
+		const g2 = await harness.live?.reload();
 		expect(activeTools.at(-1)).toEqual(toolsDuringTurn);
 		expect(registeredTools).toHaveLength(registrationsBeforeReload);
 		expect(entries).toEqual([]);
@@ -120,7 +127,77 @@ describe("native harness live state", () => {
 		expect(activeTools.at(-1)).not.toEqual(toolsDuringTurn);
 		expect(registeredTools).toHaveLength(registrationsBeforeReload + toolsDuringTurn.length - 1);
 		expect(entries.map(entry => entry.data)).toEqual([
-			{ generation: 2, spec_path: SPEC, graph_hash: harness.live?.current().graphHash },
+			{ generation: 2, spec_path: SPEC, graph_hash: g2?.graphHash },
 		]);
+		const g2Source = await readFile(sourcePath, "utf8");
+		await writeFile(sourcePath, g2Source.replace("  - run_shell\n", ""));
+		const g3 = await harness.live?.reload();
+		blockNextActiveTools = true;
+		const inFlightTurn = invoke("turn_start");
+		for (let attempt = 0; attempt < 10 && releaseActiveTools === undefined; attempt++) await Promise.resolve();
+		expect(releaseActiveTools).toBeDefined();
+		await writeFile(sourcePath, g2Source);
+		const g4 = await harness.live?.reload();
+		releaseActiveTools?.();
+		await inFlightTurn;
+		expect(entries.map(entry => entry.data)).toEqual([
+			{ generation: 2, spec_path: SPEC, graph_hash: g2?.graphHash },
+			{ generation: 3, spec_path: SPEC, graph_hash: g3?.graphHash },
+		]);
+		await invoke("turn_start");
+		expect(entries.map(entry => entry.data).at(-1)).toEqual({
+			generation: 4,
+			spec_path: SPEC,
+			graph_hash: g4?.graphHash,
+		});
+	});
+	it("cancels a pending watcher debounce when the session shuts down", async () => {
+		const root = await workspace();
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		const handlers = new Map<string, Array<(event: unknown, context: unknown) => unknown>>();
+		let intervalCallback: (() => void) | undefined;
+		let timeoutCallback: (() => void) | undefined;
+		let clearCount = 0;
+		const api = {
+			on(event: string, handler: unknown) {
+				const list = handlers.get(event) ?? [];
+				list.push(handler as (event: unknown, context: unknown) => unknown);
+				handlers.set(event, list);
+			},
+			registerCommand() {},
+			registerTool() {},
+			setActiveTools() {},
+			appendEntry() {},
+		};
+		createNativeHarnessExtension(harness)(api as never);
+		const context = {
+			ui: { notify() {} },
+			setInterval(callback: () => void) {
+				intervalCallback = callback;
+				return {} as Timer;
+			},
+			setTimeout(callback: () => void) {
+				timeoutCallback = callback;
+				return {} as Timer;
+			},
+			clearTimer() {
+				clearCount += 1;
+			},
+		};
+		await handlers.get("session_start")?.at(-1)?.({}, context);
+		const sourcePath = join(root, SPEC);
+		const source = await readFile(sourcePath, "utf8");
+		await writeFile(sourcePath, source.replace("  - list_dir\n", ""));
+		intervalCallback?.();
+		for (let attempt = 0; attempt < 10 && timeoutCallback === undefined; attempt++) {
+			await new Promise<void>(resolve => setImmediate(resolve));
+		}
+		expect(timeoutCallback).toBeDefined();
+		const shutdown = handlers.get("session_shutdown")?.at(-1);
+		await shutdown?.({}, context);
+		expect(clearCount).toBe(1);
+		timeoutCallback?.();
+		await Promise.resolve();
+		expect(harness.live?.generation).toBe(1);
 	});
 });

@@ -331,14 +331,15 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		const commitPendingHarness = async (): Promise<void> => {
 			if (pendingHarness === activeHarness) return;
 			const next = pendingHarness;
+			const generation = pendingGeneration;
 			registerFunctionTools(api, next, todos, guard);
 			activeHarness = next;
 			stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
 			policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
 			await applyStage();
-			if (pendingGeneration !== undefined) {
-				recordGeneration(pendingGeneration, activeHarness);
-				pendingGeneration = undefined;
+			if (generation !== undefined) {
+				recordGeneration(generation, activeHarness);
+				if (pendingHarness === next && pendingGeneration === generation) pendingGeneration = undefined;
 			}
 		};
 
@@ -360,7 +361,8 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				let observedMtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs ?? 0;
 				let reloadInFlight: Promise<void> | undefined;
 				let reloadAgain = false;
-				let debounceTimer: NodeJS.Timeout | undefined;
+				let debounceTimer: Timer | undefined;
+				let disposed = false;
 				const notifyReloadError = (error: unknown): void => {
 					const message =
 						error instanceof NativeHarnessReloadError
@@ -369,13 +371,19 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 					context.ui.notify(message, "error");
 				};
 				const scheduleReload = (): void => {
-					clearTimeout(debounceTimer);
-					debounceTimer = setTimeout(() => {
+					if (disposed) return;
+					if (debounceTimer !== undefined) {
+						context.clearTimer(debounceTimer);
 						debounceTimer = undefined;
+					}
+					debounceTimer = context.setTimeout(() => {
+						debounceTimer = undefined;
+						if (disposed) return;
 						void runReload();
 					}, 150);
 				};
 				const runReload = async (): Promise<void> => {
+					if (disposed) return;
 					if (reloadInFlight !== undefined) {
 						reloadAgain = true;
 						return;
@@ -386,7 +394,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 						.catch(notifyReloadError)
 						.finally(() => {
 							reloadInFlight = undefined;
-							if (reloadAgain) {
+							if (!disposed && reloadAgain) {
 								reloadAgain = false;
 								scheduleReload();
 							}
@@ -394,8 +402,9 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 					await reloadInFlight;
 				};
 				const poll = async (): Promise<void> => {
+					if (disposed) return;
 					const mtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs;
-					if (mtime === undefined || mtime <= observedMtime) return;
+					if (disposed || mtime === undefined || mtime <= observedMtime) return;
 					observedMtime = mtime;
 					if (reloadInFlight !== undefined) {
 						reloadAgain = true;
@@ -406,6 +415,13 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				context.setInterval(() => {
 					void poll();
 				}, 1000);
+				api.on("session_shutdown", () => {
+					disposed = true;
+					if (debounceTimer !== undefined) {
+						context.clearTimer(debounceTimer);
+						debounceTimer = undefined;
+					}
+				});
 			});
 		}
 		activeHarness.live?.subscribe(change => {
