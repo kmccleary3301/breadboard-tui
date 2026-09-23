@@ -456,6 +456,7 @@ export function resolveCliArgv(argv: string[]): ResolvedCliArgv {
 	const productDisabledMessage = productDisabledCommandMessage(argv);
 	if (productDisabledMessage) return { error: productDisabledMessage };
 	const reservedMessage = reservedTopLevelWordMessage(argv);
+	if (reservedMessage) return { error: reservedMessage };
 	if (first === "--help" || first === "-h" || first === "--version" || first === "-v" || first === "help") {
 		return { argv };
 	}
