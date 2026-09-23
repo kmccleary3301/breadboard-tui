@@ -6,8 +6,8 @@ import {
 	renderBreadboardPolicy,
 	renderBreadboardStatusLine,
 	renderBreadboardStatusRows,
-} from "../src/modes/components/status-line/breadboard-presentation";
-import { initTheme, setSymbolPreset } from "../src/modes/theme/theme";
+} from "@oh-my-pi/pi-tui/status-line/breadboard-presentation";
+import { initTheme, setSymbolPreset } from "@oh-my-pi/pi-tui/theme";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 
 const harness: HarnessSnapshot = {
