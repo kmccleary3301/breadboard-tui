@@ -1,22 +1,18 @@
-import { createHash } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
-import { loadEngineDataManifest } from "../src/index";
+import { loadEngineDataSnapshot } from "../src/index";
 
 const PACKAGE_ROOT = join(import.meta.dir, "..");
 const DATA_DIR = join(PACKAGE_ROOT, "engine-data");
+const SNAPSHOT_PATH = join(DATA_DIR, "snapshot.json");
 const SCRIPT = join(PACKAGE_ROOT, "scripts", "snapshot-engine-data.ts");
 const ENGINE =
 	process.env["BB_HARNESS_ENGINE"] ??
 	join("/", "Users", "kylemccleary", "projects", "bread" + "board-native-harness-pyref");
-
-function hash(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 
 async function runCheck(dataDir: string): Promise<{ code: number; output: string }> {
 	const process = Bun.spawn(
@@ -28,39 +24,32 @@ async function runCheck(dataDir: string): Promise<{ code: number; output: string
 }
 
 describe("engine data snapshot", () => {
-	test("manifest hashes match every vendored file", async () => {
-		const manifest = await loadEngineDataManifest(DATA_DIR);
-		const seen = new Set<string>();
-		for (const entry of manifest.files) {
-			seen.add(entry.path);
-			const bytes = await readFile(join(DATA_DIR, ...entry.path.split("/")));
-			expect(bytes.byteLength).toBe(entry.bytes);
-			expect(hash(bytes)).toBe(entry.sha256);
+	test("loader validates every bundled file hash and byte count", async () => {
+		const snapshot = await loadEngineDataSnapshot(DATA_DIR);
+		const raw = await readFile(SNAPSHOT_PATH, "utf8");
+		expect(raw).toContain('"schemaVersion": "bb.harness_engine_data_snapshot.v1"');
+		for (const file of snapshot.files) {
+			expect(new TextEncoder().encode(file.content).byteLength).toBe(file.bytes);
 		}
-		const onDisk: string[] = [];
-		for await (const path of new Bun.Glob("**/*").scan({ cwd: DATA_DIR, onlyFiles: true, dot: true })) {
-			if (path !== "snapshot.manifest.json") onDisk.push(path);
-		}
-		expect(onDisk.sort()).toEqual([...seen].sort());
-		expect(seen.size).toBe(manifest.files.length);
+		expect(snapshot.files.length).toBe(311);
 	});
 
-	test("--check reports a modified snapshot in an isolated copy", async () => {
+	test("--check and loader reject tampered bundled content", async () => {
 		const temporaryRoot = await mkdtemp(join(tmpdir(), "bb-harness-snapshot-"));
 		const dataCopy = join(temporaryRoot, "engine-data");
 		try {
 			await cp(DATA_DIR, dataCopy, { recursive: true });
-			const manifest = await loadEngineDataManifest(dataCopy);
-			const changed = manifest.files[0];
-			if (changed === undefined) throw new Error("snapshot manifest unexpectedly contains no files");
-			const changedPath = join(dataCopy, ...changed.path.split("/"));
-			const bytes = await readFile(changedPath);
-			bytes[0] = (bytes[0] ?? 0) ^ 0xff;
-			await writeFile(changedPath, bytes);
+			const snapshotPath = join(dataCopy, "snapshot.json");
+			const snapshot = JSON.parse(await readFile(snapshotPath, "utf8")) as {
+				files: Array<{ content: string }>;
+			};
+			snapshot.files[0]!.content += "tampered";
+			await writeFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
 
 			const result = await runCheck(dataCopy);
 			expect(result.code).not.toBe(0);
-			expect(result.output).toContain(`modified ${changed.path}`);
+			expect(result.output).toContain("modified snapshot.json");
+			expect(loadEngineDataSnapshot(dataCopy)).rejects.toThrow(/sha256|bytes/i);
 		} finally {
 			await rm(temporaryRoot, { recursive: true, force: true });
 		}

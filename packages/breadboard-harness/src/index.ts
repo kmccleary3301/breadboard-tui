@@ -1,24 +1,26 @@
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-export interface EngineDataManifestFile {
+export interface EngineDataSnapshotFile {
 	readonly path: string;
 	readonly sha256: string;
 	readonly bytes: number;
+	readonly content: string;
 }
 
-export interface EngineDataManifest {
+export interface EngineDataSnapshot {
 	readonly schemaVersion: "bb.harness_engine_data_snapshot.v1";
 	readonly engineCommit: string;
 	readonly engineTree: string;
-	readonly files: readonly EngineDataManifestFile[];
+	readonly files: readonly EngineDataSnapshotFile[];
 }
 
-const MANIFEST_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
+const SNAPSHOT_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
 const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const DEFAULT_ENGINE_DATA_DIR = fileURLToPath(new URL("../engine-data/", import.meta.url));
+const DEFAULT_DATA_DIR = fileURLToPath(new URL("../engine-data/", import.meta.url));
+const snapshotCache = new Map<string, EngineDataSnapshot>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -32,10 +34,14 @@ function compare(left: string, right: string): number {
 	return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function validateManifest(value: unknown): EngineDataManifest {
-	if (!isRecord(value)) throw new Error("engine data manifest must be an object");
-	if (value.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
-		throw new Error(`unsupported engine data manifest schema: ${String(value.schemaVersion)}`);
+function sha256(content: string): string {
+	return new Bun.CryptoHasher("sha256").update(new TextEncoder().encode(content)).digest("hex");
+}
+
+function validateSnapshot(value: unknown): EngineDataSnapshot {
+	if (!isRecord(value)) throw new Error("engine data snapshot must be an object");
+	if (value.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
+		throw new Error(`unsupported engine data snapshot schema: ${String(value.schemaVersion)}`);
 	}
 	assertString(value.engineCommit, "engineCommit");
 	if (!SHA1.test(value.engineCommit)) throw new Error("engineCommit must be a 40-character lowercase SHA-1");
@@ -43,50 +49,71 @@ function validateManifest(value: unknown): EngineDataManifest {
 	if (!SHA1.test(value.engineTree)) throw new Error("engineTree must be a 40-character lowercase SHA-1");
 	if (!Array.isArray(value.files)) throw new Error("files must be an array");
 
-	const files: EngineDataManifestFile[] = [];
+	const files: EngineDataSnapshotFile[] = [];
 	let previousPath = "";
 	const paths = new Set<string>();
 	for (const [index, rawFile] of value.files.entries()) {
 		if (!isRecord(rawFile)) throw new Error(`files[${index}] must be an object`);
 		assertString(rawFile.path, `files[${index}].path`);
 		if (rawFile.path.startsWith("/") || rawFile.path.split("/").includes("..")) {
-			throw new Error(`files[${index}].path must be relative and stay within engine-data: ${rawFile.path}`);
+			throw new Error(`files[${index}].path must be relative: ${rawFile.path}`);
 		}
-		if (rawFile.path.length === 0 || rawFile.path.endsWith("/")) {
-			throw new Error(`files[${index}].path must name a file`);
-		}
+		if (rawFile.path.endsWith("/")) throw new Error(`files[${index}].path must name a file`);
 		if (paths.has(rawFile.path)) throw new Error(`files contains duplicate path: ${rawFile.path}`);
 		if (compare(previousPath, rawFile.path) >= 0) throw new Error("files must be sorted by path");
 		previousPath = rawFile.path;
 		paths.add(rawFile.path);
-
 		assertString(rawFile.sha256, `files[${index}].sha256`);
 		if (!SHA256.test(rawFile.sha256)) throw new Error(`files[${index}].sha256 must be lowercase SHA-256`);
 		if (!Number.isSafeInteger(rawFile.bytes) || (rawFile.bytes as number) < 0) {
 			throw new Error(`files[${index}].bytes must be a non-negative safe integer`);
 		}
-		files.push({ path: rawFile.path, sha256: rawFile.sha256, bytes: rawFile.bytes as number });
+		if (typeof rawFile.content !== "string") throw new Error(`files[${index}].content must be a string`);
+		const actualBytes = new TextEncoder().encode(rawFile.content);
+		if (actualBytes.byteLength !== rawFile.bytes) throw new Error(`files[${index}] bytes do not match content`);
+		if (sha256(rawFile.content) !== rawFile.sha256) throw new Error(`files[${index}] sha256 does not match content`);
+		files.push({
+			path: rawFile.path,
+			sha256: rawFile.sha256,
+			bytes: rawFile.bytes as number,
+			content: rawFile.content,
+		});
 	}
-
 	return {
-		schemaVersion: MANIFEST_SCHEMA_VERSION,
+		schemaVersion: SNAPSHOT_SCHEMA_VERSION,
 		engineCommit: value.engineCommit,
 		engineTree: value.engineTree,
 		files,
 	};
 }
 
-/** Read and structurally validate the generated engine-data snapshot manifest. */
-export async function loadEngineDataManifest(
-	dataDir: string | URL = DEFAULT_ENGINE_DATA_DIR,
-): Promise<EngineDataManifest> {
+function snapshotPath(dataDir: string | URL): string {
 	const root = typeof dataDir === "string" ? dataDir : fileURLToPath(dataDir);
-	const manifestPath = join(root, "snapshot.manifest.json");
+	return join(root, "snapshot.json");
+}
+
+/** Read, validate, hash-check, and cache the generated engine-data bundle. */
+export async function loadEngineDataSnapshot(
+	dataDir: string | URL = DEFAULT_DATA_DIR,
+): Promise<EngineDataSnapshot> {
+	const path = snapshotPath(dataDir);
+	const cached = snapshotCache.get(path);
+	if (cached !== undefined) return cached;
 	let raw: unknown;
 	try {
-		raw = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+		raw = JSON.parse(await readFile(path, "utf8")) as unknown;
 	} catch (error) {
-		throw new Error(`unable to read engine data manifest at ${manifestPath}`, { cause: error });
+		throw new Error(`unable to read engine data snapshot at ${path}`, { cause: error });
 	}
-	return validateManifest(raw);
+	const snapshot = validateSnapshot(raw);
+	snapshotCache.set(path, snapshot);
+	return snapshot;
+}
+
+/** Return one bundled engine-data file, rejecting paths absent from the validated snapshot. */
+export async function readEngineDataFile(path: string): Promise<string> {
+	const snapshot = await loadEngineDataSnapshot();
+	const file = snapshot.files.find(entry => entry.path === path);
+	if (file === undefined) throw new Error(`unknown engine data file: ${path}`);
+	return file.content;
 }

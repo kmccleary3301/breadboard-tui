@@ -1,18 +1,11 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
-import {
-	lstatSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
-const MANIFEST_NAME = "snapshot.manifest.json";
-const MANIFEST_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
+const SNAPSHOT_NAME = "snapshot.json";
+const SNAPSHOT_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
 const DEFAULT_DATA_DIR = resolve(import.meta.dir, "..", "engine-data");
 const TRACKED_PREFIXES = [
 	"implementations/tools/defs",
@@ -34,18 +27,14 @@ type SnapshotFile = {
 	readonly path: string;
 	readonly sha256: string;
 	readonly bytes: number;
-};
-
-type SnapshotManifest = {
-	readonly schemaVersion: typeof MANIFEST_SCHEMA_VERSION;
-	readonly engineCommit: string;
-	readonly engineTree: string;
-	readonly files: readonly SnapshotFile[];
+	readonly content: string;
 };
 
 type Snapshot = {
-	readonly manifest: SnapshotManifest;
-	readonly files: ReadonlyMap<string, Uint8Array>;
+	readonly schemaVersion: typeof SNAPSHOT_SCHEMA_VERSION;
+	readonly engineCommit: string;
+	readonly engineTree: string;
+	readonly files: readonly SnapshotFile[];
 };
 
 type CliOptions = {
@@ -74,12 +63,19 @@ function runGitText(engine: string, args: readonly string[]): string {
 	return decode(runGit(engine, args));
 }
 
+function sha256(bytes: Uint8Array): string {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+	if (left.byteLength !== right.byteLength) return false;
+	for (let index = 0; index < left.byteLength; index++) if (left[index] !== right[index]) return false;
+	return true;
+}
+
 function trackedPaths(engine: string): string[] {
 	const output = runGitText(engine, ["ls-files", "--cached", "-z", "--", ...TRACKED_PREFIXES, ...REQUIRED_PATHS]);
 	return output.split("\0").filter(Boolean).sort();
-}
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 
 function hasPrefix(path: string, prefix: string): boolean {
@@ -96,8 +92,17 @@ function selectedPaths(engine: string): string[] {
 	return [...new Set(selected)].sort();
 }
 
-function readGitFile(engine: string, commit: string, sourcePath: string): Uint8Array {
-	return runGit(engine, ["show", `${commit}:${sourcePath}`]);
+function readGitUtf8(engine: string, commit: string, sourcePath: string): { bytes: Uint8Array; content: string } {
+	const bytes = runGit(engine, ["show", `${commit}:${sourcePath}`]);
+	let content: string;
+	try {
+		content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	} catch (error) {
+		throw new Error(`selected engine path is not valid UTF-8: ${sourcePath}`, { cause: error });
+	}
+	const roundTrip = new TextEncoder().encode(content);
+	if (!bytesEqual(bytes, roundTrip)) throw new Error(`UTF-8 round-trip changed selected engine path: ${sourcePath}`);
+	return { bytes, content };
 }
 
 function createSnapshot(engine: string): Snapshot {
@@ -107,97 +112,43 @@ function createSnapshot(engine: string): Snapshot {
 		throw new Error(`engine identity is not a full SHA-1: commit=${commit} tree=${tree}`);
 	}
 
-	const files = new Map<string, Uint8Array>();
+	const files: SnapshotFile[] = [];
 	for (const sourcePath of selectedPaths(engine)) {
-		const bytes = readGitFile(engine, commit, sourcePath);
-		files.set(sourcePath, bytes);
+		const { bytes, content } = readGitUtf8(engine, commit, sourcePath);
+		files.push({ path: sourcePath, sha256: sha256(bytes), bytes: bytes.byteLength, content });
 	}
-	const manifestFiles = [...files.entries()]
-		.map(([filePath, bytes]) => ({ path: filePath, sha256: sha256(bytes), bytes: bytes.byteLength }))
-		.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
-	return {
-		manifest: {
-			schemaVersion: MANIFEST_SCHEMA_VERSION,
-			engineCommit: commit,
-			engineTree: tree,
-			files: manifestFiles,
-		},
-		files,
-	};
+	files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+	return { schemaVersion: SNAPSHOT_SCHEMA_VERSION, engineCommit: commit, engineTree: tree, files };
 }
 
-function manifestText(manifest: SnapshotManifest): string {
-	return `${JSON.stringify(manifest, null, 2)}\n`;
+function snapshotText(snapshot: Snapshot): string {
+	return `${JSON.stringify(snapshot, null, 2)}\n`;
 }
 
-function targetPath(dataDir: string, snapshotPath: string): string {
-	return join(dataDir, ...snapshotPath.split("/"));
+function snapshotPath(dataDir: string): string {
+	return join(dataDir, SNAPSHOT_NAME);
 }
 
 function writeSnapshot(dataDir: string, snapshot: Snapshot): void {
 	rmSync(dataDir, { recursive: true, force: true });
-	for (const [snapshotPath, bytes] of snapshot.files) {
-		const path = targetPath(dataDir, snapshotPath);
-		mkdirSync(resolve(path, ".."), { recursive: true });
-		writeFileSync(path, bytes);
-	}
-	writeFileSync(join(dataDir, MANIFEST_NAME), manifestText(snapshot.manifest));
-}
-
-function collectDataFiles(dataDir: string): string[] {
-	const paths: string[] = [];
-	if (!lstatSync(dataDir, { throwIfNoEntry: false })) return paths;
-	const visit = (directory: string): void => {
-		for (const entry of readdirSync(directory, { withFileTypes: true })) {
-			const absolutePath = join(directory, entry.name);
-			if (entry.isDirectory()) {
-				visit(absolutePath);
-				continue;
-			}
-			if (!entry.isFile()) throw new Error(`engine-data contains unsupported entry: ${absolutePath}`);
-			const relativePath = relative(dataDir, absolutePath).split(sep).join("/");
-			if (relativePath !== MANIFEST_NAME) paths.push(relativePath);
-		}
-	};
-	visit(dataDir);
-	return paths.sort();
-}
-
-function readManifest(dataDir: string): { text?: string; error?: string } {
-	const path = join(dataDir, MANIFEST_NAME);
-	try {
-		return { text: readFileSync(path, "utf8") };
-	} catch (error) {
-		return { error: error instanceof Error ? error.message : String(error) };
-	}
+	mkdirSync(dataDir, { recursive: true });
+	writeFileSync(snapshotPath(dataDir), snapshotText(snapshot), "utf8");
 }
 
 function checkSnapshot(dataDir: string, expected: Snapshot): string[] {
-	const expectedPaths = new Set(expected.files.keys());
-	const actualPaths = new Set(collectDataFiles(dataDir));
-	const differences = new Set<string>();
-	for (const path of expectedPaths) {
-		if (!actualPaths.has(path)) {
-			differences.add(`removed ${path}`);
-			continue;
-		}
-		const bytes = readFileSync(targetPath(dataDir, path));
-		const manifestFile = expected.manifest.files.find(file => file.path === path);
-		if (manifestFile === undefined || bytes.byteLength !== manifestFile.bytes || sha256(bytes) !== manifestFile.sha256) {
-			differences.add(`modified ${path}`);
-		}
+	const path = snapshotPath(dataDir);
+	let actual: Uint8Array;
+	try {
+		actual = readFileSync(path);
+	} catch {
+		return [`removed ${SNAPSHOT_NAME}`];
 	}
-	for (const path of actualPaths) if (!expectedPaths.has(path)) differences.add(`added ${path}`);
-
-	const actualManifest = readManifest(dataDir);
-	if (actualManifest.text !== manifestText(expected.manifest)) differences.add(`modified ${MANIFEST_NAME}`);
-	return [...differences].sort();
+	const expectedBytes = new TextEncoder().encode(snapshotText(expected));
+	return bytesEqual(actual, expectedBytes) ? [] : [`modified ${SNAPSHOT_NAME}`];
 }
 
 function usage(): never {
-	throw new Error(
-		"usage: bun snapshot-engine-data.ts --engine <checkout> [--check] [--data-dir <directory>]",
-	);
+	throw new Error("usage: bun snapshot-engine-data.ts --engine <checkout> [--check] [--data-dir <directory>]");
 }
 
 function parseArgs(args: readonly string[]): CliOptions {
@@ -223,8 +174,9 @@ function parseArgs(args: readonly string[]): CliOptions {
 			continue;
 		}
 		if (arg.startsWith("--data-dir=")) {
-			dataDir = resolve(arg.slice("--data-dir=".length));
-			if (dataDir.length === 0) usage();
+			const value = arg.slice("--data-dir=".length);
+			if (value.length === 0) usage();
+			dataDir = resolve(value);
 			continue;
 		}
 		usage();
@@ -244,13 +196,11 @@ if (import.meta.main) {
 				for (const difference of differences) console.error(`- ${difference}`);
 				process.exitCode = 1;
 			} else {
-				console.log(`engine-data is up to date (${snapshot.manifest.files.length} files)`);
+				console.log(`engine-data is up to date (${snapshot.files.length} files)`);
 			}
 		} else {
 			writeSnapshot(options.dataDir, snapshot);
-			console.log(
-				`wrote ${snapshot.manifest.files.length} files (${snapshot.manifest.engineCommit}, ${snapshot.manifest.engineTree})`,
-			);
+			console.log(`wrote ${snapshot.files.length} files (${snapshot.engineCommit}, ${snapshot.engineTree})`);
 		}
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
@@ -258,4 +208,4 @@ if (import.meta.main) {
 	}
 }
 
-export { checkSnapshot, createSnapshot, manifestText, parseArgs, writeSnapshot };
+export { checkSnapshot, createSnapshot, parseArgs, snapshotText, writeSnapshot };
