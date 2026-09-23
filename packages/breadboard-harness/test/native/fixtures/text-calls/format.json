@@ -1,0 +1,24 @@
+{
+  "source": "capture_text_calls.py; MessageFormatter.format_execution_results (message_formatter.py:14-28)",
+  "cases": {
+    "empty": {
+      "chunks": [
+        "(no tool output)"
+      ],
+      "role": "user"
+    },
+    "error": {
+      "chunks": [
+        "[TodoWrite] \"Error: TodoWrite missing required todos\""
+      ],
+      "role": "user"
+    },
+    "success": {
+      "chunks": [
+        "[TodoWrite] \"Todos have been modified successfully.\"",
+        "[echo] {\"value\": \"x\", \"n\": 1}"
+      ],
+      "role": "user"
+    }
+  }
+}

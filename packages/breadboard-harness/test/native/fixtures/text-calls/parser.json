@@ -1,0 +1,182 @@
+{
+  "source": "capture_text_calls.py; Pythonic02Dialect.parse_calls (pythonic02.py:69-450)",
+  "cases": {
+    "colon-repair": {
+      "calls": [
+        {
+          "arguments": {
+            "label": "l",
+            "value": "v"
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value: \"v\", label: \"l\") </TOOL_CALL>"
+    },
+    "duplicate": {
+      "calls": [
+        {
+          "arguments": {
+            "value": 1
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=1) </TOOL_CALL><TOOL_CALL> echo(value=1) </TOOL_CALL>"
+    },
+    "lists-dicts": {
+      "calls": [
+        {
+          "arguments": {
+            "todos": [
+              {
+                "content": "one",
+                "status": "todo"
+              },
+              {
+                "content": "two",
+                "status": "done"
+              }
+            ]
+          },
+          "name": "TodoWrite"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> TodoWrite(todos=[{\"content\": \"one\", \"status\": \"todo\"}, {\"content\": \"two\", \"status\": \"done\"}]) </TOOL_CALL>"
+    },
+    "malformed-call": {
+      "calls": [],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=\"unterminated) </TOOL_CALL>"
+    },
+    "nested-parens-in-string": {
+      "calls": [
+        {
+          "arguments": {
+            "label": "x",
+            "value": "close ) and comma, inside"
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=\"close ) and comma, inside\", label=\"x\") </TOOL_CALL>"
+    },
+    "outside-tag": {
+      "calls": [
+        {
+          "arguments": {
+            "value": 2
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "echo(value=1)\n<TOOL_CALL> echo(value=2) </TOOL_CALL>\necho(value=3)"
+    },
+    "positional": {
+      "calls": [
+        {
+          "arguments": {
+            "label": "l",
+            "value": "v"
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(\"v\", \"l\") </TOOL_CALL>"
+    },
+    "string-escapes": {
+      "calls": [
+        {
+          "arguments": {
+            "label": "it's\n",
+            "value": "line\nquote \"ok\" ☃"
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=\"line\\nquote \\\"ok\\\" \\u2603\", label=\"it's\\n\") </TOOL_CALL>"
+    },
+    "triple-quoted": {
+      "calls": [
+        {
+          "arguments": {
+            "label": "single",
+            "value": "line one\nline two"
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=\"\"\"line one\nline two\"\"\", label='single' ) </TOOL_CALL>"
+    },
+    "unknown-function": {
+      "calls": [],
+      "errors": [],
+      "input": "<TOOL_CALL> no_such(value=1) </TOOL_CALL>"
+    },
+    "valid-multiple": {
+      "calls": [
+        {
+          "arguments": {
+            "value": 1
+          },
+          "name": "echo"
+        },
+        {
+          "arguments": {
+            "value": {
+              "a": [
+                1,
+                2,
+                {
+                  "b": true
+                }
+              ]
+            }
+          },
+          "name": "nested"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=1) </TOOL_CALL>\n<TOOL_CALL> nested(value={\"a\": [1, 2, {\"b\": True}]}) </TOOL_CALL>"
+    },
+    "valid-single": {
+      "calls": [
+        {
+          "arguments": {
+            "label": "world",
+            "value": "hello"
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "<TOOL_CALL> echo(value=\"hello\", label=\"world\") </TOOL_CALL>"
+    },
+    "whitespace-variants": {
+      "calls": [
+        {
+          "arguments": {
+            "label": null,
+            "value": [
+              1,
+              {
+                "x": "y"
+              }
+            ]
+          },
+          "name": "echo"
+        }
+      ],
+      "errors": [],
+      "input": "before<tool_call>\n  echo( value = [1, {\"x\": \"y\"}] , label = None )\n</TOOL_CALL>after"
+    }
+  }
+}

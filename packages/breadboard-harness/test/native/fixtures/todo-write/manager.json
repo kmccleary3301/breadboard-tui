@@ -1,0 +1,306 @@
+{
+  "source": "capture_text_calls.py; TodoManager.handle_write_board (todo/manager.py:132-177)",
+  "cases": {
+    "create": {
+      "input": {
+        "todos": [
+          {
+            "content": "First",
+            "status": "todo",
+            "activeForm": "Doing first"
+          },
+          {
+            "content": "Second",
+            "status": "in_progress"
+          }
+        ]
+      },
+      "pythonManager": {
+        "ok": true,
+        "result": {
+          "todos": [
+            {
+              "metadata": {
+                "active_form": "Doing first"
+              },
+              "status": "todo",
+              "title": "First"
+            },
+            {
+              "metadata": {},
+              "status": "in_progress",
+              "title": "Second"
+            }
+          ]
+        },
+        "snapshot": {
+          "todos": [
+            {
+              "metadata": {
+                "active_form": "Doing first"
+              },
+              "status": "todo",
+              "title": "First"
+            },
+            {
+              "metadata": {},
+              "status": "in_progress",
+              "title": "Second"
+            }
+          ]
+        }
+      },
+      "native": {
+        "apply": {
+          "ok": true,
+          "__mvi_text_output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        },
+        "openItems": [
+          "First",
+          "Second"
+        ]
+      }
+    },
+    "empty-list": {
+      "input": {
+        "todos": []
+      },
+      "pythonManager": {
+        "ok": true,
+        "result": {
+          "todos": []
+        },
+        "snapshot": {
+          "todos": []
+        }
+      },
+      "native": {
+        "apply": {
+          "ok": true,
+          "__mvi_text_output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        },
+        "openItems": []
+      }
+    },
+    "invalid-status": {
+      "input": {
+        "todos": [
+          {
+            "content": "Mystery",
+            "status": "not-a-status"
+          }
+        ]
+      },
+      "pythonManager": {
+        "ok": true,
+        "result": {
+          "todos": [
+            {
+              "metadata": {},
+              "status": "todo",
+              "title": "Mystery"
+            }
+          ]
+        },
+        "snapshot": {
+          "todos": [
+            {
+              "metadata": {},
+              "status": "todo",
+              "title": "Mystery"
+            }
+          ]
+        }
+      },
+      "native": {
+        "apply": {
+          "ok": true,
+          "__mvi_text_output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        },
+        "openItems": [
+          "Mystery"
+        ]
+      }
+    },
+    "missing-content": {
+      "input": {
+        "todos": [
+          {
+            "status": "todo"
+          }
+        ]
+      },
+      "pythonManager": {
+        "error": "TodoWrite entries must include 'content'.",
+        "ok": false,
+        "snapshot": {
+          "todos": []
+        }
+      },
+      "native": {
+        "apply": {
+          "error": "TodoWrite entries must include 'content'.",
+          "__mvi_text_output": "TodoWrite entries must include 'content'."
+        },
+        "openItems": []
+      }
+    },
+    "missing-todos": {
+      "input": {},
+      "pythonManager": {
+        "error": "TodoWrite requires a 'todos' array.",
+        "ok": false,
+        "snapshot": {
+          "todos": []
+        }
+      },
+      "native": {
+        "apply": {
+          "error": "Error: TodoWrite missing required todos",
+          "__mvi_text_output": "Error: TodoWrite missing required todos"
+        },
+        "openItems": []
+      }
+    },
+    "non-object-entry": {
+      "input": {
+        "todos": [
+          "bad"
+        ]
+      },
+      "pythonManager": {
+        "error": "TodoWrite entries must be objects with 'content' and 'status'.",
+        "ok": false,
+        "snapshot": {
+          "todos": []
+        }
+      },
+      "native": {
+        "apply": {
+          "error": "TodoWrite entries must be objects with 'content' and 'status'.",
+          "__mvi_text_output": "TodoWrite entries must be objects with 'content' and 'status'."
+        },
+        "openItems": []
+      }
+    },
+    "title-update": {
+      "input": {
+        "todos": [
+          {
+            "content": "Same"
+          },
+          {
+            "content": "same",
+            "status": "done"
+          }
+        ]
+      },
+      "pythonManager": {
+        "ok": true,
+        "result": {
+          "todos": [
+            {
+              "metadata": {},
+              "status": "done",
+              "title": "Same"
+            },
+            {
+              "metadata": {},
+              "status": "done",
+              "title": "Same"
+            }
+          ]
+        },
+        "snapshot": {
+          "todos": [
+            {
+              "metadata": {},
+              "status": "done",
+              "title": "Same"
+            },
+            {
+              "metadata": {},
+              "status": "done",
+              "title": "Same"
+            }
+          ]
+        }
+      },
+      "native": {
+        "apply": {
+          "ok": true,
+          "__mvi_text_output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        },
+        "openItems": []
+      }
+    },
+    "update-statuses": {
+      "input": {
+        "todos": [
+          {
+            "content": "First",
+            "status": "done"
+          },
+          {
+            "content": "Second",
+            "status": "blocked"
+          },
+          {
+            "content": "Third",
+            "status": "canceled"
+          }
+        ]
+      },
+      "pythonManager": {
+        "ok": true,
+        "result": {
+          "todos": [
+            {
+              "metadata": {},
+              "status": "done",
+              "title": "First"
+            },
+            {
+              "metadata": {},
+              "status": "blocked",
+              "title": "Second"
+            },
+            {
+              "metadata": {},
+              "status": "canceled",
+              "title": "Third"
+            }
+          ]
+        },
+        "snapshot": {
+          "todos": [
+            {
+              "metadata": {},
+              "status": "done",
+              "title": "First"
+            },
+            {
+              "metadata": {},
+              "status": "blocked",
+              "title": "Second"
+            },
+            {
+              "metadata": {},
+              "status": "canceled",
+              "title": "Third"
+            }
+          ]
+        }
+      },
+      "native": {
+        "apply": {
+          "ok": true,
+          "__mvi_text_output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        },
+        "openItems": [
+          "Second"
+        ]
+      }
+    }
+  }
+}

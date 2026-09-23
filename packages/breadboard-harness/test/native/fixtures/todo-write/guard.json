@@ -1,0 +1,33 @@
+{
+  "source": "capture_text_calls.py; completion_guard_check (guardrails/orchestrator.py:495-508)",
+  "cases": {
+    "0": {
+      "open_titles": [],
+      "reason": null
+    },
+    "1": {
+      "open_titles": [
+        "Item 0"
+      ],
+      "reason": "Outstanding todos must be completed or canceled before finishing. Pending items: Item 0"
+    },
+    "3": {
+      "open_titles": [
+        "Item 0",
+        "Item 1",
+        "Item 2"
+      ],
+      "reason": "Outstanding todos must be completed or canceled before finishing. Pending items: Item 0; Item 1; Item 2"
+    },
+    "5": {
+      "open_titles": [
+        "Item 0",
+        "Item 1",
+        "Item 2",
+        "Item 3",
+        "Item 4"
+      ],
+      "reason": "Outstanding todos must be completed or canceled before finishing. Pending items: Item 0; Item 1; Item 2"
+    }
+  }
+}
