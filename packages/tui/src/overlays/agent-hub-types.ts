@@ -71,4 +71,9 @@ export interface AgentLifecycleLike<TRecord extends AgentRecordLike = AgentRecor
 /** Unread-message counts supplied by the host IRC bus. */
 export interface IrcBusLike {
 	unreadCount(id: string): number;
+	/** Session-scoped history configuration and change notifications, when available. */
+	configureHistory?(sessionFile?: string | null): void;
+	readonly history?: {
+		onChange(listener: () => void): () => void;
+	};
 }
