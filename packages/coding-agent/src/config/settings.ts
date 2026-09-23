@@ -723,9 +723,6 @@ export class Settings {
 		}
 
 		const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
-		if (value !== undefined) {
-			assertKnownStatusLineSegments(path, value);
-		}
 		let resolved =
 			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : getDefault(path);
 		if (path === "statusLine.breadboard") {
