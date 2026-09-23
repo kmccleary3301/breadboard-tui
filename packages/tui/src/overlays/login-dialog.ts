@@ -25,9 +25,21 @@ export class LoginDialogComponent extends OverlayPanel {
 		tui: TUI,
 		providerId: string,
 		onComplete: (success: boolean, message?: string) => void,
-		openUrl: (url: string) => void,
-		providerDisplayName?: string,
+		openUrlOrProviderDisplayName: ((url: string) => void) | string = () => {},
+		providerDisplayNameOrOpenUrl?: string | ((url: string) => void),
 	) {
+		const openUrl =
+			typeof openUrlOrProviderDisplayName === "function"
+				? openUrlOrProviderDisplayName
+				: typeof providerDisplayNameOrOpenUrl === "function"
+					? providerDisplayNameOrOpenUrl
+					: () => {};
+		const providerDisplayName =
+			typeof openUrlOrProviderDisplayName === "string"
+				? openUrlOrProviderDisplayName
+				: typeof providerDisplayNameOrOpenUrl === "string"
+					? providerDisplayNameOrOpenUrl
+					: undefined;
 		const providerInfo = providerDisplayName ? undefined : getOAuthProviders().find(p => p.id === providerId);
 		const providerName = providerDisplayName ?? providerInfo?.name ?? providerId;
 		super(`Login to ${providerName}`);
@@ -45,6 +57,10 @@ export class LoginDialogComponent extends OverlayPanel {
 	#createInput(secret = false): TextFormField {
 		return new TextFormField({
 			theme: formTheme,
+			secret,
+			empty: "submit",
+			spaceBeforeControl: false,
+			spaceAfterControl: false,
 			onSubmit: value => {
 				const resolve = this.#inputResolver;
 				if (!resolve) return;
@@ -59,6 +75,7 @@ export class LoginDialogComponent extends OverlayPanel {
 			requestRender: () => this.#tui.requestRender(),
 		});
 	}
+
 
 	get signal(): AbortSignal {
 		return this.#abortController.signal;
@@ -136,6 +153,7 @@ export class LoginDialogComponent extends OverlayPanel {
 			this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 0, 0));
 		}
 		this.#input.input.mask = false;
+		this.#tui.requestRender();
 
 		if (signal?.aborted) {
 			return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Login input cancelled"));

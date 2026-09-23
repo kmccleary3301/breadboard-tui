@@ -19,6 +19,8 @@ export interface LogoutAccount {
 /** Account picker for `/logout` after the provider has been selected. */
 export class LogoutAccountSelectorComponent extends OverlayPanel {
 	#listContainer: Container;
+	#menu: MenuSelection<LogoutAccount>;
+	#onSelectCallback: (account: LogoutAccount) => void;
 	#onCancelCallback: () => void;
 	#action: "log out" | "revoke";
 
@@ -34,6 +36,14 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		this.#onCancelCallback = onCancel;
 		this.#action = action;
 		const active = accounts.find(account => account.active);
+		this.#menu = new MenuSelection<LogoutAccount>(
+			accounts,
+			{
+				getKey: account => String(account.credentialId),
+				getSearchText: account => `${account.label} ${account.detail} ${account.provider}`,
+			},
+			active ? String(active.credentialId) : undefined,
+		);
 
 		this.#listContainer = new Container();
 		this.addChild(this.#listContainer);
@@ -81,6 +91,13 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		this.#listContainer.addChild(
 			new TruncatedText(theme.fg("muted", `↑/↓ select · ↵ ${this.#action} account · Esc cancel`), 0, 0),
 		);
+	}
+
+	handleInput(keyData: string): void {
+		if (matchesSelectCancel(keyData)) {
+			this.#onCancelCallback();
+			return;
+		}
 
 		if (matchesSelectUp(keyData)) {
 			this.#menu.move(-1, true);
