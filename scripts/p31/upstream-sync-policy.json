@@ -190,6 +190,7 @@
 				"packages/coding-agent/test/modes/components/composer-shape-preview.test.ts",
 				"packages/coding-agent/test/setup-identity.test.ts",
 				"packages/coding-agent/test/setup-wizard.test.ts",
+				"packages/coding-agent/test/setup-sign-in-product.test.ts",
 				"packages/coding-agent/test/terminal-title-state.test.ts",
 				"scripts/ci-release-publish.ts",
 				"scripts/ci-release-publish.test.ts",
@@ -256,7 +257,10 @@
 				"**/entrypoint",
 				"**/entrypoint.*",
 				"docs/extensions.md",
-				"docs/system-prompt-customization.md"
+				"docs/system-prompt-customization.md",
+				"docs/cli-reference.md",
+				"docs/settings.md",
+				"docs/theme.md"
 			]
 		},
 		{
@@ -381,7 +385,10 @@
 				"docs/tools/eval.md",
 				"docs/tools/task.md",
 				"docs/extensions.md",
-				"docs/system-prompt-customization.md"
+				"docs/system-prompt-customization.md",
+				"docs/cli-reference.md",
+				"docs/settings.md",
+				"docs/theme.md"
 			]
 		}
 	],
@@ -518,6 +525,7 @@
 			"packages/tui/src/theme/defaults/index.ts",
 			"packages/tui/src/theme/symbols.ts",
 			"packages/coding-agent/test/setup-wizard.test.ts",
+			"packages/coding-agent/test/setup-sign-in-product.test.ts",
 			"packages/coding-agent/scripts/verify-breadboard-sdk-provenance.ts",
 			"packages/coding-agent/src/session/**",
 			"packages/coding-agent/test/modes/components/welcome.test.ts",

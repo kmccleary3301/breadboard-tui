@@ -82,6 +82,13 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "docs/cli-reference.md",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
+		},
+		{
 			"path": "docs/conformance/p30/bb-omp/harbor-license-provenance.v1.manifest.json",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -116,6 +123,13 @@
 			"layer": 3
 		},
 		{
+			"path": "docs/settings.md",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
+		},
+		{
 			"path": "docs/system-prompt-customization.md",
 			"class": "manual-review",
 			"rule": "manual-review-boundaries",
@@ -124,6 +138,13 @@
 		},
 		{
 			"path": "docs/task-agent-discovery.md",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "fork-runtime",
+			"layer": 3
+		},
+		{
+			"path": "docs/theme.md",
 			"class": "manual-review",
 			"rule": "manual-review-boundaries",
 			"owner": "fork-runtime",
@@ -659,6 +680,13 @@
 		},
 		{
 			"path": "packages/coding-agent/src/cli/update-cli.ts",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "omp-entrypoint",
+			"layer": 2
+		},
+		{
+			"path": "packages/coding-agent/src/cli/worker-selectors.ts",
 			"class": "manual-review",
 			"rule": "manual-review-boundaries",
 			"owner": "omp-entrypoint",
@@ -1320,6 +1348,11 @@
 		},
 		{
 			"path": "packages/coding-agent/test/setup-identity.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/setup-sign-in-product.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
