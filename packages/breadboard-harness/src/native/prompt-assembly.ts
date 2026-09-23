@@ -101,17 +101,19 @@ function pythonicFunctionPrompt(tools: readonly NativeToolDefinition[]): string 
 	return `\nYou may call a python functions to execute an action.\nTo do so, you must wrap it in the following template:\n\n<TOOL_CALL> function_name(arg_1=value1, arg2=value2, ...) </TOOL_CALL>\n\nand it is wrapped as <TOOL_CALL> ... </TOOL_CALL>.\nThe call MUST begin with the sequence "<TOOL_CALL>" and MUST end with the sequence "</TOOL_CALL>" to be valid.\nThe inner content must be valid python code.\n\nHere are your available functions:\n\n${available}\n\nSyntax: strictly use parentheses with comma-separated arguments and equal signs for keyword args.\nExample: my_tool(arg1=123, arg2=\"text\"). Do NOT use colons.\n`;
 }
 
-function perTurnCatalog(surface: NativeToolSurfacePack): string {
+function perTurnCatalog(surface: NativeToolSurfacePack, persistent = false): string {
+	const nativeTools = persistent ? [...surface.native, ...surface.textInvoked] : surface.native;
+	const textTools = persistent ? [] : surface.textInvoked;
 	const sections = ["\n\nSYSTEM MESSAGE - AVAILABLE TOOLS\n"];
-	if (surface.native.length > 0) {
+	if (nativeTools.length > 0) {
 		sections.push(
 			"NATIVE TOOLS AVAILABLE VIA TOOL CALLING:\n" +
-				surface.native.map(tool => `- ${tool.name}`).join("\n") +
-			"\n",
+				nativeTools.map(tool => `- ${tool.name}`).join("\n") +
+				"\n",
 		);
 	}
-	if (surface.textInvoked.length > 0) {
-		const functionPrompt = pythonicFunctionPrompt(surface.textInvoked);
+	if (textTools.length > 0) {
+		const functionPrompt = pythonicFunctionPrompt(textTools);
 		sections.push(
 			"\nADDITIONAL TEXT-INVOKED FUNCTIONS:\n" +
 				`<FUNCTIONS>\n${functionPrompt}\n\n${functionPrompt}\n\n\n</FUNCTIONS>\n`,
@@ -217,7 +219,7 @@ export type NativeUserTextBlock = { readonly type: "text"; readonly text: string
 export function frameNativeUserContent(userText: string, stage: { readonly perTurnPrompt: string; readonly toolPromptMode?: string; readonly toolSurface: NativeToolSurfacePack }): string | NativeUserTextBlock[] {
 	const framed = frameNativeUserMessage(userText, stage.perTurnPrompt);
 	if (stage.toolPromptMode !== "system_compiled_and_persistent_per_turn") return framed;
-	return [{ type: "text", text: framed }, { type: "text", text: perTurnCatalog(stage.toolSurface) }];
+	return [{ type: "text", text: framed }, { type: "text", text: perTurnCatalog(stage.toolSurface, true) }];
 }
 
 /**

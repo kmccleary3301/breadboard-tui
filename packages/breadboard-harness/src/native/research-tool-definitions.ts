@@ -498,7 +498,7 @@ export const RESEARCH_TOOL_DEFINITIONS: Readonly<Record<string, readonly NativeT
 				required: ["todos"],
 				additionalProperties: false,
 			},
-			nativePrimary: true,
+			nativePrimary: false,
 		},
 		{
 			id: "cc.WebFetch",
