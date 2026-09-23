@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+// The default snapshot is a module import, not a runtime path: `bun build --compile` embeds it into the binary. The
+// import is dynamic so processes that never load a harness skip parsing it.
+async function bundledSnapshot(): Promise<unknown> {
+	return (await import("../engine-data/snapshot.json", { with: { type: "json" } })).default;
+}
 
 export interface EngineDataSnapshotFile {
 	readonly path: string;
@@ -19,7 +24,7 @@ export interface EngineDataSnapshot {
 const SNAPSHOT_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
 const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const DEFAULT_DATA_DIR = fileURLToPath(new URL("../engine-data/", import.meta.url));
+const BUNDLED_SNAPSHOT_KEY = "bundled";
 const snapshotCache = new Map<string, EngineDataSnapshot>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,14 +100,17 @@ function snapshotPath(dataDir: string | URL): string {
 	return join(root, "snapshot.json");
 }
 
-/** Read, validate, hash-check, and cache the generated engine-data bundle. */
-export async function loadEngineDataSnapshot(dataDir: string | URL = DEFAULT_DATA_DIR): Promise<EngineDataSnapshot> {
-	const path = snapshotPath(dataDir);
+/**
+ * Read, validate, hash-check, and cache the engine-data bundle. With no `dataDir` this is the copy embedded at build
+ * time; a `dataDir` reads `<dataDir>/snapshot.json` from disk.
+ */
+export async function loadEngineDataSnapshot(dataDir?: string | URL): Promise<EngineDataSnapshot> {
+	const path = dataDir === undefined ? BUNDLED_SNAPSHOT_KEY : snapshotPath(dataDir);
 	const cached = snapshotCache.get(path);
 	if (cached !== undefined) return cached;
 	let raw: unknown;
 	try {
-		raw = JSON.parse(await readFile(path, "utf8")) as unknown;
+		raw = dataDir === undefined ? await bundledSnapshot() : (JSON.parse(await readFile(path, "utf8")) as unknown);
 	} catch (error) {
 		throw new Error(`unable to read engine data snapshot at ${path}`, { cause: error });
 	}
