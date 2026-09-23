@@ -1,19 +1,20 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
+import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
+import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
 	OMP_PRODUCT_IDENTITY,
 	type ProductIdentity,
-} from "../../../src/product-identity";
-import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
-import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-tui/theme";
+} from "@oh-my-pi/pi-coding-agent/product-identity";
 
 describe("WelcomeComponent", () => {
 	beforeAll(async () => {
 		await Settings.init({ inMemory: true });
 		await initTheme(false);
 	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 		settings.set("display.reduceMotion", false);

@@ -3,7 +3,8 @@ import { matchesKey } from "../keys";
 import { centerLine, padding } from "../utils";
 import { padToWidth } from "../render/utils";
 import { routeSgrMouseInput, type SgrMouseEvent } from "../mouse";
-import { DEFAULT_PRODUCT_IDENTITY, gradientLogo } from "../prompt/welcome";
+import { getProductIdentity } from "../product-identity";
+import { gradientLogo } from "../prompt/welcome";
 import { theme } from "../theme/theme";
 import type { SetupHost } from "./scenes/types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
@@ -153,7 +154,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	render(width: number): readonly string[] {
 		const safeWidth = Math.max(1, width);
 		const height = Math.max(1, this.ctx.ui.terminal.rows);
-		const identity = this.ctx.identity ?? DEFAULT_PRODUCT_IDENTITY;
+		const identity = this.ctx.identity ?? getProductIdentity();
 		const appearance = theme.isLight ? "light" : "dark";
 		const mode = theme.getColorMode();
 		let lines: string[];

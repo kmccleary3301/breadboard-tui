@@ -42,7 +42,7 @@ import {
 import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../thinking";
 import { getTabBarTheme } from "../chrome/shared";
-import { getComposerShapeOptions, type ComposerShapeIdentity } from "./composer-shape-registry";
+import { getComposerShapeOptions } from "./composer-shape-registry";
 import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./composer-shape-preview";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
@@ -709,7 +709,6 @@ export interface SettingsRuntimeContext {
 	/** Live status renderer for composer-shape previews (the session's status line). */
 	composerPreviewStatus?: ComposerPreviewStatusSource;
 	/** Product labels for the composer selector; supplied by the host. */
-	composerIdentity?: ComposerShapeIdentity;
 }
 
 /** Status line settings subset for preview */
@@ -1336,7 +1335,7 @@ export class SettingsSelectorComponent implements Component {
 		} else if (def.path === "theme.dark" || def.path === "theme.light") {
 			options = this.#context.availableThemes.map(t => ({ value: t, label: t }));
 		} else if (def.path === "composer.shape") {
-			options = getComposerShapeOptions(this.#context.composerIdentity);
+			options = getComposerShapeOptions();
 		}
 		// Preview handlers
 		let onPreview: ((value: string) => void | Promise<void>) | undefined;

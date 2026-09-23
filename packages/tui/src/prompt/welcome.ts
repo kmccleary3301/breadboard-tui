@@ -8,28 +8,14 @@ import { sanitizeStatusText } from "../chrome/shared";
 import { isReducedMotionEnabled } from "../reduced-motion";
 import tipsText from "./tips.txt" with { type: "text" };
 
-export type ProductAppearance = "dark" | "light";
-export type ProductSymbolPreset = "unicode" | "nerd" | "emoji" | "ascii";
-export type GradientStop = readonly [red: number, green: number, blue: number];
-export interface GradientPalette {
-	readonly stops: readonly GradientStop[];
-	readonly ramp256: readonly number[];
-	readonly ramp16: readonly number[];
-}
-export interface ProductIdentity {
-	readonly id: string;
-	readonly displayName: string;
-	readonly shortDisplayName: string;
-	readonly cliName: string;
-	readonly welcomeTitle: string;
-	readonly setupWordmark: string;
-	readonly composerFrameLabel: string;
-	readonly setupModelEmptyText?: string;
-	readonly logoArt: readonly string[];
-	readonly compactLogo: Readonly<Record<ProductSymbolPreset, string>>;
-	readonly gradientPalettes: Readonly<Record<ProductAppearance, GradientPalette>>;
-	readonly defaultThemes: Readonly<Record<ProductAppearance, string>>;
-}
+import {
+	type GradientPalette,
+	getProductIdentity,
+	OMP_PRODUCT_IDENTITY,
+	type ProductAppearance,
+	type ProductIdentity,
+} from "../product-identity";
+
 export interface WelcomeHarnessSnapshot {
 	readonly name: string;
 	readonly mode: string | null;
@@ -42,33 +28,6 @@ export interface WelcomeHarnessSnapshot {
 			readonly visibility?: string;
 		}[];
 	} | null;
-}
-function freezePalette(stops: GradientStop[], ramp256: number[], ramp16: number[]): GradientPalette {
-	return Object.freeze({ stops: Object.freeze(stops), ramp256: Object.freeze(ramp256), ramp16: Object.freeze(ramp16) });
-}
-const OMP_GRADIENT = freezePalette([[255, 92, 200], [200, 110, 255], [120, 130, 255], [60, 200, 255], [120, 255, 220]], [199, 171, 135, 99, 75, 51, 87], [95, 95, 94, 96, 92]);
-const BREADBOARD_GRADIENT = freezePalette([[255, 77, 109], [217, 77, 255], [77, 163, 255]], [204, 171, 75], [91, 95, 94]);
-const OMP_LOGO = Object.freeze(["▀██████████▀", " ╘██    ██  ", "  ██    ██  ", "  ██    ██  ", " ▄██▄  ▄██▄ "]);
-export const OMP_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
-	id: "omp", displayName: "Oh My Pi", shortDisplayName: "OMP", cliName: "omp", welcomeTitle: "omp",
-	setupWordmark: "O h   M y   P i", composerFrameLabel: "Pi", logoArt: OMP_LOGO,
-	compactLogo: Object.freeze({ unicode: "π", nerd: "\ue22c", emoji: "π", ascii: "pi" }),
-	gradientPalettes: Object.freeze({ dark: OMP_GRADIENT, light: OMP_GRADIENT }),
-	defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
-});
-export const DEFAULT_PRODUCT_IDENTITY = OMP_PRODUCT_IDENTITY;
-export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
-	id: "breadboard", displayName: "BreadBoard", shortDisplayName: "BreadBoard", cliName: "bb",
-	welcomeTitle: "BreadBoard", setupWordmark: "BreadBoard", composerFrameLabel: "Framed Rules",
-	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",
-	logoArt: Object.freeze(["░█▄▄ █▀█ █▀▀ ▄▀█ █▀▄░░░░░", "░█▄█ █▀▄ ██▄ █▀█ █▄▀░░░░░", "░░░░░█▄▄ █▀█ ▄▀█ █▀█ █▀▄░", "░░░░░█▄█ █▄█ █▀█ █▀▄ █▄▀░"]),
-	compactLogo: Object.freeze({ unicode: "ƁB", nerd: "bb", emoji: "🍞", ascii: "bb" }),
-	gradientPalettes: Object.freeze({ dark: BREADBOARD_GRADIENT, light: BREADBOARD_GRADIENT }),
-	defaultThemes: Object.freeze({ dark: "breadboard", light: "breadboard-light" }),
-});
-export let activeProductIdentity: ProductIdentity = DEFAULT_PRODUCT_IDENTITY;
-export function setProductIdentity(identity: ProductIdentity): void {
-	activeProductIdentity = identity;
 }
 export interface WelcomeHarnessLockValue {
 	readonly [key: string]: unknown;
@@ -120,7 +79,7 @@ const TIP_TEMPLATES: readonly TipTemplate[] = Object.freeze(
 		),
 );
 
-export function getWelcomeTips(identity: ProductIdentity = activeProductIdentity): readonly string[] {
+export function getWelcomeTips(identity: ProductIdentity = getProductIdentity()): readonly string[] {
 	const includeNativeOnly = identity.id === OMP_PRODUCT_IDENTITY.id;
 	return Object.freeze(
 		TIP_TEMPLATES.filter(template => includeNativeOnly || !template.nativeOnly).map(template =>
@@ -263,7 +222,7 @@ export class WelcomeComponent implements Component {
 		private providerName: string,
 		private recentSessions: RecentSession[] = [],
 		private lspServers: LspServerInfo[] = [],
-		private readonly identity: ProductIdentity = activeProductIdentity,
+		private readonly identity: ProductIdentity = getProductIdentity(),
 		private readonly appearance?: ProductAppearance,
 		private reduceMotion?: boolean,
 		private harness?: WelcomeHarnessSnapshot | null,

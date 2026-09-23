@@ -1,5 +1,5 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { ProductAppearance, ProductIdentity } from "../../prompt/welcome";
+import type { ProductAppearance, ProductIdentity } from "../../product-identity";
 import { gradientLogo } from "../../prompt/welcome";
 import { padToWidth } from "../../render/utils";
 import type { ColorMode } from "../../theme/schema";

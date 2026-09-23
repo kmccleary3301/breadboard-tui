@@ -19,6 +19,7 @@ import {
 } from "../index";
 import type { ComposerShape } from "./composer-shape-registry";
 import { theme } from "../theme/theme";
+import { getProductIdentity } from "../product-identity";
 
 /**
  * Real status renderer the preview borrows rows from — structurally satisfied
@@ -50,14 +51,12 @@ export interface ComposerShapePreviewOptions {
 	/** Stand-in title forwarded through the real status renderer for unnamed sessions. */
 	previewTitle?: string;
 }
-/** Stand-in session title shown while the previewed session is unnamed. */
-const PREVIEW_TITLE = "omp";
 
 export function renderComposerShapePreview(
 	shape: ComposerShape,
 	width: number,
 	status?: ComposerPreviewStatusSource,
-	previewTitle: string = PREVIEW_TITLE,
+	previewTitle: string = getProductIdentity().cliName,
 ): readonly string[] {
 	// No upper cap: the hosting overlay already bounds width by the terminal,
 	// and capping clips the status band the preview exists to show (#12500).
@@ -160,7 +159,7 @@ export class ComposerShapePreview implements Component {
 			this.#shape,
 			width,
 			this.#options.status,
-			this.#options.previewTitle ?? PREVIEW_TITLE,
+			this.#options.previewTitle ?? getProductIdentity().cliName,
 		);
 		return ["", theme.fg("muted", "Preview:"), ...lines];
 	}

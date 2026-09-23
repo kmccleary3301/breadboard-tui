@@ -4,9 +4,13 @@ import { Container } from "../../tui";
 import { Text } from "../../components/text";
 import { WizardStep } from "../../components/wizard-step";
 import type { ComposerShape } from "../../overlays/composer-shape-registry";
-import { renderComposerShapePreview } from "../../overlays/composer-shape-preview";
+import { type ComposerPreviewStatusSource, renderComposerShapePreview } from "../../overlays/composer-shape-preview";
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
+import { getProductIdentity, type ProductIdentity } from "../../product-identity";
+import { isBreadboardPreset } from "../../status-line/breadboard-presentation";
+import type { StatusLinePreset } from "../../status-line/types";
 import { getSelectListTheme, theme } from "../../theme/theme";
+import { createBreadboardPreviewStatusSource, previewSnapshot } from "./information-layout";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 class ComposerSceneController implements SetupSceneController {
@@ -18,12 +22,15 @@ class ComposerSceneController implements SetupSceneController {
 	#currentShape: ComposerShape = "band";
 	#committing = false;
 	#step: WizardStep | undefined;
+	readonly #identity: ProductIdentity;
+	readonly #previewStatus: ComposerPreviewStatusSource | undefined;
 
 	readonly #host: SetupSceneHost;
 
 	constructor(host: SetupSceneHost) {
 		this.#host = host;
-		const choices = getComposerShapeOptions(host.ctx.identity);
+		this.#identity = host.ctx.identity ?? getProductIdentity();
+		const choices = getComposerShapeOptions(this.#identity);
 		this.#shapes = choices.map(choice => choice.value);
 		this.#items = choices.map((choice, index) => ({
 			value: choice.value,
@@ -34,6 +41,13 @@ class ComposerSceneController implements SetupSceneController {
 		const initialShape = this.#shapes.includes(configuredShape) ? configuredShape : "band";
 		this.#currentShape = initialShape;
 		const initialIndex = Math.max(0, this.#shapes.indexOf(initialShape));
+		// Without a live session status line, BreadBoard presets preview through a synthetic snapshot.
+		const configuredPreset = host.ctx.settings.get<StatusLinePreset | undefined>("statusLine.preset");
+		this.#previewStatus =
+			host.ctx.statusLine ??
+			(this.#identity.id === "breadboard" && isBreadboardPreset(configuredPreset) && configuredPreset
+				? createBreadboardPreviewStatusSource(previewSnapshot(host), configuredPreset)
+				: undefined);
 
 		const selectListTheme = getSelectListTheme();
 		this.#selectList = new SelectList(this.#items, this.#items.length, selectListTheme);
@@ -79,7 +93,12 @@ class ComposerSceneController implements SetupSceneController {
 		);
 		const preview = new Container();
 		preview.addChild(new Text(theme.fg("muted", "Preview:"), 0, 0));
-		for (const line of renderComposerShapePreview(this.#currentShape, width, this.#host.ctx.statusLine)) {
+		for (const line of renderComposerShapePreview(
+			this.#currentShape,
+			width,
+			this.#previewStatus,
+			this.#identity.cliName,
+		)) {
 			preview.addChild(new Text(line, 0, 0));
 		}
 		const items = this.#items.length;

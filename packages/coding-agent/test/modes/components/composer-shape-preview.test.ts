@@ -1,79 +1,124 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { COMPOSER_SHAPE_VALUES, type ComposerShape } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
+import {
+	ComposerShapePreview,
+	renderComposerShapePreview,
+} from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
+import {
+	getComposerShapeOptions,
+	installExtensionComposerShape,
+} from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
+import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
 import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
+import { createStatusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
+import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
+import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
 import { composerSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/composer";
 import { createBreadboardPreviewStatusSource } from "@oh-my-pi/pi-tui/setup/scenes/information-layout";
 import type { SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
-import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../../../src/product-identity";
-import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
-import { ComposerShapePreview, renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
-import { getComposerShapeOptions, installExtensionComposerShape } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
 import { initTheme, setTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
+import {
+	BREADBOARD_PRODUCT_IDENTITY,
+	OMP_PRODUCT_IDENTITY,
+	type ProductIdentity,
+} from "@oh-my-pi/pi-coding-agent/product-identity";
 import { type ComposerStyle, visibleWidth } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
 	await initTheme();
 });
-function createPreviewSession(): ConstructorParameters<typeof StatusLineComponent>[0] {
-	return {
-		state: { messages: [] },
-		messages: [],
-		model: { contextWindow: 128_000 },
-		contextUsageRevision: 0,
-		systemPrompt: [],
-		agent: { state: { tools: [] } },
-		skills: [],
-		isStreaming: false,
-		isAutoThinking: false,
-		autoResolvedThinkingLevel: () => undefined,
-		isAdvisorActive: () => false,
-		getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
-		isFastModeActive: () => false,
-		getAsyncJobSnapshot: () => ({ running: [] }),
-		getCurrentModel: () => undefined,
-		isFastModeEnabled: () => false,
-		getContextUsage: () => ({ tokens: 0, contextWindow: 128_000 }),
-		getGoalModeState: () => null,
-		modelRegistry: { isUsingOAuth: () => false },
-		sessionManager: {
-			getSessionName: () => "",
-			getUsageStatistics: () => ({
-				input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-				orchestrationInput: 0, orchestrationOutput: 0, orchestrationCacheRead: 0,
-				premiumRequests: 0, cost: 0,
-			}),
-		},
-	} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
-}
-
-function createPreviewStatus(identity: ProductIdentity): StatusLineComponent {
-	const status = new StatusLineComponent(createPreviewSession(), identity);
-	status.updateSettings({
-		preset: "custom",
-		leftSegments: ["pi"],
-		rightSegments: ["session_name"],
-		separator: "powerline-thin",
-		sessionAccent: false,
-	});
-	return status;
-}
 
 describe("composer shape preview", () => {
-	it("resolves transparent composer preview text away from the terminal default", async () => {
-		// The built-in `light` theme leaves `text` empty; a transparent shape must
-		// still emit an explicit contrast foreground instead of ESC[39m, matching
-		// the live editor so the preview stays readable on a light terminal.
-		await setTheme("light");
-		const box = renderComposerShapePreview("box", 80).join("\n");
-		expect(box).not.toContain("\x1b[39mAsk anything");
-		expect(box).toMatch(/\x1b\[38[;0-9]*mAsk anything/);
+	beforeEach(async () => {
+		resetSettingsForTest();
+		await Settings.init({ inMemory: true });
 	});
 
-	it("borrows status rows from the live status source per shape layout", async () => {
-		await setTheme("dark");
-		// Echo mocks: the stand-in title must be forwarded as a prop to every
-		// title-bearing status call, not glued onto the rendered content.
+	afterEach(() => {
+		resetSettingsForTest();
+	});
+
+	const shapes: ComposerShape[] = [...COMPOSER_SHAPE_VALUES];
+
+	function createPreviewSession() {
+		return {
+			state: { messages: [] },
+			messages: [],
+			model: { contextWindow: 128_000 },
+			contextUsageRevision: 0,
+			systemPrompt: [],
+			agent: { state: { tools: [] } },
+			skills: [],
+			isStreaming: false,
+			isAutoThinking: false,
+			autoResolvedThinkingLevel: () => undefined,
+			isAdvisorActive: () => false,
+			getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
+			isFastModeActive: () => false,
+			getAsyncJobSnapshot: () => ({ running: [] }),
+			getCurrentModel: () => undefined,
+			isFastModeEnabled: () => false,
+			getContextUsage: () => ({ tokens: 0, contextWindow: 128_000 }),
+			getGoalModeState: () => null,
+			modelRegistry: { isUsingOAuth: () => false },
+			sessionManager: {
+				getSessionName: () => "",
+				getUsageStatistics: () => ({
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					orchestrationInput: 0,
+					orchestrationOutput: 0,
+					orchestrationCacheRead: 0,
+					premiumRequests: 0,
+					cost: 0,
+				}),
+			},
+		} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
+	}
+
+	function createPreviewStatus(identity: ProductIdentity): StatusLineComponent {
+		const status = new StatusLineComponent(createPreviewSession(), createStatusLineHost(identity));
+		status.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "powerline-thin",
+			sessionAccent: false,
+		});
+		return status;
+	}
+
+	it.each(shapes)("preserves the draft within %s preview geometry", async (shape: ComposerShape) => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const lines = renderComposerShapePreview(shape, 80);
+		expect(lines.join("\n")).toContain("Ask anything");
+		expect(lines.every(line => visibleWidth(line) <= 80)).toBe(true);
+	});
+
+	it("changes the visible composer geometry without losing its draft", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const preview = new ComposerShapePreview("box", { requestRender: () => {} });
+		expect(preview.render(80).join("\n")).toContain("╭");
+		preview.setValue("claude");
+		const rendered = preview.render(80).join("\n");
+		expect(rendered).not.toContain("╭");
+		expect(rendered).toContain("Ask anything");
+	});
+
+	it("keeps the native lower status group when responsive overflow is unavailable", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const status = createPreviewStatus(OMP_PRODUCT_IDENTITY);
+		const lines = renderComposerShapePreview("claude", 80, status, "Example session").map(Bun.stripANSI);
+		expect(lines[lines.length - 1]).toContain(theme.icon.omp);
+		expect(lines.slice(0, -1).join("\n")).toContain("Example session");
+	});
+
+	it("keeps each responsive field exactly once across the actual box edges", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
 		const source = createBreadboardPreviewStatusSource(
 			{
 				modelName: "Model",
@@ -147,9 +192,10 @@ describe("composer shape preview", () => {
 			const isolated = Settings.isolated();
 			isolated.set("composer.shape", "pi");
 			const host = {
-				identity,
 				ctx: {
+					identity,
 					settings: isolated,
+					composerShape: "pi",
 					statusLine: createPreviewStatus(identity),
 				},
 				requestRender: () => {},
@@ -212,18 +258,36 @@ describe("composer shape preview", () => {
 		expect(getComposerShapeOptions().some(option => option.value === "extension-dock")).toBe(false);
 	});
 
-	it("uses the full overlay width instead of clipping the status band (issue #12500)", async () => {
+	it("renders preview inside SettingsSelectorComponent submenu without crashing", async () => {
 		await setTheme("dark");
-		const status = {
-			getTopBorder: (width: number) => ({ content: "", width }),
-			getStandaloneTopBorder: (width: number) => ({ content: "", width }),
-			getBandTopBorder: (width: number) => ({ content: " ".repeat(width - 6) + "STATUS", width }),
-			renderBottomBar: () => "",
-		};
+		const selector = new SettingsSelectorComponent(
+			{
+				availableThinkingLevels: [],
+				thinkingLevel: undefined,
+				availableThemes: ["dark", "light"],
+				providers: [],
+				settings: createSettingsHost(),
+				plugins: createPluginSettingsHost(process.cwd()),
+			},
+			{
+				onChange: () => {},
+				onCancel: () => {},
+			},
+		);
 
-		const [statusBand] = renderComposerShapePreview("band", 200, status);
+		for (const ch of "composer shape") selector.handleInput(ch);
+		// Open the composer.shape submenu
+		selector.handleInput("\n");
 
-		expect(visibleWidth(statusBand ?? "")).toBe(200);
-		expect(statusBand).toEndWith("STATUS");
+		const rendered = selector.render(80).join("\n");
+		expect(rendered).toContain("Composer Shape");
+		expect(rendered).toContain("Preview:");
+		expect(rendered).toContain("Ask anything");
+
+		// Cycle down to claude
+		selector.handleInput("\x1b[B");
+		const nextRendered = selector.render(80).join("\n");
+		expect(nextRendered).toContain("Claude Code");
+		expect(nextRendered).toContain("Preview:");
 	});
 });

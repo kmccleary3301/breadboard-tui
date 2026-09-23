@@ -1,7 +1,7 @@
 import { type Component, type OverlayFocusOwner } from "../tui";
 import { matchesKey } from "../keys";
 import type { SetupUiHost } from "./scenes/types";
-import { DEFAULT_PRODUCT_IDENTITY, type ProductIdentity } from "../prompt/welcome";
+import { getProductIdentity, type ProductIdentity } from "../product-identity";
 import { theme } from "../theme/theme";
 import { isReducedMotionEnabled } from "../reduced-motion";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
@@ -117,7 +117,7 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 /** Show the startup animation and restore the previous overlay focus afterward. */
 export async function runStartupSplash(ctx: SetupUiHost, options: RunStartupSplashOptions = {}): Promise<void> {
 	const component = new StartupSplashComponent(ctx, {
-		identity: options.identity ?? ctx.identity ?? DEFAULT_PRODUCT_IDENTITY,
+		identity: options.identity ?? ctx.identity ?? getProductIdentity(),
 		...(options.durationMs !== undefined ? { durationMs: options.durationMs } : {}),
 		...(options.tickMs !== undefined ? { tickMs: options.tickMs } : {}),
 		...(options.now ? { now: options.now } : {}),

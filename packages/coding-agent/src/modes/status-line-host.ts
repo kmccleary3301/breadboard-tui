@@ -1,7 +1,7 @@
 import type { StatusLineHost, StatusLineSession } from "@oh-my-pi/pi-tui/status-line/host";
 import { theme } from "@oh-my-pi/pi-tui/theme";
 import { settings } from "../config/settings";
-import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
+import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../product-identity";
 import type { AgentSession } from "../session/agent-session";
 import { getSessionCompactionBoundaries } from "../session/context-usage-runtime";
 import { limitMatchesActiveAccount } from "../slash-commands/helpers/active-oauth-account";
@@ -16,43 +16,50 @@ import { calculateTokensPerSecond } from "../utils/token-rate";
 export type StatusLineHostSession = StatusLineSession &
 	Partial<Pick<AgentSession, "settings" | "modelRegistry" | "sessionId" | "fetchUsageReports">>;
 
-/** Application policy and runtime services consumed by the portable status renderer. */
-export const statusLineHost: StatusLineHost<StatusLineHostSession> = {
-	getSettings: () => ({
-		preset: settings.get("statusLine.preset"),
-		leftSegments: settings.get("statusLine.leftSegments"),
-		rightSegments: settings.get("statusLine.rightSegments"),
-		separator: settings.get("statusLine.separator"),
-		showHookStatus: settings.get("statusLine.showHookStatus"),
-		segmentOptions: settings.getGroup("statusLine").segmentOptions,
-		sessionAccent: settings.get("statusLine.sessionAccent"),
-		transparent: settings.get("statusLine.transparent"),
-		compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
-		breadboard: settings.get("statusLine.breadboard"),
-	}),
-	gitEnabled: () => settings.get("git.enabled"),
-	codexResetFireworksEnabled: () => settings.get("tui.codexResetFireworks"),
-	getSettingsRevision: () => settings.revision,
-	getSessionSettingsIdentity: session => session.settings,
-	getSessionSettingsRevision: session => session.settings?.revision ?? 0,
-	goalStatusInFooter: session => (session.settings ?? settings).get("goal.statusInFooter"),
-	activeAccount: (session, provider) =>
-		session.modelRegistry?.authStorage?.getOAuthAccountIdentity(provider, session.sessionId),
-	canFetchUsageReports: session => typeof session.fetchUsageReports === "function",
-	fetchUsageReports: (session, signal) => session.fetchUsageReports?.(signal) ?? Promise.resolve(null),
-	resolveActiveRepo: resolveActiveRepoContextSync,
-	lookupPullRequest: cwd =>
-		github.run(cwd, ["pr", "view", "--json", "number,url"], AbortSignal.timeout(GH_COMMAND_TIMEOUT_MS)),
-	calculateTokensPerSecond,
-	getIdentityMark: () => ACTIVE_PRODUCT_IDENTITY.compactLogo[theme.getSymbolPreset()],
-	isBreadboardOwned: session => ACTIVE_PRODUCT_IDENTITY.id === "breadboard" || session.mainStreamOwnsTurnLifecycle === true,
-	limitMatchesActiveAccount,
-	computeCompactionBoundaries: (session, contextWindow, model) => {
-		const source = session.settings;
-		return getSessionCompactionBoundaries(
-			typeof source?.getGroup === "function" ? source : settings,
-			contextWindow,
-			model,
-		);
-	},
-};
+/** Application policy and runtime services consumed by the portable status renderer, for one product identity. */
+export function createStatusLineHost(
+	identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
+): StatusLineHost<StatusLineHostSession> {
+	return {
+		getSettings: () => ({
+			preset: settings.get("statusLine.preset"),
+			leftSegments: settings.get("statusLine.leftSegments"),
+			rightSegments: settings.get("statusLine.rightSegments"),
+			separator: settings.get("statusLine.separator"),
+			showHookStatus: settings.get("statusLine.showHookStatus"),
+			segmentOptions: settings.getGroup("statusLine").segmentOptions,
+			sessionAccent: settings.get("statusLine.sessionAccent"),
+			transparent: settings.get("statusLine.transparent"),
+			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
+			breadboard: settings.get("statusLine.breadboard"),
+		}),
+		gitEnabled: () => settings.get("git.enabled"),
+		codexResetFireworksEnabled: () => settings.get("tui.codexResetFireworks"),
+		getSettingsRevision: () => settings.revision,
+		getSessionSettingsIdentity: session => session.settings,
+		getSessionSettingsRevision: session => session.settings?.revision ?? 0,
+		goalStatusInFooter: session => (session.settings ?? settings).get("goal.statusInFooter"),
+		activeAccount: (session, provider) =>
+			session.modelRegistry?.authStorage?.getOAuthAccountIdentity(provider, session.sessionId),
+		canFetchUsageReports: session => typeof session.fetchUsageReports === "function",
+		fetchUsageReports: (session, signal) => session.fetchUsageReports?.(signal) ?? Promise.resolve(null),
+		resolveActiveRepo: resolveActiveRepoContextSync,
+		lookupPullRequest: cwd =>
+			github.run(cwd, ["pr", "view", "--json", "number,url"], AbortSignal.timeout(GH_COMMAND_TIMEOUT_MS)),
+		calculateTokensPerSecond,
+		getIdentityMark: () =>
+			identity.id === OMP_PRODUCT_IDENTITY.id ? theme.icon.omp : identity.compactLogo[theme.getSymbolPreset()],
+		isBreadboardOwned: session => identity.id === "breadboard" || session.mainStreamOwnsTurnLifecycle === true,
+		limitMatchesActiveAccount,
+		computeCompactionBoundaries: (session, contextWindow, model) => {
+			const source = session.settings;
+			return getSessionCompactionBoundaries(
+				typeof source?.getGroup === "function" ? source : settings,
+				contextWindow,
+				model,
+			);
+		},
+	};
+}
+
+export const statusLineHost = createStatusLineHost();

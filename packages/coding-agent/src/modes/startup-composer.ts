@@ -18,6 +18,8 @@ import {
 import { setMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
 import { initThemeSync } from "@oh-my-pi/pi-tui/theme";
 import { MAGIC_KEYWORDS } from "./magic-keywords";
+// Registers the product identity with the renderer before the prepaint theme and welcome resolve defaults.
+import "../product-identity";
 
 /** Inputs available at the CLI prepaint boundary before command modules load. */
 export interface PrepaintComposerOptions {

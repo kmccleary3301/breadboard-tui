@@ -6,10 +6,10 @@ import { WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
 import { attachmentSgr } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
 import { highlightMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
 import { renderSetupSplash } from "@oh-my-pi/pi-tui/setup/scenes/splash";
-import { colorToAnsi, detectColorMode, fgAnsi, bgAnsi, paintAnsi } from "@oh-my-pi/pi-tui/theme/color";
+import { bgAnsi, colorToAnsi, detectColorMode, fgAnsi, paintAnsi } from "@oh-my-pi/pi-tui/theme/color";
 import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
-import { getCurrentThemeName, getMarkdownTheme, initTheme, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
+import { getCurrentThemeName, getMarkdownTheme, initTheme, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { ProductIdentity } from "../src/product-identity";
 import { BREADBOARD_PRODUCT_IDENTITY } from "../src/product-identity";
 

@@ -7,7 +7,7 @@ import type { ModelBrowserSource } from "../../overlays/model-browser";
 import type { SymbolPreset } from "../../theme/theme";
 import type { SearchProviderId } from "../../tools/web-search";
 import type { Component, TUI } from "../../tui";
-import type { ProductIdentity } from "../../prompt/welcome";
+import type { ProductIdentity } from "../../product-identity";
 
 /** Terminal capabilities used by setup overlays and the startup splash. */
 export interface SetupUiHost {
