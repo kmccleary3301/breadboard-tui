@@ -63,20 +63,55 @@ describe("native harness live state", () => {
 	it("coalesces quick edits into one ordered publication of the last source", async () => {
 		const root = await workspace();
 		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
-		const generations: number[] = [];
-		harness.live?.subscribe(change => generations.push(change.generation));
-		const sourcePath = join(root, SPEC);
-		const source = await readFile(sourcePath, "utf8");
-		const firstSource = source.replace("  - list_dir\n", "");
-		const secondSource = firstSource.replace("  - run_shell\n", "");
-		await writeFile(sourcePath, firstSource);
-		const firstReload = harness.live?.reload();
-		await writeFile(sourcePath, secondSource);
-		const secondReload = harness.live?.reload();
-		const [firstResult, secondResult] = await Promise.all([firstReload, secondReload]);
-		expect(firstResult?.graphHash).toBe(secondResult?.graphHash);
-		expect(harness.live?.generation).toBe(2);
-		expect(generations).toEqual([2]);
+		let bytes = new TextEncoder().encode("one");
+		const reloadSources: string[] = [];
+		let intervalCallback: (() => void) | undefined;
+		let timeoutCallback: (() => void) | undefined;
+		const context = {
+			ui: { notify() {} },
+			setInterval(callback: () => void) {
+				intervalCallback = callback;
+				return {} as Timer;
+			},
+			setTimeout(callback: () => void) {
+				timeoutCallback = callback;
+				return {} as Timer;
+			},
+			clearTimer() {},
+		};
+		const fakeLive = {
+			editable: true,
+			generation: 1,
+			current: () => harness,
+			reload: async (prepare?: (next: typeof harness) => void | Promise<void>) => {
+				await prepare?.(harness);
+				reloadSources.push(new TextDecoder().decode(bytes));
+				return harness;
+			},
+			setReloadValidator() {},
+			subscribe() {
+				return () => {};
+			},
+		};
+		const watcher = startNativeHarnessWatcher({
+			live: fakeLive,
+			specPath: "harness.yaml",
+			context: context as never,
+			statFile: async () => ({ mtimeMs: 1, size: 3 }),
+			readSource: async () => bytes,
+		});
+		await watcher.ready;
+		bytes = new TextEncoder().encode("two");
+		intervalCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		bytes = new TextEncoder().encode("three");
+		intervalCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		expect(timeoutCallback).toBeDefined();
+		timeoutCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		expect(reloadSources).toEqual(["three"]);
+		watcher.dispose();
 	});
 	it("keeps in-flight turn tools stable and commits a staged generation at the next turn", async () => {
 		const root = await workspace();
