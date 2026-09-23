@@ -2115,7 +2115,7 @@ export class Settings {
 			const defaultHarness = harness?.default;
 			const isR39Harness =
 				typeof defaultHarness === "string" && /(?:^|[/\\])r39(?:[/\\])/.test(defaultHarness);
-			if (isR39Harness && breadboard.engineMode === "local-owned") {
+			if (harness !== undefined && isR39Harness && breadboard.engineMode === "local-owned") {
 				for (const key of [
 					"engineMode",
 					"baseUrl",
