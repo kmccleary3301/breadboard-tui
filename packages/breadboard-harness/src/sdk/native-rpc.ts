@@ -10,7 +10,15 @@ import type {
 	RpcSessionEventFrame,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { RpcFrameDecoder, encodeRpcFrame, MAX_RPC_FRAME_BYTES } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
-import type { NativePublicSessionEvent, NativeSessionTranscriptV2 } from "./contracts";
+import type { NativeSessionTranscriptV2 } from "./contracts";
+import type {
+	PublicAssistantMessagePayload,
+	PublicLifecyclePayload,
+	PublicSessionEvent,
+	PublicSessionEventKind,
+	PublicToolCallPayload,
+	PublicToolResultPayload,
+} from "./public-session-event";
 
 /** The two harness selectors accepted by the native CLI. */
 export type NativeHarnessSelection =
@@ -55,8 +63,6 @@ export type NativeApprovalPolicy =
 export interface NativeRpcEvent {
 	readonly kind: "session" | "ui" | "prompt_result";
 	readonly frame: RpcSessionEventFrame | RpcExtensionUIRequest | RpcPromptResultFrame;
-	/** Undefined for raw OMP frames; the public contract cannot represent this event. */
-	readonly publicEvent?: NativePublicSessionEvent;
 }
 
 /** Process seam used by tests and by non-local SDK hosts. */
@@ -243,6 +249,13 @@ function toEnvironment(
 function statusForState(isStreaming: boolean): NativeSessionStatus {
 	return isStreaming ? "running" : "completed";
 }
+const PUBLIC_ZERO_SHA256 = `sha256:${"0".repeat(64)}` as `sha256:${string}`;
+const PUBLIC_VISIBILITY = Object.freeze({
+	model_visible: true,
+	provider_visible: true,
+	host_visible: true,
+	redaction_state: "none" as const,
+});
 
 /**
  * Minimal JSONL client for the installed native product. It intentionally does
@@ -252,6 +265,7 @@ function statusForState(isStreaming: boolean): NativeSessionStatus {
 export class NativeRpcTransport {
 	readonly #options: NativeRpcTransportOptions;
 	readonly #events = new AsyncQueue<NativeRpcEvent>();
+	readonly #publicEvents = new AsyncQueue<PublicSessionEvent>();
 	readonly #pending = new Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }>();
 	readonly #notifyWaiters: Array<(request: UiNotifyRequest) => void> = [];
 	#process: NativeRpcProcess | undefined;
@@ -262,6 +276,8 @@ export class NativeRpcTransport {
 	#protocolV2Supported = false;
 	#protocolV2Enabled = false;
 	#stderrTail = "";
+	#publicEventSeq = 0;
+	#cancelRequested = false;
 	#requestId = 0;
 	#resumeSession: string | undefined;
 	#session: NativeSessionHandle | undefined;
@@ -343,12 +359,20 @@ export class NativeRpcTransport {
 			const newSession = this.#data<"new_session", { cancelled: boolean }>(result);
 			if (newSession.cancelled) throw new Error("Native RPC session creation was cancelled");
 		}
+
 		const state = await this.#state();
 		this.#session = {
 			session_id: state.sessionId,
 			...(state.sessionFile === undefined ? {} : { session_file: state.sessionFile }),
 			status: "starting",
 		};
+		this.#publicEventSeq = 0;
+		this.#cancelRequested = false;
+		this.#emitPublic(
+			"session.started",
+			{ effective_lock_hash: PUBLIC_ZERO_SHA256, task_hash: PUBLIC_ZERO_SHA256 },
+			"bb.payload.product_session.lifecycle.v1",
+		);
 		await this.prompt(request.task);
 		const running = await this.#state();
 		const response: NativeSessionCreateResponse = {
@@ -390,14 +414,24 @@ export class NativeRpcTransport {
 			transport: "omp-rpc",
 		};
 	}
-
 	async prompt(message: string): Promise<void> {
 		await this.#send({ type: "prompt", message });
+		this.#emitPublic(
+			"input.accepted",
+			{ content_hash: PUBLIC_ZERO_SHA256, attachments: [] },
+			"bb.payload.product_session.lifecycle.v1",
+		);
 	}
 
 	async cancel(request?: PublicSessionCancelRequest): Promise<void> {
 		void request;
+		this.#cancelRequested = true;
 		await this.#send({ type: "abort" });
+		this.#emitPublic(
+			"session.canceled",
+			{ outcome: "canceled", reason: request?.reason ?? "caller canceled" },
+			"bb.payload.product_session.lifecycle.v1",
+		);
 	}
 
 	/** Request the native `/bb-transcript` exporter and return its announced path. */
@@ -423,8 +457,13 @@ export class NativeRpcTransport {
 		return result;
 	}
 
-	/** Top-level session events and headless UI requests in arrival order. */
-	events(): AsyncGenerator<NativeRpcEvent, void, void> {
+	/** Projected BreadBoard public events. */
+	events(): AsyncGenerator<PublicSessionEvent, void, void> {
+		return this.#publicEvents.iterate();
+	}
+
+	/** Raw OMP RPC events for diagnostics and hosts that need wire details. */
+	rawEvents(): AsyncGenerator<NativeRpcEvent, void, void> {
 		return this.#events.iterate();
 	}
 
@@ -434,6 +473,7 @@ export class NativeRpcTransport {
 		this.#stopping = true;
 		this.#process = undefined;
 		this.#events.close();
+		this.#publicEvents.close();
 		this.#rejectPending(new Error("Native RPC transport stopped"));
 		child.kill();
 		await child.exited.catch(() => undefined);
@@ -447,14 +487,106 @@ export class NativeRpcTransport {
 
 	async #failReader(child: NativeRpcProcess, cause: Error): Promise<void> {
 		if (this.#process !== child) return;
+		if (!this.#stopping && !this.#cancelRequested)
+			this.#emitPublic(
+				"session.failed",
+				{ outcome: "failed", error: "rpc_reader_failed", detail: cause.message },
+				"bb.payload.product_session.lifecycle.v1",
+			);
 		this.#process = undefined;
 		this.#stopping = true;
 		const error = new Error(`${cause.message}${this.#stderrTail ? `; stderr: ${this.#stderrTail}` : ""}`, { cause });
 		this.#rejectPending(error);
+		this.#events.close();
+		this.#publicEvents.close();
 		try {
 			child.kill();
 		} finally {
 			await child.exited.catch(() => undefined);
+		}
+	}
+
+	#emitPublic(
+		kind: PublicSessionEventKind,
+		payload: PublicLifecyclePayload | PublicAssistantMessagePayload | PublicToolCallPayload | PublicToolResultPayload,
+		payloadSchemaVersion: PublicSessionEvent["payload_schema_version"],
+	): void {
+		const sessionId = this.#session?.session_id;
+		if (!sessionId) return;
+		const seq = this.#publicEventSeq++;
+		this.#publicEvents.push({
+			schema_version: "bb.public_session_event.v1",
+			event_id: `${sessionId}:${seq}`,
+			seq,
+			timestamp: new Date().toISOString(),
+			work_item_id: null,
+			parent_work_item_id: null,
+			attempt_id: null,
+			session_id: sessionId,
+			span_id: null,
+			visibility: PUBLIC_VISIBILITY,
+			kind,
+			payload,
+			payload_schema_version: payloadSchemaVersion,
+		});
+	}
+
+	#projectSessionFrame(frame: RpcSessionEventFrame): void {
+		const candidate = frame as CanonicalJson;
+		if (!isJsonRecord(candidate) || typeof candidate.type !== "string") return;
+		if (candidate.type === "message_end" && isJsonRecord(candidate.message)) {
+			if (candidate.message.role === "assistant") {
+				const content = Array.isArray(candidate.message.content) ? candidate.message.content : [];
+				const text = content
+					.filter(isJsonRecord)
+					.filter(part => part.type === "text" && typeof part.text === "string")
+					.map(part => part.text as string)
+					.join("");
+				this.#emitPublic(
+					"assistant_message",
+					{ message: candidate.message, text, source: "omp-rpc" },
+					"bb.payload.message.assistant.v1",
+				);
+			}
+			return;
+		}
+		if (candidate.type === "tool_execution_start") {
+			this.#emitPublic(
+				"tool_call",
+				{
+					...(typeof candidate.toolCallId === "string" ? { call_id: candidate.toolCallId } : {}),
+					...(typeof candidate.toolName === "string" ? { tool_name: candidate.toolName } : {}),
+					call: isJsonRecord(candidate.args) ? candidate.args : {},
+					state: "started",
+				},
+				"bb.payload.tool.called.v1",
+			);
+			return;
+		}
+		if (candidate.type === "tool_execution_end") {
+			this.#emitPublic(
+				"tool_result",
+				{
+					...(typeof candidate.toolCallId === "string" ? { call_id: candidate.toolCallId } : {}),
+					...(typeof candidate.toolName === "string" ? { tool: candidate.toolName } : {}),
+					success: candidate.isError !== true,
+					status: candidate.isError === true ? "failed" : "completed",
+					message: candidate.result,
+				},
+				"bb.payload.tool.completed.v1",
+			);
+			return;
+		}
+		if (candidate.type === "agent_end") {
+			if (this.#cancelRequested) return;
+			const error = typeof candidate.error === "string" ? candidate.error : undefined;
+			this.#emitPublic(
+				error ? "session.failed" : "session.completed",
+				error
+					? { outcome: "failed", error: "agent_failed", detail: error }
+					: { outcome: "completed", summary: "OMP agent completed" },
+				"bb.payload.product_session.lifecycle.v1",
+			);
 		}
 	}
 
@@ -502,8 +634,6 @@ export class NativeRpcTransport {
 				const next = await reader.read();
 				if (next.done) break;
 				buffer += decoder.decode(next.value, { stream: true });
-				if (Buffer.byteLength(buffer, "utf8") > MAX_RPC_FRAME_BYTES)
-					throw new Error(`Native RPC frame exceeds ${MAX_RPC_FRAME_BYTES} bytes`);
 				let newline = buffer.indexOf("\n");
 				while (newline >= 0) {
 					const rawLine = buffer.slice(0, newline);
@@ -520,6 +650,8 @@ export class NativeRpcTransport {
 					}
 					newline = buffer.indexOf("\n");
 				}
+				if (Buffer.byteLength(buffer, "utf8") > MAX_RPC_FRAME_BYTES)
+					throw new Error(`Native RPC frame exceeds ${MAX_RPC_FRAME_BYTES} bytes`);
 			}
 			if (!this.#stopping) {
 				const reason = new Error("Native RPC output ended");
@@ -532,8 +664,8 @@ export class NativeRpcTransport {
 			await this.#failReader(child, reason);
 		} finally {
 			reader.releaseLock();
-			if (!this.#ready && !this.#stopping) this.#readyReject?.(new Error("Native RPC output ended before ready"));
 			this.#events.close();
+			this.#publicEvents.close();
 		}
 	}
 
@@ -574,6 +706,11 @@ export class NativeRpcTransport {
 		if (isUiRequest(value)) {
 			this.#events.push({ kind: "ui", frame: value });
 			if (value.method === "confirm" || value.method === "select") {
+				this.#emitPublic(
+					"approval.requested",
+					{ request_id: value.id, operation: value.title },
+					"bb.payload.product_session.lifecycle.v1",
+				);
 				void this.#resolveApproval(value).catch(() => this.#sendUiCancellation(value.id));
 			} else {
 				if (value.method === "notify") {
@@ -587,7 +724,10 @@ export class NativeRpcTransport {
 			this.#events.push({ kind: "prompt_result", frame: value });
 			return;
 		}
-		if (isSessionEvent(value)) this.#events.push({ kind: "session", frame: value });
+		if (isSessionEvent(value)) {
+			this.#events.push({ kind: "session", frame: value });
+			this.#projectSessionFrame(value);
+		}
 	}
 
 	#sendUiCancellation(id: string): void {
@@ -625,6 +765,11 @@ export class NativeRpcTransport {
 					})();
 		if (!this.#process) throw new Error("Native RPC transport is not started");
 		this.#process.stdin.write(`${encodeRpcFrame(response)}\n`);
+		this.#emitPublic(
+			"approval.resolved",
+			{ request_id: request.id, decision: allowed ? "allow" : "deny" },
+			"bb.payload.product_session.lifecycle.v1",
+		);
 	}
 }
 

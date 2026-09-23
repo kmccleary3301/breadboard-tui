@@ -1,12 +1,4 @@
-import type { SessionEvent } from "@breadboard/sdk";
 import type { JsonRecord } from "../canonical-json";
-
-/**
- * Vendored public session-event contract. OMP RPC frames are richer and do not
- * carry the required public event envelope, so NativeRpcEvent keeps the raw
- * frame and exposes this contract as an optional projection slot.
- */
-export type NativePublicSessionEvent = SessionEvent;
 /** Generated ts-kernel-contracts bb.session_transcript.v2 shape bundled in engine-data. */
 export interface NativeTranscriptVisibility {
 	readonly model_visible: boolean;

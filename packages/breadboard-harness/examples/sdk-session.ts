@@ -37,16 +37,11 @@ try {
 	const created = await transport.createSession({ task });
 	for await (const event of eventStream) {
 		events.push(event.kind);
-		if (event.kind === "ui" && (event.frame.method === "confirm" || event.frame.method === "select"))
-			approvalRequests += 1;
-		if (event.kind === "session" && event.frame.type === "message_end" && event.frame.message.role === "assistant") {
-			const text = event.frame.message.content
-				.filter(part => part.type === "text")
-				.map(part => part.text)
-				.join("");
-			if (text) replyTexts.push(text);
-		}
-		if (event.kind === "session" && event.frame.type === "agent_end") break;
+		if (event.kind === "approval.requested") approvalRequests += 1;
+		if (event.kind === "assistant_message" && typeof event.payload.text === "string" && event.payload.text)
+			replyTexts.push(event.payload.text);
+		if (event.kind === "session.completed" || event.kind === "session.failed" || event.kind === "session.canceled")
+			break;
 	}
 	clearTimeout(cancelTimer);
 	let cancelExitCode = 0;

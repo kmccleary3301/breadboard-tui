@@ -19,7 +19,13 @@ const CONTRACT_SCHEMA_PATHS = [
 	"contracts/kernel/schemas/bb.effective_config_graph.v1.schema.json",
 	"contracts/kernel/schemas/bb.kernel.common.v1.schema.json",
 	"contracts/kernel/schemas/bb.session_transcript.v2.schema.json",
+	"contracts/kernel/schemas/payloads/bb.payload.message.assistant.v1.schema.json",
+	"contracts/kernel/schemas/payloads/bb.payload.tool.called.v1.schema.json",
+	"contracts/kernel/schemas/payloads/bb.payload.tool.completed.v1.schema.json",
 	"contracts/public/schemas/bb.harness_definition.v1.schema.json",
+	"contracts/public/schemas/bb.payload.product_session.annotation.v1.schema.json",
+	"contracts/public/schemas/bb.payload.product_session.lifecycle.v1.schema.json",
+	"contracts/public/schemas/bb.public_session_event.v1.schema.json",
 ] as const;
 const CONTRACT_ID_BASE = "https://breadboard.dev/";
 const GENERATED_TYPE_PATHS = [

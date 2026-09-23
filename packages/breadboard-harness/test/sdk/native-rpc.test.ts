@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { validateBundledSchema } from "../../src/compiler/validate";
+import type { PublicSessionEvent } from "../../src/sdk/public-session-event";
 import type { RpcCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { NativeRpcTransport, type NativeRpcProcess } from "../../src/sdk/native-rpc";
 
@@ -43,6 +45,7 @@ function fakePeer(approvalOptions: readonly string[] = ["Approve", "Deny"]): Fak
 							type: "extension_ui_request",
 							id: "approval-1",
 							method: "select",
+							title: "Allow tool: bash",
 							options: approvalOptions,
 						});
 					if (command.message === "/bb-transcript")
@@ -119,12 +122,41 @@ describe("NativeRpcTransport", () => {
 				return peer.process;
 			},
 		});
-		const events = transport.events();
+		const events = transport.rawEvents();
 		const created = await transport.createSession({ task: "hello" });
 		expect(argv).toEqual(["/tmp/bb", "--mode", "rpc", "--engine-mode", "native", "--harness", "bb-omp.native"]);
 		expect(created.session_id).toBe("s1");
 		expect((await events.next()).value).toMatchObject({ kind: "session", frame: { type: "agent_start" } });
 		expect(await transport.exportTranscript()).toBe("/tmp/bb-transcript.v2.s1.json");
+		await transport.stop();
+	});
+
+	test("projects approval and cancellation frames as schema-valid public events", async () => {
+		const peer = fakePeer();
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => peer.process });
+		const events = transport.events();
+		await transport.createSession({ task: "hello" });
+		await transport.prompt("ask");
+		await eventually(() => peer.writes.find(line => line.includes("approval-1")));
+		await transport.cancel({ reason: "test cancellation" });
+		const projected: PublicSessionEvent[] = [];
+		for (let index = 0; index < 6; index += 1) projected.push((await events.next()).value as PublicSessionEvent);
+		expect(projected.map(event => event.kind)).toEqual([
+			"session.started",
+			"input.accepted",
+			"approval.requested",
+			"approval.resolved",
+			"input.accepted",
+			"session.canceled",
+		]);
+		for (const event of projected) {
+			expect(
+				validateBundledSchema(
+					"https://breadboard.dev/contracts/public/schemas/bb.public_session_event.v1.schema.json",
+					event,
+				),
+			).toEqual([]);
+		}
 		await transport.stop();
 	});
 
@@ -134,6 +166,7 @@ describe("NativeRpcTransport", () => {
 			binaryPath: "/tmp/bb",
 			approval: {
 				kind: "forward",
+
 				decide: async request =>
 					request.options?.includes("Approve") ? { decision: "allow" } : { decision: "deny" },
 			},
@@ -152,6 +185,35 @@ describe("NativeRpcTransport", () => {
 		await eventually(() => denied.writes.find(line => line.includes("approval-1")));
 		expect(denied.writes.at(-1)).toContain('"value":"Deny"');
 		await deny.stop();
+	});
+	test("projects assistant and tool frames with schema-valid payloads", async () => {
+		const peer = fakePeer();
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => peer.process });
+		const events = transport.events();
+		await transport.createSession({ task: "hello" });
+		peer.emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "true" } });
+		peer.emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "bash", result: "ok", isError: false });
+		peer.emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } });
+		peer.emit({ type: "agent_end" });
+		const projected: PublicSessionEvent[] = [];
+		for (let index = 0; index < 6; index += 1) projected.push((await events.next()).value as PublicSessionEvent);
+		expect(projected.map(event => event.kind)).toEqual([
+			"session.started",
+			"input.accepted",
+			"tool_call",
+			"tool_result",
+			"assistant_message",
+			"session.completed",
+		]);
+		for (const event of projected) {
+			expect(
+				validateBundledSchema(
+					"https://breadboard.dev/contracts/public/schemas/bb.public_session_event.v1.schema.json",
+					event,
+				),
+			).toEqual([]);
+		}
+		await transport.stop();
 	});
 
 	test("matches exact approval labels and cancels unknown select options", async () => {
