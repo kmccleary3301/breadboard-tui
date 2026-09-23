@@ -89,6 +89,13 @@ function jsonType(value: unknown): string {
 	return "object";
 }
 
+function numericValue(value: unknown): number | undefined {
+	if (value instanceof JsonFloat) return value.value;
+	if (typeof value === "number") return value;
+	if (typeof value === "bigint") return Number(value);
+	return undefined;
+}
+
 function isInteger(value: unknown): boolean {
 	if (value instanceof JsonFloat) return Number.isInteger(value.value);
 	return (typeof value === "number" && Number.isInteger(value)) || typeof value === "bigint";
@@ -188,12 +195,15 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 	const types = schemaType(schema);
 	if (types.length > 0 && !types.some(type => acceptsType(value, type))) {
 		errors.push(error(path, "type", schema.type, schema));
-		return errors;
 	}
 	if ("const" in schema && !sameJson(value, schema.const)) errors.push(error(path, "const", schema.const, schema));
 	if (Array.isArray(schema.enum) && !schema.enum.some(item => sameJson(value, item))) errors.push(error(path, "enum", schema.enum, schema));
-	if (typeof schema.minimum === "number" && (typeof value === "number" || typeof value === "bigint" || value instanceof JsonFloat) && Number(value) < schema.minimum) errors.push(error(path, "minimum", schema.minimum, schema));
-	if (typeof schema.exclusiveMinimum === "number" && (typeof value === "number" || typeof value === "bigint" || value instanceof JsonFloat) && Number(value) <= schema.exclusiveMinimum) errors.push(error(path, "exclusiveMinimum", schema.exclusiveMinimum, schema));
+	const numeric = numericValue(value);
+	if (numeric !== undefined && typeof schema.minimum === "number" && numeric < schema.minimum) errors.push(error(path, "minimum", schema.minimum, schema));
+	if (numeric !== undefined && typeof schema.maximum === "number" && numeric > schema.maximum) errors.push(error(path, "maximum", schema.maximum, schema));
+	if (numeric !== undefined && typeof schema.exclusiveMinimum === "number" && numeric <= schema.exclusiveMinimum) errors.push(error(path, "exclusiveMinimum", schema.exclusiveMinimum, schema));
+	if (numeric !== undefined && typeof schema.exclusiveMaximum === "number" && numeric >= schema.exclusiveMaximum) errors.push(error(path, "exclusiveMaximum", schema.exclusiveMaximum, schema));
+	if (numeric !== undefined && typeof schema.multipleOf === "number" && numeric % schema.multipleOf !== 0) errors.push(error(path, "multipleOf", schema.multipleOf, schema));
 	if (typeof schema.minLength === "number" && typeof value === "string" && [...value].length < schema.minLength) errors.push(error(path, "minLength", schema.minLength, schema));
 	if (typeof schema.maxLength === "number" && typeof value === "string" && [...value].length > schema.maxLength) errors.push(error(path, "maxLength", schema.maxLength, schema));
 	if (typeof schema.pattern === "string" && typeof value === "string") {

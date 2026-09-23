@@ -154,6 +154,20 @@ describe("harness compiler", () => {
 		});
 		expect(findings).toEqual([]);
 	});
+	test("reports numeric minimum alongside integer type for a negative YAML float", () => {
+		const findings = validateHarnessDefinition({
+			schema_version: "bb.harness_definition.v1",
+			version: 1,
+			workspace: { root: "." },
+			providers: { default_model: "main", models: [{ id: "main", adapter: "openai" }] },
+			modes: [{ name: "build" }],
+			loop: { plan_turn_limit: new JsonFloat(-0.5), sequence: [{ mode: "build" }] },
+		});
+		expect(findings.map(finding => [finding.pointer, finding.code])).toEqual([
+			["/loop/plan_turn_limit", "minimum"],
+			["/loop/plan_turn_limit", "type"],
+		]);
+	});
 
 	test("reports one cycle back-edge finding", () => {
 		const cycle: Record<string, unknown> = {};
