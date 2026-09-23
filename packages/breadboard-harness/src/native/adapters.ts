@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import type { CanonicalJson } from "../canonical-json";
+import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
+import { applyPatchOperationsDirect, convertPatchToUnified } from "./patch";
 import type { NativeToolResult } from "./types";
 
 export function pythonJson(value: CanonicalJson): string {
@@ -22,7 +23,7 @@ function workspacePath(workspaceRoot: string, requested: string): string {
 	return candidate;
 }
 
-function pathError(workspaceRoot: string, requested: string, extra: Record<string, CanonicalJson>): NativeToolResult {
+function pathError(workspaceRoot: string, requested: string, extra: JsonRecord): NativeToolResult {
 	return result({ path: resolve(workspaceRoot), ...extra, error: "path_outside_workspace" }, true);
 }
 
@@ -130,20 +131,40 @@ async function git(root: string, args: readonly string[]): Promise<{ exit: numbe
 	return { exit: await process.exited, stdout, stderr };
 }
 
+/** Mirrors `apply_unified_patch` (`agent_llm_openai.py:5579-5617`). */
 export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: string): Promise<NativeToolResult> {
 	const root = resolve(workspaceRoot);
-	for (const path of patchPaths(patch)) {
+	const patchSourceText = patch;
+	let patchText = patchSourceText;
+	if (
+		patchText.includes("*** Add File:")
+		|| patchText.includes("*** Update File:")
+		|| patchText.includes("*** Delete File:")
+		|| patchText.includes("*** Begin Patch")
+	) {
+		const converted = convertPatchToUnified(patchText);
+		if (converted) patchText = converted;
+	}
+	for (const path of patchPaths(patchSourceText)) {
 		if (isAbsolute(path) || path.split(/[\\/]/u).includes("..")) {
 			return result({ ok: false, stdout: "", stderr: `error: ${path}: does not exist in index\n` }, true);
 		}
 	}
+	if (!patchText.trim()) return result({ ok: false, error: "empty patch" }, true);
 	const refresh = await git(root, ["update-index", "--refresh"]);
-	if (refresh.exit !== 0) return result({ ok: false, stdout: refresh.stdout, stderr: refresh.stderr }, true);
+	if (refresh.exit !== 0) {
+		const fallback = await applyPatchOperationsDirect(root, patchSourceText || patchText);
+		if (fallback !== null) return result(fallback, isJsonRecord(fallback) && fallback.ok === false);
+		return result({ ok: false, stdout: refresh.stdout, stderr: refresh.stderr }, true);
+	}
 	const patchPath = resolve(root, `.breadboard_patch_${crypto.randomUUID()}.diff`);
 	try {
-		await writeFile(patchPath, patch, "utf8");
+		await writeFile(patchPath, patchText, "utf8");
 		const applied = await git(root, ["apply", "--3way", "--index", "--whitespace=fix", patchPath]);
-		return result({ ok: applied.exit === 0, stdout: applied.stdout, stderr: applied.stderr }, applied.exit !== 0);
+		if (applied.exit === 0) return result({ ok: true, stdout: applied.stdout, stderr: applied.stderr });
+		const fallback = await applyPatchOperationsDirect(root, patchSourceText || patchText);
+		if (fallback !== null) return result(fallback, isJsonRecord(fallback) && fallback.ok === false);
+		return result({ ok: false, stdout: applied.stdout, stderr: applied.stderr }, true);
 	} finally {
 		await unlink(patchPath).catch(() => undefined);
 	}
