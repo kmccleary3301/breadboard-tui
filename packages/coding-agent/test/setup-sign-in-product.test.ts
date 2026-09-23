@@ -1,0 +1,426 @@
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
+import type { OAuthLoginCallbacks, OAuthProviderId } from "@oh-my-pi/pi-ai/oauth/types";
+import { ProviderAuthError, type ProviderAuthPort } from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createSetupHost, type SetupWizardContext } from "@oh-my-pi/pi-coding-agent/modes/setup";
+import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "@oh-my-pi/pi-coding-agent/product-identity";
+import { SignInTab } from "@oh-my-pi/pi-tui/setup/scenes/sign-in";
+import type { SetupHost, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
+import type { Component } from "@oh-my-pi/pi-tui";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
+
+function createSignInHost(options: {
+	identity: typeof OMP_PRODUCT_IDENTITY | typeof BREADBOARD_PRODUCT_IDENTITY;
+	nativeAuthStorage?: AuthStorage;
+	providerAuthPort?: ProviderAuthPort;
+	authStorage?: AuthStorage;
+	copyToClipboard?: (text: string) => Promise<void>;
+	openInBrowser?: (url: string) => void;
+	setFocus?: (component: Component | null) => void;
+}): SetupSceneHost {
+	const registryAuthStorage =
+		options.authStorage ??
+		({
+			has: () => false,
+			hasAuth: () => false,
+			getCredentialOrigin: () => undefined,
+		} as unknown as AuthStorage);
+	const settings = Settings.isolated();
+	const ctx = {
+		settings,
+		ui: {
+			terminal: { rows: 24 },
+			showOverlay: () => ({ hide: () => {} }),
+			setFocus: options.setFocus ?? (() => {}),
+			requestRender: () => {},
+			invalidate: () => {},
+		} as unknown as SetupWizardContext["ui"],
+		modelRegistry: {
+			authStorage: registryAuthStorage,
+			getAvailable: () => [],
+			getAll: () => [],
+			refresh: async () => {},
+			refreshProvider: async () => {},
+		} as unknown as SetupWizardContext["modelRegistry"],
+		modelSelection: {
+			mode: "default" as const,
+			currentModel: undefined,
+			availableModels: () => [],
+			refresh: async () => {},
+			select: async () => {},
+		},
+		openInBrowser: options.openInBrowser ?? (() => {}),
+	} satisfies SetupWizardContext;
+	const setupHost = createSetupHost(ctx, {
+		providerAuthPort: options.providerAuthPort,
+		nativeAuthStorage: options.nativeAuthStorage,
+	});
+	const host: SetupHost = {
+		...setupHost,
+		identity: options.identity,
+		// The active test process is OMP by default. Override the resolved store for
+		// the BreadBoard-unavailable case so SignInTab can prove it does not read it.
+		authStorage:
+			options.identity.id === BREADBOARD_PRODUCT_IDENTITY.id &&
+			!options.providerAuthPort &&
+			!options.nativeAuthStorage
+				? undefined
+				: setupHost.authStorage,
+		copyToClipboard: options.copyToClipboard ?? setupHost.copyToClipboard,
+		openInBrowser: options.openInBrowser ?? setupHost.openInBrowser,
+	};
+	return {
+		ctx: host,
+		requestRender: () => {},
+		finish: () => {},
+		setFocus: options.setFocus ?? (() => {}),
+		restoreFocus: () => {},
+	};
+}
+
+beforeAll(async () => {
+	await initTheme();
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+describe("product-aware SignInTab", () => {
+	it.each([OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY])(
+		"keeps native login usable above clipped wizard rows for $id",
+		async identity => {
+			const url = `https://example.com/oauth/authorize?client_id=omp&redirect_uri=http%3A%2F%2Flocalhost%3A45454%2Fcallback&state=${"a".repeat(96)}`;
+			const loginGate = Promise.withResolvers<void>();
+			const secretReceived = Promise.withResolvers<string>();
+			const secretValue = crypto.randomUUID();
+			const copySpy = vi.fn(async (_text: string): Promise<void> => {});
+			let focusTarget: Component | undefined;
+			const openedUrls: string[] = [];
+			const authStorage = {
+				has: (_providerId: string) => false,
+				hasAuth: (_providerId: string) => false,
+				getCredentialOrigin: (_providerId: string) => undefined,
+				async login(_provider: OAuthProviderId, ctrl: OAuthLoginCallbacks): Promise<void> {
+					ctrl.onAuth({ url });
+					secretReceived.resolve(
+						await ctrl.onPrompt({ message: "Consumer key", placeholder: "secret value", secret: true }),
+					);
+					const prompt = ctrl.onManualCodeInput?.();
+					await loginGate.promise;
+					await prompt;
+				},
+			} as unknown as AuthStorage;
+			const host = createSignInHost({
+				identity,
+				nativeAuthStorage: identity.id === BREADBOARD_PRODUCT_IDENTITY.id ? authStorage : undefined,
+				authStorage,
+				copyToClipboard: copySpy,
+				openInBrowser: openedUrl => openedUrls.push(openedUrl),
+				setFocus: component => {
+					focusTarget = component ?? undefined;
+				},
+			});
+			const tab = new SignInTab(host);
+			try {
+				for (const char of "anthropic") tab.handleInput(char);
+				tab.handleInput("\n");
+				expect(focusTarget).toBeDefined();
+				focusTarget?.handleInput?.(secretValue);
+				expect(tab.render(120).join("\n")).not.toContain(secretValue);
+				focusTarget?.handleInput?.("\n");
+				await expect(secretReceived.promise).resolves.toBe(secretValue);
+				const rendered = tab.render(36);
+				const compact = rendered.map(line => Bun.stripANSI(line).trim()).join("");
+				expect(compact).toContain(url);
+				expect(compact).not.toContain("…");
+				expect(rendered.join("\n")).toContain(`\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`);
+				expect(openedUrls).toEqual([url]);
+				focusTarget?.handleInput?.("\x1bc");
+				expect(copySpy).toHaveBeenCalledTimes(2);
+				expect(copySpy).toHaveBeenLastCalledWith(url);
+				const clippedBody = rendered.slice(0, 8).map(line => Bun.stripANSI(line).trim());
+				const plainUrlIndex = clippedBody.findIndex(line =>
+					line.startsWith("https://example.com/oauth/authorize?"),
+				);
+				const inputIndex = clippedBody.findIndex(line => line.startsWith(">"));
+				expect(clippedBody.some(line => line.startsWith("Browser login: Open login URL"))).toBe(true);
+				expect(plainUrlIndex).toBeGreaterThanOrEqual(0);
+				expect(clippedBody.join(" ")).toContain("Paste the authorization code (or full redirect URL):");
+				expect(inputIndex).toBeGreaterThanOrEqual(0);
+				expect(plainUrlIndex).toBeLessThan(inputIndex);
+			} finally {
+				tab.dispose();
+				loginGate.resolve();
+				await loginGate.promise;
+			}
+		},
+	);
+
+	it("clears manual input after a native callback path settles", async () => {
+		const url = "https://example.com/oauth/authorize?client_id=omp&state=native";
+		const loginCompleted = Promise.withResolvers<void>();
+		const authStorage = {
+			has: (_providerId: string) => false,
+			hasAuth: (_providerId: string) => false,
+			getCredentialOrigin: (_providerId: string) => undefined,
+			async login(_provider: OAuthProviderId, ctrl: OAuthLoginCallbacks): Promise<void> {
+				ctrl.onAuth({ url });
+				const settled = new AbortController();
+				const prompt = ctrl.onManualCodeInput?.(settled.signal);
+				settled.abort(new Error("native callback received"));
+				await prompt?.catch(() => {});
+				loginCompleted.resolve();
+			},
+		} as unknown as AuthStorage;
+		const host = createSignInHost({ identity: OMP_PRODUCT_IDENTITY, authStorage });
+		const tab = new SignInTab(host);
+		try {
+			for (const char of "anthropic") tab.handleInput(char);
+			tab.handleInput("\n");
+			await loginCompleted.promise;
+			await Promise.resolve();
+			expect(tab.render(80).join("\n")).not.toContain("Paste the authorization code");
+		} finally {
+			tab.dispose();
+		}
+	});
+
+	it("copies the active login URL from the keyboard while the setup TUI owns selection", async () => {
+		const url = "https://example.com/oauth/authorize?client_id=omp&state=copy";
+		const loginGate = Promise.withResolvers<void>();
+		const copySpy = vi.fn(async (_text: string): Promise<void> => {});
+		const authStorage = {
+			has: (_providerId: string) => false,
+			hasAuth: (_providerId: string) => false,
+			getCredentialOrigin: (_providerId: string) => undefined,
+			async login(_provider: OAuthProviderId, ctrl: OAuthLoginCallbacks): Promise<void> {
+				ctrl.onAuth({ url });
+				await loginGate.promise;
+			},
+		} as unknown as AuthStorage;
+		const host = createSignInHost({ identity: OMP_PRODUCT_IDENTITY, authStorage, copyToClipboard: copySpy });
+		const tab = new SignInTab(host);
+		try {
+			for (const char of "anthropic") tab.handleInput(char);
+			tab.handleInput("\n");
+			await Promise.resolve();
+			expect(copySpy).toHaveBeenCalledTimes(1);
+			tab.handleInput("\x1bc");
+			await Promise.resolve();
+			expect(copySpy).toHaveBeenCalledTimes(2);
+			expect(copySpy).toHaveBeenLastCalledWith(url);
+		} finally {
+			tab.dispose();
+			loginGate.resolve();
+			await loginGate.promise;
+		}
+	});
+
+	it("uses the broker login state machine and clears masked API-key input", async () => {
+		const secretCanary = "sk-ant-setup-canary";
+		const nativeCalls: string[] = [];
+		const writes: unknown[] = [];
+		const authStorage = {
+			async login() {
+				nativeCalls.push("login");
+				throw new Error("native AuthStorage login must not run in BreadBoard mode");
+			},
+			setRuntimeApiKey() {
+				nativeCalls.push("setRuntimeApiKey");
+				throw new Error("native AuthStorage mutation must not run in BreadBoard mode");
+			},
+		} as unknown as AuthStorage;
+		const port: ProviderAuthPort = {
+			async listProviders() {
+				return [
+					{
+						providerId: "anthropic",
+						aliases: ["claude"],
+						displayName: "Anthropic",
+						supportTier: "core",
+						authOwner: "broker",
+						available: true,
+						authSchemes: ["api_key"],
+						loginAvailable: false,
+						oauthFlows: [],
+						modelDiscovery: "configured_only",
+					},
+				];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin() {
+				throw new Error("OAuth login must not run for an API-key provider");
+			},
+			async getLogin() {
+				throw new Error("OAuth login must not run for an API-key provider");
+			},
+			async completeLogin() {
+				throw new Error("OAuth login must not run for an API-key provider");
+			},
+			async cancelLogin(loginSessionId) {
+				return { ok: true, outcome: "cancelled", loginSessionId };
+			},
+			async putApiKey(input) {
+				writes.push(input);
+				return {
+					schemaVersion: "bb.auth.credential_summary.v1",
+					credentialRef: "bbcred_anthropic_work",
+					accountId: "bbacct_anthropic_work",
+					providerId: input.providerId,
+					authSchemeId: "api_key",
+					credentialKind: "api_key",
+					accountLabel: input.accountLabel,
+					status: "active",
+					source: "broker",
+					expiresAtUtc: null,
+				};
+			},
+			async logout(input) {
+				return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
+			},
+			async revoke(input) {
+				return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
+			},
+		};
+		const focused: Component[] = [];
+		const host = createSignInHost({
+			identity: BREADBOARD_PRODUCT_IDENTITY,
+			providerAuthPort: port,
+			authStorage,
+			setFocus: component => {
+				if (component) focused.push(component);
+			},
+		});
+		const tab = new SignInTab(host);
+		try {
+			for (let pass = 0; pass < 4; pass++) await Promise.resolve();
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 8 && focused.length < 1; pass++) await Promise.resolve();
+			const labelInput = focused[0];
+			if (!labelInput) throw new Error("Account label prompt did not receive focus");
+			for (const character of "work") labelInput.handleInput?.(character);
+			labelInput.handleInput?.("\n");
+			for (let pass = 0; pass < 8 && focused.length < 2; pass++) await Promise.resolve();
+			const secretInput = focused[1];
+			if (!secretInput) throw new Error("API-key prompt did not receive focus");
+			for (const character of secretCanary) secretInput.handleInput?.(character);
+			expect(tab.render(80).map(line => Bun.stripANSI(line)).join("\n")).not.toContain(secretCanary);
+			secretInput.handleInput?.("\n");
+			for (let pass = 0; pass < 8 && writes.length === 0; pass++) await Promise.resolve();
+			expect(writes).toEqual([
+				{ providerId: "anthropic", authSchemeId: "api_key", accountLabel: "work", apiKey: secretCanary },
+			]);
+			expect(nativeCalls).toEqual([]);
+			let successfulRender = "";
+			for (let pass = 0; pass < 16; pass++) {
+				await Promise.resolve();
+				successfulRender = tab.render(80).map(line => Bun.stripANSI(line)).join("\n");
+				if (successfulRender.includes("Credentials managed by BreadBoard auth broker")) break;
+			}
+			expect(successfulRender).toContain("Credentials managed by BreadBoard auth broker");
+			expect(successfulRender).not.toContain(secretCanary);
+			for (let pass = 0; pass < 16 && tab.modal; pass++) await Promise.resolve();
+			expect(tab.modal).toBe(false);
+			for (let pass = 0; pass < 8; pass++) await Promise.resolve();
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 8 && focused.length < 3; pass++) await Promise.resolve();
+			if (focused.length < 3) throw new Error("Second account label prompt did not receive focus");
+			for (const character of "personal") tab.handleInput(character);
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 8 && focused.length < 4; pass++) await Promise.resolve();
+			if (focused.length < 4) throw new Error("Second API-key prompt did not receive focus");
+			for (const character of "sk-cancelled-setup-canary") tab.handleInput(character);
+			tab.handleInput("\u001b");
+			for (let pass = 0; pass < 8 && tab.modal; pass++) await Promise.resolve();
+			const cancelledRender = tab.render(80).map(line => Bun.stripANSI(line)).join("\n");
+			expect(tab.modal).toBe(false);
+			expect(writes).toHaveLength(1);
+			expect(cancelledRender).toContain("Login cancelled.");
+			expect(cancelledRender).not.toContain("sk-cancelled-setup-canary");
+			expect(nativeCalls).toEqual([]);
+		} finally {
+			tab.dispose();
+		}
+	});
+
+	it("shows product remediation without instantiating native AuthStorage when the broker port is absent", async () => {
+		const host = createSignInHost({ identity: BREADBOARD_PRODUCT_IDENTITY });
+		const tab = new SignInTab(host);
+		try {
+			await Promise.resolve();
+			const rendered = tab.render(80).map(line => Bun.stripANSI(line)).join("\n");
+			expect(rendered).toContain("BreadBoard provider setup is unavailable.");
+			expect(rendered).toContain("retry with `bb setup` when the auth broker is ready");
+			expect(rendered).not.toContain("Credentials saved to");
+			expect(rendered).not.toContain("Oh My Pi");
+		} finally {
+			tab.dispose();
+		}
+	});
+
+	it("preserves broker failure codes and actionable retry-or-continue remediation", async () => {
+		const port: ProviderAuthPort = {
+			async listProviders() {
+				return [
+					{
+						providerId: "anthropic",
+						aliases: ["claude"],
+						displayName: "Anthropic",
+						supportTier: "core",
+						authOwner: "broker",
+						available: true,
+						authSchemes: ["oauth2"],
+						loginAvailable: true,
+						oauthFlows: ["browser"],
+						modelDiscovery: "configured_only",
+					},
+				];
+			},
+			async listCredentials() {
+				return [];
+			},
+			async beginLogin() {
+				throw new ProviderAuthError({
+					code: "broker_unavailable",
+					message: "BreadBoard auth broker is unavailable.",
+					nextAction: "Retry provider setup or press Esc to continue.",
+				});
+			},
+			async getLogin() {
+				throw new Error("unexpected getLogin");
+			},
+			async completeLogin() {
+				throw new Error("unexpected completeLogin");
+			},
+			async cancelLogin(loginSessionId) {
+				return { ok: true, outcome: "cancelled", loginSessionId };
+			},
+			async putApiKey() {
+				throw new Error("unexpected putApiKey");
+			},
+			async logout(input) {
+				return { ok: true, outcome: "disabled", credentialRef: input.credentialRef };
+			},
+			async revoke(input) {
+				return { ok: true, outcome: "revoked", credentialRef: input.credentialRef };
+			},
+		};
+		const host = createSignInHost({ identity: BREADBOARD_PRODUCT_IDENTITY, providerAuthPort: port });
+		const tab = new SignInTab(host);
+		try {
+			for (let pass = 0; pass < 6; pass++) await Promise.resolve();
+			tab.handleInput("\n");
+			for (let pass = 0; pass < 12 && tab.modal; pass++) await Promise.resolve();
+			const rendered = tab.render(80).map(line => Bun.stripANSI(line)).join("\n");
+			expect(rendered).toContain("Login failed [broker_unavailable]: BreadBoard auth broker is unavailable.");
+			expect(rendered).toContain("Retry provider setup or press Esc to continue.");
+			expect(rendered).not.toContain("Credentials saved to");
+		} finally {
+			tab.dispose();
+		}
+	});
+});

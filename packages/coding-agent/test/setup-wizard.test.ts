@@ -6,12 +6,15 @@ import { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	ALL_SCENES,
+	createInteractiveSetupContext,
 	createSetupHost,
 	CURRENT_SETUP_VERSION,
 	markSetupWizardComplete,
 	runSetupWizard,
 	type SetupScene,
 	type SetupSceneHost,
+	type SetupSceneResult,
+	type SetupWizardContext,
 	selectSetupScenes,
 } from "@oh-my-pi/pi-coding-agent/modes/setup";
 import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/providers";
@@ -221,8 +224,83 @@ describe("setup wizard model selection", () => {
 		expect(settings.getProjectModelRole("default")).toBe("spark/minimax-m3");
 		expect(settings.getGlobalModelRole("default")).toBeUndefined();
 	});
-});
+	it("uses the session-scoped model selection seam for engine-owned contexts", async () => {
+		const setModelTemporary = mock(async (_model: Model) => {});
+		const ctx = {
+			settings: Settings.isolated(),
+			ui: { terminal: { rows: 24 }, setFocus: () => {}, requestRender: () => {}, invalidate: () => {} },
+			openInBrowser: () => {},
+			playWelcomeIntro: () => {},
+			session: {
+				mainStreamOwnsTurnLifecycle: true,
+				model: CUSTOM_MODEL,
+				scopedModels: [{ model: CUSTOM_MODEL }],
+				modelRegistry: {
+					getAvailable: () => [CUSTOM_MODEL],
+					getAll: () => [CUSTOM_MODEL],
+					refresh: async () => {},
+					refreshProvider: async () => {},
+				},
+				setModelTemporary,
+			},
+		} as unknown as InteractiveModeContext;
+		const setup = createInteractiveSetupContext(ctx);
+		expect(setup.modelSelection.mode).toBe("session");
+		expect(setup.modelSelection.availableModels()).toEqual([CUSTOM_MODEL]);
+		await setup.modelSelection.select(CUSTOM_MODEL, "spark/minimax-m3");
+		expect(setModelTemporary).toHaveBeenCalledWith(CUSTOM_MODEL);
+	});
 
+	it("accepts a standalone SetupWizardContext without an interactive session", async () => {
+		const settings = Settings.isolated({ setupVersion: 0 });
+		let component: SetupWizardComponent | undefined;
+		const context: SetupWizardContext = {
+			settings,
+			ui: {
+				terminal: { rows: 24 },
+				showOverlay: next => {
+					component = next;
+					return { hide: () => {} };
+				},
+				setFocus: () => {},
+				requestRender: () => {},
+				invalidate: () => {},
+			} as unknown as SetupWizardContext["ui"],
+			modelRegistry: {
+				authStorage: { has: () => false, hasAuth: () => false, getCredentialOrigin: () => undefined },
+				getAvailable: () => [],
+				getAll: () => [],
+				refresh: async () => {},
+				refreshProvider: async () => {},
+			} as unknown as SetupWizardContext["modelRegistry"],
+			modelSelection: {
+				mode: "default",
+				currentModel: undefined,
+				availableModels: () => [],
+				refresh: async () => {},
+				select: async () => {},
+			},
+			openInBrowser: () => {},
+		};
+		const scene: SetupScene = {
+			id: "standalone",
+			title: "Standalone",
+			minVersion: 1,
+			mount: host => ({
+				title: "Standalone",
+				onMount: () => host.finish("done"),
+				render: () => [],
+				invalidate: () => {},
+			}),
+		};
+		const pending = runSetupWizard(context, [scene], { markComplete: false, playWelcomeIntro: false });
+		component?.handleInput?.("\n");
+		component?.handleInput?.("\n");
+		await pending;
+		expect(settings.get("setupVersion")).toBe(0);
+	});
+
+});
 describe("setup wizard persistence", () => {
 	it("marks the current setup version complete", async () => {
 		const settings = Settings.isolated();
@@ -271,6 +349,42 @@ describe("setup wizard persistence", () => {
 		expect(playWelcomeIntro).not.toHaveBeenCalled();
 		expect(hideOverlay).toHaveBeenCalledTimes(1);
 		expect(setFocus).toHaveBeenCalled();
+	});
+});
+describe("setup wizard reduced motion", () => {
+	it("shows the first scene immediately and skips decorative timers and outro", async () => {
+		const interval = vi.spyOn(globalThis, "setInterval");
+		let host: SetupSceneHost | undefined;
+		const scene: SetupScene = {
+			id: "static",
+			title: "Static setup",
+			minVersion: 1,
+			mount: nextHost => {
+				host = nextHost;
+				return { title: "Static setup", render: () => ["STATIC-SCENE"], invalidate: () => {} };
+			},
+		};
+		const context = {
+			...fakeContextWithConfiguredModel(),
+			settings: Settings.isolated(),
+			ui: { terminal: { rows: 24 }, setFocus: () => {}, requestRender: () => {}, invalidate: () => {} },
+			openInBrowser: () => {},
+			playWelcomeIntro: () => {},
+		} as unknown as InteractiveModeContext;
+		const component = new SetupWizardComponent(createSetupHost(context), [scene], {
+			reduceMotion: true,
+		});
+		try {
+			const completed = component.run();
+			expect(component.render(80).join("\n")).toContain("STATIC-SCENE");
+			expect(interval).not.toHaveBeenCalled();
+			host?.finish("done");
+			await completed;
+			expect(component.render(80).every(line => line.trim().length === 0)).toBe(true);
+			expect(interval).not.toHaveBeenCalled();
+		} finally {
+			component.dispose();
+		}
 	});
 });
 describe("setup wizard mouse routing", () => {
@@ -473,6 +587,52 @@ describe("setup wizard theme previews", () => {
 
 		controller.handleInput?.("2");
 		await Bun.sleep(20);
+		expect(settings.get("symbolPreset")).toBe("nerd");
+		expect(theme.getSymbolPreset()).toBe("nerd");
+	});
+});
+describe("setup wizard glyph scene", () => {
+	it("commits Emoji after an immediately confirmed preview", async () => {
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const settings = Settings.isolated();
+		const finished = Promise.withResolvers<SetupSceneResult>();
+		const host = bindSceneHost({
+			ctx: {
+				settings,
+				ui: { invalidate: () => {}, requestRender: () => {} },
+			},
+			requestRender: () => {},
+			finish: finished.resolve,
+			setFocus: () => {},
+			restoreFocus: () => {},
+		} as unknown as SetupApplicationSceneHost);
+		const controller = ALL_SCENES.find(scene => scene.id === "glyph-mode")!.mount(host);
+		controller.handleInput?.("3");
+		controller.handleInput?.("\n");
+		expect(await finished.promise).toBe("done");
+		expect(settings.get("symbolPreset")).toBe("emoji");
+		expect(theme.getSymbolPreset()).toBe("emoji");
+	});
+
+	it("restores the original glyphs when rapid previews are cancelled", async () => {
+		await initTheme(false, "nerd", false, "titanium", "light");
+		const settings = Settings.isolated({ symbolPreset: "nerd" });
+		const finished = Promise.withResolvers<SetupSceneResult>();
+		const host = bindSceneHost({
+			ctx: {
+				settings,
+				ui: { invalidate: () => {}, requestRender: () => {} },
+			},
+			requestRender: () => {},
+			finish: finished.resolve,
+			setFocus: () => {},
+			restoreFocus: () => {},
+		} as unknown as SetupApplicationSceneHost);
+		const controller = ALL_SCENES.find(scene => scene.id === "glyph-mode")!.mount(host);
+		controller.handleInput?.("3");
+		controller.handleInput?.("1");
+		controller.handleInput?.("\x1b");
+		expect(await finished.promise).toBe("skipped");
 		expect(settings.get("symbolPreset")).toBe("nerd");
 		expect(theme.getSymbolPreset()).toBe("nerd");
 	});
