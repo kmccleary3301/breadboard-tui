@@ -13,7 +13,7 @@ export function getExtraHelpText(): string {
 
 ${chalk.bold("Configuration:")}
   BREADBOARD_OMP_AGENT_DIR   - Reference an existing OMP authentication store
-  PI_CODING_AGENT_DIR       - Frontend session and settings directory
+  PI_CODING_AGENT_DIR       - Frontend session and settings directory (default: ~/${CONFIG_DIR_NAME}/agent)
   BREADBOARD_CONFIG_DIR     - BreadBoard configuration and native cache directory
   OMP_PROFILE              - Named frontend profile
   Native helper preferences do not configure engine workers or tools.`;
