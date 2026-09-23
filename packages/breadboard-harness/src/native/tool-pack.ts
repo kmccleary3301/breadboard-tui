@@ -1,6 +1,6 @@
 import { type CanonicalJson, isJsonRecord as isRecord, type JsonRecord } from "../canonical-json";
 import { parseHarnessYaml } from "../compiler";
-import { loadEngineDataSnapshot } from "../index";
+import { loadEngineDataSnapshot } from "../engine-data";
 import { nativeLockValue } from "./lock-values";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 

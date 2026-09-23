@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { JsonFloat, type CanonicalJson } from "../canonical-json";
+import { bundledEngineDataSnapshot } from "../engine-data";
 
 export interface HarnessValidationFinding {
 	readonly pointer: string;
@@ -19,17 +17,6 @@ type RawError = {
 	readonly context?: readonly RawError[];
 };
 
-const SNAPSHOT = JSON.parse(readFileSync(fileURLToPath(new URL("../../engine-data/snapshot.json", import.meta.url)), "utf8")) as {
-	readonly files: readonly { readonly path: string; readonly content: string }[];
-};
-const SCHEMAS = new Map<string, JsonSchema>();
-for (const file of SNAPSHOT.files) {
-	if (file.path.endsWith(".schema.json")) {
-		const schema = JSON.parse(file.content) as JsonSchema;
-		const id = schema.$id;
-		if (typeof id === "string") SCHEMAS.set(id, schema);
-	}
-}
 const CANONICAL_SCHEMA_ID = "https://breadboard.dev/contracts/public/schemas/bb.harness_definition.v1.schema.json";
 const LEGACY_SCHEMA_ID = "https://breadboard.dev/contracts/kernel/schemas/bb.agent_config_surface.v2.schema.json";
 const MAX_JSON_INTEGER_DIGITS = 640;
@@ -131,13 +118,27 @@ function recordSchemaScope(value: unknown, root: JsonSchema): void {
 	for (const child of Object.values(value)) recordSchemaScope(child, root);
 }
 
-for (const schema of SCHEMAS.values()) recordSchemaScope(schema, schema);
+let schemaTable: ReadonlyMap<string, JsonSchema> | undefined;
+
+/** The bundled schemas by `$id`, parsed on first use so importing the compiler costs nothing. */
+function schemas(): ReadonlyMap<string, JsonSchema> {
+	if (schemaTable !== undefined) return schemaTable;
+	const table = new Map<string, JsonSchema>();
+	for (const file of bundledEngineDataSnapshot().files) {
+		if (!file.path.endsWith(".schema.json")) continue;
+		const schema = JSON.parse(file.content) as JsonSchema;
+		if (typeof schema.$id === "string") table.set(schema.$id, schema);
+	}
+	for (const schema of table.values()) recordSchemaScope(schema, schema);
+	schemaTable = table;
+	return table;
+}
 
 function resolveRef(ref: string, root: JsonSchema): JsonSchema {
 	const separator = ref.indexOf("#");
 	const base = separator < 0 ? ref : ref.slice(0, separator);
 	const fragment = separator < 0 ? "" : ref.slice(separator + 1);
-	const target = base.length === 0 ? root : SCHEMAS.get(base);
+	const target = base.length === 0 ? root : schemas().get(base);
 	if (target === undefined) throw new Error(`Unknown schema reference: ${ref}`);
 	let value: unknown = target;
 	if (fragment.startsWith("/")) {
@@ -347,7 +348,7 @@ export function validateHarnessDefinition(document: unknown): readonly HarnessVa
 	if (source.length > 0) return sortFindings(source);
 	const schemaVersion = document.schema_version;
 	const version = Number(document.version);
-	const root = SCHEMAS.get(schemaVersion === "bb.harness_definition.v1" && version === 1 ? CANONICAL_SCHEMA_ID : LEGACY_SCHEMA_ID);
+	const root = schemas().get(schemaVersion === "bb.harness_definition.v1" && version === 1 ? CANONICAL_SCHEMA_ID : LEGACY_SCHEMA_ID);
 	if (root === undefined) throw new Error("Harness definition schemas are unavailable");
 	const errors = validateSchema(document, root, [], root);
 	return sortFindings(errors.flatMap(transformError));

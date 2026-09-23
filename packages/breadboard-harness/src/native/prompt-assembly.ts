@@ -1,4 +1,4 @@
-import { readEngineDataFile } from "../index";
+import { readEngineDataFile } from "../engine-data";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
 import { nativeLockValue } from "./lock-values";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
