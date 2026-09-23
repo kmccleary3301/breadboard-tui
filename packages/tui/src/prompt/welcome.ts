@@ -350,7 +350,7 @@ export class WelcomeComponent implements Component {
 	}
 
 	#renderLines(termWidth: number): string[] {
-		const greeting = this.identity.id === OMP_PRODUCT_IDENTITY.id ? "Welcome back!" : "Welcome!";
+		const greeting = this.identity.welcomeGreeting ?? "Welcome back!";
 		// Box dimensions - responsive with max width and small-terminal support
 		const maxWidth = 100;
 		const boxWidth = Math.min(maxWidth, Math.max(0, termWidth - 2));

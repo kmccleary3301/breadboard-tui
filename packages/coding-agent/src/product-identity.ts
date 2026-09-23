@@ -47,6 +47,7 @@ export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	shortDisplayName: "BreadBoard",
 	cliName: "bb",
 	welcomeTitle: "BreadBoard",
+	welcomeGreeting: "Welcome!",
 	setupWordmark: "BreadBoard",
 	composerFrameLabel: "Framed Rules",
 	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",

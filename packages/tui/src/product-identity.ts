@@ -21,6 +21,8 @@ export interface ProductIdentity {
 	readonly shortDisplayName: string;
 	readonly cliName: string;
 	readonly welcomeTitle: string;
+	/** Welcome box greeting; stock OMP's "Welcome back!" when unset. */
+	readonly welcomeGreeting?: string;
 	/** Wordmark shown below compact setup art. */
 	readonly setupWordmark: string;
 	/** User-facing label for the stable `pi` composer shape id. */
