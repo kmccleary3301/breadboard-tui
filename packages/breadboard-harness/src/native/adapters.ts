@@ -2,7 +2,7 @@ import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
-import { applyPatchOperationsDirect, convertPatchToUnified, normalizeWorkspacePath } from "./patch";
+import { applyPatchOperationsDirect, convertPatchToUnified, normalizeWorkspacePath, patchTouchedPaths } from "./patch";
 import type { NativeToolResult } from "./types";
 
 export function pythonJson(value: CanonicalJson): string {
@@ -109,7 +109,12 @@ function workspacePath(workspaceRoot: string, requested: string): string {
 	const candidate = resolve(root, requested || ".");
 	const rest = relative(root, candidate);
 	if (rest === ".." || rest.startsWith("../") || isAbsolute(rest)) throw new Error("path_outside_workspace");
-	return leavesWorkspace(root, candidate) ? root : candidate;
+	const resolvedRoot = resolveSymlinkAware(root, root);
+	const resolvedPath = resolveSymlinkAware(root, candidate);
+	const resolvedRelative = relative(resolvedRoot, resolvedPath);
+	return resolvedRelative === ".." || resolvedRelative.startsWith("../") || isAbsolute(resolvedRelative)
+		? root
+		: resolve(root, resolvedRelative);
 }
 
 function pathError(workspaceRoot: string, requested: string, extra: JsonRecord): NativeToolResult {
@@ -241,17 +246,6 @@ export async function createFileFromBlockAdapter(
 	}
 }
 
-function patchPaths(patch: string): string[] {
-	const paths: string[] = [];
-	for (const line of patch.replaceAll("\r\n", "\n").split("\n")) {
-		if (!line.startsWith("--- ") && !line.startsWith("+++ ")) continue;
-		let path = line.slice(4).split("\t", 1)[0]!.trim();
-		if (path === "/dev/null") continue;
-		path = path.replace(/^[ab][/]/u, "");
-		paths.push(path);
-	}
-	return paths;
-}
 
 async function git(root: string, args: readonly string[]): Promise<{ exit: number; stdout: string; stderr: string }> {
 	const process = Bun.spawn(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
@@ -283,12 +277,15 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 		const converted = convertPatchToUnified(patchText);
 		if (converted) patchText = converted;
 	}
-	for (const path of patchPaths(patchSourceText)) {
+	for (const path of patchTouchedPaths(patchSourceText)) {
 		if (isAbsolute(path) || path.split(/[\\/]/u).includes("..")) {
 			return result({ ok: false, stdout: "", stderr: `error: ${path}: does not exist in index\n` }, true);
 		}
 		if (leavesWorkspace(root, resolve(root, path))) {
-			return result({ ok: false, stdout: "", stderr: `error: ${path}: Operation not permitted\n` }, true);
+			const stderr = patchSourceText.includes("*** Begin Patch")
+				? 'error: No valid patches in input (allow with "--allow-empty")\n'
+				: `error: ${path}: Operation not permitted\n`;
+			return result({ ok: false, stdout: "", stderr }, true);
 		}
 	}
 	if (!patchText.trim()) return result({ ok: false, error: "empty patch" }, true);

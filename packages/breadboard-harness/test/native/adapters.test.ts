@@ -85,7 +85,8 @@ describe("R39 native adapters", () => {
 					}
 				}
 				for (const [path, target] of Object.entries(fixture.symlinks ?? {})) {
-					await symlink(target === "__OUTSIDE__" ? outsideRoot! : target, join(root, path), "dir");
+					const resolvedTarget = target === "__OUTSIDE__" ? outsideRoot! : target === "__REENTER__" ? join(root, "public") : target;
+					await symlink(resolvedTarget, join(root, path), "dir");
 				}
 				if (fixture.tool === "apply_unified_patch") {
 					await command(root, ["init"]);

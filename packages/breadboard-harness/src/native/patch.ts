@@ -170,6 +170,34 @@ function parseOpenCodePatch(text: string): PatchOperation[] {
 	}
 	return operations;
 }
+export function patchTouchedPaths(patchText: string): string[] {
+	const normalized = normalizePatchBlock(patchText);
+	if (!normalized) return [];
+	try {
+		const operations = parseOpenCodePatch(normalized);
+		if (operations.length > 0) {
+			return operations.flatMap(operation => [operation.filePath, ...(operation.moveTo ? [operation.moveTo] : [])]);
+		}
+	} catch {
+		// Fall through to unified-diff headers.
+	}
+	const paths: string[] = [];
+	for (const line of splitLines(normalized)) {
+		if (line.startsWith("diff --git ")) {
+			const fields = line.slice("diff --git ".length).trim().split(/\s+/u);
+			for (const field of fields) if (field.startsWith("a/") || field.startsWith("b/")) paths.push(field.slice(2));
+		} else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+			let path = line.slice(4).split("\t", 1)[0]!.trim();
+			if (path !== "/dev/null") {
+				if (path.startsWith("a/") || path.startsWith("b/")) path = path.slice(2);
+				paths.push(path);
+			}
+		} else if (/^(?:rename|copy) (?:from|to) /u.test(line)) {
+			paths.push(line.replace(/^(?:rename|copy) (?:from|to) /u, "").trim());
+		}
+	}
+	return [...new Set(paths)];
+}
 
 function normalizeCodexLine(text: string): string {
 	return text.normalize("NFKD").replaceAll("—", "-").replaceAll("–", "-").replaceAll("−", "-").replace(/\s+$/u, "");

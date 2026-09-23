@@ -1,0 +1,26 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "outside-alias-opencode",
+  "input": "*** Begin Patch\n*** Update File: alias/.bb-r39-ticket25-opencode/target.txt\n@@\n-before\n+after\n*** End Patch\n",
+  "initial": {
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"ok\": false, \"stdout\": \"\", \"stderr\": \"error: No valid patches in input (allow with \\\"--allow-empty\\\")\\n\"}",
+    "details": {
+      "ok": false,
+      "stdout": "",
+      "stderr": "error: No valid patches in input (allow with \"--allow-empty\")\n"
+    },
+    "isError": true
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": "__OUTSIDE__"
+  },
+  "outside": {
+    ".bb-r39-ticket25-opencode/target.txt": "before\n"
+  }
+}

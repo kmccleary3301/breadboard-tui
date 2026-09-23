@@ -1,0 +1,28 @@
+{
+  "tool": "read_file",
+  "case": "reentering-alias",
+  "input": {
+    "path": "alias/target.txt"
+  },
+  "initial": {
+    "public/target.txt": "inside target\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/public/target.txt\", \"content\": \"inside target\\n\", \"truncated\": false, \"offset\": 0, \"limit\": null}",
+    "details": {
+      "path": "<WORKSPACE>/public/target.txt",
+      "content": "inside target\n",
+      "truncated": false,
+      "offset": 0,
+      "limit": null
+    },
+    "isError": false
+  },
+  "final": {
+    "public/target.txt": "inside target\n"
+  },
+  "symlinks": {
+    "alias": "__REENTER__"
+  },
+  "outside": {}
+}
