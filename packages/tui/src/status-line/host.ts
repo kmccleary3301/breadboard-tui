@@ -31,6 +31,7 @@ export interface StatusLineSession {
 	agent?: { state?: { tools?: readonly Pick<Tool, "name" | "description" | "parameters">[] }; tokenizer?: unknown };
 	skills?: readonly unknown[];
 	compactionSpeculation?: "idle" | "running" | "armed";
+	mainStreamOwnsTurnLifecycle?: boolean;
 	sessionManager: {
 		getSessionName(): string | undefined;
 		getSessionId(): string;

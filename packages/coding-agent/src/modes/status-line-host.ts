@@ -1,12 +1,13 @@
 import type { StatusLineHost, StatusLineSession } from "@oh-my-pi/pi-tui/status-line/host";
+import { theme } from "@oh-my-pi/pi-tui/theme";
 import { settings } from "../config/settings";
+import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 import type { AgentSession } from "../session/agent-session";
 import { getSessionCompactionBoundaries } from "../session/context-usage-runtime";
 import { limitMatchesActiveAccount } from "../slash-commands/helpers/active-oauth-account";
 import { resolveActiveRepoContextSync } from "../utils/active-repo-context";
 import { GH_COMMAND_TIMEOUT_MS, github } from "../utils/github";
 import { calculateTokensPerSecond } from "../utils/token-rate";
-
 /**
  * Session capabilities the host consults beyond the display subset. Every
  * field is optional so display-only sessions (collab guest replicas, test
@@ -43,6 +44,8 @@ export const statusLineHost: StatusLineHost<StatusLineHostSession> = {
 	lookupPullRequest: cwd =>
 		github.run(cwd, ["pr", "view", "--json", "number,url"], AbortSignal.timeout(GH_COMMAND_TIMEOUT_MS)),
 	calculateTokensPerSecond,
+	getIdentityMark: () => ACTIVE_PRODUCT_IDENTITY.compactLogo[theme.getSymbolPreset()],
+	isBreadboardOwned: session => ACTIVE_PRODUCT_IDENTITY.id === "breadboard" || session.mainStreamOwnsTurnLifecycle === true,
 	limitMatchesActiveAccount,
 	computeCompactionBoundaries: (session, contextWindow, model) => {
 		const source = session.settings;
