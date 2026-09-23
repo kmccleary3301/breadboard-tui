@@ -1,0 +1,22 @@
+{
+  "operation": "eval",
+  "case": "oracle-bb-kernels-turn-24",
+  "input": {
+    "output": "70\n",
+    "isError": false,
+    "language": "js"
+  },
+  "python": {
+    "text": "{\"stdout\": \"70\\n\", \"stderr\": \"\", \"exit\": 0, \"result\": \"\", \"kernel_reset\": false, \"output_truncated\": false, \"__mvi_text_output\": \"70\\n\"}",
+    "details": {
+      "stdout": "70\n",
+      "stderr": "",
+      "exit": 0,
+      "result": "",
+      "kernel_reset": false,
+      "output_truncated": false,
+      "__mvi_text_output": "70\n"
+    },
+    "isError": false
+  }
+}

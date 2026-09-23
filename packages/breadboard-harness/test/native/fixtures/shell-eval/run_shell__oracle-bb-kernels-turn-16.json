@@ -1,0 +1,19 @@
+{
+  "operation": "run_shell",
+  "case": "oracle-bb-kernels-turn-16",
+  "input": {
+    "output": "SECOND_CALL_FINISHED",
+    "exitCode": 0,
+    "timedOut": false,
+    "cancelled": false
+  },
+  "python": {
+    "text": "{\"stdout\": \"SECOND_CALL_FINISHED\", \"exit\": 0, \"__mvi_text_output\": \"SECOND_CALL_FINISHED\"}",
+    "details": {
+      "stdout": "SECOND_CALL_FINISHED",
+      "exit": 0,
+      "__mvi_text_output": "SECOND_CALL_FINISHED"
+    },
+    "isError": false
+  }
+}

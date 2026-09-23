@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { CanonicalJson } from "../canonical-json";
 import type { NativeToolResult } from "./types";
 
-function pythonJson(value: CanonicalJson): string {
+export function pythonJson(value: CanonicalJson): string {
 	if (value === null || typeof value === "boolean" || typeof value === "number") return JSON.stringify(value);
 	if (typeof value === "string") return JSON.stringify(value);
 	if (Array.isArray(value)) return `[${value.map(pythonJson).join(", ")}]`;

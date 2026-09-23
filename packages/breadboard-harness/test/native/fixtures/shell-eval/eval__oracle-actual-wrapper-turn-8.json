@@ -1,0 +1,10 @@
+{
+  "operation": "eval",
+  "case": "oracle-actual-wrapper-turn-8",
+  "input": { "output": "82\n", "isError": false, "language": "py" },
+  "python": {
+    "text": "{\"stdout\": \"82\\n\", \"stderr\": \"\", \"exit\": 0, \"result\": \"\", \"kernel_reset\": false, \"output_truncated\": false, \"__mvi_text_output\": \"82\\n\"}",
+    "details": { "stdout": "82\n", "stderr": "", "exit": 0, "result": "", "kernel_reset": false, "output_truncated": false, "__mvi_text_output": "82\n" },
+    "isError": false
+  }
+}

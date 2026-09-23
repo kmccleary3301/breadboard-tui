@@ -1,0 +1,20 @@
+{
+  "operation": "run_shell",
+  "case": "captured-python-timeout-shape",
+  "input": {
+    "output": "partial",
+    "exitCode": 124,
+    "timedOut": true,
+    "cancelled": false
+  },
+  "python": {
+    "text": "{\"stdout\": \"partial\", \"exit\": 124, \"__mvi_text_output\": \"partial\\nCommand timed out\", \"stderr\": \"Command timed out\"}",
+    "details": {
+      "stdout": "partial",
+      "exit": 124,
+      "__mvi_text_output": "partial\nCommand timed out",
+      "stderr": "Command timed out"
+    },
+    "isError": true
+  }
+}

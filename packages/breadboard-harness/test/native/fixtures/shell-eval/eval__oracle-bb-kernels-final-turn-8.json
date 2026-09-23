@@ -1,0 +1,22 @@
+{
+  "operation": "eval",
+  "case": "oracle-bb-kernels-final-turn-8",
+  "input": {
+    "output": "False\nkernel state reset",
+    "isError": false,
+    "language": "py"
+  },
+  "python": {
+    "text": "{\"stdout\": \"False\\n\", \"stderr\": \"\", \"exit\": 0, \"result\": \"\", \"kernel_reset\": true, \"output_truncated\": false, \"__mvi_text_output\": \"False\\nkernel state reset\"}",
+    "details": {
+      "stdout": "False\n",
+      "stderr": "",
+      "exit": 0,
+      "result": "",
+      "kernel_reset": true,
+      "output_truncated": false,
+      "__mvi_text_output": "False\nkernel state reset"
+    },
+    "isError": false
+  }
+}
