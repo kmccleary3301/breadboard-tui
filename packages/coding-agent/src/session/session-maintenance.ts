@@ -1954,7 +1954,7 @@ export class SessionMaintenance {
 		const entries = this.#host.sessionManager.getBranch();
 		const messageCount = entries.filter(e => e.type === "message").length;
 		if (messageCount < 2) throw new Error("Nothing to hand off (no messages yet)");
-		await this.#host.beforeHandoff();
+		await this.#host.beforeHandoff?.();
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		const preparation = prepareCompaction(
 			entries,
@@ -4179,7 +4179,7 @@ export class SessionMaintenance {
 			const startEvent = { type: "auto_compaction_start" as const, reason, action };
 			await this.#emitLifecycleEvent(startEvent, false);
 			if (action === "handoff") {
-				await this.#host.beforeHandoff();
+				await this.#host.beforeHandoff?.();
 			}
 			if (armedSpec) {
 				// A background speculation already produced this compaction's
