@@ -146,6 +146,7 @@ function configureTheme(
 	lightTheme?: string,
 	mode?: ColorMode,
 ): string {
+	autoDetectedTheme = true;
 	autoDarkTheme = darkTheme ?? getProductIdentity().defaultThemes.dark;
 	autoLightTheme = lightTheme ?? getProductIdentity().defaultThemes.light;
 	currentSymbolPresetOverride = symbolPreset;
