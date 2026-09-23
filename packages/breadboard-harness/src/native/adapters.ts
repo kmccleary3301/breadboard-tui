@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { CanonicalJson } from "../canonical-json";
 import type { NativeToolResult } from "./types";
@@ -149,8 +149,7 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 	}
 }
 
-export async function assertWorkspacePath(workspaceRoot: string, requested: string): Promise<string> {
-	const path = workspacePath(workspaceRoot, requested);
-	await stat(path);
-	return path;
+/** `mark_task_complete` returns the completion action (`agent_llm_openai.py:5656-5657`). */
+export function markTaskCompleteAdapter(): NativeToolResult {
+	return result({ action: "complete" });
 }

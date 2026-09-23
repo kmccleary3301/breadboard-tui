@@ -17,6 +17,8 @@ import {
 	type CanonicalJson,
 	canonicalJson,
 	graphContentHash,
+	isJsonRecord as isRecord,
+	type JsonRecord,
 	sha256Json,
 } from "../canonical-json";
 import {
@@ -25,8 +27,6 @@ import {
 } from "./validate";
 
 export { validateHarnessDefinition } from "./validate";
-
-export type JsonRecord = { [key: string]: CanonicalJson };
 export type HarnessDefinition = JsonRecord;
 export interface HarnessCompileErrorOptions {
 	readonly code?: string;
@@ -106,9 +106,6 @@ interface MergedValue {
 
 const EMPTY_RECORD = (): JsonRecord => ({});
 
-function isRecord(value: CanonicalJson | undefined): value is JsonRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof JsonFloat);
-}
 
 function compareCodePoints(left: string, right: string): number {
 	const a = [...left];

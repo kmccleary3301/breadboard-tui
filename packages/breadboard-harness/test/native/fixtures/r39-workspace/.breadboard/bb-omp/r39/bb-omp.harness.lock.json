@@ -1,0 +1,208 @@
+{
+  "effective_values": [
+    {
+      "env_gate_ids": [],
+      "path": "completion.natural_finish.idle_turn_limit",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": 2,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "completion.natural_finish.no_tool_turns_threshold",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": 2,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "features.todos.enabled",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "features.todos.strict",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "loop.sequence",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        {
+          "mode": "coding"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "modes",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        {
+          "name": "coding",
+          "prompt": "@pack(base).system",
+          "tools_enabled": [
+            "read_file",
+            "list_dir",
+            "apply_unified_patch",
+            "create_file_from_block",
+            "run_shell",
+            "eval",
+            "TodoWrite",
+            "mark_task_complete"
+          ]
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "permissions.options.mode",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "prompt",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "permissions.shell.default",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "ask",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.system",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "prompts/daily_driver_system.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.default_model",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "openai-codex/gpt-5.6-luna",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.models",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": [
+        {
+          "adapter": "openai_responses",
+          "id": "openai-codex/gpt-5.6-luna"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "schema_version",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": "bb.harness_definition.v1",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.mark_task_complete",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "version",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.root",
+      "source_layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "value": ".",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    }
+  ],
+  "env_gates": [],
+  "graph_hash": "sha256:b962c4e249d1f529325bb29b32ac6e17a83a456df857e61734b7ffa20dec7fcd",
+  "graph_id": "agent_config:bb-omp.harness",
+  "merge_policy": {
+    "conflict_resolution": "highest-precedence",
+    "policy_id": "precedence_order_deep_merge",
+    "strategy": "deep-merge"
+  },
+  "migrations": [
+    {
+      "applied": true,
+      "from_version": "agent-config-yaml",
+      "migration_id": "agent-config-yaml-to-effective-config-graph-v1",
+      "to_version": "bb.effective_config_graph.v1"
+    }
+  ],
+  "schema_version": "bb.effective_config_graph.v1",
+  "source_layers": [
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:9bb4c959096911f4f7f2b6b0ab855b9cfa0ea6308f84997643897452dc6c2b21",
+      "layer_id": "agent-config:0000:bb-omp.harness.yaml",
+      "model_visible": true,
+      "precedence": 0,
+      "scope": "agent",
+      "source_kind": "project",
+      "source_ref": ".breadboard/bb-omp/r39/bb-omp.harness.yaml"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:1b3f1543403a6bf3c1d8c8a3e95d44412f44876265a32b5e9557567afdacf695",
+      "layer_id": "harness-resource:0000",
+      "model_visible": true,
+      "precedence": 10,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": ".breadboard/bb-omp/r39/bb-omp.harness.yaml::prompts/daily_driver_system.md"
+    }
+  ],
+  "visibility": {
+    "host_only_paths": [],
+    "model_visible_paths": [
+      "completion.natural_finish.idle_turn_limit",
+      "completion.natural_finish.no_tool_turns_threshold",
+      "features.todos.enabled",
+      "features.todos.strict",
+      "loop.sequence",
+      "modes",
+      "permissions.options.mode",
+      "permissions.shell.default",
+      "prompts.packs.base.system",
+      "providers.default_model",
+      "providers.models",
+      "schema_version",
+      "tools.mark_task_complete",
+      "version",
+      "workspace.root"
+    ],
+    "redacted_paths": []
+  }
+}

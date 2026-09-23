@@ -10,6 +10,7 @@ const DEFAULT_DATA_DIR = resolve(import.meta.dir, "..", "engine-data");
 const TRACKED_PREFIXES = [
 	"implementations/tools/defs",
 	"implementations/system_prompts",
+	"implementations/prompts/todos",
 	"agent_configs",
 	"config/e4_targets",
 ] as const;

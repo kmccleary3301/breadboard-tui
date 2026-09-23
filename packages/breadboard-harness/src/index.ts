@@ -121,3 +121,4 @@ export async function readEngineDataFile(path: string): Promise<string> {
 
 export * from "./canonical-json";
 export * from "./compiler";
+export * from "./native";

@@ -7,8 +7,8 @@ import {
 	createFileFromBlockAdapter,
 	listDirAdapter,
 	readFileAdapter,
-} from "../../packages/breadboard-harness/src/native/adapters";
-import type { NativeToolResult } from "../../packages/breadboard-harness/src/native/types";
+} from "../../src/native/adapters";
+import type { NativeToolResult } from "../../src/native/types";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 

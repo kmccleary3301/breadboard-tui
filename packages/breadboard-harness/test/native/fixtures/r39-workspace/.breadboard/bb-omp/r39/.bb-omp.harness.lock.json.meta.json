@@ -1,0 +1,6 @@
+{
+  "graph_hash": "sha256:b962c4e249d1f529325bb29b32ac6e17a83a456df857e61734b7ffa20dec7fcd",
+  "schema_version": "bb.harness_lock_metadata.v1",
+  "source_ref": ".breadboard/bb-omp/r39/bb-omp.harness.yaml",
+  "source_sha256": "sha256:9bb4c959096911f4f7f2b6b0ab855b9cfa0ea6308f84997643897452dc6c2b21"
+}

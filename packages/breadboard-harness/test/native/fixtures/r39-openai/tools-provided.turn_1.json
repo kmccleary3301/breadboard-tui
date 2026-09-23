@@ -1,0 +1,157 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "create_file_from_block",
+      "description": "Create a new file from provided content block",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Path to the new file (OpenCode-compatible)"
+          },
+          "file_name": {
+            "type": "string",
+            "description": "Path to the new file (legacy alias)"
+          },
+          "content": {
+            "type": "string",
+            "description": "Full file content to write"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "eval",
+      "description": "Execute Python with IPython or JavaScript in a persistent, session-local kernel in the project workspace. Bindings survive cells and turns while the engine session remains live. Top-level await is supported. Shell tools share the workspace but not kernel variables. Engine restart loses kernel state. A timeout or cancellation may reset the selected kernel; inspect the result. This tool does not provide the native OMP tool, agent, or workpool prelude.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "py",
+              "js"
+            ],
+            "description": "Kernel language, py for IPython or js for JavaScript"
+          },
+          "code": {
+            "type": "string",
+            "description": "Code to execute in the selected persistent kernel"
+          },
+          "title": {
+            "type": "string",
+            "description": "Short label for the cell"
+          },
+          "timeout": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Cell deadline in seconds; defaults to 30, and 0 disables the deadline"
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "Clear only the selected language's state before executing this cell"
+          }
+        },
+        "required": [
+          "language",
+          "code"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_dir",
+      "description": "List files in a directory; supports optional depth for tree view",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path"
+          },
+          "depth": {
+            "type": "integer",
+            "description": "Optional tree depth (1-5)",
+            "default": 1
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mark_task_complete",
+      "description": "Signal that the task is fully complete and end the session",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read a file's content with optional offset/limit for large files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute or workspace-relative file path"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Optional byte or line offset (implementation-specific)"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Optional read length (implementation-specific)"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_shell",
+      "description": "Execute a shell command in the project workspace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The shell command to run"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Timeout in seconds",
+            "default": 60
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    }
+  }
+]

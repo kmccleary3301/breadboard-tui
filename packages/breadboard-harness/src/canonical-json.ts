@@ -21,6 +21,14 @@ export type CanonicalJson =
 	| readonly CanonicalJson[]
 	| { readonly [key: string]: CanonicalJson };
 
+/** A mutable-at-construction JSON object; the shape every parsed mapping takes. */
+export type JsonRecord = { [key: string]: CanonicalJson };
+
+/** Narrow a {@link CanonicalJson} value to its object arm. */
+export function isJsonRecord(value: CanonicalJson | undefined): value is JsonRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof JsonFloat);
+}
+
 /** Parse JSON text, marking every number written with a fraction or exponent as a {@link JsonFloat}. */
 export function parseCanonicalJson(text: string): CanonicalJson {
 	return JSON.parse(text, (_key, value: unknown, context?: { source?: string }) => {

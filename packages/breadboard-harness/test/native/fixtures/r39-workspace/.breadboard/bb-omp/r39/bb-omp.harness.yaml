@@ -1,0 +1,43 @@
+schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: openai-codex/gpt-5.6-luna
+  models:
+  - id: openai-codex/gpt-5.6-luna
+    adapter: openai_responses
+prompts:
+  packs:
+    base:
+      system: prompts/daily_driver_system.md
+features:
+  todos:
+    enabled: true
+    strict: true
+tools:
+  mark_task_complete: true
+modes:
+- name: coding
+  prompt: '@pack(base).system'
+  tools_enabled:
+  - read_file
+  - list_dir
+  - apply_unified_patch
+  - create_file_from_block
+  - run_shell
+  - eval
+  - TodoWrite
+  - mark_task_complete
+permissions:
+  options:
+    mode: prompt
+  shell:
+    default: ask
+loop:
+  sequence:
+  - mode: coding
+completion:
+  natural_finish:
+    idle_turn_limit: 2
+    no_tool_turns_threshold: 2
