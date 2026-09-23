@@ -15,6 +15,7 @@ export interface OnboardingSetupDependencies {
 	runRoot?: typeof runRootCommand;
 	/** Launch-surface argv forwarded by the CLI before the setup command token. */
 	launchArgs?: readonly string[];
+	stdinIsTTY?: boolean;
 	stdoutIsTTY?: boolean;
 	writeStderr?: (text: string) => void;
 	exit?: (code: number) => never;

@@ -24,7 +24,7 @@ import { createModelBrowserSource } from "./model-browser-source";
 import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "../product-identity";
 import type { InteractiveModeContext } from "./types";
 export { ALL_SCENES, CURRENT_SETUP_VERSION };
-export type { SetupScene, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
+export type { SetupScene, SetupSceneHost, SetupSceneResult } from "@oh-my-pi/pi-tui/setup/scenes/types";
 export { runStartupSplash } from "@oh-my-pi/pi-tui/setup/startup-splash";
 
 const WEB_SEARCH_GROUNDINGS: Readonly<Record<WebSearchGrounding, true>> = {

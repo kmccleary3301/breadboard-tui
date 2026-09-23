@@ -258,7 +258,7 @@ describe("setup wizard model selection", () => {
 			settings,
 			ui: {
 				terminal: { rows: 24 },
-				showOverlay: next => {
+				showOverlay: (next: SetupWizardComponent) => {
 					component = next;
 					return { hide: () => {} };
 				},
