@@ -58,29 +58,26 @@ function environmentArtifact(): Record<string, string> {
 }
 
 describe("resolveProductBreadboardRunConfig", () => {
-	test("selects the installed artifact and product endpoint only for a product-owned default", async () => {
+	test("defaults product launches to native without installed-engine discovery", async () => {
 		let calls = 0;
-		const environment = {} as Record<string, string | undefined>;
 		const config = await resolveProductBreadboardRunConfig({
 			...baseInput,
-			environment,
+			environment: {},
 			isBreadboardProduct: true,
 			productExecutablePath: "/Applications/BreadBoard.app/Contents/MacOS/bb",
-			resolveInstalledSelection: async input => {
+			resolveInstalledSelection: async () => {
 				calls++;
-				expect(input.productExecutablePath).toEndWith("/bb");
 				return installedSelection;
 			},
 		});
 
-		expect(calls).toBe(1);
-		expect(environment.BREADBOARD_PRODUCT).toBeUndefined();
+		expect(calls).toBe(0);
 		expect(config).toMatchObject({
-			mode: "local-owned",
-			endpoint: "http://127.0.0.1:9099",
-			sources: { endpoint: "derived-default", engineArtifact: "derived-installed-artifact" },
+			mode: "native",
+			sources: { mode: "derived-default", endpoint: "derived-default" },
 		});
-		expect(config.installedEngineIdentity).toBe(installedIdentity);
+		expect(config.endpoint).toBeUndefined();
+		expect(config.installedEngineIdentity).toBeUndefined();
 	});
 
 	test("binds the trusted installed identity into the safe config digest", async () => {
@@ -94,6 +91,7 @@ describe("resolveProductBreadboardRunConfig", () => {
 		const resolve = async (identity: InstalledEngineSelection["identity"]) =>
 			resolveProductBreadboardRunConfig({
 				...baseInput,
+				endpointOverride: "http://127.0.0.1:9099",
 				isBreadboardProduct: true,
 				resolveInstalledSelection: async () => ({ ...installedSelection, identity }),
 			});
@@ -104,6 +102,7 @@ describe("resolveProductBreadboardRunConfig", () => {
 		expect(changed.installedEngineIdentity).toBe(changedIdentity);
 		expect(changed.configDigest).not.toBe(first.configDigest);
 	});
+
 
 	test("preserves CLI, environment, and selected artifact precedence without discovery", async () => {
 		let calls = 0;
@@ -197,11 +196,10 @@ describe("resolveProductBreadboardRunConfig", () => {
 				input: {},
 				expected: {
 					result: {
-						mode: "local-owned",
-						endpoint: "http://127.0.0.1:9099",
-						sources: { engineArtifact: "derived-installed-artifact" },
+						mode: "native",
+						sources: { mode: "derived-default", endpoint: "derived-default", engineArtifact: "derived-default" },
 					},
-					calls: 1,
+					calls: 0,
 				},
 			},
 			{
@@ -374,9 +372,10 @@ describe("resolveProductBreadboardRunConfig", () => {
 				expected: { error: "mode_endpoint_conflict", calls: 0 },
 			},
 			{
-				name: "non-selector fields still discover",
+				name: "non-selector fields still discover for the product-owned bridge",
 				product: true,
 				input: {
+					endpointOverride: "http://127.0.0.1:9099",
 					selectedConfig: {
 						startupTimeoutMs: 5_000,
 						requestTimeoutMs: 6_000,

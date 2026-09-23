@@ -21,6 +21,32 @@ Current product identity:
 - `@breadboard/sdk`: `0.4.0`
 - SDK engine API range: `>=0.4.0 <0.5.0`
 
+
+## Daily-driver engine
+
+The product defaults to the native `bb-omp.native` harness when no engine mode is configured. To
+select a Python bridge explicitly, set `breadboard.engineMode` in the profile, pass
+`--engine-mode <local-owned|local-external|remote|off>`, or set `BREADBOARD_ENGINE_MODE`.
+
+Generate the candidate launcher with a per-workspace native profile root. The launcher copies the
+matching R39 profile into that root, runs the one-shot product migration, and records a source
+checksum marker; it never mutates the R39 root:
+
+```sh
+bun scripts/native-daily-driver-launcher.ts \
+  /path/to/installed/bb \
+  /path/to/native-profile-root \
+  /path/to/r39/user/projects \
+  ~/.omp/agent \
+  ~/.local/bin/bb-omp
+```
+
+Rollback by installing the retained R39 launcher byte-for-byte:
+
+```sh
+install -m 755 /path/to/r39/launch ~/.local/bin/bb-omp
+```
+
 ## Build
 
 Prerequisites: Bun `1.4.0` (the repository package manager and primary CI lane use Bun 1.4), the platform's OMP native addon, and a checkout of the exact backend commit recorded in `packages/coding-agent/breadboard-sdk-provenance.json`.

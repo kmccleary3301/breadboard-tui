@@ -614,6 +614,8 @@ export class Settings {
 
 	/** Whether to persist changes */
 	#persist: boolean;
+	/** Explicit one-shot R39-to-native profile migration requested by the launcher. */
+	#nativeProfileMigrationRequested = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION === "1";
 
 	private constructor(options: SettingsOptions = {}) {
 		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
@@ -1500,6 +1502,7 @@ export class Settings {
 		this.#fireAllHooks();
 		return this;
 	}
+
 	async #loadGlobalSettings(): Promise<void> {
 		this.#storage = await AgentStorage.open(getAgentDbPath(this.#agentDir));
 		const existingConfig = await this.#loadExistingMainYaml();
@@ -1508,6 +1511,10 @@ export class Settings {
 		} else {
 			await this.#migrateFromLegacy();
 			this.#global = await this.#loadYaml(this.#configPath!);
+		}
+		if (this.#nativeProfileMigrationRequested && this.#migrateR39Profile(this.#global) && this.#configPath) {
+			await this.#writeYamlAtomically(this.#configPath, this.#global);
+			await this.#writeNativeProfileMigrationReceipt();
 		}
 		await this.#seedLastChangelogVersionMarker();
 	}
@@ -2103,7 +2110,50 @@ export class Settings {
 		}
 	}
 
-	/** Apply schema migrations to raw settings */
+	async #writeNativeProfileMigrationReceipt(): Promise<void> {
+		const receiptPath = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
+		if (!receiptPath) return;
+		const temporaryPath = `${receiptPath}.${process.pid}.${randomUUID()}.tmp`;
+		await fs.promises.mkdir(path.dirname(receiptPath), { recursive: true });
+		try {
+			await fs.promises.writeFile(
+				temporaryPath,
+				`${JSON.stringify({ schema: "bb.native_profile_migration.receipt.v1" })}\n`,
+				{ mode: 0o600 },
+			);
+			await replaceFileAtomically(temporaryPath, receiptPath);
+		} finally {
+			await fs.promises.unlink(temporaryPath).catch(() => {});
+		}
+	}
+
+	/** Apply or recognize the one-shot R39-to-native rewrite to the global profile only. */
+	#migrateR39Profile(raw: RawSettings): boolean {
+		if (process.env.BREADBOARD_PRODUCT !== "1" || !isRecord(raw.breadboard)) return false;
+		const breadboard = raw.breadboard;
+		const harness = isRecord(breadboard.harness) ? breadboard.harness : undefined;
+		const defaultHarness = harness?.default;
+		const legacyKeys = [
+			"engineMode",
+			"baseUrl",
+			"auth",
+			"tls",
+			"engineArtifact",
+			"ownerExitPolicy",
+			"sessionConfigPath",
+		];
+		const isNativeProfile =
+			defaultHarness === "daily_driver" && !legacyKeys.some((key) => key in breadboard);
+		if (isNativeProfile) return true;
+		const isR39Harness = typeof defaultHarness === "string" && /(?:^|[/\\])r39(?:[/\\])/.test(defaultHarness);
+		if (harness === undefined || !isR39Harness || breadboard.engineMode !== "local-owned") return false;
+		for (const key of legacyKeys) {
+			delete breadboard[key];
+		}
+		harness.default = "daily_driver";
+		return true;
+	}
+	/** Apply schema migrations to raw settings. */
 	#migrateRawSettings(raw: RawSettings, captureLegacyChangelogVersion = true): RawSettings {
 		// queueMode -> steeringMode
 		if ("queueMode" in raw && !("steeringMode" in raw)) {

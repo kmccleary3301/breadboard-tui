@@ -131,7 +131,7 @@ export function resolveNativeSurfaceEngineSelection(
 		selectedConfig,
 	});
 	if (!explicitSelection) {
-		return { engineMode: isBreadboardProduct ? "local-owned" : "off" };
+		return { engineMode: isBreadboardProduct ? "native" : "off" };
 	}
 	try {
 		const effective = resolveBreadboardRunConfig({
