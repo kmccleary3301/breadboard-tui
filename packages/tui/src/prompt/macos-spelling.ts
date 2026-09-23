@@ -4,6 +4,7 @@ import type { EditorInlineReplacement, EditorTextAssistProvider, EditorWordRepla
 import { logger } from "@oh-my-pi/pi-utils";
 import { isMagicKeyword } from "./magic-keywords";
 import { maskNonProse } from "./markdown-prose";
+import { theme } from "../theme/theme";
 
 /** Styled underline: red curly undercurl via colon-subparameter SGR (4:3 + SGR 58 color). */
 const STYLED_TYPO_MARKS = { start: "\x1b[4:3m\x1b[58:2::255:95:95m", end: "\x1b[4:0m\x1b[59m" } as const;
@@ -164,7 +165,9 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 				continue;
 			}
 			rendered += decorate(text.slice(cursor, range.start));
-			rendered += this.#marks.start + decorate(text.slice(range.start, end)) + this.#marks.end;
+			const decorated = decorate(text.slice(range.start, end));
+			const colored = typeof theme === "undefined" ? decorated : theme.fg("error", decorated);
+			rendered += this.#marks.start + colored + this.#marks.end;
 			cursor = end;
 		}
 		return rendered + decorate(text.slice(cursor));

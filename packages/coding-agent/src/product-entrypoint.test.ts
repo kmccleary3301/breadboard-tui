@@ -166,11 +166,11 @@ describe("BreadBoard product entrypoint", () => {
 	test("renders BreadBoard welcome copy only in an isolated product process", async () => {
 		const probe = String.raw`
 			const { Settings } = await import("./src/config/settings.ts");
-			const { initTheme } = await import("./src/modes/theme/theme.ts");
+			const { initTheme } = await import("@oh-my-pi/pi-tui/theme/theme");
 			await Settings.init({ inMemory: true });
 			await initTheme(false);
 			const { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } = await import("./src/product-identity.ts");
-			const { WelcomeComponent } = await import("./src/modes/components/welcome.ts");
+			const { WelcomeComponent } = await import("@oh-my-pi/pi-tui/prompt/welcome");
 			const stripAnsi = value => value.replace(/\x1b\[[0-9;]*m/g, "");
 			const hasRow = (lines, row) => lines.some(line => line.includes(row.trimEnd()));
 			const welcome = new WelcomeComponent("0.1.0-rc.4", "model", "provider");
@@ -204,12 +204,14 @@ describe("BreadBoard product entrypoint", () => {
 			const { getCustomThemesDir } = await import("@oh-my-pi/pi-utils");
 			const themesDir = getCustomThemesDir();
 			await mkdir(themesDir, { recursive: true });
-			const darkBase = await Bun.file("./src/modes/theme/dark.json").json();
-			const lightBase = await Bun.file("./src/modes/theme/light.json").json();
+			const darkBase = await Bun.file("../tui/src/theme/dark.json").json();
+			const lightBase = await Bun.file("../tui/src/theme/light.json").json();
 			await Bun.write(path.join(themesDir, "identity-custom-dark.json"), JSON.stringify({ ...darkBase, name: "identity-custom-dark" }));
 			await Bun.write(path.join(themesDir, "identity-custom-light.json"), JSON.stringify({ ...lightBase, name: "identity-custom-light" }));
+			// coding-agent registers the active product identity with pi-tui on import.
+			await import("./src/product-identity.ts");
 			const { Settings } = await import("./src/config/settings.ts");
-			const theme = await import("./src/modes/theme/theme.ts");
+			const theme = await import("@oh-my-pi/pi-tui/theme/theme");
 			await Settings.init({ inMemory: true });
 			await theme.initTheme(false);
 			const defaultTheme = theme.getCurrentThemeName();

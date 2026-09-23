@@ -145,7 +145,7 @@ describe("Agent hub row ordering", () => {
 
 	it("shows and refreshes main-session BreadBoard notices without adding main responses", async () => {
 		vi.useFakeTimers();
-		using tempDir = TempDir.createSync("hub-main-notices-");
+		using tempDir = TempDir.createSync("@hub-main-notices-");
 		geometry = stubStdoutGeometry(120);
 		const sessionFile = `${tempDir.path()}/main.jsonl`;
 		const notice = (id: string, content: string) =>

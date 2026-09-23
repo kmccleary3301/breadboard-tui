@@ -3,8 +3,8 @@
   "generator": "scripts/generate-third-party-notices.ts",
   "bundle": {
     "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "sha256": "b925efa274ad2e0de218e5e0fd388f4631e065f43badd54cde11aa7516bdf273",
-    "bytes": 54487
+    "sha256": "31bd6648fa19f0b26bc92355ba6c34a4a5f1e6ad21c8d1e66a54719e67dda679",
+    "bytes": 52535
   },
   "packageLicense": {
     "path": "packages/coding-agent/LICENSE",
@@ -164,11 +164,6 @@
       "path": "packages/utils/LICENSE",
       "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
       "bytes": 1111
-    },
-    {
-      "path": "packages/utils/src/vendor/mermaid-ascii/NOTICE",
-      "sha256": "9824d8cfb81dd754497864857edc44f88048199e5ba2c6b498a7248f5062bb82",
-      "bytes": 1748
     },
     {
       "path": "packages/wire/LICENSE",
