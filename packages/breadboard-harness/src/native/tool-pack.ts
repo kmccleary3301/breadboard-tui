@@ -187,6 +187,8 @@ function codexPythonSchemaOrder(definition: NativeToolDefinition): NativeToolDef
 		if (!isRecord(plan)) return definition;
 		const planSchema = plan.plan;
 		if (!isRecord(planSchema) || !isRecord(planSchema.items)) return definition;
+		const itemProperties = planSchema.items.properties;
+		if (!isRecord(itemProperties)) return definition;
 		return {
 			...definition,
 			parameters: {
@@ -195,7 +197,14 @@ function codexPythonSchemaOrder(definition: NativeToolDefinition): NativeToolDef
 					...plan,
 					plan: {
 						...planSchema,
-						items: { ...planSchema.items, required: ["status", "step"] },
+						items: {
+							...planSchema.items,
+							properties: {
+								status: itemProperties.status,
+								step: itemProperties.step,
+							},
+							required: ["status", "step"],
+						},
 					},
 				},
 			},
