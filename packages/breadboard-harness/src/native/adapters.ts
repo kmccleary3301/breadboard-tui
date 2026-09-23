@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
 import { applyPatchOperationsDirect, convertPatchToUnified, normalizeWorkspacePath } from "./patch";
 import type { NativeToolResult } from "./types";
@@ -15,11 +16,38 @@ function result(details: CanonicalJson, isError = false): NativeToolResult {
 	return { text: pythonJson(details), details, ...(isError ? { isError: true } : {}) };
 }
 
+function resolveSymlinkAware(path: string): string {
+	const missing: string[] = [];
+	let current = resolve(path);
+	while (true) {
+		try {
+			const resolved = realpathSync.native(current);
+			return resolve(resolved, ...missing.reverse());
+		} catch {
+			const parent = dirname(current);
+			if (parent === current) return resolve(path);
+			missing.unshift(basename(current));
+			current = parent;
+		}
+	}
+}
+
+function workspaceResultPath(workspaceRoot: string, path: string): string {
+	const lexicalRoot = resolve(workspaceRoot);
+	const resolvedRoot = resolveSymlinkAware(lexicalRoot);
+	const resolvedPath = resolveSymlinkAware(path);
+	const lexicalRelative = relative(lexicalRoot, path);
+	const resolvedRelative = relative(resolvedRoot, resolvedPath);
+	return lexicalRelative === resolvedRelative ? path : resolve(lexicalRoot, resolvedRelative);
+}
+
 /** Mirrors `agent_llm_openai.py:5264-5273`; list filtering follows :5519-5521. */
 function privateWorkspacePath(workspaceRoot: string, requested: string): boolean {
-	const root = resolve(workspaceRoot);
-	const normalized = normalizeWorkspacePath(root, requested);
-	const relativePath = relative(root, normalized);
+	const lexicalRoot = resolve(workspaceRoot);
+	const root = resolveSymlinkAware(lexicalRoot);
+	const normalized = normalizeWorkspacePath(lexicalRoot, requested);
+	const resolved = resolveSymlinkAware(normalized);
+	const relativePath = relative(root, resolved);
 	const parts = relativePath.split(/[\\/]/u).filter(Boolean);
 	return parts[0] === ".breadboard" && (parts[1] === "artifacts" || parts[1] === "attachments");
 }
@@ -121,7 +149,7 @@ export async function listDirAdapter(
 	const items = (await treeEntries(path, depth, "")).filter(
 		entry => !privateTreeEntry(workspaceRoot, path, entry),
 	);
-	return result({ path, items, entries: items, tree_format: false });
+	return result({ path: workspaceResultPath(workspaceRoot, path), items, entries: items, tree_format: false });
 }
 export async function createFileFromBlockAdapter(
 	workspaceRoot: string,

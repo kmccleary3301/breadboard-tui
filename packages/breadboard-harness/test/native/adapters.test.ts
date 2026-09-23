@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
@@ -18,6 +18,7 @@ type Fixture = {
 	initial: Record<string, string>;
 	python: { text: string; details: Record<string, unknown>; isError?: boolean };
 	final: Record<string, string>;
+	symlinks?: Record<string, string>;
 };
 
 async function run(root: string, fixture: Fixture): Promise<NativeToolResult> {
@@ -69,6 +70,9 @@ describe("R39 native adapters", () => {
 					const target = join(root, path);
 					await mkdir(resolve(target, ".."), { recursive: true });
 					await writeFile(target, content, "utf8");
+				}
+				for (const [path, target] of Object.entries(fixture.symlinks ?? {})) {
+					await symlink(target, join(root, path), "dir");
 				}
 				if (fixture.tool === "apply_unified_patch") {
 					await command(root, ["init"]);

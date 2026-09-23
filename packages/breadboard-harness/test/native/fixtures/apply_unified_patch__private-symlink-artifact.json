@@ -1,0 +1,25 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "symlink-artifact",
+  "input": "--- a/alias/x.txt\n+++ b/alias/x.txt\n@@ -1 +1 @@\n-secret artifact\n+changed artifact\n",
+  "initial": {
+    ".breadboard/artifacts/x.txt": "secret artifact\n",
+    ".breadboard/artifacts/nested/y.txt": "nested secret\n",
+    ".breadboard/attachments/a.bin": "private attachment\n",
+    ".breadboard/other/visible.txt": "visible control\n",
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"error\": \"private workspace storage is unavailable to model tools\"}",
+    "details": {
+      "error": "private workspace storage is unavailable to model tools"
+    },
+    "isError": true
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": ".breadboard/artifacts"
+  }
+}
