@@ -270,7 +270,10 @@ function registerFunctionTools(
 			name: tool.name,
 			label: tool.name,
 			description: tool.description,
-			parameters: api.typebox.Type.Unsafe(tool.parameters),
+			// A plain JSON Schema, not `Type.Unsafe`: OMP sends plain schemas as given, while ArkType schemas get
+			// `additionalProperties: false` on every declared object, which Python never sends
+			// (`provider/adapters.py:98-164`). Cloned because validation annotates the schema object.
+			parameters: structuredClone(tool.parameters) as Record<string, unknown>,
 			...(tool.strict === undefined ? {} : { strict: tool.strict }),
 			loadMode: "essential",
 			approval: binding.approval,

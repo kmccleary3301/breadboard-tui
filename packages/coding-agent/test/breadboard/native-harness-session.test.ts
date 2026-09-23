@@ -119,12 +119,29 @@ function userTexts(messages: readonly AgentMessage[]): string[] {
 }
 
 describe("native harness session", () => {
-	it("exposes exactly the harness function tools under the compiled system prompt", async () => {
-		const { session, harness } = await nativeSession([]);
+	it("sends exactly the harness function tools and schemas under the compiled system prompt", async () => {
+		const { session, harness, calls } = await nativeSession(
+			[
+				toolCall("shell-1", "run_shell", { command: "printf ok" }),
+				{ content: [{ type: "text", text: "ok" }], stopReason: "stop" },
+			],
+			{ autoApprove: true },
+		);
 		expect(session.getActiveToolNames().toSorted()).toEqual(
 			["create_file_from_block", "eval", "list_dir", "mark_task_complete", "read_file", "run_shell"].toSorted(),
 		);
 		expect(session.agent.state.systemPrompt.join("\n\n")).toBe(harness.systemPrompt);
+
+		await session.prompt("hello");
+		await session.waitForIdle();
+		// Python sends the compiled schemas unchanged (`provider/adapters.py:98-164`): no intent field, no closed
+		// objects, and nothing left behind by validating the run_shell call.
+		const expected = Object.fromEntries(harness.toolSurface.native.map(tool => [tool.name, tool.parameters]));
+		expect(calls).toHaveLength(2);
+		for (const call of calls) {
+			const wire = Object.fromEntries((call.context.tools ?? []).map(tool => [tool.name, tool.parameters]));
+			expect(JSON.parse(JSON.stringify(wire))).toEqual(expected);
+		}
 	});
 
 	it("runs run_shell on OMP bash, returns Python's result text, and ends the run on mark_task_complete", async () => {

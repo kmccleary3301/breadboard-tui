@@ -28,4 +28,6 @@ export function applyNativeHarnessSessionOptions(
 	if (harness.permissions.mode === "prompt" && !cli.approvalSelected) activeSettings.override("tools.approvalMode", "always-ask");
 	// The harness owns todos through its TodoWrite tool; OMP's own todo reminders would add turns Python never sends.
 	activeSettings.override("todo.enabled", false);
+	// Python sends the compiled tool schemas unchanged; OMP's intent field would add a required `i` property.
+	activeSettings.override("tools.intentTracing", false);
 }
