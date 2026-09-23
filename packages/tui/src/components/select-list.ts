@@ -6,7 +6,6 @@ import { type MouseRoutable, routeSelectListMouse, type SgrMouseEvent } from "..
 import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
 import { Ellipsis, padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
-import { ScrollView } from "./scroll-view";
 
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
@@ -153,6 +152,18 @@ export class SelectList implements Component, MouseRoutable {
 	#hoveredIndex: number | null = null;
 	/** Per-render map of 0-based output line → filtered-item index. */
 	#hitRows: (number | undefined)[] = [];
+	#primaryColumnWidth: number | undefined;
+	#iconColumnWidth: number | undefined;
+	readonly #displayValues = new Map<SelectItem, string>();
+	readonly #descriptions = new Map<SelectItem, string | undefined>();
+	readonly #iconWidths = new Map<SelectItem, number>();
+	readonly #displaySources = new Map<SelectItem, string>();
+	readonly #descriptionSources = new Map<SelectItem, string | undefined>();
+	readonly #iconSources = new Map<SelectItem, string | undefined>();
+	readonly #itemSnapshot: SelectItem[];
+	readonly #rowCounts: number[] = [];
+	#rowCountsWidth: number | undefined;
+	#rowCountsTotal = 0;
 
 	onSelect?: (item: SelectItem) => void;
 	onCancel?: () => void;
@@ -243,9 +254,59 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	invalidate(): void {
-		// No cached state to invalidate currently
+		this.#primaryColumnWidth = undefined;
+		this.#iconColumnWidth = undefined;
+		this.#displayValues.clear();
+		this.#displaySources.clear();
+		this.#descriptionSources.clear();
+		this.#iconSources.clear();
+		this.#descriptions.clear();
+		this.#iconWidths.clear();
+		this.#rowCountsWidth = undefined;
 	}
 
+	/**
+	 * Refresh mutable item properties without discarding unchanged derived values.
+	 * Returns quickly for stable provider-owned item arrays.
+	 */
+	refreshItems(): void {
+		let membershipChanged = this.#itemSnapshot.length !== this.items.length;
+		if (!membershipChanged) {
+			for (let i = 0; i < this.items.length; i++) {
+				if (this.#itemSnapshot[i] !== this.items[i]) {
+					membershipChanged = true;
+					break;
+				}
+			}
+		}
+		if (membershipChanged) {
+			this.invalidate();
+			this.#itemSnapshot.length = this.items.length;
+			for (let i = 0; i < this.items.length; i++) this.#itemSnapshot[i] = this.items[i]!;
+		}
+
+		let changed = membershipChanged;
+		for (const item of this.items) {
+			const hadDisplayValue = this.#displayValues.has(item);
+			const previousDisplayValue = this.#displayValues.get(item);
+			const displayValue = this.#getDisplayValue(item);
+			if (!hadDisplayValue || previousDisplayValue !== displayValue) changed = true;
+
+			const hadDescription = this.#descriptions.has(item);
+			const previousDescription = this.#descriptions.get(item);
+			const description = this.#getDescription(item);
+			if (!hadDescription || previousDescription !== description) changed = true;
+
+			const hadIconWidth = this.#iconWidths.has(item);
+			const previousIconWidth = this.#iconWidths.get(item);
+			const iconWidth = this.#getIconWidth(item);
+			if (!hadIconWidth || previousIconWidth !== iconWidth) changed = true;
+		}
+		if (!changed) return;
+		this.#primaryColumnWidth = undefined;
+		this.#iconColumnWidth = undefined;
+		this.#rowCountsWidth = undefined;
+	}
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
 		this.#hitRows = [];
@@ -302,7 +363,6 @@ export class SelectList implements Component, MouseRoutable {
 		// rows. Falls through to the original item-count window when every row
 		// count is 1.
 		const { startIndex, endIndex, rowOffset } = window;
-
 		// Render visible items. Cap rows at the budget so a single item that
 		// wraps to more than `visualBudget` rows (pathological — e.g. a 5-row
 		// description with maxVisible=3) still keeps the popup bounded; the
@@ -453,7 +513,7 @@ export class SelectList implements Component, MouseRoutable {
 		const prefix = isSelected ? `${cursor} ` : padding(visibleWidth(cursor) + 1);
 		// Icon column: every row reserves the same width so labels stay aligned
 		// whether or not an individual item carries an icon.
-		const iconWidth = item.icon ? visibleWidth(item.icon) : 0;
+		const iconWidth = this.#getIconWidth(item);
 		const iconCell = iconColumnWidth > 0 ? (item.icon ?? "") + padding(iconColumnWidth - iconWidth + 1) : "";
 		const prefixWidth = visibleWidth(prefix) + (iconColumnWidth > 0 ? iconColumnWidth + 1 : 0);
 		const descriptionSingleLine = this.#sanitizedDescription(item);
@@ -493,14 +553,17 @@ export class SelectList implements Component, MouseRoutable {
 	}
 
 	#getIconColumnWidth(): number {
+		if (this.#iconColumnWidth !== undefined) return this.#iconColumnWidth;
 		let widest = 0;
 		for (const item of this.#selection.visibleItems) {
 			if (item.icon) widest = Math.max(widest, visibleWidth(item.icon));
 		}
+		this.#iconColumnWidth = widest;
 		return widest;
 	}
 
 	#getPrimaryColumnWidth(): number {
+		if (this.#primaryColumnWidth !== undefined) return this.#primaryColumnWidth;
 		const { min, max } = this.#getPrimaryColumnBounds();
 		const widestPrimary = this.#selection.visibleItems.reduce((widest, item) => {
 			return Math.max(widest, visibleWidth(this.#getDisplayValue(item)) + PRIMARY_COLUMN_GAP);
@@ -642,8 +705,9 @@ export class SelectList implements Component, MouseRoutable {
 
 	#getFilterText(item: SelectItem): string {
 		let text = `${item.label} ${item.value}`;
-		if (item.description) {
-			text += ` ${item.description}`;
+		const description = this.#getDescription(item);
+		if (description) {
+			text += ` ${description}`;
 		}
 		if (item.hint) {
 			text += ` ${item.hint}`;
