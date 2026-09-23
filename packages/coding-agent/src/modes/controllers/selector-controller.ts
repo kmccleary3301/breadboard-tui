@@ -291,7 +291,7 @@ export class SelectorController {
 					harness: this.ctx.harnessPort?.current() ?? null,
 					imageBudget: this.ctx.ui.imageBudget,
 					requestRender: () => this.ctx.ui.requestRender(),
-					mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
+					mainStreamOwnsTurnLifecycle: this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 				},
 				{
 					onChange: (id, value) => this.handleSettingChange(id, value),
@@ -520,7 +520,7 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
-		const restriction = nativeControlRestriction("native-tools", this.ctx.session.mainStreamOwnsTurnLifecycle);
+		const restriction = nativeControlRestriction("native-tools", this.ctx.session?.mainStreamOwnsTurnLifecycle === true);
 		if (restriction) {
 			this.ctx.showWarning(restriction);
 			return;
@@ -582,7 +582,7 @@ export class SelectorController {
 	 * sidebar, agent rows, and chip strips that dive into the model browser.
 	 */
 	async showAgentsDashboard(): Promise<void> {
-		const restriction = nativeControlRestriction("subagents", this.ctx.session.mainStreamOwnsTurnLifecycle);
+		const restriction = nativeControlRestriction("subagents", this.ctx.session?.mainStreamOwnsTurnLifecycle === true);
 		if (restriction) {
 			this.ctx.showWarning(restriction);
 			return;
@@ -623,7 +623,7 @@ export class SelectorController {
 		// Selector-only ids (autoCompact, discovery.*) are not schema paths.
 		const ui = id in SETTINGS_SCHEMA ? getUi(id as SettingPath) : undefined;
 		const restriction = ui
-			? nativeSettingRestriction(id as SettingPath, ui.group, this.ctx.session.mainStreamOwnsTurnLifecycle)
+			? nativeSettingRestriction(id as SettingPath, ui.group, this.ctx.session?.mainStreamOwnsTurnLifecycle === true)
 			: undefined;
 		if (restriction) {
 			this.ctx.showWarning(restriction);
@@ -981,13 +981,13 @@ export class SelectorController {
 		compactFirst: boolean,
 	): Promise<void> {
 		const apply = async () => {
-			const level = this.ctx.session.mainStreamOwnsTurnLifecycle
+			const level = this.ctx.session?.mainStreamOwnsTurnLifecycle === true
 				? undefined
 				: (thinkingLevel ?? this.ctx.session.resolveTemporaryModelThinkingLevel(model));
 			await this.ctx.session.setModelTemporary(model, level);
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
-			if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
+			if (this.ctx.session?.mainStreamOwnsTurnLifecycle === true) {
 				this.ctx.showStatus(`Engine model: ${selector}.`);
 			} else {
 				const roleSelectorHint = this.ctx.keybindings.getKeys("app.model.select")[0] ?? "Alt+M";
@@ -1039,7 +1039,7 @@ export class SelectorController {
 			this.ctx.session.scopedModels,
 			{
 				onPick: async (model, selector, { overContext }) => {
-					if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
+					if (this.ctx.session?.mainStreamOwnsTurnLifecycle === true) {
 						await this.#applySessionModel(model, selector, undefined, false);
 						done();
 						return;
@@ -1070,7 +1070,7 @@ export class SelectorController {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}
 				},
-				onPickTask: this.ctx.session.mainStreamOwnsTurnLifecycle
+				onPickTask: (this.ctx.session?.mainStreamOwnsTurnLifecycle === true)
 					? undefined
 					: (_model, selector) => {
 							// Session-only: layer the Task override onto the runtime settings
@@ -1085,17 +1085,17 @@ export class SelectorController {
 				onCancel: done,
 			},
 			{
-				mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
+				mainStreamOwnsTurnLifecycle: this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 				currentContextTokens,
 				currentSelector,
-				taskModeKeys: this.ctx.session.mainStreamOwnsTurnLifecycle
+				taskModeKeys: (this.ctx.session?.mainStreamOwnsTurnLifecycle === true)
 					? undefined
 					: this.ctx.keybindings.getKeys("app.model.selectTemporary"),
 				taskModeKeyLabel: this.ctx.keybindings.getDisplayString("app.model.selectTemporary") || "alt+p",
 				taskSelector,
-				quickRoles: this.ctx.session.mainStreamOwnsTurnLifecycle ? undefined : quickRoleCycle?.models,
-				quickRoleOrder: this.ctx.session.mainStreamOwnsTurnLifecycle ? undefined : quickRoleOrder,
-				currentQuickRole: this.ctx.session.mainStreamOwnsTurnLifecycle
+				quickRoles: (this.ctx.session?.mainStreamOwnsTurnLifecycle === true) ? undefined : quickRoleCycle?.models,
+				quickRoleOrder: (this.ctx.session?.mainStreamOwnsTurnLifecycle === true) ? undefined : quickRoleOrder,
+				currentQuickRole: (this.ctx.session?.mainStreamOwnsTurnLifecycle === true)
 					? undefined
 					: quickRoleCycle?.models[quickRoleCycle.currentIndex]?.role,
 			},
@@ -1146,7 +1146,7 @@ export class SelectorController {
 				onAssign: async (model, role, thinkingLevel, selector, scope?: ModelRoleSelectionScope) => {
 					const restriction = nativeControlRestriction(
 						"model-roles",
-						this.ctx.session.mainStreamOwnsTurnLifecycle,
+						(this.ctx.session?.mainStreamOwnsTurnLifecycle === true),
 					);
 					if (restriction) {
 						this.ctx.showWarning(restriction);
@@ -1240,7 +1240,7 @@ export class SelectorController {
 				onUnassign: async (role, scope?: ModelRoleSelectionScope) => {
 					const restriction = nativeControlRestriction(
 						"model-roles",
-						this.ctx.session.mainStreamOwnsTurnLifecycle,
+						(this.ctx.session?.mainStreamOwnsTurnLifecycle === true),
 					);
 					if (restriction) {
 						this.ctx.showWarning(restriction);
@@ -1327,7 +1327,7 @@ export class SelectorController {
 				onFallbackChainChange: (role, chain) => {
 					const restriction = nativeControlRestriction(
 						"model-roles",
-						this.ctx.session.mainStreamOwnsTurnLifecycle,
+						(this.ctx.session?.mainStreamOwnsTurnLifecycle === true),
 					);
 					if (restriction) {
 						this.ctx.showWarning(restriction);
@@ -1359,7 +1359,7 @@ export class SelectorController {
 				onCycleOrderChange: order => {
 					const restriction = nativeControlRestriction(
 						"model-roles",
-						this.ctx.session.mainStreamOwnsTurnLifecycle,
+						(this.ctx.session?.mainStreamOwnsTurnLifecycle === true),
 					);
 					if (restriction) {
 						this.ctx.showWarning(restriction);
@@ -1377,7 +1377,7 @@ export class SelectorController {
 				onCancel: () => done(),
 			},
 			{
-				mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
+				mainStreamOwnsTurnLifecycle: this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 				initialProviderId: hubOptions.initialProviderId,
 			},
 		);
@@ -1482,7 +1482,7 @@ export class SelectorController {
 	showUserMessageSelector(): void {
 		const restriction = nativeControlRestriction(
 			"native-session-transition",
-			this.ctx.session.mainStreamOwnsTurnLifecycle,
+			this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 		);
 		if (restriction) {
 			this.ctx.showWarning(restriction);
@@ -1676,7 +1676,7 @@ export class SelectorController {
 	showTreeSelector(): void {
 		const restriction = nativeControlRestriction(
 			"native-session-transition",
-			this.ctx.session.mainStreamOwnsTurnLifecycle,
+			this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 		);
 		if (restriction) {
 			this.ctx.showWarning(restriction);
@@ -1951,7 +1951,7 @@ export class SelectorController {
 	async showSessionSelector(source?: ForeignSessionSource): Promise<void> {
 		const restriction = nativeControlRestriction(
 			"native-session-transition",
-			this.ctx.session.mainStreamOwnsTurnLifecycle,
+			this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 		);
 		if (restriction) {
 			this.ctx.showWarning(restriction);
@@ -2913,7 +2913,7 @@ export class SelectorController {
 				remote: this.ctx.collabGuest?.hubRemote,
 				sessionFile: this.ctx.sessionManager.getSessionFile() ?? null,
 				harnessPort: this.ctx.harnessPort,
-				mainStreamOwnsTurnLifecycle: this.ctx.session.mainStreamOwnsTurnLifecycle,
+				mainStreamOwnsTurnLifecycle: this.ctx.session?.mainStreamOwnsTurnLifecycle === true,
 			}),
 			observers,
 			hubKeys,
