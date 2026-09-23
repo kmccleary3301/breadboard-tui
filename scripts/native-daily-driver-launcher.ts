@@ -32,32 +32,49 @@ native_root=${shellQuote(nativeProfileRoot)}/user/projects/$workspace_key
 r39_root=${shellQuote(r39ProfileRoot)}/$workspace_key
 marker="$native_root/.bb-native-profile-migration.v1.json"
 receipt="$native_root/.bb-native-profile-migration.receipt.v1.json"
-pending=0
-if [[ ! -e "$marker" ]]; then
-  pending=1
+marker_valid=0
+if [[ -f "$marker" && ! -L "$marker" ]] &&
+  [[ "$(/usr/bin/plutil -extract schema raw -o - "$marker" 2>/dev/null)" == "bb.native_profile_migration.v1" ]] &&
+  [[ "$(/usr/bin/plutil -extract source raw -o - "$marker" 2>/dev/null)" == "$r39_root" ]]; then
+  marker_config_sha="$(/usr/bin/plutil -extract sourceConfigSha256 raw -o - "$marker" 2>/dev/null || true)"
+  marker_agent_db_sha="$(/usr/bin/plutil -extract sourceAgentDbSha256 raw -o - "$marker" 2>/dev/null || true)"
+  if [[ "$marker_config_sha" =~ ^[0-9a-f]{64}$ && "$marker_agent_db_sha" =~ ^[0-9a-f]{64}$ ]]; then
+    marker_valid=1
+  fi
+fi
+pending=$((1 - marker_valid))
+if [[ "$pending" == 1 ]]; then
   [[ -d "$r39_root" && ! -L "$r39_root" ]] || { printf 'R39 profile is missing for workspace key %s\n' "$workspace_key" >&2; exit 1; }
   [[ ! -e "$native_root" ]] || { [[ -d "$native_root" && ! -L "$native_root" ]] || exit 1; }
   mkdir -p "$(dirname "$native_root")"
+  for stale_seed in "$native_root".seed.*; do
+    [[ -e "$stale_seed" ]] || continue
+    [[ -d "$stale_seed" && ! -L "$stale_seed" ]] || exit 1
+    rm -rf "$stale_seed"
+  done
   if [[ ! -e "$native_root" ]]; then
-    mkdir "$native_root"
+    seed_root="$native_root.seed.$$"
+    [[ ! -e "$seed_root" ]] || exit 1
+    mkdir "$seed_root"
     shopt -s dotglob nullglob
     for source in "$r39_root"/*; do
       if [[ "$(basename "$source")" == agent ]]; then
-        mkdir "$native_root/agent"
+        mkdir "$seed_root/agent"
         for agent_source in "$source"/*; do
           case "$(basename "$agent_source")" in
             agent.db*) continue ;;
           esac
-          cp -a "$agent_source" "$native_root/agent/"
+          cp -a "$agent_source" "$seed_root/agent/"
         done
       else
-        cp -a "$source" "$native_root/"
+        cp -a "$source" "$seed_root/"
       fi
     done
     shopt -u dotglob nullglob
+    mv "$seed_root" "$native_root"
   fi
   [[ -d "$native_root/agent" && ! -L "$native_root/agent" ]] || exit 1
-  rm -f "$native_root/agent/agent.db" "$native_root/agent/agent.db-"*
+  rm -f "$native_root/agent"/agent.db*
   ln -s ${shellQuote(authSource)}/agent.db "$native_root/agent/agent.db"
   rm -f "$receipt"
 fi
@@ -89,8 +106,11 @@ set -e
 if [[ "$pending" == 1 && "$status" == 0 && -f "$receipt" && ! -L "$receipt" ]]; then
   source_config_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
   source_agent_db_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/agent.db" | /usr/bin/cut -d ' ' -f 1)"
-  printf '{"schema":"bb.native_profile_migration.v1","source":"%s","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$r39_root" "$source_config_sha" "$source_agent_db_sha" > "$marker"
-  chmod 600 "$marker"
+  marker_tmp="$marker.tmp.$$"
+  rm -f "$marker_tmp"
+  printf '{"schema":"bb.native_profile_migration.v1","source":"%s","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$r39_root" "$source_config_sha" "$source_agent_db_sha" > "$marker_tmp"
+  chmod 600 "$marker_tmp"
+  mv -f "$marker_tmp" "$marker"
 fi
 exit "$status"
 `;

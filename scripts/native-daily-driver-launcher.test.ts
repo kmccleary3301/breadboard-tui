@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readdir, realpath, writeFile } from "node:fs/promises";
 import { lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderNativeDailyDriverLauncher } from "./native-daily-driver-launcher";
 
@@ -82,23 +82,29 @@ function spawn(fixture: LauncherFixture, args: string[] = []) {
 }
 
 describe("native daily-driver launcher", () => {
-	test("does not copy agent database files and does not mark --version as migrated", async () => {
+	test("removes stale seed directories and does not mark --version as migrated", async () => {
 		const fixture = await setupLauncher();
+		const staleSeed = `${fixture.nativeProfile}.seed.crash`;
+		await mkdir(join(staleSeed, "agent"), { recursive: true });
+		await writeFile(join(staleSeed, "agent", "partial"), "partial");
 		const version = spawn(fixture, ["--version"]);
 		expect(version.exitCode).toBe(0);
+		expect((await readdir(dirname(fixture.nativeProfile))).filter(name => name.includes(".seed."))).toEqual([]);
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(false);
 		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
 		const databaseFiles = (await readdir(join(fixture.nativeProfile, "agent"))).filter(name => name.startsWith("agent.db"));
 		expect(databaseFiles).toEqual(["agent.db"]);
 	});
 
-	test("retries migration when the first launch fails", async () => {
+	test("retries migration after a failed launch and truncated marker", async () => {
 		const fixture = await setupLauncher();
+		const marker = join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json");
 		const first = spawn(fixture);
 		expect(first.exitCode).toBe(1);
-		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(false);
+		expect(await Bun.file(marker).exists()).toBe(false);
+		await writeFile(marker, "{");
 		const second = spawn(fixture);
 		expect(second.exitCode).toBe(0);
-		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(true);
+		expect(await Bun.file(marker).text()).toContain('"schema":"bb.native_profile_migration.v1"');
 	});
 });
