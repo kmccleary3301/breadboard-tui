@@ -3,7 +3,8 @@ import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-
 import { nativeLockValue } from "./lock-values";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
-const PACK_REFERENCE = /^@pack\(([^()]+)\)\.([A-Za-z0-9_]+)$/u;
+// `system_prompt_compiler.py:407`: `re.match(r"@pack\(([^)]+)\)\.(.+)$", token.strip())`.
+const PACK_REFERENCE = /^@pack\(([^)]+)\)\.(.+)$/u;
 const TODO_PROMPT_PATHS = Object.freeze({
 	todo_plan: "implementations/prompts/todos/plan.md",
 	todo_build: "implementations/prompts/todos/build.md",
@@ -148,11 +149,18 @@ export async function assembleNativePrompts(
 		const bytes = resources.get(value);
 		return bytes === undefined ? value : decode(bytes);
 	};
+	const resolvePackReference = (token: string): string => {
+		const reference = PACK_REFERENCE.exec(token.trim());
+		return reference === null ? "" : loadText(packs.get(reference[1])?.get(reference[2]));
+	};
+	// `system_prompt_compiler.py:423-434`: a mode prompt may itself be a pack reference, then loads once more (:556).
+	const modePrompt = (mode: string): string => {
+		const text = loadText(modePromptReference(lock, mode));
+		return loadText(text.startsWith("@pack(") ? resolvePackReference(text) : text);
+	};
 	const resolveToken = (token: string, mode: string): string => {
-		if (token === "mode_specific") return loadText(modePromptReference(lock, mode));
-		const reference = PACK_REFERENCE.exec(token);
-		if (reference === null) return loadText(token);
-		return loadText(packs.get(reference[1])?.get(reference[2]));
+		if (token === "mode_specific") return modePrompt(mode);
+		return token.startsWith("@pack(") ? resolvePackReference(token) : loadText(token);
 	};
 	const assemble = (order: readonly string[], mode: string, dedupe: boolean): string => {
 		const segments: string[] = [];

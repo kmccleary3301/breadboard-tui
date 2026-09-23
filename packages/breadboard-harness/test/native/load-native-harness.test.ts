@@ -57,10 +57,29 @@ describe("loadNativeHarness", () => {
 		await expect(loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root })).rejects.toThrow(/is stale/);
 	});
 
+	test("keeps a prompt string that names no file as literal text", async () => {
+		const root = await copyOfR39();
+		await rm(join(root, R39_LOCK));
+		const spec = join(root, R39_SPEC);
+		await writeFile(spec, (await readFile(spec, "utf8")).replace("prompts/daily_driver_system.md", "inline prompt"));
+		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root });
+		expect(harness.systemPrompt.startsWith("inline prompt\n\n")).toBe(true);
+	});
+
+	test("resolves a mode prompt that is a pack reference", async () => {
+		const root = await copyOfR39();
+		await rm(join(root, R39_LOCK));
+		const spec = join(root, R39_SPEC);
+		await writeFile(spec, (await readFile(spec, "utf8")).replace("prompts:\n", "prompts:\n  injection:\n    system_order:\n    - mode_specific\n"));
+		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root });
+		expect(harness.systemPrompt).toBe(await readFile(join(import.meta.dir, "fixtures/r39-openai/compiled_system.md"), "utf8"));
+	});
+
 	test("refuses a prompt resource outside the spec directory", async () => {
 		const root = await copyOfR39();
 		const spec = join(root, R39_SPEC);
 		await writeFile(spec, (await readFile(spec, "utf8")).replace("prompts/daily_driver_system.md", "../../../secret.md"));
+		await writeFile(join(root, "secret.md"), "not a prompt\n");
 		await expect(loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root })).rejects.toThrow(/escapes its spec directory/);
 	});
 });

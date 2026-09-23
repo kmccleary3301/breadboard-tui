@@ -41,26 +41,43 @@ function posixRelative(root: string, path: string): string {
 	return relative(root, path).split(sep).join("/");
 }
 
-/** Every `prompts.packs.<pack>.<role>` file path a spec names, relative to the spec's directory. */
-function packResourcePaths(definition: JsonRecord): string[] {
-	const prompts = definition.prompts;
-	const packs = isJsonRecord(prompts) ? prompts.packs : undefined;
-	if (!isJsonRecord(packs)) return [];
-	const paths: string[] = [];
-	for (const pack of Object.values(packs)) {
-		if (!isJsonRecord(pack)) continue;
-		for (const value of Object.values(pack)) if (typeof value === "string") paths.push(value);
+/**
+ * Every prompt string that `_load_text` may read as a file: pack entries, mode prompts, and bare order tokens
+ * (`system_prompt_compiler.py:379-410`, `:429`, `:560`). Multiline or longer-than-256 strings are always literal.
+ */
+function promptResourceCandidates(definition: JsonRecord): Set<string> {
+	const candidates = new Set<string>();
+	const add = (value: unknown): void => {
+		if (typeof value === "string" && value.length > 0 && !value.includes("\n") && value.length <= 256) candidates.add(value);
+	};
+	const prompts = isJsonRecord(definition.prompts) ? definition.prompts : undefined;
+	if (isJsonRecord(prompts?.packs)) {
+		for (const pack of Object.values(prompts.packs)) if (isJsonRecord(pack)) Object.values(pack).forEach(add);
 	}
-	return paths;
+	if (isJsonRecord(prompts?.injection)) {
+		for (const order of Object.values(prompts.injection)) {
+			if (!Array.isArray(order)) continue;
+			for (const token of order) if (typeof token === "string" && token !== "mode_specific" && !token.startsWith("@pack(")) add(token);
+		}
+	}
+	if (Array.isArray(definition.modes)) for (const mode of definition.modes) if (isJsonRecord(mode)) add(mode.prompt);
+	return candidates;
 }
 
-async function readResource(specDirectory: string, resource: string): Promise<Uint8Array> {
-	if (resource.length === 0 || isAbsolute(resource)) {
-		throw new Error(`native harness resource must be relative to its spec: ${resource}`);
-	}
+/**
+ * What `_load_text` yields for a prompt string: `undefined` when it names no path and so stays literal text, empty
+ * bytes for a path it cannot read as text (a directory), else the file. Python resolves against the working directory
+ * and the config's directories; a native harness resolves only inside its spec directory, and refuses a string that
+ * names an existing path outside it.
+ */
+async function readResource(specDirectory: string, resource: string): Promise<{ bytes: Uint8Array; file: boolean } | undefined> {
 	const path = resolve(specDirectory, resource);
-	if (!contained(specDirectory, path)) throw new Error(`native harness resource escapes its spec directory: ${resource}`);
-	return new Uint8Array(await readFile(path));
+	const info = await stat(path).catch(() => undefined);
+	if (info === undefined) return undefined;
+	if (isAbsolute(resource) || (path !== specDirectory && !contained(specDirectory, path))) {
+		throw new Error(`native harness resource escapes its spec directory: ${resource}`);
+	}
+	return info.isFile() ? { bytes: new Uint8Array(await readFile(path)), file: true } : { bytes: new Uint8Array(), file: false };
 }
 
 function stringValue(lock: JsonRecord, path: string): string | undefined {
@@ -88,11 +105,14 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 	const source = await readFile(specPath, "utf8");
 	const sourceRef = posixRelative(workspaceRoot, specPath);
 	const specDirectory = dirname(specPath);
-	const resources = new Map<string, Uint8Array>();
-	for (const resource of packResourcePaths(parseHarnessYaml(source))) {
-		if (!resources.has(resource)) resources.set(resource, await readResource(specDirectory, resource));
+	const promptTexts = new Map<string, Uint8Array>();
+	const resourceInputs = new Map<string, Uint8Array>();
+	for (const resource of promptResourceCandidates(parseHarnessYaml(source))) {
+		const loaded = await readResource(specDirectory, resource);
+		if (loaded === undefined) continue;
+		promptTexts.set(resource, loaded.bytes);
+		if (loaded.file) resourceInputs.set(`${sourceRef}::${resource}`, loaded.bytes);
 	}
-	const resourceInputs = new Map([...resources].map(([path, bytes]) => [`${sourceRef}::${path}`, bytes]));
 	const { lock } = compileHarnessYaml(source, { sourceRef, resourceInputs });
 	const graphHash = lock.graph_hash;
 	if (typeof graphHash !== "string") throw new Error("native harness compilation produced no graph_hash");
@@ -110,7 +130,7 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 	}
 
 	const toolSurface = await loadNativeToolSurface(lock);
-	const prompts = await assembleNativePrompts(lock, resources, toolSurface);
+	const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface);
 	return Object.freeze({
 		specPath,
 		workspaceRoot,
