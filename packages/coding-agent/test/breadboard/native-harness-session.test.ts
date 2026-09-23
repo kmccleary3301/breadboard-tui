@@ -47,12 +47,14 @@ afterAll(() => {
 async function nativeSession(
 	responses: MockResponse[],
 	options: { autoApprove?: boolean } = {},
+	configureHarness?: (harness: LoadedNativeHarness) => LoadedNativeHarness,
 ): Promise<{ session: AgentSession; harness: LoadedNativeHarness; calls: ReturnType<typeof createMockModel>["calls"] }> {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), `bb-native-session-${Snowflake.next()}-`));
 	tempDirs.push(root);
 	const cwd = fs.realpathSync(root);
 	fs.cpSync(R39_FIXTURE, cwd, { recursive: true });
-	const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: cwd });
+	const loadedHarness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: cwd });
+	const harness = configureHarness?.(loadedHarness) ?? loadedHarness;
 	const settings = Settings.isolated({
 		"async.enabled": false,
 		"bash.autoBackground.enabled": false,
@@ -117,6 +119,53 @@ function userTexts(messages: readonly AgentMessage[]): string[] {
 		return [typeof content === "string" ? content : textOf({ content })];
 	});
 }
+function configureStagedHarness(harness: LoadedNativeHarness): LoadedNativeHarness {
+	const toolByName = new Map(harness.registeredToolSurface.native.map(tool => [tool.name, tool]));
+	const pack = (mode: string, names: string[]) => ({
+		mode,
+		native: names.map(name => {
+			const tool = toolByName.get(name);
+			if (!tool) throw new Error(`fixture does not provide ${name}`);
+			return tool;
+		}),
+		textInvoked: harness.toolSurface.textInvoked,
+	});
+	const planPack = pack("plan", ["read_file"]);
+	const buildPack = pack("build", ["run_shell"]);
+	const plan = { mode: "plan", systemPrompt: "PLAN_STAGE_PROMPT", perTurnPrompt: "", toolSurface: planPack };
+	const build = { mode: "build", systemPrompt: "BUILD_STAGE_PROMPT", perTurnPrompt: "", toolSurface: buildPack };
+	const effectiveValues = Array.isArray(harness.lock.effective_values)
+		? harness.lock.effective_values.map(value => {
+				if (!value || typeof value !== "object") return value;
+				const entry = value as { path?: unknown; value?: unknown };
+				if (entry.path === "modes") {
+					return {
+						...entry,
+						value: [
+							{ name: "plan", prompt: "PLAN_STAGE_PROMPT", tools_enabled: ["read_file"] },
+							{ name: "build", prompt: "BUILD_STAGE_PROMPT", tools_enabled: ["run_shell"] },
+						],
+					};
+				}
+				if (entry.path === "loop.sequence") return { ...entry, value: [{ mode: "plan", if: "features.plan" }, { mode: "build" }] };
+				return value;
+			})
+		: [];
+	effectiveValues.push(
+		{ path: "features.plan", value: true },
+		{ path: "loop.plan_turn_limit", value: 1 },
+	);
+	const lock = { ...harness.lock, effective_values: effectiveValues };
+	return {
+		...harness,
+		lock,
+		systemPrompt: plan.systemPrompt,
+		toolSurface: planPack,
+		stages: [plan, build],
+		registeredToolSurface: { mode: "registered", native: [...planPack.native, ...buildPack.native], textInvoked: [] },
+	};
+}
+
 
 describe("native harness session", () => {
 	it("sends exactly the harness function tools and schemas under the compiled system prompt", async () => {
@@ -218,5 +267,32 @@ describe("native harness session", () => {
 		expect(calls).toHaveLength(2);
 		expect(toolResult(session, "shell-denied")?.isError).toBe(true);
 		expect(fs.existsSync(path.join(session.sessionManager.getCwd(), "ran.txt"))).toBe(false);
+	});
+	it("applies the next stage on the continuation provider request", async () => {
+		const { session, calls } = await nativeSession(
+			[
+				{
+					content: [
+						...(todoWrite.content ?? []),
+						{ type: "toolCall", id: "read-1", name: "read_file", arguments: { path: "prompts/daily_driver_system.md" } },
+					],
+					stopReason: "toolUse",
+				},
+				{ content: [{ type: "text", text: "build complete" }], stopReason: "stop" },
+			],
+			{},
+			configureStagedHarness,
+		);
+
+		await session.prompt("implement it");
+		await session.waitForIdle();
+
+		// Python's stage transition waits for the turn boundary after TodoWrite
+		// (`agent_llm_openai.py:3052-3080`, `guardrails/orchestrator.py:269-349`).
+		expect(calls).toHaveLength(2);
+		expect(calls[0]?.context.systemPrompt).toEqual(["PLAN_STAGE_PROMPT"]);
+		expect(calls[0]?.context.tools?.map(tool => tool.name)).toEqual(["read_file"]);
+		expect(calls[1]?.context.systemPrompt).toEqual(["BUILD_STAGE_PROMPT"]);
+		expect(calls[1]?.context.tools?.map(tool => tool.name)).toEqual(["run_shell"]);
 	});
 });

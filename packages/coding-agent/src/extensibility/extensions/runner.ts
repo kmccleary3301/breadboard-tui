@@ -40,6 +40,9 @@ import type {
 	ComposerShapeDefinition,
 	ContextEvent,
 	ContextEventResult,
+	TurnPrepareContext,
+	TurnPrepareEvent,
+	TurnPrepareResult,
 	ContextUsage,
 	Extension,
 	ExtensionActions,
@@ -1722,7 +1725,30 @@ export class ExtensionRunner {
 			if (!unchanged) markPerCallContextMessage(message);
 		}
 		for (const message of messages) clearContextHistoryIndex(message);
+
 		return currentMessages;
+	}
+	/** Runs turn preparation handlers immediately before every provider request. */
+	async emitTurnPrepare(context: TurnPrepareContext): Promise<TurnPrepareResult | undefined> {
+		if (!this.hasHandlers("turn_prepare")) return undefined;
+		const ctx = this.createContext();
+		let current: TurnPrepareResult | undefined;
+		for (const ext of this.extensions) {
+			const handlers = ext.handlers.get("turn_prepare");
+			if (!handlers || handlers.length === 0) continue;
+			for (const handler of handlers) {
+				const event: TurnPrepareEvent = { type: "turn_prepare", ...context };
+				const result = await this.#runHandlerWithTimeout(
+					handler,
+					event,
+					ctx,
+					ext,
+					extensionHandlerTimeoutMs,
+				);
+				if (result !== undefined) current = { ...(current ?? {}), ...result };
+			}
+		}
+		return current;
 	}
 
 	/** Runs request payload hooks with the model used for that provider request. */

@@ -322,13 +322,18 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			policy.beginTurn();
 			await applyStage();
 		});
-		api.on("turn_end", async () => {
-			stageMachine.endTurn(todos.openItems.length > 0);
-			await applyStage();
+		api.on("turn_prepare", () => {
+			const stage = stageMachine.current;
+			return {
+				mode: stage.mode,
+				systemPrompt: stage.systemPrompt,
+				activeToolNames: stage.toolSurface.native.map(tool => tool.name),
+			};
 		});
 		api.on("tool_call", event => policy.admit(event.toolName));
 		api.on("turn_settle", async (event, context) => {
 			const text = await runTextCalls(event.message, harness, policy, todos, context);
+			stageMachine.endTurn(todos.openItems.length > 0);
 			const messages = [
 				...(text === undefined ? [] : [{ customType: NATIVE_TEXT_RESULTS_MESSAGE_TYPE, content: text, display: true }]),
 				...guard.takeAdvisories().map(content => ({ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true })),

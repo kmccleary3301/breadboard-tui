@@ -4115,5 +4115,35 @@ describe("ExtensionRunner", () => {
 			});
 			expect(cachedTexts).toEqual(["persisted user", "persisted assistant"]);
 		});
+	it("emits turn_prepare results for every provider request", async () => {
+		fs.writeFileSync(
+			path.join(extensionsDir, "turn-prepare.ts"),
+			`export default (pi) => {
+				pi.on("turn_prepare", (event) => ({
+					mode: event.nextMode,
+					systemPrompt: ["prepared prompt"],
+					activeToolNames: ["build"],
+					continue: true,
+				}));
+			};`,
+		);
+		const result = await loadTestExtensions();
+		const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir.path(), sessionManager, modelRegistry);
+
+		await expect(
+			runner.emitTurnPrepare({
+				turnIndex: 1,
+				previousMode: "plan",
+				nextMode: "build",
+				activeToolNames: ["read"],
+				baseSystemPrompt: ["plan prompt"],
+			}),
+		).resolves.toEqual({
+			mode: "build",
+			systemPrompt: ["prepared prompt"],
+			activeToolNames: ["build"],
+			continue: true,
+		});
+	});
 	});
 });

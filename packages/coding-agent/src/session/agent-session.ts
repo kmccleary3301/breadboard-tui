@@ -55,6 +55,7 @@ import {
 import type {
 	AssistantMessage,
 	CodexCompactionContext,
+	Context,
 	ImageContent,
 	Message,
 	MessageAttribution,
@@ -792,6 +793,7 @@ export class AgentSession {
 	#usagePreflightReadyModel: Model | undefined;
 	#detachUsageBeforeQueueDequeue: (() => void) | undefined;
 	#detachUsageBeforeModelCall: (() => void) | undefined;
+	#detachTurnPrepare: (() => void) | undefined;
 
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
@@ -1447,6 +1449,28 @@ export class AgentSession {
 		this.#promptTemplates = config.promptTemplates ?? [];
 		this.#slashCommands = config.slashCommands ?? [];
 		this.#extensionRunner = config.extensionRunner;
+		this.#detachTurnPrepare = this.agent.addBeforeModelCall(async (context: Context, signal?: AbortSignal) => {
+			const result = await this.#extensionRunner?.emitTurnPrepare({
+				turnIndex: this.#turnIndex,
+				previousMode: undefined,
+				nextMode: "",
+				activeToolNames: this.agent.state.tools.map(tool => tool.name),
+				baseSystemPrompt: this.agent.state.systemPrompt,
+			});
+			signal?.throwIfAborted();
+			if (!result) return;
+			if (result.systemPrompt !== undefined) {
+				context.systemPrompt =
+					typeof result.systemPrompt === "string" ? [result.systemPrompt] : [...result.systemPrompt];
+			}
+			if (result.activeToolNames !== undefined) {
+				await this.setActiveToolsByName(result.activeToolNames);
+				context.tools = this.agent.state.tools;
+			}
+			if (result.continue === false) {
+				return { stop: true, reason: "turn_prepare requested stop" };
+			}
+		});
 		this.#getEvalPreludes = config.getEvalPreludes;
 		this.#reconcileBrowserMcpFilter = config.reconcileBrowserMcpFilter;
 		this.#customCommands = config.customCommands ?? [];
@@ -4773,6 +4797,8 @@ export class AgentSession {
 		this.#detachUsageBeforeQueueDequeue = undefined;
 		this.#detachUsageBeforeModelCall?.();
 		this.#detachUsageBeforeModelCall = undefined;
+		this.#detachTurnPrepare?.();
+		this.#detachTurnPrepare = undefined;
 		if (this.agent.prepareQueuedMessages === this.#prepareQueuedUserMessages) {
 			this.agent.prepareQueuedMessages = undefined;
 		}

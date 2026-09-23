@@ -302,6 +302,7 @@ Cancelable pre-events:
 - `input`
 - `before_agent_start`
 - `before_provider_request` (may replace provider request payload — the replacement is applied by every provider that fires the hook, which is all of them except `devin-agent`, which does not fire it)
+- `turn_prepare` — awaited immediately before every provider request, including tool-loop continuations. It receives `{ turnIndex, previousMode, nextMode, activeToolNames, baseSystemPrompt }`; return `{ mode?, systemPrompt?, activeToolNames?, continue? }` to replace the prompt/tool surface for that request. `continue: false` stops the loop before the request.
 - `after_provider_response`
 - `context`
 - `agent_start` / `agent_end` — agent loop lifecycle notification; `agent_end` remains notification-only

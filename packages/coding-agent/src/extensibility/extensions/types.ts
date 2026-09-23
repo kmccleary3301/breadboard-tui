@@ -1104,6 +1104,7 @@ export type ExtensionEvent =
 	| BeforeProviderRequestEvent
 	| AfterProviderResponseEvent
 	| BeforeAgentStartEvent
+	| TurnPrepareEvent
 	| AgentStartEvent
 	| AgentEndEvent
 	| SessionStopEvent
@@ -1140,8 +1141,31 @@ export type ExtensionEvent =
 // ============================================================================
 
 /**
- * Fired after a turn's tool results are recorded and before the loop decides whether to make another
- * model call. Unlike `turn_end`, the loop awaits it, so its messages land before the next request.
+ * Context prepared immediately before each provider request in an agent run.
+ * The host supplies the stage metadata; extensions may replace the request prompt/tools.
+ */
+export interface TurnPrepareContext {
+	turnIndex: number;
+	previousMode: string | undefined;
+	nextMode: string;
+	activeToolNames: readonly string[];
+	baseSystemPrompt: readonly string[];
+}
+
+export interface TurnPrepareEvent extends TurnPrepareContext {
+	type: "turn_prepare";
+}
+
+export interface TurnPrepareResult {
+	mode?: string;
+	systemPrompt?: string | string[];
+	activeToolNames?: string[];
+	continue?: boolean;
+}
+
+/**
+ * Fired after context synchronization and before the provider call. Unlike `turn_end`, this event
+ * is awaited for every request, including tool-loop continuations.
  */
 export interface TurnSettleEvent {
 	type: "turn_settle";
@@ -1313,6 +1337,7 @@ export interface ExtensionAPI {
 	): void;
 	on(event: "after_provider_response", handler: ExtensionHandler<AfterProviderResponseEvent>): void;
 	on(event: "before_agent_start", handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>): void;
+	on(event: "turn_prepare", handler: ExtensionHandler<TurnPrepareEvent, TurnPrepareResult>): void;
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): void;
 	on(event: "session_stop", handler: ExtensionHandler<SessionStopEvent, SessionStopEventResult>): void;
