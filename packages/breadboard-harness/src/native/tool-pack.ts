@@ -96,23 +96,43 @@ async function vendoredToolDefinitions(): Promise<ReadonlyMap<string, NativeTool
 	return byName;
 }
 
-function selectedMode(lock: JsonRecord): { mode: string; toolNames: readonly string[] } {
-	const sequence = nativeLockValue(lock, "loop.sequence");
-	if (!Array.isArray(sequence) || sequence.length !== 1 || !isRecord(sequence[0])) {
-		// Multi-stage sequences need the turn seam from ticket 22.
-		throw new Error("native harness supports exactly one loop.sequence stage");
-	}
-	const mode = requiredString(sequence[0].mode, "loop.sequence[0].mode");
+function modeRecords(lock: JsonRecord): readonly JsonRecord[] {
 	const modes = nativeLockValue(lock, "modes");
-	if (!Array.isArray(modes)) throw new Error("native harness lock has no modes");
-	const selected = modes.find(candidate => isRecord(candidate) && candidate.name === mode);
-	if (!isRecord(selected) || !Array.isArray(selected.tools_enabled)) {
-		throw new Error(`native harness mode ${mode} has no tools_enabled list`);
+	return Array.isArray(modes) ? modes.filter(isRecord) : [];
+}
+
+function selectedToolNames(mode: JsonRecord, definitions: ReadonlyMap<string, NativeToolDefinition>): readonly string[] {
+	const enabled = Array.isArray(mode.tools_enabled) ? mode.tools_enabled.filter((name): name is string => typeof name === "string") : [];
+	const disabled = new Set(
+		Array.isArray(mode.tools_disabled) ? mode.tools_disabled.filter((name): name is string => typeof name === "string") : [],
+	);
+	const selected = enabled.length === 0 || enabled.includes("*") ? [...definitions.keys()] : enabled;
+	return selected.filter(name => !disabled.has(name));
+}
+
+async function loadNativeToolSurfacesWithDefinitions(
+	lock: JsonRecord,
+	definitions: ReadonlyMap<string, NativeToolDefinition>,
+): Promise<ReadonlyMap<string, NativeToolSurfacePack>> {
+	const surfaces = new Map<string, NativeToolSurfacePack>();
+	for (const mode of modeRecords(lock)) {
+		const modeName = requiredString(mode.name, "modes[].name");
+		const enabled = selectedToolNames(mode, definitions).map(name => {
+			const definition = definitions.get(name);
+			if (definition === undefined) throw new Error(`native harness tool ${name} has no vendored definition`);
+			return definition;
+		});
+		const ordered = [...enabled].sort(caseInsensitiveOrder);
+		surfaces.set(
+			modeName,
+			Object.freeze({
+				mode: modeName,
+				native: Object.freeze(ordered.filter(tool => tool.nativePrimary)),
+				textInvoked: Object.freeze(ordered.filter(tool => !tool.nativePrimary)),
+			}),
+		);
 	}
-	return {
-		mode,
-		toolNames: selected.tools_enabled.map((name, index) => requiredString(name, `${mode}.tools_enabled[${index}]`)),
-	};
+	return surfaces;
 }
 
 function caseInsensitiveOrder(left: NativeToolDefinition, right: NativeToolDefinition): number {
@@ -122,24 +142,19 @@ function caseInsensitiveOrder(left: NativeToolDefinition, right: NativeToolDefin
 }
 
 /**
- * Build the locked mode's tool surface from the vendored definitions. `native` lists the tools the
- * Python reference sends through provider function calling, in its registry order; `textInvoked`
- * lists the enabled tools it offers only through its text-call dialect.
+ * Build the locked mode tool surfaces from vendored definitions. Disabled names are removed after
+ * inclusion, matching `agent_llm_openai.py:3093-3111`.
  */
+export async function loadNativeToolSurfaces(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolSurfacePack>> {
+	return loadNativeToolSurfacesWithDefinitions(lock, await vendoredToolDefinitions());
+}
+
+/** Build the first declared mode surface for single-stage callers. */
 export async function loadNativeToolSurface(lock: JsonRecord): Promise<NativeToolSurfacePack> {
-	const { mode, toolNames } = selectedMode(lock);
-	const definitions = await vendoredToolDefinitions();
-	const enabled = toolNames.map(name => {
-		const definition = definitions.get(name);
-		if (definition === undefined) throw new Error(`native harness tool ${name} has no vendored definition`);
-		return definition;
-	});
-	const ordered = [...enabled].sort(caseInsensitiveOrder);
-	return Object.freeze({
-		mode,
-		native: Object.freeze(ordered.filter(tool => tool.nativePrimary)),
-		textInvoked: Object.freeze(ordered.filter(tool => !tool.nativePrimary)),
-	});
+	const surfaces = await loadNativeToolSurfaces(lock);
+	const first = surfaces.values().next().value;
+	if (first === undefined) throw new Error("native harness lock has no modes");
+	return first;
 }
 
 /** Provider function-tool payload for one native tool, as the Python reference serializes it. */

@@ -132,7 +132,9 @@ export async function assembleNativePrompts(
 	lock: JsonRecord,
 	resources: ReadonlyMap<string, Uint8Array>,
 	surface: NativeToolSurfacePack,
+	modeOverride?: string,
 ): Promise<{ system: string; perTurn: string }> {
+	const mode = modeOverride ?? selectedMode(lock);
 	const packs = packValues(lock);
 	const todosEnabled = nativeLockValue(lock, "features.todos.enabled") === true;
 	if (todosEnabled) {
@@ -191,7 +193,6 @@ export async function assembleNativePrompts(
 			system.push("@pack(base).todo_build");
 		}
 	}
-	const mode = selectedMode(lock);
 	const dedupe = nativeLockValue(lock, "prompts.dedupe") === true;
 	return { system: assemble(system, mode, dedupe), perTurn: perTurnCatalog(surface) };
 }

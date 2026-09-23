@@ -3,6 +3,7 @@ export * from "./load-native-harness";
 export * from "./lock-loader";
 export * from "./lock-values";
 export * from "./omp-extension";
+export * from "./stage-machine";
 export * from "./prompt-assembly";
 export * from "./session-transcript";
 export * from "./shell-eval-results";

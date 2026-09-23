@@ -5,7 +5,8 @@ import { compileHarnessYaml, parseHarnessYaml } from "../compiler";
 import { loadNativeLock, nativeLockPathForSpec } from "./lock-loader";
 import { nativeLockValue } from "./lock-values";
 import { assembleNativePrompts } from "./prompt-assembly";
-import { loadNativeToolSurface } from "./tool-pack";
+import { loadNativeToolSurfaces } from "./tool-pack";
+import { allNativeToolSurface, createNativeStageMachine, type NativeHarnessStage } from "./stage-machine";
 import type { NativeToolSurfacePack } from "./types";
 
 export interface LoadNativeHarnessOptions {
@@ -13,7 +14,6 @@ export interface LoadNativeHarnessOptions {
 	readonly specPath: string;
 	readonly workspaceRoot: string;
 }
-
 export interface LoadedNativeHarness {
 	readonly specPath: string;
 	readonly workspaceRoot: string;
@@ -21,11 +21,16 @@ export interface LoadedNativeHarness {
 	readonly graphHash: string;
 	/** Path of the precompiled lock that was verified against this compilation, if one exists. */
 	readonly verifiedCachePath?: string;
-	/** The compiled system prompt (`system_prompt_compiler.py` order, todo packs included). */
+	/** The initial stage's compiled system prompt. */
 	readonly systemPrompt: string;
-	/** The per-turn tool catalog Python frames into each user message. */
+	/** The initial stage's per-turn tool catalog. */
 	readonly perTurnPrompt: string;
+	/** The initial active mode's tool surface. */
 	readonly toolSurface: NativeToolSurfacePack;
+	/** Every declared mode, with its stage-specific prompt and tools. */
+	readonly stages: readonly NativeHarnessStage[];
+	/** The union registered with OMP so later stages can activate their tools. */
+	readonly registeredToolSurface: NativeToolSurfacePack;
 	/** `providers.default_model`, an OMP `provider/model` selector. */
 	readonly defaultModel?: string;
 	readonly permissions: { readonly mode?: string; readonly shell?: string };
@@ -129,17 +134,26 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 		verifiedCachePath = cachePath;
 	}
 
-	const toolSurface = await loadNativeToolSurface(lock);
-	const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface);
+	const surfaces = await loadNativeToolSurfaces(lock);
+	const stages: NativeHarnessStage[] = [];
+	for (const [mode, toolSurface] of surfaces) {
+		const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode);
+		stages.push(Object.freeze({ mode, systemPrompt: prompts.system, perTurnPrompt: prompts.perTurn, toolSurface }));
+	}
+	const stageMachine = createNativeStageMachine(lock, stages);
+	const initialStage = stageMachine.current;
+	const registeredToolSurface = allNativeToolSurface(stages);
 	return Object.freeze({
 		specPath,
 		workspaceRoot,
 		lock,
 		graphHash,
 		...(verifiedCachePath === undefined ? {} : { verifiedCachePath }),
-		systemPrompt: prompts.system,
-		perTurnPrompt: prompts.perTurn,
-		toolSurface,
+		systemPrompt: initialStage.systemPrompt,
+		perTurnPrompt: initialStage.perTurnPrompt,
+		toolSurface: initialStage.toolSurface,
+		stages: Object.freeze(stages),
+		registeredToolSurface,
 		...(stringValue(lock, "providers.default_model") === undefined
 			? {}
 			: { defaultModel: stringValue(lock, "providers.default_model") }),

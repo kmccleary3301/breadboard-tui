@@ -82,6 +82,50 @@ describe("loadNativeHarness", () => {
 		await writeFile(join(root, "secret.md"), "not a prompt\n");
 		await expect(loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root })).rejects.toThrow(/escapes its spec directory/);
 	});
+	test("compiles plan and build stages with stage-specific prompts and tools", async () => {
+		const root = await copyOfR39();
+		await rm(join(root, R39_LOCK));
+		await writeFile(
+			join(root, R39_DIR, "bb-omp.harness.yaml"),
+			`schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: openai-codex/gpt-5.6-luna
+  models:
+  - id: openai-codex/gpt-5.6-luna
+    adapter: openai_responses
+prompts:
+  packs:
+    base:
+      system: base prompt
+  injection:
+    system_order:
+    - mode_specific
+features:
+  plan: true
+modes:
+- name: plan
+  prompt: plan prompt
+  tools_enabled: [read_file]
+- name: build
+  prompt: build prompt
+  tools_enabled: [run_shell]
+loop:
+  sequence:
+  - if: features.plan
+    then: {mode: plan}
+  - mode: build
+  plan_turn_limit: 1
+`,
+		);
+		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root });
+		expect(harness.stages.map(stage => stage.mode)).toEqual(["plan", "build"]);
+		expect(harness.stages.map(stage => stage.systemPrompt)).toEqual(["plan prompt", "build prompt"]);
+		expect(harness.stages[0]?.toolSurface.native.map(tool => tool.name)).toContain("read_file");
+		expect(harness.stages[1]?.toolSurface.native.map(tool => tool.name)).toContain("run_shell");
+	});
 });
 
 describe("loadNativeLock", () => {

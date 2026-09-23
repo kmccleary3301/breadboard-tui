@@ -3,6 +3,7 @@ import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
 import { type LoadedNativeHarness } from "./load-native-harness";
 import { frameNativeUserMessage } from "./prompt-assembly";
+import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
 import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
 import { TodoWriteState, todoCompletionGuardReason } from "./todo-write";
@@ -265,23 +266,19 @@ function registerFunctionTools(
 	todos: TodoWriteState,
 	guard: CompletionGuard,
 ): void {
-	for (const tool of harness.toolSurface.native) {
+	for (const tool of harness.registeredToolSurface.native) {
 		const binding = NATIVE_BINDINGS[tool.name];
 		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
 		api.registerTool({
 			name: tool.name,
 			label: tool.name,
 			description: tool.description,
-			// A plain JSON Schema, not `Type.Unsafe`: OMP sends plain schemas as given, while ArkType schemas get
-			// `additionalProperties: false` on every declared object, which Python never sends
-			// (`provider/adapters.py:98-164`). Cloned because validation annotates the schema object.
 			parameters: structuredClone(tool.parameters) as Record<string, unknown>,
 			...(tool.strict === undefined ? {} : { strict: tool.strict }),
 			loadMode: "essential",
 			approval: binding.approval,
 			...(tool.name === "mark_task_complete" ? { terminal: result => guard.endsRun(result.details) } : {}),
 			async execute(_toolCallId, params, signal, onUpdate, context) {
-				// Arguments arrive JSON-decoded; re-reading them as canonical JSON gives adapters typed input.
 				const input = parseCanonicalJson(JSON.stringify(params ?? null));
 				if (!isJsonRecord(input)) throw new Error(`${tool.name} arguments must be an object`);
 				const output = await binding.run({ input, harness, context, signal, onUpdate, todos, guard });
@@ -296,24 +293,38 @@ function registerFunctionTools(
 }
 
 /**
- * The extension that makes an OMP session run a compiled BreadBoard harness: the harness's function
- * tools, its per-turn limits, its text-dialect tools, and Python's user-message framing.
+ * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
+ * transitions between continuation requests.
  */
 export function createNativeHarnessExtension(harness: LoadedNativeHarness): ExtensionFactory {
 	return api => {
 		const todos = new TodoWriteState();
-		const policy = new NativeTurnPolicy(harness.toolSurface);
+		const policy = new NativeTurnPolicy(harness.registeredToolSurface);
+		const stageMachine = createNativeStageMachine(harness.lock, harness.stages);
+		const promptOverride = [stageMachine.current.systemPrompt];
+		const applyStage = async (): Promise<void> => {
+			const stage = stageMachine.current;
+			promptOverride.splice(0, promptOverride.length, stage.systemPrompt);
+			await api.setActiveTools(stage.toolSurface.native.map(tool => tool.name));
+		};
 		const guard = new CompletionGuard();
 		registerFunctionTools(api, harness, todos, guard);
 		registerSessionTranscriptExport(api, {
 			specPath: relative(harness.workspaceRoot, harness.specPath).split(sep).join("/"),
 			graphHash: harness.graphHash,
 		});
-		api.on("agent_start", () => {
+		api.on("agent_start", async () => {
 			guard.beginRun();
+			await applyStage();
 		});
-		api.on("turn_start", () => {
+		api.on("before_agent_start", () => ({ systemPrompt: promptOverride }));
+		api.on("turn_start", async () => {
 			policy.beginTurn();
+			await applyStage();
+		});
+		api.on("turn_end", async () => {
+			stageMachine.endTurn(todos.openItems.length > 0);
+			await applyStage();
 		});
 		api.on("tool_call", event => policy.admit(event.toolName));
 		api.on("turn_settle", async (event, context) => {
@@ -324,15 +335,11 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			];
 			return messages.length === 0 ? undefined : { messages };
 		});
-		// The threshold-th held completion ends the run before `turn_settle`; its advisory stays in the
-		// history the next prompt sends, as Python's does.
 		api.on("agent_end", () => {
 			for (const content of guard.takeAdvisories()) {
 				api.sendMessage({ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true }, { deliverAs: "nextTurn" });
 			}
 		});
-		// Python frames each user prompt with the per-turn catalog and sends text results as a user
-		// message. Both are request-only rewrites; the stored transcript keeps what the user typed.
 		api.on("context", event => ({
 			messages: event.messages.map(message => {
 				if (
@@ -348,7 +355,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				}
 				if (message.role !== "user" || message.attribution === "agent") return message;
 				if (typeof message.content === "string") {
-					return { ...message, content: frameNativeUserMessage(message.content, harness.perTurnPrompt) };
+					return { ...message, content: frameNativeUserMessage(message.content, stageMachine.current.perTurnPrompt) };
 				}
 				const first = message.content.findIndex(block => block.type === "text");
 				if (first < 0) return message;
@@ -356,7 +363,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 					...message,
 					content: message.content.map((block, index) =>
 						index === first && block.type === "text"
-							? { ...block, text: frameNativeUserMessage(block.text, harness.perTurnPrompt) }
+							? { ...block, text: frameNativeUserMessage(block.text, stageMachine.current.perTurnPrompt) }
 							: block,
 					),
 				};
