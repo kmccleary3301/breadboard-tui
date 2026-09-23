@@ -317,7 +317,12 @@ function sha256Source(source: Uint8Array): string {
 	return createHash("sha256").update(source).digest("hex");
 }
 
-export async function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): Promise<() => void> {
+export interface NativeHarnessWatcherHandle {
+	readonly ready: Promise<void>;
+	readonly dispose: () => void;
+}
+
+export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): NativeHarnessWatcherHandle {
 	const statFile =
 		options.statFile ??
 		(async (path: string): Promise<NativeHarnessSourceInfo> => {
@@ -406,17 +411,20 @@ export async function startNativeHarnessWatcher(options: NativeHarnessWatchOptio
 			scheduleReload(sourceHash);
 		}
 	};
-	const initialInfo = await statFile(options.specPath).catch(() => undefined);
-	const initialSource = await readSource(options.specPath).catch(() => undefined);
-	if (!disposed && initialInfo !== undefined && initialSource !== undefined) {
-		observed = initialInfo;
-		lastPublishedHash = sha256Source(initialSource);
-		lastObservedHash = lastPublishedHash;
-	}
-	intervalTimer = options.context.setInterval(() => {
-		void poll();
-	}, 1000);
-	return () => {
+	const ready = (async (): Promise<void> => {
+		const initialInfo = await statFile(options.specPath).catch(() => undefined);
+		const initialSource = await readSource(options.specPath).catch(() => undefined);
+		if (disposed) return;
+		if (initialInfo !== undefined && initialSource !== undefined) {
+			observed = initialInfo;
+			lastPublishedHash = sha256Source(initialSource);
+			lastObservedHash = lastPublishedHash;
+		}
+		intervalTimer = options.context.setInterval(() => {
+			void poll();
+		}, 1000);
+	})();
+	const dispose = (): void => {
 		if (disposed) return;
 		disposed = true;
 		lifecycle += 1;
@@ -431,6 +439,7 @@ export async function startNativeHarnessWatcher(options: NativeHarnessWatchOptio
 			intervalTimer = undefined;
 		}
 	};
+	return { ready, dispose };
 }
 
 /**
@@ -485,18 +494,18 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			api.on("before_agent_start", event => ({ systemPrompt: [...event.systemPrompt, ...blocks] }));
 			return;
 		}
-
 		const live = activeHarness.live;
 		live?.setReloadValidator(assertNativeHarnessBindings);
 		registerFunctionTools(api, activeHarness, todos, guard);
 		if (live?.editable) {
 			api.on("session_start", async (_event, context) => {
-				const disposeWatcher = await startNativeHarnessWatcher({
+				const watcher = startNativeHarnessWatcher({
 					live,
 					specPath: activeHarness.specPath,
 					context,
 				});
-				api.on("session_shutdown", disposeWatcher);
+				api.on("session_shutdown", watcher.dispose);
+				await watcher.ready;
 			});
 		}
 		activeHarness.live?.subscribe(change => {

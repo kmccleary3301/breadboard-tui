@@ -67,7 +67,7 @@ describe("native harness live state", () => {
 		harness.live?.subscribe(change => generations.push(change.generation));
 		const sourcePath = join(root, SPEC);
 		const source = await readFile(sourcePath, "utf8");
-		const firstSource = source.replace("  - eval\n", "  - eval\n  - TodoWrite\n");
+		const firstSource = source.replace("  - list_dir\n", "");
 		const secondSource = firstSource.replace("  - run_shell\n", "");
 		await writeFile(sourcePath, firstSource);
 		const firstReload = harness.live?.reload();
@@ -172,18 +172,18 @@ describe("native harness live state", () => {
 				clearCount += 1;
 			},
 		};
-		const dispose = await startNativeHarnessWatcher({
+		const watcher = startNativeHarnessWatcher({
 			live: harness.live!,
 			specPath: "harness.yaml",
 			context: context as never,
 			statFile: async () => ({ mtimeMs: 1, size: 3 }),
 			readSource: async () => bytes,
 		});
+		await watcher.ready;
 		bytes = new TextEncoder().encode("two");
 		intervalCallback?.();
 		for (let attempt = 0; attempt < 5 && timeoutCallback === undefined; attempt++) await Promise.resolve();
-		expect(timeoutCallback).toBeDefined();
-		dispose();
+		watcher.dispose();
 		expect(clearCount).toBe(2);
 		timeoutCallback?.();
 		await Promise.resolve();
@@ -230,24 +230,60 @@ describe("native harness live state", () => {
 				return () => {};
 			},
 		};
-		const dispose = await startNativeHarnessWatcher({
+		const watcher = startNativeHarnessWatcher({
 			live: fakeLive,
 			specPath: "harness.yaml",
 			context: context as never,
 			statFile: async () => ({ mtimeMs: 1, size: 3 }),
 			readSource: async () => bytes,
 		});
+		await watcher.ready;
 		bytes = new TextEncoder().encode("two");
 		intervalCallback?.();
 		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
 		timeoutCallback?.();
 		for (let attempt = 0; attempt < 10 && releaseReload === undefined; attempt++) await Promise.resolve();
 		expect(releaseReload).toBeDefined();
-		dispose();
+		watcher.dispose();
 		expect(clearCount).toBe(1);
 		releaseReload?.();
 		for (let attempt = 0; attempt < 3; attempt++) await Promise.resolve();
 		expect(published).toBe(false);
 		expect(notifyCount).toBe(0);
+	});
+	it("does not install a timer when shutdown races initial source loading", async () => {
+		const root = await workspace();
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		let releaseRead: (() => void) | undefined;
+		let intervalInstalled = false;
+		const context = {
+			ui: { notify() {} },
+			setInterval() {
+				intervalInstalled = true;
+				return {} as Timer;
+			},
+			setTimeout() {
+				return {} as Timer;
+			},
+			clearTimer() {},
+		};
+		const watcher = startNativeHarnessWatcher({
+			live: harness.live!,
+			specPath: "harness.yaml",
+			context: context as never,
+			statFile: async () => ({ mtimeMs: 1, size: 3 }),
+			readSource: async () => {
+				await new Promise<void>(resolve => {
+					releaseRead = resolve;
+				});
+				return new TextEncoder().encode("one");
+			},
+		});
+		for (let attempt = 0; attempt < 5 && releaseRead === undefined; attempt++) await Promise.resolve();
+		expect(releaseRead).toBeDefined();
+		watcher.dispose();
+		releaseRead?.();
+		await watcher.ready;
+		expect(intervalInstalled).toBe(false);
 	});
 });
