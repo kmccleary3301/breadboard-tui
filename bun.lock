@@ -53,6 +53,13 @@
         "@types/bun": "catalog:",
       },
     },
+    "packages/breadboard-harness": {
+      "name": "@breadboard/harness",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "packages/browser-relay": {
       "name": "@oh-my-pi/browser-relay",
       "version": "0.1.0",
@@ -451,6 +458,8 @@
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
     "@bgotink/kdl": ["@bgotink/kdl@0.4.0", "", {}, "sha512-F0uJCjo5FQvFdcGF5QbYVNfcGiRWlocuzyIdQxottZF2+gu6L2xjMGEu9PIpse2hifAca/19vIospgaETCKxIg=="],
+
+    "@breadboard/harness": ["@breadboard/harness@workspace:packages/breadboard-harness"],
 
     "@breadboard/sdk": ["@breadboard/sdk@./vendor/breadboard-sdk-0.4.0.tgz", { "dependencies": { "eventsource-parser": "^1.1.2" } }, "sha512-tKysZpui+L+aK9RyDWB2jzteESNH6CDCACVSDb/5p2Fmp40M48eFx9rDtZ7d8XqFg1Cc2GHWPNY2V88O79ksfA=="],
 
