@@ -35,6 +35,7 @@ import type {
 	SimpleStreamOptions,
 	Static,
 	TextContent,
+	ToolResultMessage,
 	TSchema,
 	UsageProvider,
 } from "@oh-my-pi/pi-ai";
@@ -1105,6 +1106,7 @@ export type ExtensionEvent =
 	| SessionStopEvent
 	| TurnStartEvent
 	| TurnEndEvent
+	| TurnSettleEvent
 	| MessageStartEvent
 	| MessageUpdateEvent
 	| MessageEndEvent
@@ -1133,6 +1135,25 @@ export type ExtensionEvent =
 // ============================================================================
 // Event Results
 // ============================================================================
+
+/**
+ * Fired after a turn's tool results are recorded and before the loop decides whether to make another
+ * model call. Unlike `turn_end`, the loop awaits it, so its messages land before the next request.
+ */
+export interface TurnSettleEvent {
+	type: "turn_settle";
+	turnIndex: number;
+	message: AgentMessage;
+	toolResults: ToolResultMessage[];
+	/** Whether the loop already continues (for example because the turn called tools). */
+	willContinue: boolean;
+}
+
+/** Return type for `turn_settle` handlers */
+export interface TurnSettleEventResult {
+	/** Messages added before the next model call; any message continues a run that would otherwise stop. */
+	messages?: CustomMessagePayload[];
+}
 
 export interface ContextEventResult {
 	messages?: AgentMessage[];
@@ -1294,6 +1315,7 @@ export interface ExtensionAPI {
 	on(event: "session_stop", handler: ExtensionHandler<SessionStopEvent, SessionStopEventResult>): void;
 	on(event: "turn_start", handler: ExtensionHandler<TurnStartEvent>): void;
 	on(event: "turn_end", handler: ExtensionHandler<TurnEndEvent>): void;
+	on(event: "turn_settle", handler: ExtensionHandler<TurnSettleEvent, TurnSettleEventResult>): void;
 	on(event: "message_start", handler: ExtensionHandler<MessageStartEvent>): void;
 	on(event: "message_update", handler: ExtensionHandler<MessageUpdateEvent>): void;
 	on(event: "message_end", handler: ExtensionHandler<MessageEndEvent>): void;

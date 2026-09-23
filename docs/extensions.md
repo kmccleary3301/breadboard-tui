@@ -307,6 +307,7 @@ Cancelable pre-events:
 - `agent_start` / `agent_end` — agent loop lifecycle notification; `agent_end` remains notification-only
 - `session_stop` — main-session stop hook, awaited before settle. Advisory `{ continue: true, additionalContext }` requests are capped at 8 continuations. Explicit `{ decision: "block", reason }` refusals take precedence over advisory requests, do not consume that allowance, and remain blocking until the hook allows completion or the operator interrupts. A refusal without a reason receives a diagnostic continuation rather than permission to finish. This event never fires for task/subagent sessions and defers until agent-owned background jobs are fully idle (`#hasPendingAsyncWake` in `session/agent-session.ts`).
 - `turn_start` / `turn_end`
+- `turn_settle` — awaited at each turn boundary, after tool results are recorded and before the loop picks its next step. Return `{ messages: CustomMessagePayload[] }` to steer messages into the run; they precede the next model call and continue a run that would otherwise stop. Skipped after a terminal tool result (`yield`, or a tool with `terminal: true`).
 - `message_start` / `message_update` / `message_end` — lifecycle notifications; `message_end` receives a detached message snapshot, so use `tool_result` or `context` when an extension needs to change provider context
 
 `before_agent_start` prepares policy for an ordinary prompt and for each steering or follow-up batch containing user work when that batch is actually dequeued. It is not an enqueue notification: a live batch can fire it without another `agent_start`. Queue peeks, provider retries, tool-only iterations, and synthetic-only queued continuations do not fire it. Explicit synthetic prompts retain their ordinary prompt lifecycle.
@@ -407,6 +408,12 @@ present only when a native built-in of that name exists — `ctx.invokeTool` is 
 net-new tool that shadows no built-in. The native call is not re-gated, since it is the same tool you
 are already approved as, and delegation depth is guarded against accidental self-recursion.
 
+An SDK host can point a differently named tool at a built-in with
+`createAgentSession({ toolDelegates: { run_shell: "bash" } })`. The extension tool `run_shell` then
+gets a `ctx.invokeTool` that runs the native `bash`, and `bash` is created without joining the active
+tool set unless `toolNames` names it. Only the host sets this map, so an extension still cannot
+choose its own target.
+
 Template:
 
 ```ts
@@ -439,7 +446,7 @@ pi.registerTool({
 });
 ```
 
-`tool_call`/`tool_result` intercept all tools once the registry is wrapped in `sdk.ts`, including built-ins and extension/custom tools. `ToolDefinition` also supports optional `hidden`, `defaultInactive`, `loadMode` (`"discoverable"` by default, or `"essential"`), `deferrable`, `approval` (`"exec"` by default), `strict`, `mcpServerName`, `mcpToolName`, `renderCall`, and `renderResult` fields.
+`tool_call`/`tool_result` intercept all tools once the registry is wrapped in `sdk.ts`, including built-ins and extension/custom tools. `ToolDefinition` also supports optional `hidden`, `defaultInactive`, `loadMode` (`"discoverable"` by default, or `"essential"`), `deferrable`, `approval` (`"exec"` by default), `strict`, `terminal` (a successful call ends the current run before the next model call, like `yield`; a failed call does not), `mcpServerName`, `mcpToolName`, `renderCall`, and `renderResult` fields.
 
 ### File write fallback (`registerFileWriteFallback`)
 

@@ -1586,6 +1586,7 @@ export class AgentSession {
 		this.agent.setRawSseEventInterceptor(this.#onSseEvent);
 		this.agent.setOnTurnEnd(async (messages, signal, context) => {
 			if (signal?.aborted || this.#mainStreamOwnsTurnLifecycle) return;
+			if (context) await this.#emitTurnSettle(context);
 			const rewindReport = this.#extractRewindReport(messages);
 			if (rewindReport) {
 				this.#pendingRewindReport = undefined;
@@ -4168,6 +4169,34 @@ export class AgentSession {
 				continue;
 			}
 			break;
+		}
+	}
+
+	/** Steers `turn_settle` messages into the run so they precede the loop's next model call. */
+	async #emitTurnSettle(context: AgentTurnEndContext): Promise<void> {
+		// A terminal result already ended the run; a steered message would leak into the next prompt.
+		if (
+			this.#yieldTerminationPending ||
+			context.toolResults.some(result => !result.isError && this.getToolByName(result.toolName)?.terminal === true)
+		)
+			return;
+		const payloads = await this.#extensionRunner?.emitTurnSettle({
+			turnIndex: this.#turnIndex,
+			message: context.message,
+			toolResults: context.toolResults,
+			willContinue: context.willContinue,
+		});
+		for (const payload of payloads ?? []) {
+			const normalized = normalizeCustomMessagePayload(payload);
+			this.agent.steer({
+				role: "custom",
+				customType: normalized.customType,
+				content: normalized.content,
+				display: normalized.display,
+				details: normalized.details,
+				attribution: normalized.attribution ?? "agent",
+				timestamp: Date.now(),
+			});
 		}
 	}
 

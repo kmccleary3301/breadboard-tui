@@ -75,6 +75,8 @@ import type {
 	ToolRegistrationListener,
 	ToolResultEvent,
 	ToolResultEventResult,
+	TurnSettleEvent,
+	TurnSettleEventResult,
 	UserBashEvent,
 	UserBashEventResult,
 	UserPythonEvent,
@@ -347,6 +349,7 @@ type RunnerEmitEvent = Exclude<
 	| BeforeAgentStartEvent
 	| ResourcesDiscoverEvent
 	| InputEvent
+	| TurnSettleEvent
 >;
 
 type SessionBeforeEvent = Extract<
@@ -1629,6 +1632,26 @@ export class ExtensionRunner {
 		if (currentText !== text) transformed.text = currentText;
 		if (currentImages !== images) transformed.images = currentImages;
 		return transformed;
+	}
+
+	/** Runs every `turn_settle` handler in order and concatenates the messages they return. */
+	async emitTurnSettle(event: Omit<TurnSettleEvent, "type">): Promise<TurnSettleEventResult["messages"]> {
+		if (!this.hasHandlers("turn_settle")) return undefined;
+		const ctx = this.createContext();
+		const messages: NonNullable<TurnSettleEventResult["messages"]> = [];
+		for (const ext of this.extensions) {
+			for (const handler of ext.handlers.get("turn_settle") ?? []) {
+				const result = (await this.#runHandlerWithTimeout(
+					handler,
+					{ type: "turn_settle", ...event },
+					ctx,
+					ext,
+					extensionHandlerTimeoutMs,
+				)) as TurnSettleEventResult | undefined;
+				if (result?.messages) messages.push(...result.messages);
+			}
+		}
+		return messages;
 	}
 
 	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
