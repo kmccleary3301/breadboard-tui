@@ -1,5 +1,5 @@
 import { maskNonProse } from "./markdown-prose";
-import { detectColorMode, FG_RESET } from "../theme/color";
+import { colorToAnsi, detectColorMode, FG_RESET } from "../theme/color";
 import { theme } from "../theme/theme";
 
 /** A gradient keyword highlighter.
@@ -48,10 +48,10 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 		// directly so the gradient still paints safely. See #2998, #4766.
 		const mode = typeof theme === "undefined" ? detectColorMode() : theme.getColorMode();
 		if (cachedPalette && cachedMode === mode) return cachedPalette;
-		const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
 		const next: string[] = [];
 		for (let i = 0; i < stops; i++) {
-			next.push(Bun.color(`hsl(${Math.round(hue(i / stops))}, ${saturation}%, ${lightness}%)`, format) ?? "");
+			const color = `hsl(${Math.round(hue(i / stops))}, ${saturation}%, ${lightness}%)`;
+			next.push(typeof theme === "undefined" ? colorToAnsi(color, mode) : theme.getCustomColorAnsi(color));
 		}
 		cachedMode = mode;
 		cachedPalette = next;
@@ -81,9 +81,11 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 		return `${out}${resetTo}`;
 	};
 
-	return (text: string, resetTo: string = FG_RESET, phase: number = 0): string => {
+	return (text: string, resetTo?: string, phase: number = 0): string => {
 		if (!text.includes(probe)) return text;
-		// Wrap phase into [0, 1) so negative inputs and values ≥ 1 stay well-defined.
+		const mode = typeof theme === "undefined" ? detectColorMode() : theme.getColorMode();
+		if (mode === "none") return text;
+		const effectiveReset = resetTo ?? FG_RESET;
 		const wrappedPhase = ((phase % 1) + 1) % 1;
 		// Match against a code/markup-masked copy so keywords inside code spans,
 		// fenced blocks, or XML sections never paint; indices still address `text`.
@@ -93,7 +95,7 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 		for (const m of masked.matchAll(highlight)) {
 			const start = m.index ?? 0;
 			const end = start + m[0].length;
-			out += text.slice(last, start) + paint(text.slice(start, end), resetTo, wrappedPhase);
+			out += text.slice(last, start) + paint(text.slice(start, end), effectiveReset, wrappedPhase);
 			last = end;
 		}
 		return out + text.slice(last);

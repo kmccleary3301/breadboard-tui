@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it } from "bun:test";
-import { highlightMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { highlightMagicKeywords, setMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import {
 	MAGIC_KEYWORDS,
@@ -10,6 +10,11 @@ import { clearBundledCommandsCache, loadBundledCommands } from "@oh-my-pi/pi-cod
 
 beforeAll(async () => {
 	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
+	setMagicKeywords(MAGIC_KEYWORDS);
+});
+
+afterAll(() => {
+	setMagicKeywords([]);
 });
 
 describe("magic keyword registry", () => {
