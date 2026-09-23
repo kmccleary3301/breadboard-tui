@@ -1,5 +1,4 @@
 import { type ComposerStyle, registerComposerStyle } from "../index";
-import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
 import type { SubmenuOption } from "./settings-defs";
 
 /** Composer shape id; extensions may register additional values at runtime. */
@@ -59,6 +58,12 @@ export interface ComposerShapeDefinition {
 	style: ComposerStyle;
 }
 
+/** Product labels needed to adapt built-in composer copy without a package dependency. */
+export interface ComposerShapeIdentity {
+	readonly id: string;
+	readonly composerFrameLabel: string;
+}
+
 const extensionComposerShapes = new Map<string, SubmenuOption>();
 
 /** Install one extension composer shape into rendering and selector registries. */
@@ -78,7 +83,9 @@ export function installExtensionComposerShape(definition: ComposerShapeDefinitio
 }
 
 /** Available built-in and extension composer choices in selector order. */
-export function getComposerShapeOptions(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): readonly SubmenuOption[] {
+export function getComposerShapeOptions(
+	identity: ComposerShapeIdentity = { id: "omp", composerFrameLabel: "Pi" },
+): readonly SubmenuOption[] {
 	const builtins = BUILTIN_COMPOSER_SHAPES.map(option => {
 		if (option.value === "pi") return { ...option, label: identity.composerFrameLabel };
 		if (identity.id === "breadboard") {

@@ -117,6 +117,7 @@ export type AnyUiMetadata = UiBase & {
 	secret?: boolean;
 	ordered?: boolean;
 };
+ 
 
 /** Structural schema entries supplied by the application host. */
 export interface SettingsDisplayEntry {
@@ -157,6 +158,8 @@ interface BaseSettingDef {
 	 * enums, submenus, and text inputs.
 	 */
 	condition?: () => boolean;
+	/** Render an informational value without an editor or mutation callback. */
+	readonly?: boolean;
 }
 
 export interface BooleanSettingDef extends BaseSettingDef {
@@ -225,6 +228,7 @@ function entryToSettingDef(entry: SettingsDisplayEntry): SettingDef | null {
 		condition,
 		readonly: ui.readonly,
 	};
+
 	if (schemaType === "boolean") {
 		return { ...base, type: "boolean" };
 	}
