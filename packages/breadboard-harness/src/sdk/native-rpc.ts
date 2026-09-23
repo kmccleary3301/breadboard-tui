@@ -9,8 +9,8 @@ import type {
 	RpcResponse,
 	RpcSessionEventFrame,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import { RpcFrameDecoder, encodeRpcFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
-import type { SessionTranscriptV2 } from "../native/session-transcript";
+import { RpcFrameDecoder, encodeRpcFrame, MAX_RPC_FRAME_BYTES } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
+import type { NativePublicSessionEvent, NativeSessionTranscriptV2 } from "./contracts";
 
 /** The two harness selectors accepted by the native CLI. */
 export type NativeHarnessSelection =
@@ -55,12 +55,15 @@ export type NativeApprovalPolicy =
 export interface NativeRpcEvent {
 	readonly kind: "session" | "ui" | "prompt_result";
 	readonly frame: RpcSessionEventFrame | RpcExtensionUIRequest | RpcPromptResultFrame;
+	/** Undefined for raw OMP frames; the public contract cannot represent this event. */
+	readonly publicEvent?: NativePublicSessionEvent;
 }
 
 /** Process seam used by tests and by non-local SDK hosts. */
 export interface NativeRpcProcess {
 	readonly stdin: { write(data: string | Uint8Array): unknown };
 	readonly stdout: ReadableStream<Uint8Array>;
+	readonly stderr?: ReadableStream<Uint8Array>;
 	readonly exited: Promise<number>;
 	kill(signal?: number | string, graceMs?: number): void;
 }
@@ -185,6 +188,10 @@ function isReady(value: unknown): value is RpcReadyFrame {
 	if (!isJsonRecord(candidate)) return false;
 	return candidate.type === "ready" && candidate.protocolVersion === 1;
 }
+function isRpcChunk(value: unknown): boolean {
+	const candidate = value as CanonicalJson;
+	return isJsonRecord(candidate) && candidate.type === "rpc_chunk";
+}
 
 function isResponse(value: unknown): value is RpcResponse {
 	const candidate = value as CanonicalJson;
@@ -252,6 +259,9 @@ export class NativeRpcTransport {
 	#readyResolve: (() => void) | undefined;
 	#readyReject: ((error: Error) => void) | undefined;
 	#ready = false;
+	#protocolV2Supported = false;
+	#protocolV2Enabled = false;
+	#stderrTail = "";
 	#requestId = 0;
 	#resumeSession: string | undefined;
 	#session: NativeSessionHandle | undefined;
@@ -286,11 +296,18 @@ export class NativeRpcTransport {
 			env: toEnvironment(this.#options.env, this.#options.inheritEnv !== false),
 		});
 		this.#process = child;
-		this.#stopping = false;
+		this.#ready = false;
+		this.#protocolV2Supported = false;
+		this.#protocolV2Enabled = false;
+		this.#stderrTail = "";
 		const ready = new Promise<void>((resolve, reject) => {
 			this.#readyResolve = resolve;
 			this.#readyReject = reject;
 		});
+		if (child.stderr)
+			void this.#drainStderr(child.stderr).catch(error =>
+				this.#failReader(child, error instanceof Error ? error : new Error(String(error))),
+			);
 		this.#readerTask = this.#read(child);
 		const timeout = this.#options.startupTimeoutMs ?? 30_000;
 		let timeoutId: NodeJS.Timeout | undefined;
@@ -301,6 +318,16 @@ export class NativeRpcTransport {
 					timeoutId = setTimeout(() => reject(new Error("Timed out waiting for native RPC ready")), timeout);
 				}),
 			]);
+			if (this.#protocolV2Supported) {
+				const negotiated = await this.#send({ type: "negotiate_protocol", protocolVersion: 2 });
+				if (
+					!negotiated.success ||
+					negotiated.command !== "negotiate_protocol" ||
+					negotiated.data.protocolVersion !== 2
+				)
+					throw new Error("Native RPC protocol v2 negotiation failed");
+				this.#protocolV2Enabled = true;
+			}
 		} catch (error) {
 			await this.stop();
 			throw error;
@@ -402,13 +429,33 @@ export class NativeRpcTransport {
 	}
 
 	async stop(): Promise<void> {
-		if (!this.#process) return;
+		const child = this.#process;
+		if (!child) return;
 		this.#stopping = true;
-		this.#events.close();
-		this.#process.kill();
-		await this.#process.exited.catch(() => undefined);
-		await this.#readerTask?.catch(() => undefined);
 		this.#process = undefined;
+		this.#events.close();
+		this.#rejectPending(new Error("Native RPC transport stopped"));
+		child.kill();
+		await child.exited.catch(() => undefined);
+		await this.#readerTask?.catch(() => undefined);
+	}
+
+	#rejectPending(error: Error): void {
+		for (const pending of this.#pending.values()) pending.reject(error);
+		this.#pending.clear();
+	}
+
+	async #failReader(child: NativeRpcProcess, cause: Error): Promise<void> {
+		if (this.#process !== child) return;
+		this.#process = undefined;
+		this.#stopping = true;
+		const error = new Error(`${cause.message}${this.#stderrTail ? `; stderr: ${this.#stderrTail}` : ""}`, { cause });
+		this.#rejectPending(error);
+		try {
+			child.kill();
+		} finally {
+			await child.exited.catch(() => undefined);
+		}
 	}
 
 	async #state(): Promise<ResponseData<"get_state">> {
@@ -455,23 +502,34 @@ export class NativeRpcTransport {
 				const next = await reader.read();
 				if (next.done) break;
 				buffer += decoder.decode(next.value, { stream: true });
+				if (Buffer.byteLength(buffer, "utf8") > MAX_RPC_FRAME_BYTES)
+					throw new Error(`Native RPC frame exceeds ${MAX_RPC_FRAME_BYTES} bytes`);
 				let newline = buffer.indexOf("\n");
 				while (newline >= 0) {
-					const line = buffer.slice(0, newline).trim();
+					const rawLine = buffer.slice(0, newline);
 					buffer = buffer.slice(newline + 1);
+					if (Buffer.byteLength(rawLine, "utf8") + 1 > MAX_RPC_FRAME_BYTES)
+						throw new Error(`Native RPC frame exceeds ${MAX_RPC_FRAME_BYTES} bytes`);
+					const line = rawLine.trim();
 					if (line) {
 						const parsed: unknown = JSON.parse(line);
+						if (isRpcChunk(parsed) && !this.#protocolV2Enabled)
+							throw new Error("Native RPC chunk received before protocol v2 negotiation");
 						const decoded = frameDecoder.push(parsed);
 						if (decoded !== undefined) this.#handle(decoded);
 					}
 					newline = buffer.indexOf("\n");
 				}
 			}
+			if (!this.#stopping) {
+				const reason = new Error("Native RPC output ended");
+				this.#readyReject?.(reason);
+				await this.#failReader(child, reason);
+			}
 		} catch (error) {
 			const reason = error instanceof Error ? error : new Error(String(error));
 			this.#readyReject?.(reason);
-			for (const pending of this.#pending.values()) pending.reject(reason);
-			this.#pending.clear();
+			await this.#failReader(child, reason);
 		} finally {
 			reader.releaseLock();
 			if (!this.#ready && !this.#stopping) this.#readyReject?.(new Error("Native RPC output ended before ready"));
@@ -479,9 +537,26 @@ export class NativeRpcTransport {
 		}
 	}
 
+	async #drainStderr(stream: ReadableStream<Uint8Array>): Promise<void> {
+		const reader = stream.getReader();
+		const decoder = new TextDecoder();
+		try {
+			while (true) {
+				const next = await reader.read();
+				if (next.done) break;
+				this.#stderrTail = (this.#stderrTail + decoder.decode(next.value, { stream: true })).slice(-8192);
+			}
+		} finally {
+			reader.releaseLock();
+		}
+	}
+
 	#handle(value: unknown): void {
 		if (!this.#ready && isReady(value)) {
 			this.#ready = true;
+			this.#protocolV2Supported = Array.isArray(value.supportedProtocolVersions)
+				? value.supportedProtocolVersions.includes(2)
+				: true;
 			this.#readyResolve?.();
 			return;
 		}
@@ -498,9 +573,13 @@ export class NativeRpcTransport {
 		}
 		if (isUiRequest(value)) {
 			this.#events.push({ kind: "ui", frame: value });
-			if (value.method === "confirm" || value.method === "select") void this.#resolveApproval(value);
-			if (value.method === "notify") {
-				for (const waiter of [...this.#notifyWaiters]) waiter(value);
+			if (value.method === "confirm" || value.method === "select") {
+				void this.#resolveApproval(value).catch(() => this.#sendUiCancellation(value.id));
+			} else {
+				if (value.method === "notify") {
+					for (const waiter of [...this.#notifyWaiters]) waiter(value as UiNotifyRequest);
+				}
+				this.#sendUiCancellation(value.id);
 			}
 			return;
 		}
@@ -509,6 +588,16 @@ export class NativeRpcTransport {
 			return;
 		}
 		if (isSessionEvent(value)) this.#events.push({ kind: "session", frame: value });
+	}
+
+	#sendUiCancellation(id: string): void {
+		if (!this.#process) return;
+		const response: RpcExtensionUIResponse = { type: "extension_ui_response", id, cancelled: true };
+		try {
+			this.#process.stdin.write(`${encodeRpcFrame(response)}\n`);
+		} catch {
+			// Reader failure will reject pending calls and reap the process.
+		}
 	}
 
 	async #resolveApproval(request: UiConfirmRequest | UiSelectRequest): Promise<void> {
@@ -527,18 +616,15 @@ export class NativeRpcTransport {
 		const response: RpcExtensionUIResponse =
 			request.method === "confirm"
 				? { type: "extension_ui_response", id: request.id, confirmed: allowed }
-				: {
-						type: "extension_ui_response",
-						id: request.id,
-						value: allowed
-							? (request.options.find(option => option.toLowerCase() === "approve") ??
-								request.options[0] ??
-								"Approve")
-							: (request.options.find(option => option.toLowerCase() === "deny") ??
-								request.options.at(-1) ??
-								"Deny"),
-					};
-		this.#process?.stdin.write(`${encodeRpcFrame(response)}\n`);
+				: (() => {
+						const expected = allowed ? "Approve" : "Deny";
+						const value = request.options.find(option => option === expected);
+						return value === undefined
+							? { type: "extension_ui_response", id: request.id, cancelled: true }
+							: { type: "extension_ui_response", id: request.id, value };
+					})();
+		if (!this.#process) throw new Error("Native RPC transport is not started");
+		this.#process.stdin.write(`${encodeRpcFrame(response)}\n`);
 	}
 }
 
@@ -554,4 +640,4 @@ async function defaultSpawn(argv: readonly string[], options: NativeRpcSpawnOpti
 }
 
 /** Keep the generated transcript contract reachable from the SDK package surface. */
-export type { SessionTranscriptV2 };
+export type { NativeSessionTranscriptV2 };

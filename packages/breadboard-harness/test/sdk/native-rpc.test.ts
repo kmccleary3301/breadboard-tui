@@ -9,7 +9,7 @@ interface FakePeer {
 	emit(frame: object): void;
 }
 
-function fakePeer(): FakePeer {
+function fakePeer(approvalOptions: readonly string[] = ["Approve", "Deny"]): FakePeer {
 	let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
 	let exit: (() => void) | undefined;
 	const writes: string[] = [];
@@ -21,7 +21,15 @@ function fakePeer(): FakePeer {
 				const line = typeof data === "string" ? data : new TextDecoder().decode(data);
 				writes.push(line.trim());
 				const command = JSON.parse(line) as RpcCommand;
-				if (command.type === "get_state") {
+				if (command.type === "negotiate_protocol") {
+					emit({
+						type: "response",
+						id: command.id,
+						command: "negotiate_protocol",
+						success: true,
+						data: { protocolVersion: 2 },
+					});
+				} else if (command.type === "get_state") {
 					emit({
 						type: "response",
 						id: command.id,
@@ -35,8 +43,7 @@ function fakePeer(): FakePeer {
 							type: "extension_ui_request",
 							id: "approval-1",
 							method: "select",
-							title: "Allow tool: bash",
-							options: ["Approve", "Deny"],
+							options: approvalOptions,
 						});
 					if (command.message === "/bb-transcript")
 						emit({
@@ -147,6 +154,27 @@ describe("NativeRpcTransport", () => {
 		await deny.stop();
 	});
 
+	test("matches exact approval labels and cancels unknown select options", async () => {
+		const reversed = fakePeer(["Deny", "Approve"]);
+		const allow = new NativeRpcTransport({
+			binaryPath: "/tmp/bb",
+			approval: { kind: "forward", decide: () => ({ decision: "allow" }) },
+			spawn: async () => reversed.process,
+		});
+		await allow.start();
+		await allow.prompt("ask");
+		await eventually(() => reversed.writes.find(line => line.includes("approval-1")));
+		expect(reversed.writes.at(-1)).toContain('"value":"Approve"');
+		await allow.stop();
+
+		const unknown = fakePeer(["Yes", "No"]);
+		const deny = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => unknown.process });
+		await deny.start();
+		await deny.prompt("ask");
+		await eventually(() => unknown.writes.find(line => line.includes("approval-1")));
+		expect(unknown.writes.at(-1)).toContain('"cancelled":true');
+		await deny.stop();
+	});
 	test("resumes an existing session from the startup session file and supports cancellation", async () => {
 		const peer = fakePeer();
 		let argv: readonly string[] = [];
@@ -165,5 +193,33 @@ describe("NativeRpcTransport", () => {
 		await transport.cancel({ reason: "caller stopped" });
 		expect(peer.writes.some(line => line.includes('"abort"'))).toBe(true);
 		await transport.stop();
+	});
+	test("cancels unsupported UI methods instead of leaving RPC pending", async () => {
+		const peer = fakePeer();
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => peer.process });
+		await transport.start();
+		peer.emit({ type: "extension_ui_request", id: "editor-1", method: "editor", title: "Edit" });
+		await eventually(() => peer.writes.find(line => line.includes("editor-1")));
+		expect(peer.writes.at(-1)).toContain('"cancelled":true');
+		await transport.stop();
+	});
+	test("rejects startup when the child ends before ready", async () => {
+		let resolveExit: (() => void) | undefined;
+		const process: NativeRpcProcess = {
+			stdin: { write() {} },
+			stdout: new ReadableStream({
+				start(controller) {
+					controller.close();
+				},
+			}),
+			exited: new Promise(resolve => {
+				resolveExit = () => resolve(1);
+			}),
+			kill() {
+				resolveExit?.();
+			},
+		};
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => process });
+		await expect(transport.start()).rejects.toThrow("output ended");
 	});
 });
