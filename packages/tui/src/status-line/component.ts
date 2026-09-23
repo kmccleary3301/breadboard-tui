@@ -2281,6 +2281,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			leftSegments,
 			rightSegments,
 			separator: this.#settings.separator ?? presetDef.separator,
+			contextLine: this.#isBreadboardOwned() ? "off" : this.#settings.contextLine,
 			segmentOptions: mergedSegmentOptions,
 		};
 	}
