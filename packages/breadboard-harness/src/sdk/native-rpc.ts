@@ -78,9 +78,11 @@ export interface NativeRpcTransportOptions {
 	readonly binaryPath: string;
 	readonly harness?: string | NativeHarnessSelection;
 	readonly cwd?: string;
+	/** Environment overrides; set `inheritEnv: false` for isolated candidate launches. */
 	readonly env?: Readonly<Record<string, string>>;
-	readonly provider?: string;
+	readonly inheritEnv?: boolean;
 	readonly model?: string;
+	readonly provider?: string;
 	readonly sessionDir?: string;
 	/** Resume this OMP session file when the RPC process starts. */
 	readonly resumeSession?: string;
@@ -216,11 +218,15 @@ function isSessionEvent(value: unknown): value is RpcSessionEventFrame {
 		candidate.type !== "prompt_result"
 	);
 }
-
-function toEnvironment(overrides: Readonly<Record<string, string>> | undefined): Record<string, string> {
-	const inherited = Object.fromEntries(
-		Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-	);
+function toEnvironment(
+	overrides: Readonly<Record<string, string>> | undefined,
+	inheritEnv: boolean,
+): Record<string, string> {
+	const inherited = inheritEnv
+		? Object.fromEntries(
+				Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+			)
+		: {};
 	return { ...inherited, ...overrides };
 }
 
@@ -271,9 +277,10 @@ export class NativeRpcTransport {
 	async start(): Promise<void> {
 		if (this.#process) return;
 		const spawn = this.#options.spawn ?? defaultSpawn;
-		const child = await spawn([this.#options.binaryPath, ...this.buildArguments()], {
+		const argv = [this.#options.binaryPath, ...this.buildArguments()];
+		const child = await spawn(argv, {
 			cwd: this.#options.cwd,
-			env: toEnvironment(this.#options.env),
+			env: toEnvironment(this.#options.env, this.#options.inheritEnv !== false),
 		});
 		this.#process = child;
 		this.#stopping = false;

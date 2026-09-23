@@ -3,11 +3,12 @@ import { NativeRpcTransport } from "../src/sdk/native-rpc";
 const binaryPath = Bun.argv[2] ?? Bun.env.BB_BINARY;
 if (!binaryPath) throw new Error("usage: bun run packages/breadboard-harness/examples/sdk-session.ts /path/to/bb");
 
-const task = Bun.env.BB_TASK ?? "Reply with one short sentence confirming the native harness is running.";
+const task = Bun.env.BB_TASK ?? "Use run_shell to run printf SDK-NATIVE-OK, then reply exactly SDK-NATIVE-OK.";
 const transport = new NativeRpcTransport({
 	binaryPath,
 	harness: Bun.env.BB_HARNESS ?? "bb-omp.native",
 	cwd: Bun.env.BB_CWD,
+	inheritEnv: false,
 	env: {
 		PI_CODING_AGENT_DIR: Bun.env.PI_CODING_AGENT_DIR ?? "",
 		BREADBOARD_CONFIG_DIR: Bun.env.BREADBOARD_CONFIG_DIR ?? "",
@@ -20,15 +21,42 @@ const transport = new NativeRpcTransport({
 });
 
 const events: string[] = [];
+const replyTexts: string[] = [];
+let approvalRequests = 0;
 const eventStream = transport.events();
 try {
 	const created = await transport.createSession({ task });
 	for await (const event of eventStream) {
 		events.push(event.kind);
+		if (event.kind === "ui" && event.frame.method === "confirm") approvalRequests += 1;
+		if (event.kind === "session" && event.frame.type === "message_end" && event.frame.message.role === "assistant") {
+			const text = event.frame.message.content
+				.filter(part => part.type === "text")
+				.map(part => part.text)
+				.join("");
+			if (text) replyTexts.push(text);
+		}
 		if (event.kind === "session" && event.frame.type === "agent_end") break;
 	}
+	let cancelExitCode = 0;
+	try {
+		await transport.cancel({ reason: "SDK example complete" });
+	} catch {
+		cancelExitCode = 1;
+	}
 	const transcriptPath = await transport.exportTranscript();
-	console.log(JSON.stringify({ session: created, events, transcriptPath }, null, 2));
+	const result = {
+		session: created,
+		events,
+		replyText: replyTexts.at(-1) ?? null,
+		approvalRequests,
+		approvalPolicy: "deny",
+		transcriptPath,
+		exitCodes: { create: 0, cancel: cancelExitCode, transcript: transcriptPath === undefined ? 1 : 0 },
+	};
+	const output = JSON.stringify(result, null, 2);
+	if (Bun.env.BB_OUTPUT) await Bun.write(Bun.env.BB_OUTPUT, `${output}\n`);
+	else console.log(output);
 } finally {
 	await transport.stop();
 }
