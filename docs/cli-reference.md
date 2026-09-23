@@ -305,9 +305,12 @@ JavaScript kernels; selecting the same model does not add those capabilities.
 
 In native mode (`breadboard.engineMode: native`) OMP runs the turn loop and none
 of the engine restrictions above apply. `--harness` takes a built-in harness id
-or a harness spec path (`.yaml`). Without one, the session runs the built-in
-`bb-omp.native`: OMP's own tools, system prompt, subagents, background jobs and
-controls, with a short BreadBoard identity block appended to the system prompt.
+or a harness spec path (`.yaml`). Precedence is `--harness`, then
+`breadboard.sessionConfigPath`, then `breadboard.harness.default`. If none is set,
+or `breadboard.harness.default` keeps its default `daily_driver`, the session runs
+the built-in `bb-omp.native`: OMP's own tools, system prompt, subagents, background
+jobs and controls, with a short BreadBoard identity block appended to the system
+prompt.
 
 Ordinary sessions preserve conversation context across turns and keep tools
 available until the model finishes. Experimental implementation-write receipt
