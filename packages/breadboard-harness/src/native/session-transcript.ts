@@ -1,4 +1,5 @@
-import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { validateBundledSchema, type HarnessValidationFinding } from "../compiler/validate";
 import { type CanonicalJson, isJsonRecord, type JsonRecord } from "../canonical-json";
@@ -185,16 +186,22 @@ export function validateSessionTranscript(value: unknown): readonly HarnessValid
 	return validateBundledSchema(SESSION_TRANSCRIPT_SCHEMA_ID, value);
 }
 
-/** Where the transcript for an OMP session file goes: beside it, under a name session listing never reads. */
-export function sessionTranscriptPath(sessionFile: string): string {
-	return `${sessionFile.endsWith(".jsonl") ? sessionFile.slice(0, -".jsonl".length) : sessionFile}.bb-transcript.v2.json`;
+/** File name of the export inside the session's artifacts directory. */
+export const SESSION_TRANSCRIPT_FILE = "bb-transcript.v2.json";
+
+/**
+ * Where the transcript goes: the session's artifacts directory (`<session file without .jsonl>/`). OMP moves and
+ * deletes that directory with the session, and session listing reads only `*.jsonl` there.
+ */
+export function sessionTranscriptPath(artifactsDir: string): string {
+	return join(artifactsDir, SESSION_TRANSCRIPT_FILE);
 }
 
 /**
- * Validate and write the transcript beside the session file, replacing any earlier export atomically. Throws with
- * the findings when the transcript does not validate, and writes nothing then.
+ * Validate and write the transcript into the session's artifacts directory, replacing any earlier export
+ * atomically. Throws with the findings when the transcript does not validate, and writes nothing then.
  */
-export async function writeSessionTranscript(sessionFile: string, transcript: SessionTranscriptV2): Promise<string> {
+export async function writeSessionTranscript(artifactsDir: string, transcript: SessionTranscriptV2): Promise<string> {
 	const findings = validateSessionTranscript(transcript);
 	if (findings.length > 0) {
 		const summary = findings
@@ -203,7 +210,8 @@ export async function writeSessionTranscript(sessionFile: string, transcript: Se
 			.join("; ");
 		throw new Error(`bb.session_transcript.v2 export is invalid (${findings.length} finding(s)): ${summary}`);
 	}
-	const path = sessionTranscriptPath(sessionFile);
+	await mkdir(artifactsDir, { recursive: true });
+	const path = sessionTranscriptPath(artifactsDir);
 	const temporary = `${path}.${process.pid}.tmp`;
 	await writeFile(temporary, `${JSON.stringify(transcript, null, 2)}\n`, "utf8");
 	await rename(temporary, path);
@@ -219,20 +227,22 @@ async function exportFromContext(
 	harness: SessionTranscriptOptions["harness"],
 ): Promise<string | undefined> {
 	const sessionFile = context.sessionManager.getSessionFile();
-	// Sessions persist lazily; with no session file on disk there is nothing to sit beside.
-	if (sessionFile === undefined || !(await stat(sessionFile).catch(() => undefined))?.isFile()) return undefined;
+	const artifactsDir = context.sessionManager.getArtifactsDir();
+	// Sessions persist lazily; with no session file on disk there is nothing to export.
+	if (sessionFile === undefined || artifactsDir === null) return undefined;
+	if (!(await stat(sessionFile).catch(() => undefined))?.isFile()) return undefined;
 	const source = await readSessionTranscriptSource(sessionFile, context.sessionManager.getLeafId());
 	const transcript = buildSessionTranscript(source, { reason, ...(harness === undefined ? {} : { harness }) });
-	return writeSessionTranscript(sessionFile, transcript);
+	return writeSessionTranscript(artifactsDir, transcript);
 }
 
-/** Export `bb.session_transcript.v2` beside the OMP session when it shuts down and on `/bb-transcript`. */
+/** Export `bb.session_transcript.v2` into the session's artifacts directory at shutdown and on `/bb-transcript`. */
 export function registerSessionTranscriptExport(
 	api: ExtensionAPI,
 	harness?: SessionTranscriptOptions["harness"],
 ): void {
 	api.registerCommand(SESSION_TRANSCRIPT_COMMAND, {
-		description: "Write this session as bb.session_transcript.v2 beside its OMP session file",
+		description: "Write this session as bb.session_transcript.v2 into its OMP artifacts directory",
 		handler: async (_args, context) => {
 			try {
 				const path = await exportFromContext(context, "on_demand", harness);

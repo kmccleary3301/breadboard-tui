@@ -1,6 +1,6 @@
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
@@ -27,7 +27,13 @@ const usage = {
 };
 
 /** A persisted OMP session with a tool round trip, a user-excluded shell run and an extension custom entry. */
-async function recordedSession(): Promise<{ manager: SessionManager; cwd: string; sessionDir: string; file: string }> {
+async function recordedSession(): Promise<{
+	manager: SessionManager;
+	cwd: string;
+	sessionDir: string;
+	file: string;
+	artifactsDir: string;
+}> {
 	const cwd = await mkdtemp(join(tmpdir(), "bb-transcript-cwd-"));
 	const sessionDir = await mkdtemp(join(tmpdir(), "bb-transcript-sessions-"));
 	directories.push(cwd, sessionDir);
@@ -74,8 +80,9 @@ async function recordedSession(): Promise<{ manager: SessionManager; cwd: string
 	});
 	await manager.flush();
 	const file = manager.getSessionFile();
-	if (file === undefined) throw new Error("session has no file");
-	return { manager, cwd, sessionDir, file };
+	const artifactsDir = manager.getArtifactsDir();
+	if (file === undefined || artifactsDir === null) throw new Error("session has no file");
+	return { manager, cwd, sessionDir, file, artifactsDir };
 }
 
 async function transcriptOf(manager: SessionManager) {
@@ -138,27 +145,25 @@ describe("bb.session_transcript.v2 export", () => {
 	});
 
 	test("an invalid transcript is refused and nothing is written", async () => {
-		const { manager, file } = await recordedSession();
+		const { manager, artifactsDir } = await recordedSession();
 		const transcript = await transcriptOf(manager);
 		const [first] = transcript.items;
 		if (!first) throw new Error("expected an item");
 		first.kind = "";
-		await expect(writeSessionTranscript(file, transcript)).rejects.toThrow(
+		await expect(writeSessionTranscript(artifactsDir, transcript)).rejects.toThrow(
 			"bb.session_transcript.v2 export is invalid",
 		);
-		expect(await Bun.file(sessionTranscriptPath(file)).exists()).toBe(false);
+		expect(await Bun.file(sessionTranscriptPath(artifactsDir)).exists()).toBe(false);
 	});
 
-	test("the transcript sits beside the session without changing listing or resume", async () => {
-		const { manager, cwd, sessionDir, file } = await recordedSession();
+	test("the transcript lives in the artifacts directory without changing listing or resume", async () => {
+		const { manager, cwd, sessionDir, file, artifactsDir } = await recordedSession();
 		const before = await readFile(file, "utf8");
-		const written = await writeSessionTranscript(file, await transcriptOf(manager));
-		expect(written).toBe(sessionTranscriptPath(file));
+		const written = await writeSessionTranscript(artifactsDir, await transcriptOf(manager));
+		expect(written).toBe(join(artifactsDir, "bb-transcript.v2.json"));
 		expect(JSON.parse(await readFile(written, "utf8"))).toEqual(await transcriptOf(manager));
-		// OMP keeps a hidden lock file beside the session; the export leaves no temporary file.
-		expect((await readdir(sessionDir)).filter(name => !name.startsWith(".")).sort()).toEqual(
-			[basename(file), basename(written)].sort(),
-		);
+		// The export leaves no temporary file behind.
+		expect(await readdir(artifactsDir)).toEqual(["bb-transcript.v2.json"]);
 
 		expect(await readFile(file, "utf8")).toBe(before);
 		const listed = await SessionManager.list(cwd, sessionDir);
@@ -167,6 +172,23 @@ describe("bb.session_transcript.v2 export", () => {
 		expect(reopened.getBranch().map(entry => entry.id)).toEqual(manager.getBranch().map(entry => entry.id));
 		const transcript = await transcriptOf(manager);
 		expect(transcript.items.map(item => item.event_id)).toEqual(reopened.getBranch().map(entry => entry.id));
+	});
+
+	test("the transcript moves and is deleted with its session", async () => {
+		const moved = await recordedSession();
+		await writeSessionTranscript(moved.artifactsDir, await transcriptOf(moved.manager));
+		const target = await mkdtemp(join(tmpdir(), "bb-transcript-moved-"));
+		directories.push(target);
+		await moved.manager.moveTo(moved.cwd, target);
+		const movedArtifacts = moved.manager.getArtifactsDir();
+		if (movedArtifacts === null) throw new Error("moved session has no artifacts directory");
+		expect(await Bun.file(sessionTranscriptPath(movedArtifacts)).exists()).toBe(true);
+		expect(await Bun.file(sessionTranscriptPath(moved.artifactsDir)).exists()).toBe(false);
+
+		const dropped = await recordedSession();
+		await writeSessionTranscript(dropped.artifactsDir, await transcriptOf(dropped.manager));
+		await dropped.manager.dropSession(dropped.file);
+		expect(await Bun.file(sessionTranscriptPath(dropped.artifactsDir)).exists()).toBe(false);
 	});
 
 	test("items hold entries as the session file persisted them, not the in-memory copies", async () => {
