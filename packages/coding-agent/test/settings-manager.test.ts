@@ -2052,10 +2052,14 @@ describe("Settings", () => {
 			});
 			const previousProduct = process.env.BREADBOARD_PRODUCT;
 			const previousMigration = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
+			const previousReceipt = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
+			const migrationReceipt = path.join(agentDir, ".bb-native-profile-migration.receipt.v1.json");
 			process.env.BREADBOARD_PRODUCT = "1";
 			process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = "1";
+			process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT = migrationReceipt;
 			try {
 				const settings = await Settings.init({ cwd: projectDir, agentDir });
+				expect(await Bun.file(migrationReceipt).exists()).toBe(true);
 				expect(settings.get("symbolPreset")).toBe("nerd");
 				expect(settings.get("composer.shape")).toBe("rule");
 				expect(settings.get("theme.dark")).toBe("titanium");
@@ -2079,6 +2083,8 @@ describe("Settings", () => {
 				else process.env.BREADBOARD_PRODUCT = previousProduct;
 				if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
 				else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
+				if (previousReceipt === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
+				else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT = previousReceipt;
 			}
 		});
 		it("keeps a bridge selection from a config overlay above the seeded profile migration", async () => {

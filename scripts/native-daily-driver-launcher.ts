@@ -31,27 +31,40 @@ workspace_key="$(printf '%s' "$workspace" | /usr/bin/shasum -a 256 | /usr/bin/cu
 native_root=${shellQuote(nativeProfileRoot)}/user/projects/$workspace_key
 r39_root=${shellQuote(r39ProfileRoot)}/$workspace_key
 marker="$native_root/.bb-native-profile-migration.v1.json"
+receipt="$native_root/.bb-native-profile-migration.receipt.v1.json"
 pending=0
 if [[ ! -e "$marker" ]]; then
-  [[ -d "$r39_root" && ! -L "$r39_root" ]] || { printf 'R39 profile is missing for workspace key %s\\n' "$workspace_key" >&2; exit 1; }
+  pending=1
+  [[ -d "$r39_root" && ! -L "$r39_root" ]] || { printf 'R39 profile is missing for workspace key %s\n' "$workspace_key" >&2; exit 1; }
   [[ ! -e "$native_root" ]] || { [[ -d "$native_root" && ! -L "$native_root" ]] || exit 1; }
   mkdir -p "$(dirname "$native_root")"
   if [[ ! -e "$native_root" ]]; then
     mkdir "$native_root"
-    cp -a "$r39_root/." "$native_root/"
+    shopt -s dotglob nullglob
+    for source in "$r39_root"/*; do
+      if [[ "$(basename "$source")" == agent ]]; then
+        mkdir "$native_root/agent"
+        for agent_source in "$source"/*; do
+          case "$(basename "$agent_source")" in
+            agent.db*) continue ;;
+          esac
+          cp -a "$agent_source" "$native_root/agent/"
+        done
+      else
+        cp -a "$source" "$native_root/"
+      fi
+    done
+    shopt -u dotglob nullglob
   fi
   [[ -d "$native_root/agent" && ! -L "$native_root/agent" ]] || exit 1
-  rm -f "$native_root/agent/agent.db"
+  rm -f "$native_root/agent/agent.db" "$native_root/agent/agent.db-"*
   ln -s ${shellQuote(authSource)}/agent.db "$native_root/agent/agent.db"
-  pending=1
+  rm -f "$receipt"
 fi
 for directory in "$native_root" "$native_root/agent" "$native_root/config" "$native_root/temp"; do
   [[ ! -L "$directory" && ( ! -e "$directory" || -d "$directory" ) ]] || exit 1
   mkdir -p "$directory"
 done
-if [[ "$pending" == 1 ]]; then
-  export BREADBOARD_NATIVE_PROFILE_MIGRATION=1
-fi
 set +e
 /usr/bin/env -i \\
   HOME="\${HOME:?HOME is required}" \\
@@ -63,16 +76,17 @@ set +e
   USER="\${USER:-}" LOGNAME="\${LOGNAME:-}" \\
   OMP_SKIP_SETUP=1 \\
   BREADBOARD_NATIVE_PROFILE_MIGRATION="\${BREADBOARD_NATIVE_PROFILE_MIGRATION:-}" \\
+  BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT="$receipt" \\
   TMPDIR="$native_root/temp/" \\
   BREADBOARD_CONFIG_DIR="$native_root/config" PI_CODING_AGENT_DIR="$native_root/agent" \\
   BREADBOARD_OMP_AGENT_DIR=${shellQuote(authSource)} \\
   ${shellQuote(binaryPath)} "$@"
 status=$?
 set -e
-if [[ "$pending" == 1 && "$status" == 0 ]]; then
+if [[ "$pending" == 1 && "$status" == 0 && -f "$receipt" && ! -L "$receipt" ]]; then
   source_config_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
   source_agent_db_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/agent.db" | /usr/bin/cut -d ' ' -f 1)"
-  printf '{"schema":"bb.native_profile_migration.v1","source":"%s","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\\n' "$r39_root" "$source_config_sha" "$source_agent_db_sha" > "$marker"
+  printf '{"schema":"bb.native_profile_migration.v1","source":"%s","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$r39_root" "$source_config_sha" "$source_agent_db_sha" > "$marker"
   chmod 600 "$marker"
 fi
 exit "$status"

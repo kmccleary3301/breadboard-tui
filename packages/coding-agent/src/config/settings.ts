@@ -1516,7 +1516,7 @@ export class Settings {
 		}
 		if (this.#nativeProfileMigrationRequested && this.#migrateR39Profile(this.#global) && this.#configPath) {
 			await this.#writeYamlAtomically(this.#configPath, this.#global);
-			this.#nativeProfileMigrationApplied = true;
+			await this.#writeNativeProfileMigrationReceipt();
 		}
 		await this.#seedLastChangelogVersionMarker();
 	}
@@ -2109,6 +2109,23 @@ export class Settings {
 			} catch (error) {
 				logger.warn("Settings: failed to clear migrated agent.db settings", { error: String(error) });
 			}
+		}
+	}
+
+	async #writeNativeProfileMigrationReceipt(): Promise<void> {
+		const receiptPath = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
+		if (!receiptPath) return;
+		const temporaryPath = `${receiptPath}.${process.pid}.${randomUUID()}.tmp`;
+		await fs.promises.mkdir(path.dirname(receiptPath), { recursive: true });
+		try {
+			await fs.promises.writeFile(
+				temporaryPath,
+				`${JSON.stringify({ schema: "bb.native_profile_migration.receipt.v1" })}\n`,
+				{ mode: 0o600 },
+			);
+			await replaceFileAtomically(temporaryPath, receiptPath);
+		} finally {
+			await fs.promises.unlink(temporaryPath).catch(() => {});
 		}
 	}
 
