@@ -1,8 +1,6 @@
-import { type Component, matchesKey, type OverlayFocusOwner } from "@oh-my-pi/pi-tui";
-import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
-import { isReducedMotionEnabled } from "../../utils/reduced-motion";
-import { theme } from "../theme/theme";
-import type { InteractiveModeContext } from "../types";
+import { type Component, type OverlayFocusOwner } from "../tui";
+import { matchesKey } from "../keys";
+import type { SetupUiHost } from "./scenes/types";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 
 /** Timing controls for the standalone startup animation. */
@@ -10,18 +8,9 @@ export interface RunStartupSplashOptions {
 	readonly durationMs?: number;
 	readonly tickMs?: number;
 	readonly now?: () => number;
-	readonly identity?: ProductIdentity;
-	readonly reduceMotion?: boolean;
 }
 
-interface StartupSplashComponentOptions {
-	readonly identity: ProductIdentity;
-	readonly durationMs?: number;
-	readonly tickMs?: number;
-	readonly now?: () => number;
-	readonly reduceMotion?: boolean;
-}
-export class StartupSplashComponent implements Component, OverlayFocusOwner {
+class StartupSplashComponent implements Component, OverlayFocusOwner {
 	#phaseStartedAt = 0;
 	#timer: NodeJS.Timeout | undefined;
 	#done = Promise.withResolvers<void>();
@@ -31,8 +20,8 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	readonly #now: () => number;
 
 	constructor(
-		readonly ctx: InteractiveModeContext,
-		private readonly options: StartupSplashComponentOptions,
+		readonly ctx: SetupUiHost,
+		options: RunStartupSplashOptions = {},
 	) {
 		this.#durationMs = options.durationMs ?? SETUP_SPLASH_MS;
 		this.#tickMs = options.tickMs ?? SETUP_TICK_MS;
@@ -40,17 +29,9 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 
 	run(): Promise<void> {
-		const reduceMotion =
-			isReducedMotionEnabled(this.options.reduceMotion) ||
-			this.ctx.ui.terminal.columns < 56 ||
-			this.ctx.ui.terminal.rows < 18;
-		this.#phaseStartedAt = this.#now() - (reduceMotion ? this.#durationMs : 0);
+		this.#phaseStartedAt = this.#now();
+		this.#startTimer();
 		this.ctx.ui.requestRender();
-		if (reduceMotion) {
-			this.#done.resolve();
-		} else {
-			this.#startTimer();
-		}
 		return this.#done.promise;
 	}
 
@@ -75,19 +56,8 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 
 	render(width: number): readonly string[] {
-		const staticFrame =
-			isReducedMotionEnabled(this.options.reduceMotion) || width < 56 || this.ctx.ui.terminal.rows < 18;
-		const elapsedMs = staticFrame
-			? SETUP_SPLASH_MS
-			: Math.min(this.#durationMs, Math.max(0, this.#now() - this.#phaseStartedAt));
-		return renderSetupSplash(
-			Math.max(1, width),
-			Math.max(1, this.ctx.ui.terminal.rows),
-			elapsedMs,
-			this.options.identity,
-			theme.isLight ? "light" : "dark",
-			theme.getColorMode(),
-		);
+		const elapsedMs = Math.min(this.#durationMs, Math.max(0, this.#now() - this.#phaseStartedAt));
+		return renderSetupSplash(Math.max(1, width), Math.max(1, this.ctx.ui.terminal.rows), elapsedMs);
 	}
 
 	#startTimer(): void {
@@ -116,17 +86,9 @@ export class StartupSplashComponent implements Component, OverlayFocusOwner {
 	}
 }
 
-export async function runStartupSplash(
-	ctx: InteractiveModeContext,
-	options: RunStartupSplashOptions = {},
-): Promise<void> {
-	const component = new StartupSplashComponent(ctx, {
-		identity: options.identity ?? ACTIVE_PRODUCT_IDENTITY,
-		...(options.durationMs !== undefined ? { durationMs: options.durationMs } : {}),
-		...(options.tickMs !== undefined ? { tickMs: options.tickMs } : {}),
-		...(options.now ? { now: options.now } : {}),
-		...(options.reduceMotion !== undefined ? { reduceMotion: options.reduceMotion } : {}),
-	});
+/** Show the startup animation and restore the previous overlay focus afterward. */
+export async function runStartupSplash(ctx: SetupUiHost, options: RunStartupSplashOptions = {}): Promise<void> {
+	const component = new StartupSplashComponent(ctx, options);
 	const overlay = ctx.ui.showOverlay(component, {
 		width: "100%",
 		maxHeight: "100%",

@@ -1,22 +1,103 @@
-import { TERMINAL } from "../terminal-capabilities";
 import type { Component } from "../tui";
 import { padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
-import type { HarnessSnapshot } from "../../breadboard/harness-port";
-import { posture, teamSize } from "../../breadboard/harness-lock-view";
 import { colorToAnsi, paintAnsi } from "../theme/color";
 import { hexToOklch, oklchToHex, rgbToHex, type OKLCH } from "@oh-my-pi/pi-utils/color";
 import type { ColorMode } from "../theme/schema";
 import { theme } from "../theme/theme";
 import { sanitizeStatusText } from "../chrome/shared";
-import {
-	ACTIVE_PRODUCT_IDENTITY,
-	type GradientPalette,
-	OMP_PRODUCT_IDENTITY,
-	type ProductAppearance,
-	type ProductIdentity,
-} from "../../product-identity";
-import { isReducedMotionEnabled } from "../../utils/reduced-motion";
+import { isReducedMotionEnabled } from "../reduced-motion";
 import tipsText from "./tips.txt" with { type: "text" };
+
+export type ProductAppearance = "dark" | "light";
+export type ProductSymbolPreset = "unicode" | "nerd" | "emoji" | "ascii";
+export type GradientStop = readonly [red: number, green: number, blue: number];
+export interface GradientPalette {
+	readonly stops: readonly GradientStop[];
+	readonly ramp256: readonly number[];
+	readonly ramp16: readonly number[];
+}
+export interface ProductIdentity {
+	readonly id: string;
+	readonly displayName: string;
+	readonly shortDisplayName: string;
+	readonly cliName: string;
+	readonly welcomeTitle: string;
+	readonly setupWordmark: string;
+	readonly composerFrameLabel: string;
+	readonly setupModelEmptyText?: string;
+	readonly logoArt: readonly string[];
+	readonly compactLogo: Readonly<Record<ProductSymbolPreset, string>>;
+	readonly gradientPalettes: Readonly<Record<ProductAppearance, GradientPalette>>;
+	readonly defaultThemes: Readonly<Record<ProductAppearance, string>>;
+}
+export interface WelcomeHarnessSnapshot {
+	readonly name: string;
+	readonly mode: string | null;
+	readonly generation: string | null;
+	readonly lock: {
+		readonly effective_values?: readonly {
+			readonly path?: string;
+			readonly value?: unknown;
+			readonly value_kind?: string;
+			readonly visibility?: string;
+		}[];
+	} | null;
+}
+function freezePalette(stops: GradientStop[], ramp256: number[], ramp16: number[]): GradientPalette {
+	return Object.freeze({ stops: Object.freeze(stops), ramp256: Object.freeze(ramp256), ramp16: Object.freeze(ramp16) });
+}
+const OMP_GRADIENT = freezePalette([[255, 92, 200], [200, 110, 255], [120, 130, 255], [60, 200, 255], [120, 255, 220]], [199, 171, 135, 99, 75, 51, 87], [95, 95, 94, 96, 92]);
+const BREADBOARD_GRADIENT = freezePalette([[255, 77, 109], [217, 77, 255], [77, 163, 255]], [204, 171, 75], [91, 95, 94]);
+const OMP_LOGO = Object.freeze(["▀██████████▀", " ╘██    ██  ", "  ██    ██  ", "  ██    ██  ", " ▄██▄  ▄██▄ "]);
+export const OMP_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
+	id: "omp", displayName: "Oh My Pi", shortDisplayName: "OMP", cliName: "omp", welcomeTitle: "omp",
+	setupWordmark: "O h   M y   P i", composerFrameLabel: "Pi", logoArt: OMP_LOGO,
+	compactLogo: Object.freeze({ unicode: "π", nerd: "\ue22c", emoji: "π", ascii: "pi" }),
+	gradientPalettes: Object.freeze({ dark: OMP_GRADIENT, light: OMP_GRADIENT }),
+	defaultThemes: Object.freeze({ dark: "dark", light: "light" }),
+});
+export const DEFAULT_PRODUCT_IDENTITY = OMP_PRODUCT_IDENTITY;
+export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
+	id: "breadboard", displayName: "BreadBoard", shortDisplayName: "BreadBoard", cliName: "bb",
+	welcomeTitle: "BreadBoard", setupWordmark: "BreadBoard", composerFrameLabel: "Framed Rules",
+	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",
+	logoArt: Object.freeze(["░█▄▄ █▀█ █▀▀ ▄▀█ █▀▄░░░░░", "░█▄█ █▀▄ ██▄ █▀█ █▄▀░░░░░", "░░░░░█▄▄ █▀█ ▄▀█ █▀█ █▀▄░", "░░░░░█▄█ █▄█ █▀█ █▀▄ █▄▀░"]),
+	compactLogo: Object.freeze({ unicode: "ƁB", nerd: "bb", emoji: "🍞", ascii: "bb" }),
+	gradientPalettes: Object.freeze({ dark: BREADBOARD_GRADIENT, light: BREADBOARD_GRADIENT }),
+	defaultThemes: Object.freeze({ dark: "breadboard", light: "breadboard-light" }),
+});
+export let activeProductIdentity: ProductIdentity = DEFAULT_PRODUCT_IDENTITY;
+export function setProductIdentity(identity: ProductIdentity): void {
+	activeProductIdentity = identity;
+}
+export interface WelcomeHarnessLockValue {
+	readonly [key: string]: unknown;
+}
+function lockValue(lock: WelcomeHarnessSnapshot["lock"], path: string): unknown {
+	const row = lock?.effective_values?.find(candidate => candidate.path === path);
+	return row && row.visibility !== "redacted" && row.value_kind !== "secret-ref" ? row.value : undefined;
+}
+function harnessTeamSize(lock: WelcomeHarnessSnapshot["lock"]): number | undefined {
+	if (lockValue(lock, "multi_agent.enabled") !== true) return undefined;
+	const value = lockValue(lock, "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents");
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+function harnessPosture(lock: WelcomeHarnessSnapshot["lock"]): readonly string[] {
+	const parts: string[] = [];
+	const nativeTools = lockValue(lock, "provider_tools.use_native");
+	if (typeof nativeTools === "boolean") parts.push(nativeTools ? "native tools" : "prompted tools");
+	if (lockValue(lock, "provider_tools.api_variant") === "responses") parts.push("responses API");
+	const modes = lockValue(lock, "modes");
+	if (Array.isArray(modes)) {
+		const names: string[] = [];
+		for (const mode of modes) {
+			if (typeof mode !== "object" || mode === null || !("name" in mode) || typeof mode.name !== "string") continue;
+			if (mode.name !== "compact") names.push(mode.name);
+		}
+		if (names.length > 0) parts.push(names.join("→"));
+	}
+	return parts;
+}
 
 const NATIVE_ONLY_TIP_PREFIX = "[native-only]";
 
@@ -39,7 +120,7 @@ const TIP_TEMPLATES: readonly TipTemplate[] = Object.freeze(
 		),
 );
 
-export function getWelcomeTips(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): readonly string[] {
+export function getWelcomeTips(identity: ProductIdentity = activeProductIdentity): readonly string[] {
 	const includeNativeOnly = identity.id === OMP_PRODUCT_IDENTITY.id;
 	return Object.freeze(
 		TIP_TEMPLATES.filter(template => includeNativeOnly || !template.nativeOnly).map(template =>
@@ -182,14 +263,14 @@ export class WelcomeComponent implements Component {
 		private providerName: string,
 		private recentSessions: RecentSession[] = [],
 		private lspServers: LspServerInfo[] = [],
-		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
+		private readonly identity: ProductIdentity = activeProductIdentity,
 		private readonly appearance?: ProductAppearance,
 		private reduceMotion?: boolean,
-		private harness?: HarnessSnapshot | null,
+		private harness?: WelcomeHarnessSnapshot | null,
 	) {
 		this.#tips = getWelcomeTips(identity);
 	}
-	setHarness(harness: HarnessSnapshot | null | undefined): void {
+	setHarness(harness: WelcomeHarnessSnapshot | null | undefined): void {
 		this.harness = harness ?? null;
 		this.invalidate();
 	}
@@ -423,9 +504,9 @@ export class WelcomeComponent implements Component {
 			}
 			if (detailParts.length > 0) identityParts[0] += ` (${detailParts.join(", ")})`;
 			const lock = harness.lock;
-			const size = teamSize(lock);
+			const size = harnessTeamSize(lock);
 			if (size !== undefined) identityParts.push(`team ${size}`);
-			const postureParts = posture(lock);
+			const postureParts = harnessPosture(lock);
 			if (postureParts.length > 0) identityParts.push(...postureParts);
 			if (lock === null) identityParts.push("details unverified");
 			identityParts.push("/harness");

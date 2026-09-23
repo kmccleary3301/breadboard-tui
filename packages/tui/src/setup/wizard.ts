@@ -1,33 +1,22 @@
-import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
-import type { Settings } from "../../config/settings";
-import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
-import { CURRENT_SETUP_VERSION } from "../setup-version";
-import type { InteractiveModeContext } from "../types";
+import { CURRENT_SETUP_VERSION } from "./setup-version";
+import type { SetupHost } from "./scenes/types";
 import { composerSetupScene } from "./scenes/composer";
 import { glyphSetupScene } from "./scenes/glyph";
-import { informationLayoutSetupScene } from "./scenes/information-layout";
 import { modelSetupScene } from "./scenes/model";
 import { providersSetupScene } from "./scenes/providers";
 import { themeSetupScene } from "./scenes/theme";
-import type { SetupScene, SetupWizardContext } from "./scenes/types";
+import type { SetupScene } from "./scenes/types";
 import { SetupWizardComponent } from "./wizard-overlay";
 
-export type {
-	SetupScene,
-	SetupSceneController,
-	SetupSceneHost,
-	SetupSceneResult,
-	SetupWizardContext,
-} from "./scenes/types";
+export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
 
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
 
+/** Ordered onboarding scenes with independent version gates. */
 export const ALL_SCENES = [
 	providersSetupScene,
 	modelSetupScene,
-	informationLayoutSetupScene,
 	glyphSetupScene,
 	composerSetupScene,
 	themeSetupScene,
@@ -52,7 +41,7 @@ function setupSkipEnvEnabled(value: string | undefined): boolean {
 export async function selectSetupScenes(
 	storedVersion: number,
 	scenes: readonly SetupScene[],
-	ctx?: SetupWizardContext,
+	ctx?: SetupHost,
 	options: SetupSceneSelectionOptions = {},
 ): Promise<SetupScene[]> {
 	const isTTY = options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
@@ -79,60 +68,16 @@ export async function selectSetupScenes(
 export interface RunSetupWizardOptions {
 	markComplete?: boolean;
 	playWelcomeIntro?: boolean;
-	providerAuthPort?: ProviderAuthPort;
-	nativeAuthStorage?: AuthStorage;
-	identity?: ProductIdentity;
-	now?: () => number;
-}
-/**
- * Adapt the live interactive session to the setup-only dependency surface.
- * Setup scenes never need the rest of InteractiveMode, while ordinary in-session
- * setup keeps its existing engine/native model-selection behavior.
- */
-export function createInteractiveSetupContext(ctx: InteractiveModeContext): SetupWizardContext {
-	const engineOwned = ctx.session.mainStreamOwnsTurnLifecycle;
-	return {
-		ui: ctx.ui,
-		settings: ctx.settings,
-		modelRegistry: ctx.session.modelRegistry,
-		modelSelection: {
-			mode: engineOwned ? "session" : "default",
-			get currentModel() {
-				return ctx.session.model;
-			},
-			availableModels: () =>
-				engineOwned ? ctx.session.scopedModels.map(entry => entry.model) : ctx.session.modelRegistry.getAvailable(),
-			refresh: engineOwned ? async () => {} : () => ctx.session.modelRegistry.refresh("online-if-uncached"),
-			select: async (model, selector) => {
-				if (engineOwned) {
-					await ctx.session.setModelTemporary(model);
-					return;
-				}
-				const projectScope = ctx.settings.get("modelRoleStorage") === "project";
-				await ctx.session.setModel(model, "default", { selector, persist: !projectScope });
-				if (projectScope) ctx.settings.setProjectModelRole("default", selector);
-				await ctx.settings.flush();
-			},
-		},
-		statusLine: ctx.statusLine,
-		openInBrowser: ctx.openInBrowser.bind(ctx),
-		playWelcomeIntro: ctx.playWelcomeIntro.bind(ctx),
-	};
 }
 
 /** Own the fullscreen setup overlay until its scenes and outro finish. */
 export async function runSetupWizard(
-	ctx: SetupWizardContext,
+	ctx: SetupHost,
 	scenes: readonly SetupScene[] = ALL_SCENES,
 	options: RunSetupWizardOptions = {},
 ): Promise<void> {
 	if (scenes.length === 0) return;
-	const component = new SetupWizardComponent(ctx, scenes, {
-		identity: options.identity ?? ACTIVE_PRODUCT_IDENTITY,
-		...(options.providerAuthPort ? { providerAuthPort: options.providerAuthPort } : {}),
-		nativeAuthStorage: options.nativeAuthStorage,
-		...(options.now ? { now: options.now } : {}),
-	});
+	const component = new SetupWizardComponent(ctx, scenes);
 	const overlay = ctx.ui.showOverlay(component, {
 		width: "100%",
 		maxHeight: "100%",
@@ -151,6 +96,6 @@ export async function runSetupWizard(
 		overlay.hide();
 	}
 	if (options.playWelcomeIntro !== false) {
-		ctx.playWelcomeIntro?.();
+		ctx.playWelcomeIntro();
 	}
 }

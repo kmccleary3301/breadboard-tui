@@ -1,5 +1,4 @@
-import { isSettingsInitialized, settings } from "../../config/settings";
-import { isReducedMotionEnabled } from "../../utils/reduced-motion";
+import { isReducedMotionEnabled } from "../reduced-motion";
 import type { Theme, ThemeColor } from "./theme";
 import { FG_RESET } from "./color";
 
@@ -29,7 +28,13 @@ const BOLD_OPEN = "\x1b[1m";
 const BOLD_CLOSE = "\x1b[22m";
 
 type ShimmerTheme = Pick<Theme, "bold" | "fg" | "getFgAnsi"> & Partial<Pick<Theme, "getColorMode">>;
-type ShimmerMode = "classic" | "kitt" | "disabled";
+export type ShimmerMode = "classic" | "kitt" | "disabled";
+let activeMode: ShimmerMode = "classic";
+
+/** Select the shimmer sweep style; the host updates this when settings load. */
+export function setShimmerMode(mode: ShimmerMode): void {
+	activeMode = mode;
+}
 
 type ShimmerPaletteTier = ThemeColor | { ansi: string };
 
@@ -165,13 +170,12 @@ function tierFor(intensity: number): Tier {
 }
 
 function resolveMode(): ShimmerMode {
-	if (isReducedMotionEnabled()) return "disabled";
-	if (!isSettingsInitialized()) return "classic";
-	return settings.get("display.shimmer");
+	return isReducedMotionEnabled() ? "disabled" : activeMode;
 }
+
 /** Whether shimmer animations are active (any mode other than `disabled`). */
 export function shimmerEnabled(): boolean {
-	return activeMode !== "disabled";
+	return resolveMode() !== "disabled";
 }
 
 /**
@@ -183,12 +187,11 @@ export function shimmerEnabled(): boolean {
  * Performance shape (per call, dominant cost):
  *   - One `Date.now()` read.
  *   - One `compile()` lookup per segment (Symbol-keyed cache slot, hot path
- *     skipped after first frame).
  *   - One ANSI open/close pair per **run of same-tier chars**, not per char.
  *   - No per-char allocations beyond the run buffer.
  */
 export function shimmerSegments(segments: readonly ShimmerSegment[], theme: ShimmerTheme): string {
-	const mode = activeMode;
+	const mode = resolveMode();
 
 	// Pre-scan: total code-point count (positions the band) and resolved palette.
 	// The per-segment string is kept verbatim — iterating UTF-16 units with a

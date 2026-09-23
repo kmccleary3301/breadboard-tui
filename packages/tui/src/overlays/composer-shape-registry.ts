@@ -1,5 +1,5 @@
 import { type ComposerStyle, registerComposerStyle } from "../index";
-import { ACTIVE_PRODUCT_IDENTITY, type ProductIdentity } from "../../product-identity";
+import { DEFAULT_PRODUCT_IDENTITY, type ProductIdentity } from "../prompt/welcome";
 import type { SubmenuOption } from "./settings-defs";
 
 /** Composer shape id; extensions may register additional values at runtime. */
@@ -78,7 +78,7 @@ export function installExtensionComposerShape(definition: ComposerShapeDefinitio
 }
 
 /** Available built-in and extension composer choices in selector order. */
-export function getComposerShapeOptions(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): readonly SubmenuOption[] {
+export function getComposerShapeOptions(identity: ProductIdentity = DEFAULT_PRODUCT_IDENTITY): readonly SubmenuOption[] {
 	const builtins = BUILTIN_COMPOSER_SHAPES.map(option => {
 		if (option.value === "pi") return { ...option, label: identity.composerFrameLabel };
 		if (identity.id === "breadboard") {

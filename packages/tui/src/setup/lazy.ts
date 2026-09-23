@@ -1,24 +1,17 @@
-import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import type { ProviderAuthPort } from "../../breadboard/provider-auth-port";
-import type { InteractiveModeContext } from "../types";
+import type { SetupHost } from "./scenes/types";
 
-export async function runProviderSetupWizard(
-	ctx: InteractiveModeContext,
-	providerAuthPort?: ProviderAuthPort,
-	nativeAuthStorage?: AuthStorage,
-): Promise<void> {
+/** Load and run provider setup without completing onboarding or replaying the welcome intro. */
+export async function runProviderSetupWizard(ctx: SetupHost): Promise<void> {
 	// Keep the full setup wizard behind the existing cold-start boundary; a static
 	// import here would load provider/OAuth/search/theme setup deps on every TUI startup.
-	const { ALL_SCENES, createInteractiveSetupContext, runSetupWizard } = await import("./index");
+	const { ALL_SCENES, runSetupWizard } = await import("./wizard");
 	const providersScene = ALL_SCENES.find(scene => scene.id === "providers");
 	if (!providersScene) {
 		ctx.showError("Provider setup is unavailable.");
 		return;
 	}
-	await runSetupWizard(createInteractiveSetupContext(ctx), [providersScene], {
+	await runSetupWizard(ctx, [providersScene], {
 		markComplete: false,
 		playWelcomeIntro: false,
-		providerAuthPort,
-		nativeAuthStorage,
 	});
 }

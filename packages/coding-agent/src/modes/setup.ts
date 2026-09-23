@@ -17,6 +17,7 @@ import { copyToClipboard } from "../utils/clipboard";
 import { getGroundedSearchProvider, getSearchProvider } from "../web/search/provider";
 import { SEARCH_PROVIDER_OPTIONS, type SearchProviderId } from "../web/search/types";
 import { createModelBrowserSource } from "./model-browser-source";
+import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 import type { InteractiveModeContext } from "./types";
 
 export { ALL_SCENES, CURRENT_SETUP_VERSION };
@@ -59,7 +60,7 @@ function resolveWebSearchSelection(ctx: InteractiveModeContext, id: SearchProvid
 export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 	const modelSource = createModelBrowserSource(ctx.settings);
 	return {
-		ui: ctx.ui,
+		identity: ACTIVE_PRODUCT_IDENTITY,
 		get statusLine() {
 			return ctx.statusLine;
 		},

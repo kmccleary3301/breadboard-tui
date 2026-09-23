@@ -18,7 +18,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { ComposerShape } from "../../config/settings-schema";
-import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
+import { DEFAULT_PRODUCT_IDENTITY } from "../prompt/welcome";
 import { theme } from "../theme/theme";
 
 /**
@@ -52,7 +52,7 @@ export interface ComposerShapePreviewOptions {
 	previewTitle?: string;
 }
 /** Stand-in session title shown while the previewed session is unnamed. */
-const PREVIEW_TITLE = ACTIVE_PRODUCT_IDENTITY.cliName;
+const PREVIEW_TITLE = DEFAULT_PRODUCT_IDENTITY.cliName;
 
 export function renderComposerShapePreview(
 	shape: ComposerShape,

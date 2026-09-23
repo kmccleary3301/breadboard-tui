@@ -10,24 +10,19 @@ import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 const MAX_VISIBLE_MODELS = 10;
 
 class ModelSceneController implements SetupSceneController {
-	get title(): string {
-		return this.host.ctx.modelSelection.mode === "session" ? "Choose your engine model" : "Choose your default model";
-	}
-	get subtitle(): string {
-		return this.host.ctx.modelSelection.mode === "session"
-			? "Select the model for this BreadBoard session."
-			: "Search configured models and save the model used for new sessions.";
-	}
+	title = "Choose your default model";
+	subtitle = "Search configured models and save the model used for new sessions.";
 	#browser: ModelBrowser;
 	#status: string | undefined;
 	#selecting = false;
 	#disposed = false;
 	#step: WizardStep | undefined;
 
-	constructor(private readonly host: SetupSceneHost) {
-		this.#browser = new ModelBrowser(host.ctx.settings, {
-			emptyText: () => host.identity.setupModelEmptyText,
-		});
+	readonly #host: SetupSceneHost;
+
+	constructor(host: SetupSceneHost) {
+		this.#host = host;
+		this.#browser = new ModelBrowser(host.ctx.modelSource);
 		this.#browser.onActivate = item => {
 			void this.#select(item.model, item.selector);
 		};
@@ -62,29 +57,33 @@ class ModelSceneController implements SetupSceneController {
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const lines = [
-			this.#status ??
-				theme.fg(
-					"muted",
-					this.host.ctx.modelSelection.mode === "session"
-						? "Type to search. Enter selects the highlighted engine model."
-						: "Type to search. Enter saves the highlighted model as your default.",
-				),
-			"",
-		];
-		const budget = maxLines === undefined ? MAX_VISIBLE_MODELS : maxLines - lines.length - BROWSER_FRAME_ROWS;
-		this.#browser.setMaxVisible(Math.max(1, Math.min(MAX_VISIBLE_MODELS, budget)));
-		this.#browserRowStart = lines.length;
-		lines.push(...this.#browser.render(width));
-		return lines;
+		const intro = new Text(
+			this.#status ?? theme.fg("muted", "Type to search. Enter saves the highlighted model as your default."),
+			0,
+			0,
+		);
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: "choice",
+				intro,
+				content: this.#browser,
+				minContentLines: 1,
+				fitContent: budget => {
+					const visible = budget === undefined ? MAX_VISIBLE_MODELS : budget - BROWSER_FRAME_ROWS;
+					this.#browser.setMaxVisible(Math.max(1, Math.min(MAX_VISIBLE_MODELS, visible)));
+				},
+			});
+		} else {
+			this.#step.setIntro(intro);
+		}
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	#syncModels(): void {
-		const registry = this.host.ctx.modelRegistry;
-		const external = this.host.ctx.modelSelection.mode === "session";
-		const available = this.host.ctx.modelSelection.availableModels();
-		const roles = external ? {} : resolveRoleAssignments(this.host.ctx.settings, registry.getAll(), available);
-		const storage = this.host.ctx.settings.getStorage();
+		const { available, all, current } = this.#host.ctx.getModels();
+		const source = this.#host.ctx.modelSource;
+		const roles = resolveRoleAssignments(source, all, available);
 		const items = buildBrowserItems(available);
 		sortModelItems(items, { roles, mruOrder: source.mruOrder });
 		this.#browser.setRoles(roles);
@@ -92,7 +91,6 @@ class ModelSceneController implements SetupSceneController {
 		this.#browser.setPerfStats(source.modelPerf);
 		this.#browser.setItems(items);
 
-		const current = this.host.ctx.modelSelection.currentModel;
 		if (current) {
 			const selector = `${current.provider}/${current.id}`;
 			this.#browser.setCurrentSelector(selector);
@@ -102,7 +100,7 @@ class ModelSceneController implements SetupSceneController {
 
 	async #refreshModels(): Promise<void> {
 		try {
-			await this.host.ctx.modelSelection.refresh();
+			await this.#host.ctx.refreshModels();
 			if (this.#disposed) return;
 			this.#syncModels();
 			this.#status = undefined;
@@ -117,16 +115,11 @@ class ModelSceneController implements SetupSceneController {
 	async #select(model: Model, selector: string): Promise<void> {
 		if (this.#selecting) return;
 		this.#selecting = true;
-		this.#status = theme.fg(
-			"muted",
-			this.host.ctx.modelSelection.mode === "session"
-				? `Selecting ${selector} for this engine session…`
-				: `Saving ${selector} as the default model…`,
-		);
-		this.host.requestRender();
+		this.#status = theme.fg("muted", `Saving ${selector} as the default model…`);
+		this.#host.requestRender();
 		try {
-			await this.host.ctx.modelSelection.select(model, selector);
-			if (!this.#disposed) this.host.finish("done");
+			await this.#host.ctx.selectModel(model, selector);
+			if (!this.#disposed) this.#host.finish("done");
 		} catch (error) {
 			if (this.#disposed) return;
 			this.#selecting = false;
@@ -136,10 +129,10 @@ class ModelSceneController implements SetupSceneController {
 	}
 }
 
-/** Setup step for the active engine model or the native persisted default role. */
+/** Setup step that assigns one available model to the persisted default role. */
 export const modelSetupScene: SetupScene = {
 	id: "model",
-	title: "Choose your model",
+	title: "Choose your default model",
 	minVersion: 1,
 	mount: host => new ModelSceneController(host),
 };

@@ -1,7 +1,6 @@
 import { colorLuma, relativeLuminance } from "@oh-my-pi/pi-utils/color";
 import * as logger from "@oh-my-pi/pi-utils/logger";
-import { Chalk, type ChalkInstance, type ColorLevel } from "@oh-my-pi/pi-utils/chalk";
-import type { SessionAccentTheme } from "../../utils/session-color";
+import chalk from "@oh-my-pi/pi-utils/chalk";
 import { bgAnsi, colorToAnsi, fgAnsi, resolveToHex } from "./color";
 import { type ColorMode, isValidThemeColor, type ThemeBg, type ThemeColor } from "./schema";
 import type { SessionAccentTheme } from "./session-color";
@@ -120,8 +119,8 @@ const langMap: Record<string, SymbolKey> = {
  * Brand colors for language icons, keyed by the resolved `lang.*` SymbolKey.
  * Used by {@link Theme.getLangIconStyled} so eval-kernel cell headers tint each
  * language with its recognizable hue (JS yellow, Ruby red, Julia purple, Python
- * blue) instead of a flat muted gray. Encoded through the active color mode;
- * languages without an entry fall back to the muted theme color.
+ * blue) instead of a flat muted gray. Applied as truecolor/256 per the active
+ * color mode; languages without an entry fall back to the muted theme color.
  */
 const LANG_BRAND_COLORS: Partial<Record<SymbolKey, string>> = {
 	"lang.javascript": "#f7df1e",
@@ -131,12 +130,6 @@ const LANG_BRAND_COLORS: Partial<Record<SymbolKey, string>> = {
 };
 
 const BACKGROUND_RESET_PATTERN = /\x1b\[(?:0|49)m/g;
-const COLOR_LEVEL_BY_MODE: Readonly<Record<ColorMode, ColorLevel>> = {
-	none: 0,
-	"16color": 1,
-	"256color": 2,
-	truecolor: 3,
-};
 const FOREGROUND_RESET_PATTERN = /\x1b\[(?:0|39)m/g;
 
 export class Theme {
@@ -146,7 +139,6 @@ export class Theme {
 	readonly #hexFgColors: Record<ThemeColor, string>;
 	/** Resolved hex strings for background colors — populated at construction. */
 	readonly #hexBgColors: Record<ThemeBg, string>;
-	readonly #chalk: ChalkInstance;
 	#symbols: SymbolMap;
 	#spinnerFramesOverrides: Partial<Record<SpinnerType, string[]>>;
 	/**
@@ -167,7 +159,6 @@ export class Theme {
 		symbolOverrides: Partial<Record<SymbolKey, string>>,
 		spinnerFramesOverrides: Partial<Record<SpinnerType, string[]>> = {},
 	) {
-		this.#chalk = new Chalk({ level: COLOR_LEVEL_BY_MODE[mode] });
 		this.statusLineLuminance = colorLuma(bgColors.statusLineBg);
 		this.#statusLineContrastLuminance = relativeLuminance(bgColors.statusLineBg);
 		const slIsLight = this.statusLineLuminance !== undefined && this.statusLineLuminance > 0.5;
@@ -299,43 +290,23 @@ export class Theme {
 	}
 
 	fg(color: ThemeColor, text: string): string {
-		if (!(color in this.#fgColors)) throw new Error(`Unknown theme color: ${color}`);
 		const ansi = this.#fgColors[color];
-		return ansi ? `${ansi}${text}\x1b[39m` : text;
-	}
-	/** Encode and paint an arbitrary CSS color through this theme's frozen capability mode. */
-	customColor(color: string, text: string): string {
-		const ansi = colorToAnsi(color, this.mode);
-		return ansi ? `${ansi}${text}\x1b[39m` : text;
-	}
-
-	getCustomColorAnsi(color: string): string {
-		return colorToAnsi(color, this.mode);
-	}
-	/** Encode and paint an arbitrary CSS background through this theme's frozen capability mode. */
-	customBg(color: string, text: string): string {
-		const ansi = bgAnsi(color, this.mode);
-		return ansi ? `${ansi}${text}\x1b[49m` : text;
-	}
-
-	getCustomBgAnsi(color: string): string {
-		return bgAnsi(color, this.mode);
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		return `${ansi}${text}\x1b[39m`; // Reset only foreground color
 	}
 
 	/** Apply a foreground, replacing terminal-default tokens with the theme's contrast-safe fallback. */
 	fgResolved(color: ThemeColor, text: string): string {
-		if (!(color in this.#fgColors)) throw new Error(`Unknown theme color: ${color}`);
 		const ansi = this.#fgColors[color];
-		// Color mode `none` (NO_COLOR, TERM=dumb) encodes every color as "": paint nothing, like `fg`.
-		if (!ansi) return text;
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
 		const resolved = ansi === "\x1b[39m" ? colorToAnsi(this.getColorHex(color), this.mode) : ansi;
 		return `${resolved}${text.replace(FOREGROUND_RESET_PATTERN, `$&${resolved}`)}\x1b[39m`;
 	}
 
 	bg(color: ThemeBg, text: string): string {
-		if (!(color in this.#bgColors)) throw new Error(`Unknown theme background color: ${color}`);
 		const ansi = this.#bgColors[color];
-		return ansi ? `${ansi}${text}\x1b[49m` : text;
+		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+		return `${ansi}${text}\x1b[49m`; // Reset only background color
 	}
 
 	/**
@@ -345,9 +316,9 @@ export class Theme {
 	 * wrapper would otherwise stop at the first nested reset.
 	 */
 	bgFill(color: ThemeBg, text: string): string {
-		if (!(color in this.#bgColors)) throw new Error(`Unknown theme background color: ${color}`);
 		const ansi = this.#bgColors[color];
-		return ansi ? `${ansi}${text.replace(BACKGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[49m` : text;
+		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+		return `${ansi}${text.replace(BACKGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[49m`;
 	}
 
 	/**
@@ -357,42 +328,39 @@ export class Theme {
 	 */
 	fgOnBg(color: ThemeColor, background: ThemeBg, text: string): string {
 		const ansi = this.getFgOnBgAnsi(color, background);
-		if (!ansi) return text;
 		return `${ansi}${text.replace(FOREGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[39m`;
 	}
 
 	bold(text: string): string {
-		return this.#chalk.bold(text);
-	}
-
-	dim(text: string): string {
-		return this.#chalk.dim(text);
+		return chalk.bold(text);
 	}
 
 	italic(text: string): string {
-		return this.#chalk.italic(text);
+		return chalk.italic(text);
 	}
 
 	underline(text: string): string {
-		return this.#chalk.underline(text);
+		return chalk.underline(text);
 	}
 
 	strikethrough(text: string): string {
-		return this.#chalk.strikethrough(text);
+		return chalk.strikethrough(text);
 	}
 
 	inverse(text: string): string {
-		return this.#chalk.inverse(text);
+		return chalk.inverse(text);
 	}
 
 	getFgAnsi(color: ThemeColor): string {
-		if (!(color in this.#fgColors)) throw new Error(`Unknown theme color: ${color}`);
-		return this.#fgColors[color];
+		const ansi = this.#fgColors[color];
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		return ansi;
 	}
 
 	getBgAnsi(color: ThemeBg): string {
-		if (!(color in this.#bgColors)) throw new Error(`Unknown theme background color: ${color}`);
-		return this.#bgColors[color];
+		const ansi = this.#bgColors[color];
+		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+		return ansi;
 	}
 
 	/**
@@ -400,9 +368,11 @@ export class Theme {
 	 * Explicit theme colors win; terminal-default tokens become black or near-white.
 	 */
 	getFgOnBgAnsi(color: ThemeColor, background: ThemeBg): string {
-		const ansi = this.getFgAnsi(color);
+		const ansi = this.#fgColors[color];
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
 		if (ansi !== "\x1b[39m") return ansi;
-		const backgroundAnsi = this.getBgAnsi(background);
+		const backgroundAnsi = this.#bgColors[background];
+		if (!backgroundAnsi) throw new Error(`Unknown theme background color: ${background}`);
 		if (backgroundAnsi === "\x1b[49m") return ansi;
 		const backgroundLuma = colorLuma(this.getBgHex(background));
 		return colorToAnsi(backgroundLuma !== undefined && backgroundLuma > 0.5 ? "#000000" : "#e5e5e7", this.mode);
@@ -419,13 +389,11 @@ export class Theme {
 	 * unavailable, so it falls back to the theme `text` color.
 	 */
 	getContrastFgAnsi(fillColor: ThemeColor): string {
-		if (!(fillColor in this.#hexFgColors)) throw new Error(`Unknown theme color: ${fillColor}`);
-		const hex = this.#hexFgColors[fillColor];
-		const rgba = Bun.color(hex, "rgba");
-		const match = rgba ? /^rgba\(\s*(\d+),\s*(\d+),\s*(\d+),/u.exec(rgba) : null;
+		const ansi = this.#fgColors[fillColor];
+		const match = ansi ? /38;2;(\d+);(\d+);(\d+)/.exec(ansi) : null;
 		if (!match) return this.#fgColors.text;
 		const luma = 0.299 * Number(match[1]) + 0.587 * Number(match[2]) + 0.114 * Number(match[3]);
-		return colorToAnsi(luma > 140 ? "#000000" : "#ffffff", this.mode);
+		return luma > 140 ? "\x1b[38;2;0;0;0m" : "\x1b[38;2;255;255;255m";
 	}
 
 	getColorMode(): ColorMode {
@@ -814,6 +782,6 @@ export class Theme {
 		const key = lang ? langMap[lang.toLowerCase()] : undefined;
 		const hex = key ? LANG_BRAND_COLORS[key] : undefined;
 		if (!hex) return this.fg("muted", icon);
-		return this.customColor(hex, icon);
+		return `${colorToAnsi(hex, this.mode)}${icon}\x1b[39m`;
 	}
 }

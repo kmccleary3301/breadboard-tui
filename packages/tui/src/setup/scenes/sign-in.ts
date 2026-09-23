@@ -10,30 +10,9 @@ import { matchesKey } from "../../keys";
 import { type SgrMouseEvent } from "../../mouse";
 import { wrapTextWithAnsi } from "../../utils";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
-import { captureBrowserSession } from "../../../utils/browser-session";
-import { authenticateProvider } from "../../../breadboard/provider-auth-login";
-import {
-	ProviderAuthError,
-	type ProviderAuthPort,
-	type ProviderAuthReadPort,
-} from "../../../breadboard/provider-auth-port";
-import { BREADBOARD_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY } from "../../../product-identity";
-import { copyToClipboard } from "../../../utils/clipboard";
-import { createNativeProviderAuthDataSource } from "../../components/oauth-provider-data-source";
-import { OAuthSelectorComponent } from "../../components/oauth-selector";
+import { OAuthSelectorComponent } from "../../overlays/oauth-selector";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
-
-const UNAVAILABLE_PRODUCT_PROVIDER_SOURCE: ProviderAuthReadPort = Object.freeze({
-	listProvidersSync: () => [],
-	listCredentialsSync: () => [],
-	async listProviders() {
-		return [];
-	},
-	async listCredentials() {
-		return [];
-	},
-});
 
 function loginUrlLink(url: string): string {
 	return `\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`;
@@ -75,10 +54,6 @@ class CopyablePromptInput implements Component, Focusable {
 		}
 		this.#input.handleInput(data);
 	}
-	clear(): void {
-		this.#input.setValue("");
-		this.#input.mask = false;
-	}
 
 	invalidate(): void {
 		this.#input.invalidate();
@@ -100,9 +75,7 @@ export class SignInTab implements SetupTab {
 	readonly id = "sign-in";
 	readonly label = "Sign in";
 
-	#authStorage: AuthStorage | undefined;
-	#providerAuthPort: ProviderAuthPort | undefined;
-	#productAuthUnavailable = false;
+	#authStorage: AuthStorage;
 	#selector: OAuthSelectorComponent;
 	#statusLines: string[] = [];
 	#authUrl: string | undefined;
@@ -116,17 +89,11 @@ export class SignInTab implements SetupTab {
 	#disposed = false;
 	#step: WizardStep | undefined;
 
-	constructor(private readonly host: SetupSceneHost) {
-		this.#providerAuthPort = host.providerAuthPort;
-		if (!this.#providerAuthPort) {
-			if (host.nativeAuthStorage) {
-				this.#authStorage = host.nativeAuthStorage;
-			} else if (host.identity.id === OMP_PRODUCT_IDENTITY.id) {
-				this.#authStorage = host.ctx.modelRegistry.authStorage;
-			} else {
-				this.#productAuthUnavailable = true;
-			}
-		}
+	readonly #host: SetupSceneHost;
+
+	constructor(host: SetupSceneHost) {
+		this.#host = host;
+		this.#authStorage = host.ctx.authStorage;
 		this.#selector = this.#createSelector();
 	}
 
@@ -150,10 +117,6 @@ export class SignInTab implements SetupTab {
 
 	handleInput(data: string): void {
 		if (this.#loggingInProvider) {
-			if (this.#prompt) {
-				this.#prompt.input.handleInput(data);
-				return;
-			}
 			if (this.#authUrl && (matchesKey(data, "alt+c") || (data === "c" && !this.#prompt))) {
 				void this.#copyAuthUrl();
 				return;
@@ -173,26 +136,16 @@ export class SignInTab implements SetupTab {
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const lines: string[] = [];
-		if (this.#loggingInProvider) {
-			lines.push(theme.bold(`Signing in to ${this.#loggingInProvider}`));
-		} else {
-			if (this.#productAuthUnavailable) {
-				lines.push(
-					theme.fg("error", `${this.host.identity.displayName} provider setup is unavailable.`),
-					theme.fg(
-						"dim",
-						`Press Esc to continue; retry with \`${this.host.identity.cliName} setup\` when the auth broker is ready.`,
-					),
-					"",
-				);
-			} else if (maxLines === undefined || maxLines >= 17 + 2) {
-				// Hint + blank cost two rows; on short screens the rows go to the provider list.
-				lines.push(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), "");
-			}
-			this.#selectorRowStart = lines.length;
-			if (maxLines !== undefined) this.#selector.setMaxHeight(maxLines - lines.length);
-			lines.push(...this.#selector.render(width));
+		// Hint + blank cost two rows; the wizard subtitle already explains
+		// this panel, so on short screens the rows go to the provider list
+		// instead (17 = full selector: 4 chrome above, 10 rows, 3 below).
+		let intro: Container | undefined;
+		if (this.#loggingInProvider === undefined && (maxLines === undefined || maxLines >= 17 + 2)) {
+			intro = new Container();
+			intro.addChild(
+				new Text(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), 0, 0),
+			);
+			intro.addChild(new Spacer(1));
 		}
 		const tail = new Container();
 		const urlLines = this.#authUrl ? wrapTextWithAnsi(theme.fg("dim", this.#authUrl), width) : [];
@@ -254,141 +207,70 @@ export class SignInTab implements SetupTab {
 	}
 
 	#createSelector(): OAuthSelectorComponent {
-		const dataSource =
-			this.#providerAuthPort ??
-			(this.#authStorage
-				? createNativeProviderAuthDataSource(this.#authStorage)
-				: UNAVAILABLE_PRODUCT_PROVIDER_SOURCE);
 		return new OAuthSelectorComponent(
 			"login",
-			dataSource,
+			this.#authStorage,
 			providerId => {
 				void this.#login(providerId);
 			},
-			() => this.host.finish("skipped"),
-			{
-				validateAuth: this.#providerAuthPort
-					? async providerId =>
-							(await this.#providerAuthPort?.listCredentials(providerId))?.some(
-								credential => credential.status === "active",
-							) === true
-					: undefined,
-				requestRender: () => this.host.requestRender(),
-			},
+			() => this.#host.finish("skipped"),
+			{ requestRender: () => this.#host.requestRender(), disabledProviders: this.#host.ctx.disabledProviders },
 		);
 	}
 
 	async #login(providerId: string): Promise<void> {
 		if (this.#loggingInProvider || this.#disposed) return;
-		const useManualInput = this.#authStorage !== undefined && PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
+		const useManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
 		this.#selector.stopValidation();
 		this.#loggingInProvider = providerId;
-		this.#statusLines = [theme.fg("dim", "Starting authentication flow…")];
+		this.#statusLines = [theme.fg("dim", "Starting OAuth flow…")];
 		this.#authUrl = undefined;
 		this.#authLaunchUrl = undefined;
 		this.#loginAbort = new AbortController();
 		this.#host.restoreFocus();
 		this.#host.requestRender();
 		try {
-			let accountLabel: string | undefined;
-			if (this.#providerAuthPort) {
-				const credential = await authenticateProvider(this.#providerAuthPort, providerId, {
-					signal: this.#loginAbort.signal,
-					selectAuthScheme: async (provider, schemes) => {
-						const choices = schemes.map((scheme, index) => `${index + 1}) ${scheme}`).join("  ");
-						const answer = (
-							await this.#showPrompt({
-								message: `Choose authentication for ${provider.displayName}: ${choices}`,
-							})
-						).trim();
-						const selectedIndex = Number.parseInt(answer, 10) - 1;
-						return schemes[selectedIndex] ?? answer;
-					},
-					selectOAuthFlow: async provider => {
-						const flows = provider.oauthFlows.filter(
-							(flow): flow is "browser" | "device" => flow === "browser" || flow === "device",
-						);
-						if (flows.length <= 1) return flows[0];
-						const choices = flows.map((flow, index) => `${index + 1}) ${flow}`).join("  ");
-						const answer = (await this.#showPrompt({ message: `Choose OAuth flow: ${choices}` })).trim();
-						const selectedIndex = Number.parseInt(answer, 10) - 1;
-						const selectedByName = answer === "browser" || answer === "device" ? answer : undefined;
-						return (
-							flows[selectedIndex] ??
-							(selectedByName && flows.includes(selectedByName) ? selectedByName : undefined)
-						);
-					},
-					showAuthorization: session => {
-						const url = session.authorizeUrl;
-						const instructions = [
-							session.instructions,
-							session.userCode ? `Code: ${session.userCode}` : undefined,
-						].filter((line): line is string => Boolean(line));
-						this.#statusLines = instructions.map(line => theme.fg("warning", line));
-						if (url) {
-							this.#authUrl = url;
-							void this.#copyAuthUrl();
-							this.host.ctx.openInBrowser(url);
-						}
-						this.host.requestRender();
-					},
-					prompt: input =>
-						this.#showPrompt({
-							message: input.message,
-							placeholder: input.placeholder,
-							secret: input.secret,
-						}),
-					showProgress: message => {
-						this.#statusLines.push(theme.fg("dim", message));
-						this.host.requestRender();
-					},
-				});
-				accountLabel = credential.accountLabel;
-			} else {
-				const authStorage = this.#authStorage;
-				if (!authStorage) {
-					throw new Error(`${this.host.identity.displayName} provider setup is unavailable`);
-				}
-				const identity = await authStorage.login(providerId as OAuthProvider, {
-					signal: this.#loginAbort.signal,
-					onBrowserSession: captureBrowserSession,
-					onAuth: info => {
-						this.#authUrl = info.url;
-						this.#authLaunchUrl = info.launchUrl && info.launchUrl !== info.url ? info.launchUrl : undefined;
-						this.#statusLines = [];
-						if (info.instructions) {
-							this.#statusLines.push(theme.fg("warning", info.instructions));
-						}
-						if (useManualInput) {
-							this.#statusLines.push(theme.fg("dim", "Paste the returned code or redirect URL when prompted."));
-						}
-						void this.#copyAuthUrl();
-						this.host.ctx.openInBrowser(info.url);
-						this.host.requestRender();
-					},
-					onPrompt: prompt => this.#showPrompt(prompt),
-					onProgress: message => {
-						this.#statusLines.push(theme.fg("dim", message));
-						this.host.requestRender();
-					},
-					onManualCodeInput: signal =>
-						this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }, signal),
-				});
-				accountLabel = identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined;
-				await this.host.ctx.modelRegistry.refreshProvider(providerId, "online");
-			}
+			await this.#authStorage.login(providerId as OAuthProvider, {
+				signal: this.#loginAbort.signal,
+				onBrowserSession: (request, signal) => this.#host.ctx.captureBrowserSession(request, signal),
+				onAuth: info => {
+					// Store the full authorization URL as the primary copy/display
+					// target: it works from any machine, including SSH boxes where
+					// the OMP-hosted `launchUrl` would resolve against the user's
+					// local browser and fail. The wizard render uses
+					// `wrapTextWithAnsi`, so long URLs wrap across lines rather
+					// than getting truncated — the RFC 7636 §4.3 PKCE-downgrade
+					// bug that motivated `launchUrl` is unreachable through this
+					// surface. `launchUrl` is still surfaced as an optional local
+					// shortcut for wide-terminal local users.
+					this.#authUrl = info.url;
+					this.#authLaunchUrl = info.launchUrl && info.launchUrl !== info.url ? info.launchUrl : undefined;
+					this.#statusLines = [];
+					if (info.instructions) {
+						this.#statusLines.push(theme.fg("warning", info.instructions));
+					}
+					if (useManualInput) {
+						this.#statusLines.push(theme.fg("dim", "Paste the returned code or redirect URL when prompted."));
+					}
+					void this.#copyAuthUrl();
+					this.#host.ctx.openInBrowser(info.url);
+					this.#host.requestRender();
+				},
+				onPrompt: prompt => this.#showPrompt(prompt),
+				onProgress: message => {
+					this.#statusLines.push(theme.fg("dim", message));
+					this.#host.requestRender();
+				},
+				onManualCodeInput: signal =>
+					this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }, signal),
+			});
+			// Provider-scoped online refresh so the just-persisted credential re-runs
+			// discovery instead of reusing a fresh authoritative cache row (#5780).
+			await this.#host.ctx.refreshProvider(providerId);
 			if (this.#disposed) return;
-			const account = accountLabel ? ` as ${accountLabel}` : "";
 			this.#statusLines = [
-				theme.fg("success", `${theme.status.success} Signed in to ${providerId}${account}`),
-				theme.fg(
-					"dim",
-					this.#providerAuthPort
-						? `Credentials managed by ${BREADBOARD_PRODUCT_IDENTITY.displayName} auth broker`
-						: this.host.nativeAuthStorage
-							? "Credentials saved to the shared OMP auth store"
-							: `Credentials saved to ${getAgentDbPath()}`,
-				),
+				theme.fg("success", `${theme.status.success} Signed in to ${providerId}`),
+				theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`),
 			];
 			this.#authUrl = undefined;
 			this.#authLaunchUrl = undefined;
@@ -402,20 +284,17 @@ export class SignInTab implements SetupTab {
 			if (this.#disposed) return;
 			if (this.#loginAbort?.signal.aborted) {
 				this.#statusLines = [theme.fg("dim", "Login cancelled.")];
-			} else if (error instanceof ProviderAuthError) {
-				this.#statusLines = [
-					theme.fg("error", `Login failed [${error.code}]: ${error.message}`),
-					theme.fg("dim", error.nextAction),
-				];
+				this.#authUrl = undefined;
+				this.#authLaunchUrl = undefined;
 			} else {
 				const message = error instanceof Error ? error.message : String(error);
 				this.#statusLines = [
 					theme.fg("error", `Login failed: ${message}`),
 					theme.fg("dim", "Choose another provider or press Esc to continue."),
 				];
+				this.#authUrl = undefined;
+				this.#authLaunchUrl = undefined;
 			}
-			this.#authUrl = undefined;
-			this.#authLaunchUrl = undefined;
 			this.#loggingInProvider = undefined;
 			this.#loginAbort = undefined;
 			this.#host.restoreFocus();
@@ -434,10 +313,7 @@ export class SignInTab implements SetupTab {
 		this.#host.requestRender();
 	}
 
-	#showPrompt(
-		prompt: { message: string; placeholder?: string; secret?: boolean },
-		signal?: AbortSignal,
-	): Promise<string> {
+	#showPrompt(prompt: OAuthPrompt, signal?: AbortSignal): Promise<string> {
 		this.#resolvePrompt("");
 		if (signal?.aborted) {
 			return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Login input cancelled"));
@@ -450,11 +326,7 @@ export class SignInTab implements SetupTab {
 		const pending = Promise.withResolvers<string>();
 		this.#promptResolve = pending.resolve;
 		this.#promptReject = pending.reject;
-		this.#prompt = {
-			message: prompt.message,
-			placeholder: prompt.secret ? undefined : prompt.placeholder,
-			input: focusInput,
-		};
+		this.#prompt = { message: prompt.message, placeholder: prompt.placeholder, input: focusInput };
 		if (signal) {
 			const onAbort = () => {
 				if (this.#promptReject !== pending.reject) return;
@@ -464,12 +336,10 @@ export class SignInTab implements SetupTab {
 			this.#promptAbortCleanup = () => signal.removeEventListener("abort", onAbort);
 		}
 		input.onSubmit = value => {
-			focusInput.clear();
 			this.#resolvePrompt(value);
 		};
 		input.onEscape = () => {
 			this.#loginAbort?.abort();
-			focusInput.clear();
 			this.#resolvePrompt("");
 		};
 		this.#host.setFocus(focusInput);
@@ -479,7 +349,6 @@ export class SignInTab implements SetupTab {
 
 	#resolvePrompt(value: string): void {
 		const resolve = this.#promptResolve;
-		this.#prompt?.input.clear();
 		if (!resolve) return;
 		this.#clearPrompt();
 		resolve(value);

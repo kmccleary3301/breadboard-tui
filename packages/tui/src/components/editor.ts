@@ -404,50 +404,6 @@ interface EditorState {
 	cursorLine: number;
 	cursorCol: number;
 }
-class BoundedStack<T> {
-	readonly #items: Array<T | undefined>;
-	#start = 0;
-	#size = 0;
-
-	constructor(private readonly capacity: number) {
-		this.#items = new Array<T | undefined>(capacity);
-	}
-
-	get size(): number {
-		return this.#size;
-	}
-
-	push(value: T): void {
-		if (this.#size < this.capacity) {
-			this.#items[(this.#start + this.#size) % this.capacity] = value;
-			this.#size++;
-			return;
-		}
-		this.#items[this.#start] = value;
-		this.#start = (this.#start + 1) % this.capacity;
-	}
-
-	peek(): T | undefined {
-		if (this.#size === 0) return undefined;
-		return this.#items[(this.#start + this.#size - 1) % this.capacity];
-	}
-
-	pop(): T | undefined {
-		if (this.#size === 0) return undefined;
-		const index = (this.#start + this.#size - 1) % this.capacity;
-		const value = this.#items[index];
-		this.#items[index] = undefined;
-		this.#size--;
-		if (this.#size === 0) this.#start = 0;
-		return value;
-	}
-
-	clear(): void {
-		this.#items.fill(undefined);
-		this.#start = 0;
-		this.#size = 0;
-	}
-}
 
 interface LayoutLine {
 	text: string;
@@ -624,7 +580,6 @@ export class Editor implements Component, Focusable {
 	#autocompleteProvider?: AutocompleteProvider;
 	#textAssistProvider?: EditorTextAssistProvider;
 	#autocompleteList?: SelectList;
-	#bareSlashAutocompleteCache?: { items: ReadonlyArray<SelectItem>; length: number; list: SelectList };
 	#autocompleteState: "regular" | "force" | "assist" | null = null;
 	#textAssistReplacement:
 		| { line: number; startCol: number; endCol: number; original: string; cursorOffset: number }
@@ -669,7 +624,7 @@ export class Editor implements Component, Focusable {
 	#historyDraftActive = false;
 
 	// Undo stack for editor state changes
-	#undoStack = new BoundedStack<EditorState>(MAX_UNDO_STACK);
+	#undoStack: EditorState[] = [];
 	#suspendUndo = false;
 
 	// Debounce timer for autocomplete updates
@@ -734,14 +689,9 @@ export class Editor implements Component, Focusable {
 	setTheme(theme: EditorTheme): void {
 		this.#theme = theme;
 		this.borderColor = theme.borderColor;
-		this.#bareSlashAutocompleteCache = undefined;
 	}
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
-		if (this.#autocompleteProvider !== provider) {
-			this.#cancelAutocomplete();
-			this.#bareSlashAutocompleteCache = undefined;
-		}
 		this.#autocompleteProvider = provider;
 	}
 
@@ -809,7 +759,6 @@ export class Editor implements Component, Focusable {
 	 * Accounts for the border characters and horizontal padding when visible.
 	 */
 	getTopBorderAvailableWidth(terminalWidth: number): number {
-		if (this.#effectiveStyle().statusAttachment === "top-rule-chip") return Math.max(0, terminalWidth - 2);
 		const paddingX = this.#getEditorPaddingX();
 		const borderWidth = this.#getHorizontalChromeWidth(paddingX);
 		return Math.max(0, terminalWidth - borderWidth * 2);
@@ -1010,7 +959,7 @@ export class Editor implements Component, Focusable {
 	}
 	/** Internal setText that doesn't reset history state - used by navigateHistory */
 	#setTextInternal(text: string, cursorAnchor: HistoryCursorAnchor = "end"): void {
-		this.#undoStack.clear();
+		this.#undoStack.length = 0;
 		const lines = sanitizeLoadedText(text).split("\n");
 		this.#state.lines = lines.length === 0 ? [""] : lines;
 		// A single-row entry's top and bottom are the same row, so the directional
@@ -1270,6 +1219,7 @@ export class Editor implements Component, Focusable {
 		this.#lastLayoutWidth = layoutWidth;
 
 		const box = this.#theme.symbols.boxRound;
+		const borderWidth = this.#getHorizontalChromeWidth(paddingX);
 
 		// Layout the text
 		const layoutLines = this.#layoutText(layoutWidth);
@@ -1288,7 +1238,7 @@ export class Editor implements Component, Focusable {
 		// Resolve the custom top-border content once per frame; the style decides
 		// how (and whether) to draw it. Provider evaluation stays editor-owned,
 		// coalescing per-event rebuilds to one per painted frame.
-		const topFillWidth = this.getTopBorderAvailableWidth(width);
+		const topFillWidth = Math.max(0, width - borderWidth * 2);
 		let topBorder: EditorTopBorder | undefined;
 		if (style.statusAttachment !== "none") {
 			if (this.#topBorderProvider) {
@@ -1776,11 +1726,8 @@ export class Editor implements Component, Focusable {
 					const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
 					const currentTextBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
 					if (!this.#autocompletePrefixMatchesCursorText(currentTextBeforeCursor, selected)) {
-						// Autocomplete is stale - cancel and fall through, except a stale
-						// namespace selection must not submit the namespace.
-						const staleNamespace = this.#selectedCompletionIsSkillNamespace();
+						// Autocomplete is stale - cancel and fall through to normal submission
 						this.#cancelAutocomplete();
-						if (staleNamespace) return;
 					} else {
 						if (selected && this.#autocompleteProvider) {
 							const shouldChainSlashCommandAutocomplete = this.#isSlashCommandNameAutocompleteSelection();
@@ -2624,7 +2571,7 @@ export class Editor implements Component, Focusable {
 		this.#setCursorCol(transientStartCol);
 
 		while (true) {
-			const snapshot = this.#undoStack.peek();
+			const snapshot = this.#undoStack.at(-1);
 			if (
 				!snapshot ||
 				!this.#matchesTransientUndoSnapshot(
@@ -2640,7 +2587,7 @@ export class Editor implements Component, Focusable {
 			this.#undoStack.pop();
 		}
 
-		if (this.#undoStack.size === 0) {
+		if (this.#undoStack.length === 0) {
 			this.#notifyChange();
 			return;
 		}
@@ -2818,41 +2765,34 @@ export class Editor implements Component, Focusable {
 			const textBeforeCursor = replaceLine.slice(0, this.#state.cursorCol);
 			const inlineReplacement = this.#autocompleteProvider?.trySyncInlineReplace?.(textBeforeCursor);
 			if (inlineReplacement && this.#applyInlineReplacement(inlineReplacement)) return;
-			// A slash at the submitted-command boundary has no preceding word to
-			// correct. Skip platform spell-check I/O before opening its menu.
-			if (char !== "/" || !this.#isAtStartOfSubmittedMessage()) {
-				const cursorLine = this.#state.cursorLine;
-				const cursorCol = this.#state.cursorCol;
-				const currentLine = this.#state.lines[cursorLine] ?? "";
-				const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(this.#state.lines, cursorLine, cursorCol);
-				if (autocorrection instanceof Promise) {
-					autocorrection
-						.then(replacement => {
-							if (
-								replacement &&
-								this.#state.cursorLine === cursorLine &&
-								this.#state.cursorCol === cursorCol &&
-								this.#state.lines[cursorLine] === currentLine &&
-								this.#applyInlineReplacement(replacement)
-							) {
-								this.onTextAssistApplied?.();
-							}
-						})
-						.catch(() => {});
-				} else if (autocorrection && this.#applyInlineReplacement(autocorrection)) {
-					return;
-				}
+			const cursorLine = this.#state.cursorLine;
+			const cursorCol = this.#state.cursorCol;
+			const currentLine = this.#state.lines[cursorLine] ?? "";
+			const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(this.#state.lines, cursorLine, cursorCol);
+			if (autocorrection instanceof Promise) {
+				autocorrection
+					.then(replacement => {
+						if (
+							replacement &&
+							this.#state.cursorLine === cursorLine &&
+							this.#state.cursorCol === cursorCol &&
+							this.#state.lines[cursorLine] === currentLine &&
+							this.#applyInlineReplacement(replacement)
+						) {
+							this.onTextAssistApplied?.();
+						}
+					})
+					.catch(() => {});
+			} else if (autocorrection && this.#applyInlineReplacement(autocorrection)) {
+				return;
 			}
 		}
 
 		// Check if we should trigger or update autocomplete
 		if (!this.#autocompleteState) {
-			// A bare command slash is entirely synchronous. Open it before the
-			// outer input handler paints, avoiding an intermediate draft-only frame.
+			// Auto-trigger for "/" at the start of a submitted command or a mid-prompt skill lookup.
 			if (char === "/" && (this.#isAtStartOfSubmittedMessage() || this.#isInMidPromptSkillSlashContext())) {
-				if (!this.#isAtStartOfSubmittedMessage() || !this.#openSyncSlashAutocomplete()) {
-					void this.#tryTriggerAutocomplete();
-				}
+				this.#tryTriggerAutocomplete();
 			}
 			// Auto-trigger for "@" file reference (fuzzy search)
 			else if (char === "@") {
@@ -3067,7 +3007,7 @@ export class Editor implements Component, Focusable {
 		this.clearPasteState();
 		this.#historyIndex = -1;
 		this.#scrollOffset = 0;
-		this.#undoStack.clear();
+		this.#undoStack.length = 0;
 
 		this.#notifyChange("");
 		if (this.onSubmit) this.onSubmit(result);
@@ -3961,8 +3901,6 @@ export class Editor implements Component, Focusable {
 	 *   engages for command-shaped selections: absolute-path completions (`/tmp/fo`
 	 *   via the no-command-match fall-through) share the leading-slash prefix shape
 	 *   but must use the live-suffix path rule so the apply slice stays anchored.
-	 *   A changed normal token must also retain the selected value as the
-	 *   provider's first-ranked current synchronous slash candidate.
 	 * - Mid-prompt skill branch re-anchors when the popup item is a skill and the
 	 *   current text still ends in a matching trailing slash token, preventing a
 	 *   stale selection from replacing a newer skill prefix.
@@ -3996,11 +3934,7 @@ export class Editor implements Component, Focusable {
 			const currentLeadingStart = findLeadingSlashCommandStart(currentTextBeforeCursor);
 			if (currentLeadingStart !== null) {
 				const token = currentTextBeforeCursor.slice(currentLeadingStart);
-				if (!token.includes(" ") && !token.slice(1).includes("/")) {
-					const currentCandidates = this.#autocompleteProvider?.trySyncSlashCompletion?.(currentTextBeforeCursor);
-					if (!item || currentCandidates?.items[0]?.value !== item.value) return false;
-					return true;
-				}
+				if (!token.includes(" ") && !token.slice(1).includes("/")) return true;
 			}
 			return false;
 		}
@@ -4074,23 +4008,6 @@ export class Editor implements Component, Focusable {
 		return /(?:^|[\s"'`(<=])[a-z][a-z0-9+.-]*:\/{1,2}[^\s"'`()<>]*$/i.test(textBeforeCursor);
 	}
 
-	#openSyncSlashAutocomplete(): boolean {
-		const provider = this.#autocompleteProvider;
-		if (!provider?.trySyncSlashCompletion) return false;
-		const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
-		const textBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
-		const suggestions = provider.trySyncSlashCompletion(textBeforeCursor, { includeBare: true });
-		if (!suggestions || suggestions.items.length === 0) return false;
-
-		this.#autocompleteRequestId += 1;
-		this.#autocompleteAbortController?.abort();
-		this.#autocompletePrefix = suggestions.prefix;
-		this.#autocompleteList = this.#createAutocompleteList(suggestions.prefix, suggestions.items);
-		this.#autocompleteState = "regular";
-		this.onAutocompleteUpdate?.();
-		return true;
-	}
-
 	async #tryTriggerAutocomplete(explicitTab: boolean = false): Promise<void> {
 		if (!this.#autocompleteProvider) return;
 		if (
@@ -4106,20 +4023,11 @@ export class Editor implements Component, Focusable {
 		}
 		await this.#queueAutocompleteRequest({ kind: "regular", explicitTab });
 	}
-	#createAutocompleteList(prefix: string, items: ReadonlyArray<SelectItem>): SelectList {
+	#createAutocompleteList(
+		prefix: string,
+		items: Array<{ value: string; label: string; description?: string }>,
+	): SelectList {
 		const layout = prefix.startsWith("/") ? SLASH_COMMAND_SELECT_LIST_LAYOUT : AUTOCOMPLETE_SELECT_LIST_LAYOUT;
-		if (prefix === "/") {
-			const cached = this.#bareSlashAutocompleteCache;
-			if (cached?.items === items && cached.length === items.length) {
-				cached.list.setSelectedIndex(0);
-				cached.list.refreshItems();
-				cached.list.setHoverIndex(null);
-				return cached.list;
-			}
-			const list = new SelectList(items, this.#autocompleteMaxVisible, this.#theme.selectList, layout);
-			this.#bareSlashAutocompleteCache = { items, length: items.length, list };
-			return list;
-		}
 		return new SelectList(items, this.#autocompleteMaxVisible, this.#theme.selectList, layout);
 	}
 
