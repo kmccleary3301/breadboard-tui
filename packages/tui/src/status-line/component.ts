@@ -2218,6 +2218,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			goalStatusInFooter: this.#goalModeStatus ? this.host.goalStatusInFooter(this.session) : false,
 			vibeMode: this.#vibeModeStatus,
 			vim: this.#vimStatus,
+			stream: this.#streamStatus,
+			recording: this.#recording,
 			collab: this.#collabStatus,
 			autoCompactEnabled: !breadboardOwned && this.#autoCompactEnabled,
 			compactionSpeculation: breadboardOwned ? "idle" : compactionSpeculation,
@@ -2548,7 +2550,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 *   lives in the editor's top rule).
 	 * - `plain-right`: right segments only (claude composer's top rule).
 	 *
-	 * `previewTitle` is a stand-in session title for composer previews; the
+	 * `session_name` segment renders it when the session is unnamed.
+	 */
 	#renderStatusLine(
 		width: number,
 		layout: StatusLineLayout,
@@ -2828,22 +2831,22 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 		const leftGroup = renderGroup(left, "left");
 		const rightGroup = renderGroup(right, "right");
-		if (!leftGroup && !rightGroup) return "";
+		if (!leftGroup && !rightGroup) return { content: "" };
 
 		if (topFillWidth === 0 || (plain && (left.length === 0 || right.length === 0))) {
-			return leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup;
+			return { content: leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup };
 		}
 
 		const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
 		if (plain) {
 			// Standalone composers: no gauge line between the groups, just air.
-			return leftGroup + padding(gapWidth) + rightGroup;
+			return { content: leftGroup + padding(gapWidth) + rightGroup };
 		}
 		// Box layout: with one group absent (an unnamed session hides
 		// `session_name`, emptying the default preset's right group) the gauge
 		// runs to the border edge instead of disappearing, so embedded context
 		// labels don't fall back to a context chip until the session is titled.
-		return leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup;
+		return { content: leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup };
 	}
 
 	/**
@@ -3030,10 +3033,15 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * `bottomBarGap` inserts a blank spacer row above the bar for styles whose
 	 * editor has no bottom chrome.
 	 */
-	setComposerStyle(style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">): void {
+	setComposerStyle(
+		style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">,
+		topBorderWidth?: (width: number) => number,
+	): void {
 		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
 		this.#topAttachment = style.statusAttachment;
 		this.#standaloneGap = style.bottomBarGap;
+		this.#topBorderWidth =
+			topBorderWidth ?? (width => (style.statusAttachment === "top-border" ? Math.max(1, width - 6) : width));
 		this.#syncPricingTimer();
 	}
 
@@ -3061,6 +3069,17 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string {
 		return this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle).dimmedContent;
 	}
+	/** Overflow shares the exact top-row allocation, including inner chrome width. */
+	renderOverflowBar(
+		width: number,
+		topWidth: number,
+		layout: "box" | "band" | "plain-right",
+		previewTitle?: string,
+	): string | undefined {
+		if (!isBreadboardPreset(this.#resolveSettings().preset)) return undefined;
+		const overflow = this.#buildStatusLine(topWidth, layout, previewTitle).overflow;
+		return overflow ? padding(Math.max(0, Math.floor((width - topWidth) / 2))) + overflow : "";
+	}
 	/**
 	 * Status bar lines for a composer layout, rendered through the real
 	 * pipeline — the single source for the /settings appearance preview.
@@ -3080,7 +3099,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			const band = this.getBandTopBorder(width);
 			if (band.content) lines.push(band.content);
 		} else if (attachment === "top-rule-chip") {
-			// Render the chip on its rule exactly as the claude composer does.
 			const rule = claudeComposerStyle.renderTop({
 				width,
 				paddingX: 0,
@@ -3092,7 +3110,11 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			});
 			if (rule !== undefined) lines.push(rule);
 		}
-		if (bottomBar !== "none") {
+		if (isBreadboardPreset(this.#resolveSettings().preset) && attachment !== "none") {
+			const layout = attachment === "top-border" ? "box" : attachment === "top-band" ? "band" : "plain-right";
+			const overflow = this.renderOverflowBar(width, width, layout);
+			if (overflow) lines.push(overflow);
+		} else if (bottomBar !== "none") {
 			const main = this.renderBottomBar(width, bottomBar);
 			if (main) lines.push(main);
 		}
@@ -3101,7 +3123,15 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
-		if (this.#standalone && !this.#autocompleteActiveProbe?.()) {
+		const autocompleteActive = this.#autocompleteActiveProbe?.() === true;
+		if (isBreadboardPreset(this.#resolveSettings().preset) && this.#topAttachment !== "none" && !autocompleteActive) {
+			const layout = this.#topAttachment === "top-border" ? "box" : this.#topAttachment === "top-band" ? "band" : "plain-right";
+			const overflow = this.renderOverflowBar(width, this.#topBorderWidth(width), layout);
+			if (overflow) {
+				if (this.#standaloneGap) lines.push("");
+				lines.push(overflow);
+			}
+		} else if (this.#standalone && !autocompleteActive) {
 			const content = this.renderBottomBar(width, this.#standalone === "left-only" ? "left" : "full");
 			if (content) {
 				if (this.#standaloneGap) lines.push("");
