@@ -409,7 +409,8 @@ export class ModelHubComponent implements Component {
 		}
 
 		this.#reloadRoles(availableModels);
-		this.#buildRolesRows();
+		if (this.#mainStreamOwnsTurnLifecycle) this.#rolesRows = [];
+		else this.#buildRolesRows();
 
 		const mruOrder = this.#settings.mruOrder;
 		this.#availableItems = buildBrowserItems(availableModels);
@@ -432,7 +433,7 @@ export class ModelHubComponent implements Component {
 	}
 
 	#buildSidebar(allModels: ReadonlyArray<Model>, availableModels: ReadonlyArray<Model>): void {
-		const scoped = this.#scopedModels.length > 0;
+		const scoped = this.#usesScopedCatalog();
 		let disabledProviders: ReadonlySet<string>;
 		try {
 			disabledProviders = new Set(this.#settings.disabledProviders);
@@ -495,7 +496,7 @@ export class ModelHubComponent implements Component {
 			catalogCount: catalogCounts.get(providerId) ?? 0,
 		});
 
-		const visibleRoles = this.#visibleRoleIds();
+		const visibleRoles = this.#mainStreamOwnsTurnLifecycle ? [] : this.#visibleRoleIds();
 		let assignedCount = 0;
 		for (const role of visibleRoles) {
 			const assignment = this.#roles[role];
@@ -504,15 +505,16 @@ export class ModelHubComponent implements Component {
 
 		// Roles leads the fixed section so downward hops from Recent head into
 		// model scopes instead of being captured by the roles view.
-		const fixed: SidebarEntry[] = [
-			{
+		const fixed: SidebarEntry[] = [];
+		if (!this.#mainStreamOwnsTurnLifecycle) {
+			fixed.push({
 				id: "roles",
 				kind: "roles",
 				label: "Roles",
 				annotation: `${assignedCount}/${visibleRoles.length}`,
-			},
-			{ id: "all", kind: "all", label: "All models", annotation: String(availableModels.length) },
-		];
+			});
+		}
+		fixed.push({ id: "all", kind: "all", label: "All models", annotation: String(availableModels.length) });
 
 		this.#fixedEntries = fixed;
 		this.#unlockedProviderEntries = [...unlocked]
@@ -834,7 +836,7 @@ export class ModelHubComponent implements Component {
 	}
 
 	#scheduleProviderRefresh(providerId: string, options?: { force?: boolean }): void {
-		if (this.#scopedModels.length > 0 || !providerId) return;
+		if (this.#usesScopedCatalog() || !providerId) return;
 		const force = options?.force === true;
 		if (force) {
 			const pending = this.#scheduledProviderRefreshes.get(providerId);
@@ -952,7 +954,9 @@ export class ModelHubComponent implements Component {
 			return;
 		}
 		if (this.#mainStreamOwnsTurnLifecycle) {
-			void this.#callbacks.onSelectModel?.(item.model, item.selector);
+			this.#finishAssignment(this.#callbacks.onSelectModel?.(item.model, item.selector), () =>
+				this.#tui.requestRender(),
+			);
 			return;
 		}
 		this.#openRoleStrip(item);
@@ -961,8 +965,9 @@ export class ModelHubComponent implements Component {
 	#roleForScope(role: string, scope: ModelRoleSelectionScope): ResolvedModelRoleValue {
 		const roleValue =
 			scope === "project" ? this.#settings.getProjectModelRole(role) : this.#settings.getGlobalModelRole(role);
-		const allModels =
-			this.#scopedModels.length > 0 ? this.#scopedModels.map(scoped => scoped.model) : this.#registry.getAll("all");
+		const allModels = this.#usesScopedCatalog()
+			? this.#scopedModels.map(scoped => scoped.model)
+			: this.#registry.getAll("all");
 		const roleLookup: ModelRoleLookup = {
 			getModelRole: scopedRole =>
 				scope === "project"
@@ -2059,7 +2064,11 @@ export class ModelHubComponent implements Component {
 			);
 		}
 		const entry = this.#activeEntry();
-		const scopedSuffix = this.#scopedModels.length > 0 ? " · --models scope" : "";
+		const scopedSuffix = this.#mainStreamOwnsTurnLifecycle
+			? " · engine catalog"
+			: this.#usesScopedCatalog()
+				? " · --models scope"
+				: "";
 		let text: string;
 		switch (entry.kind) {
 			case "recent":
@@ -2267,7 +2276,7 @@ export class ModelHubComponent implements Component {
 		const catalogCount = entry.catalogCount ?? 0;
 		if (catalogCount > 0) {
 			lines.push(truncateToWidth(theme.fg("dim", `  ${catalogCount} models in catalog:`), width));
-			const preview = this.#scopedModels.length > 0 ? [] : this.#registry.getAll("all");
+			const preview = this.#usesScopedCatalog() ? this.#scopedModels.map(scoped => scoped.model) : this.#registry.getAll("all");
 			for (const model of preview) {
 				if (model.provider !== entry.providerId) continue;
 				if (lines.length >= rows) break;
@@ -2322,6 +2331,10 @@ export class ModelHubComponent implements Component {
 		}
 		if (entry.kind === "provider" && entry.locked) {
 			return entry.oauth ? "Enter log in · ↑/↓ providers · Esc close" : "↑/↓ providers · Esc close";
+		}
+		if (this.#mainStreamOwnsTurnLifecycle) {
+			const arrows = this.#focus === "scope" ? "↑/↓ providers · → models" : "↑/↓ models · ← providers";
+			return `Enter select model · ${arrows} · type to search · Esc close`;
 		}
 		const arrows = this.#focus === "scope" ? "↑/↓ providers · → models" : "↑/↓ models · ← providers";
 		const refresh = entry.kind === "provider" ? " · F5 refresh" : "";
