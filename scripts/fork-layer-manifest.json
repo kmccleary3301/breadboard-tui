@@ -182,7 +182,17 @@
 			"rule": "breadboard-harness-package"
 		},
 		{
+			"path": "packages/breadboard-harness/src/canonical-json.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
 			"path": "packages/breadboard-harness/src/index.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/test/canonical-json.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-harness-package"
 		},

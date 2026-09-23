@@ -118,3 +118,5 @@ export async function readEngineDataFile(path: string): Promise<string> {
 	if (file === undefined) throw new Error(`unknown engine data file: ${path}`);
 	return file.content;
 }
+
+export * from "./canonical-json";
