@@ -158,11 +158,9 @@ function codexPythonSchemaOrder(definition: NativeToolDefinition): NativeToolDef
 		const properties = definition.parameters.properties;
 		if (!isRecord(properties)) return definition;
 		const nullableProperties: JsonRecord = {};
-		const orderedNames = ["command", "justification", "timeout_ms", "with_escalated_permissions", "workdir"];
-		for (const name of orderedNames) {
-			const value = properties[name];
+		for (const [name, value] of Object.entries(properties)) {
 			if (!isRecord(value) || name === "command") {
-				if (value !== undefined) nullableProperties[name] = value;
+				nullableProperties[name] = value;
 				continue;
 			}
 			const type = value.type;
