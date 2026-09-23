@@ -1,0 +1,27 @@
+{
+  "tool": "read_file",
+  "case": "dangling-private-alias",
+  "input": {
+    "path": "alias/x.txt"
+  },
+  "initial": {
+    ".breadboard/artifacts/x.txt": "secret artifact\n",
+    ".breadboard/artifacts/nested/y.txt": "nested secret\n",
+    ".breadboard/attachments/a.bin": "private attachment\n",
+    ".breadboard/other/visible.txt": "visible control\n",
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"error\": \"artifact store is private; use an authorized attachment URI\"}",
+    "details": {
+      "error": "artifact store is private; use an authorized attachment URI"
+    },
+    "isError": true
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": ".breadboard/artifacts/missing"
+  }
+}

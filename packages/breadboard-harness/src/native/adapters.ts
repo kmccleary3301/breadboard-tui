@@ -1,6 +1,6 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
 import { applyPatchOperationsDirect, convertPatchToUnified, normalizeWorkspacePath } from "./patch";
 import type { NativeToolResult } from "./types";
@@ -16,26 +16,50 @@ function result(details: CanonicalJson, isError = false): NativeToolResult {
 	return { text: pythonJson(details), details, ...(isError ? { isError: true } : {}) };
 }
 
-function resolveSymlinkAware(path: string): string {
-	const missing: string[] = [];
-	let current = resolve(path);
-	while (true) {
+function resolveSymlinkAware(workspaceRoot: string, path: string): string {
+	const lexicalRoot = resolve(workspaceRoot);
+	const root = realpathSync.native(lexicalRoot);
+	const candidate = resolve(path);
+	const rootRelative = relative(lexicalRoot, candidate);
+	if (rootRelative === ".." || rootRelative.startsWith("../") || isAbsolute(rootRelative)) return candidate;
+	let pending = rootRelative.split(/[\\/]/u).filter(Boolean);
+	let current = root;
+	while (pending.length > 0) {
+		const segment = pending.shift()!;
+		const next = resolve(current, segment);
 		try {
-			const resolved = realpathSync.native(current);
-			return resolve(resolved, ...missing.reverse());
-		} catch {
-			const parent = dirname(current);
-			if (parent === current) return resolve(path);
-			missing.unshift(basename(current));
-			current = parent;
+			current = realpathSync.native(next);
+			continue;
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ELOOP") throw error;
+			if (!(error instanceof Error) || !("code" in error) || (error.code !== "ENOENT" && error.code !== "ENOTDIR")) throw error;
+			let stat;
+			try {
+				stat = lstatSync(next);
+			} catch (statError) {
+				if (statError instanceof Error && "code" in statError && (statError.code === "ENOENT" || statError.code === "ENOTDIR")) {
+					return resolve(current, segment, ...pending);
+				}
+				throw statError;
+			}
+			if (!stat.isSymbolicLink()) return resolve(current, segment, ...pending);
+			const target = readlinkSync(next, "utf8");
+			const targetPath = resolve(isAbsolute(target) ? target : dirname(next), target);
+			const targetRelative = relative(root, targetPath);
+			if (targetRelative === ".." || targetRelative.startsWith("../") || isAbsolute(targetRelative)) {
+				return resolve(targetPath, ...pending);
+			}
+			pending = [...targetRelative.split(/[\\/]/u).filter(Boolean), ...pending];
+			current = root;
 		}
 	}
+	return current;
 }
 
 function workspaceResultPath(workspaceRoot: string, path: string): string {
 	const lexicalRoot = resolve(workspaceRoot);
-	const resolvedRoot = resolveSymlinkAware(lexicalRoot);
-	const resolvedPath = resolveSymlinkAware(path);
+	const resolvedRoot = resolveSymlinkAware(lexicalRoot, lexicalRoot);
+	const resolvedPath = resolveSymlinkAware(lexicalRoot, path);
 	const lexicalRelative = relative(lexicalRoot, path);
 	const resolvedRelative = relative(resolvedRoot, resolvedPath);
 	return lexicalRelative === resolvedRelative ? path : resolve(lexicalRoot, resolvedRelative);
@@ -44,13 +68,18 @@ function workspaceResultPath(workspaceRoot: string, path: string): string {
 /** Mirrors `agent_llm_openai.py:5264-5273`; list filtering follows :5519-5521. */
 function privateWorkspacePath(workspaceRoot: string, requested: string): boolean {
 	const lexicalRoot = resolve(workspaceRoot);
-	const root = resolveSymlinkAware(lexicalRoot);
+	const root = resolveSymlinkAware(lexicalRoot, lexicalRoot);
 	const normalized = normalizeWorkspacePath(lexicalRoot, requested);
-	const resolved = resolveSymlinkAware(normalized);
+	const resolved = resolveSymlinkAware(lexicalRoot, normalized);
 	const relativePath = relative(root, resolved);
 	const parts = relativePath.split(/[\\/]/u).filter(Boolean);
 	return parts[0] === ".breadboard" && (parts[1] === "artifacts" || parts[1] === "attachments");
 }
+function symlinkResolutionError(error: unknown): NativeToolResult | undefined {
+	if (error instanceof Error && "code" in error && error.code === "ELOOP") return result({ error: error.message }, true);
+	return undefined;
+}
+
 
 function patchTouchesPrivateWorkspace(workspaceRoot: string, patch: string): boolean {
 	const pattern = /^(?:\*\*\* (?:Add|Update|Delete) File:|\*\*\* Move to:|---|\+\+\+|(?:rename|copy) (?:from|to))\s+(?:[ab][/])?("?[^"\t\n]+"?)(?:\t.*)?$/gmu;
@@ -84,8 +113,14 @@ export async function readFileAdapter(
 	workspaceRoot: string,
 	input: Readonly<{ path: string; offset?: number; limit?: number }>,
 ): Promise<NativeToolResult> {
-	if (privateWorkspacePath(workspaceRoot, input.path)) {
-		return result({ error: "artifact store is private; use an authorized attachment URI" }, true);
+	try {
+		if (privateWorkspacePath(workspaceRoot, input.path)) {
+			return result({ error: "artifact store is private; use an authorized attachment URI" }, true);
+		}
+	} catch (error) {
+		const failure = symlinkResolutionError(error);
+		if (failure) return failure;
+		throw error;
 	}
 
 	let path: string;
@@ -146,18 +181,37 @@ export async function listDirAdapter(
 		return pathError(workspaceRoot, input.path, { entries: [], items: [], tree_format: false });
 	}
 	const depth = Math.max(1, Math.trunc(input.depth || 1));
-	const items = (await treeEntries(path, depth, "")).filter(
-		entry => !privateTreeEntry(workspaceRoot, path, entry),
-	);
-	return result({ path: workspaceResultPath(workspaceRoot, path), items, entries: items, tree_format: false });
+	let items: CanonicalJson[];
+	try {
+		items = (await treeEntries(path, depth, "")).filter(
+			entry => !privateTreeEntry(workspaceRoot, path, entry),
+		);
+	} catch (error) {
+		const failure = symlinkResolutionError(error);
+		if (failure) return failure;
+		throw error;
+	}
+	try {
+		return result({ path: workspaceResultPath(workspaceRoot, path), items, entries: items, tree_format: false });
+	} catch (error) {
+		const failure = symlinkResolutionError(error);
+		if (failure) return failure;
+		throw error;
+	}
 }
 export async function createFileFromBlockAdapter(
 	workspaceRoot: string,
 	input: Readonly<{ filePath?: string; file_name?: string; content: string }>,
 ): Promise<NativeToolResult> {
 	const requested = input.file_name || input.filePath || "";
-	if (privateWorkspacePath(workspaceRoot, requested)) {
-		return result({ error: "private workspace storage is unavailable to model tools" }, true);
+	try {
+		if (privateWorkspacePath(workspaceRoot, requested)) {
+			return result({ error: "private workspace storage is unavailable to model tools" }, true);
+		}
+	} catch (error) {
+		const failure = symlinkResolutionError(error);
+		if (failure) return failure;
+		throw error;
 	}
 
 	let path: string;
@@ -198,8 +252,14 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 	const root = resolve(workspaceRoot);
 	const patchSourceText = patch;
 	let patchText = patchSourceText;
-	if (patchTouchesPrivateWorkspace(root, patchSourceText)) {
-		return result({ error: "private workspace storage is unavailable to model tools" }, true);
+	try {
+		if (patchTouchesPrivateWorkspace(root, patchSourceText)) {
+			return result({ error: "private workspace storage is unavailable to model tools" }, true);
+		}
+	} catch (error) {
+		const failure = symlinkResolutionError(error);
+		if (failure) return failure;
+		throw error;
 	}
 
 	if (

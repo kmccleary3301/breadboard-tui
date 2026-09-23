@@ -8,6 +8,7 @@ import {
 	listDirAdapter,
 	readFileAdapter,
 } from "../../src/native/adapters";
+import { isJsonRecord } from "../../src/canonical-json";
 import type { NativeToolResult } from "../../src/native/types";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
@@ -89,3 +90,37 @@ describe("R39 native adapters", () => {
 		}, 30_000);
 	}
 });
+
+test("read_file surfaces symlink loops as ELOOP", async () => {
+	const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-loop-"));
+	try {
+		await symlink("b", join(root, "a"), "dir");
+		await symlink("a", join(root, "b"), "dir");
+		const actual = await readFileAdapter(root, { path: "a/x.txt" });
+		if (!isJsonRecord(actual.details) || typeof actual.details.error !== "string") throw new Error("missing ELOOP error");
+		expect(actual.details.error).toContain("ELOOP: too many symbolic links encountered");
+		expect(actual.isError).toBe(true);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+}, 30_000);
+
+test("read_file refuses case variants on case-insensitive volumes", async () => {
+	const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-case-"));
+	try {
+		const actualPath = join(root, ".breadboard", "artifacts", "x.txt");
+		await mkdir(resolve(actualPath, ".."), { recursive: true });
+		await writeFile(actualPath, "secret\n", "utf8");
+		const variantPath = join(root, ".Breadboard", "Artifacts", "x.txt");
+		try {
+			await readFile(variantPath, "utf8");
+		} catch {
+			return;
+		}
+		const actual = await readFileAdapter(root, { path: ".Breadboard/Artifacts/x.txt" });
+		expect(actual.details).toEqual({ error: "artifact store is private; use an authorized attachment URI" });
+		expect(actual.isError).toBe(true);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+}, 30_000);
