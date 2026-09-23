@@ -1,5 +1,5 @@
 import { isJsonRecord, type CanonicalJson } from "../canonical-json";
-import type { PublicSessionCancelRequest, PublicSessionStartRequest } from "@breadboard/sdk";
+import type { PublicSessionCancelRequest, PublicSessionStartRequest } from "./public-session-requests";
 import type {
 	RpcCommand,
 	RpcExtensionUIRequest,

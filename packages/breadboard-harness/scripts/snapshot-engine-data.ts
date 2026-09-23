@@ -28,6 +28,17 @@ const CONTRACT_SCHEMA_PATHS = [
 	"contracts/public/schemas/bb.public_session_event.v1.schema.json",
 ] as const;
 const CONTRACT_ID_BASE = "https://breadboard.dev/";
+const OPENAPI_SOURCE_PATH = "sdk/ts/src/generated/openapi.v1.json";
+const DERIVED_REQUEST_SCHEMAS = [
+	{
+		component: "SessionStartRequest",
+		path: "contracts/public/schemas/bb.session_start_request.v1.schema.json",
+	},
+	{
+		component: "SessionCancelRequest",
+		path: "contracts/public/schemas/bb.session_cancel_request.v1.schema.json",
+	},
+] as const;
 const GENERATED_TYPE_PATHS = [
 	"sdk/ts-kernel-contracts/src/generated/types/bb.effective_config_graph.v1.ts",
 	"sdk/ts-kernel-contracts/src/generated/types/bb.session_transcript.v2.ts",
@@ -141,6 +152,7 @@ function assertSchemaRefClosure(files: readonly SnapshotFile[]): void {
 	const bundled = new Set(files.map(file => file.path));
 	for (const file of files) {
 		if (!file.path.endsWith(".schema.json")) continue;
+
 		const refs = new Set<string>();
 		collectRefs(JSON.parse(file.content) as unknown, refs);
 		for (const ref of refs) {
@@ -150,6 +162,25 @@ function assertSchemaRefClosure(files: readonly SnapshotFile[]): void {
 			}
 		}
 	}
+}
+/** Derive the two public request schemas from the pyref's generated OpenAPI contract. */
+function derivedRequestSchemas(engine: string, commit: string): SnapshotFile[] {
+	const { content } = readGitUtf8(engine, commit, OPENAPI_SOURCE_PATH);
+	const openapi = JSON.parse(content) as {
+		components?: { schemas?: Record<string, Record<string, unknown>> };
+	};
+	return DERIVED_REQUEST_SCHEMAS.map(({ component, path }) => {
+		const definition = openapi.components?.schemas?.[component];
+		if (definition === undefined) throw new Error(`OpenAPI component is missing: ${component}`);
+		const schema = {
+			$schema: "https://json-schema.org/draft/2020-12/schema",
+			$id: `${CONTRACT_ID_BASE}${path}`,
+			...definition,
+		};
+		const derived = `${JSON.stringify(schema, null, 2)}\n`;
+		const bytes = new TextEncoder().encode(derived);
+		return { path, sha256: sha256(bytes), bytes: bytes.byteLength, content: derived };
+	});
 }
 
 function createSnapshot(engine: string): Snapshot {
@@ -164,6 +195,7 @@ function createSnapshot(engine: string): Snapshot {
 		const { bytes, content } = readGitUtf8(engine, commit, sourcePath);
 		files.push({ path: sourcePath, sha256: sha256(bytes), bytes: bytes.byteLength, content });
 	}
+	files.push(...derivedRequestSchemas(engine, commit));
 	files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 	assertSchemaRefClosure(files);
 	return { schemaVersion: SNAPSHOT_SCHEMA_VERSION, engineCommit: commit, engineTree: tree, files };
