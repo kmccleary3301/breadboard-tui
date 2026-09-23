@@ -1164,8 +1164,8 @@ export interface TurnPrepareResult {
 }
 
 /**
- * Fired after context synchronization and before the provider call. Unlike `turn_end`, this event
- * is awaited for every request, including tool-loop continuations.
+ * Fired after a turn's tool results are recorded and before the loop decides whether to make another
+ * model call. Unlike `turn_end`, the loop awaits it, so its messages land before the next request.
  */
 export interface TurnSettleEvent {
 	type: "turn_settle";
