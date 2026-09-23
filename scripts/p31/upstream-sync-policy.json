@@ -12,6 +12,12 @@
 	},
 	"rules": [
 		{
+			"id": "breadboard-harness-package",
+			"class": "breadboard-owned",
+			"description": "The native BreadBoard harness package and its generated engine-data snapshot are downstream-owned.",
+			"patterns": ["packages/breadboard-harness/**"]
+		},
+		{
 			"id": "breadboard-owned-adapters-and-controls",
 			"class": "breadboard-owned",
 			"description": "BreadBoard adapters, policy controls, provenance, and conformance evidence are downstream-owned.",

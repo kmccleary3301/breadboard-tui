@@ -1,0 +1,592 @@
+# Codex CLI E4 reference config
+# Captured against Codex CLI 0.107.0 and calibrated using the GPT-5.1 Codex Mini lane.
+# This file is fully standalone by design: no `extends`, no hidden prompt refs, and no gitignored assets.
+# Local reference material lives under `../config/e4_targets/codex/0.107.0/`.
+#
+# +--------------------------- Codex dossier map ---------------------------+
+# | tracked vendor prompt + policy refs                                    |
+# |   -> OpenAI Responses API with provider-native tools                   |
+# |   -> BreadBoard tool registry narrowed to the evidence-backed subset   |
+# |   -> mode / completion / concurrency policy for the frozen Codex lane  |
+# +------------------------------------------------------------------------+
+#
+# Reading guide:
+# - This file is the public top-level Codex dossier.
+# - The adjacent target package contains the prompt bundle and reference material.
+# - Where Codex exposes richer product machinery than this frozen lane currently exercises,
+#   the comments below say so plainly instead of overstating parity.
+#
+# Calibration note:
+# The short filename intentionally omits the calibration model nickname. The current latest
+# strict Codex E4 lane was frozen using the GPT-5.1 Codex Mini route, which is why that exact
+# model id is still explicit below.
+
+version: 2
+profile:
+  name: codex-0.107.0-e4-2026-03-06
+
+workspace:
+  # Codex is fundamentally a direct-workspace harness.
+  root: ./agent_ws
+  sandbox:
+    # The public E4 lane uses BreadBoard's process sandbox rather than a heavier VM.
+    driver: process
+  mirror:
+    # Mirror support exists in BreadBoard, but the frozen Codex lane is direct-workspace.
+    enabled: false
+    path: ./agent_ws
+    mode: development
+
+providers:
+  default_model: openai/gpt-5.1-codex-mini
+  routing:
+    # If the provider cannot honor native tools or streaming, fail soft instead of crashing
+    # the harness. This keeps the public lane operational while still preferring the real shape.
+    disable_native_tools_on_probe_failure: true
+    disable_stream_on_probe_failure: true
+  models:
+  - id: openai/gpt-5.1-codex-mini
+    adapter: openai
+    params:
+      temperature: 0.2
+      top_p: 0.9
+
+provider_tools:
+  # Codex is a provider-native tool harness on the Responses API.
+  # We do not layer a second fake tool protocol on top of that.
+  use_native: true
+  suppress_prompts: false
+  api_variant: responses
+
+prompts:
+  packs:
+    base:
+      # This frozen lane reuses the same tracked vendor prompt bundle for system / plan /
+      # builder / compact because it is close to: vendor prompt + provider-native tools +
+      # narrowed BB execution surface.
+      system: ../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md
+      plan: ../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md
+      builder: ../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md
+      compact: ../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md
+      tools_catalog_full: ../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md
+      tools_catalog_short: ../config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md
+  # Because Codex is using provider-native tools, BreadBoard does not synthesize an extra
+  # Jinja-generated tool catalog into the model prompt for this lane.
+  tool_prompt_mode: none
+  tool_prompt_synthesis:
+    enabled: false
+
+tools:
+  # Codex can conclude by explicitly marking the task complete.
+  mark_task_complete: true
+  registry:
+    # `tools.registry.paths` is a deliberate catalog boundary.
+    #
+    # It points at the tracked BreadBoard tool-definition directory; that is where the actual
+    # JSON-schema/tool metadata lives. We keep the path instead of copying those large schemas
+    # inline, but the *effective* public surface of this frozen Codex lane is the `include`
+    # list just below.
+    #
+    # Effective tool surface in this strict public lane:
+    # - shell_command : sandboxed command execution
+    # - apply_patch   : structured file-change/diff tool
+    # - update_plan   : Codex-like plan/todo lifecycle tool
+    #
+    # Collaboration tools are a separate surface from the ordinary registry:
+    # - `spawn_agent` and `wait` come from the orchestration/collaboration layer
+    # - they are documented under `multi_agent:` below rather than being treated as ordinary
+    #   file/edit/search tools
+    #
+    # In other words: yes, this is a deferral to shared tool definitions, but it is now an
+    # explicit and documented one rather than hidden magic.
+    paths:
+    - ../implementations/tools/defs
+    include:
+    - shell_command
+    - apply_patch
+    - update_plan
+  aliases:
+    # These aliases make the dossier easier to compare to Codex concepts and transcripts.
+    bash: run_shell
+    edit: apply_search_replace
+    list: list_dir
+    patch: apply_unified_patch
+    read: read_file
+  dialects:
+    # When BreadBoard must render edits textually, these preferences preserve the Codex-like
+    # feel of the edit surface instead of leaving it to arbitrary defaults.
+    preference:
+      default:
+      - aider_search_replace
+      - unified_diff
+      - bash_block
+      by_model:
+        openrouter/openai/*:
+          order:
+          - aider_search_replace
+          - unified_diff
+          - bash_block
+        openai/*:
+          order:
+          - aider_search_replace
+          - unified_diff
+          - bash_block
+    selection:
+      by_model:
+        openrouter/openai/*:
+        - aider_search_replace
+        - unified_diff
+        openai/*:
+        - aider_search_replace
+        - unified_diff
+
+# -----------------------------------------------------------------------------
+# Tool packs / bindings / terminal sessions
+# -----------------------------------------------------------------------------
+# These sections are part of the public dossier layer, not just implementation notes.
+# The goal is that a reader can inspect:
+# - which tools conceptually travel together
+# - which execution/binding shape actually satisfies a tool
+# - which persistent terminal-session surfaces are currently frozen vs merely targeted
+#
+# The frozen public lane here is still intentionally narrower than upstream Codex as a whole.
+
+tool_packs:
+  core-e4:
+    # This is the evidence-backed public tool pack for the strict Codex lane currently shipped
+    # at top level in `agent_configs/`.
+    description: frozen public Codex E4 pack
+    tool_ids:
+    - shell_command
+    - apply_patch
+    - update_plan
+    exposure: provider_native
+    support_status: frozen
+  collaboration:
+    # Collaboration is a separate Codex surface from the ordinary shell/edit/read tool pack.
+    # We keep it visible here as a pack even though the detailed behavior lives under
+    # `multi_agent:` below.
+    description: Codex collaboration/orchestration surface
+    tool_ids:
+    - spawn_agent
+    - wait
+    exposure: collab_protocol
+    support_status: frozen
+  background-terminals:
+    # Upstream Codex also exposes a distinct persistent background-terminal surface. We are
+    # deliberately spelling it out in the dossier now so the eventual parity lane remains
+    # inspectable and easy to compare line-by-line.
+    #
+    # Phase 14 status:
+    # - contracts are real
+    # - trusted-local runtime slice is real
+    # - Codex-shaped reference-engine lanes now exist for start/write/poll/list/cleanup and
+    #   dead-session interaction failure shaping
+    # - mixed-state list and cleanup-after-exit rows are also frozen as reference-engine
+    #   semantic lanes so hosts can reason about "recently ended" sessions without guessing
+    # - a running-summary lane is now frozen too, so the projection surface can represent one
+    #   active session while still carrying multiple recently ended sessions in a stable way
+    # - a future dedicated Codex-background-terminal parity program could still strengthen the
+    #   claim beyond these reference-engine semantic lanes, but that is follow-on scope rather
+    #   than unfinished Phase 14 work
+    description: upstream Codex persistent terminal-session surface
+    tool_ids:
+    - exec_command
+    - write_stdin
+    exposure: interactive_terminal_protocol
+    support_status: reference_engine_frozen_not_e4
+
+tool_bindings:
+  # `tool_bindings` answers a different question from `tools.registry.include`.
+  #
+  # - `tools.registry.include` says which abstract tools are in the public lane
+  # - `tool_bindings` says what execution/profile/binding shape actually satisfies those tools
+  #
+  # This is exactly the kind of interpretability surface we want BreadBoard to expose well.
+  # It is also the surface that lets a future host answer questions like:
+  # - "Which bindings are active for this execution profile?"
+  # - "Did `exec_command` fall back to a different implementation?"
+  # - "Why is a custom service or CUDA profiling tool hidden from the model right now?"
+  - id: codex.shell.process_local
+    tool_id: shell_command
+    binding_kind: sandbox
+    execution_profile: trusted_local
+    placement: workspace_local
+    exposure: provider_native
+    support_status: frozen
+  - id: codex.patch.workspace_local
+    tool_id: apply_patch
+    binding_kind: host
+    execution_profile: trusted_local
+    placement: workspace_local
+    exposure: provider_native
+    support_status: frozen
+  - id: codex.plan.workspace_local
+    tool_id: update_plan
+    binding_kind: host
+    execution_profile: trusted_local
+    placement: workspace_local
+    exposure: provider_native
+    support_status: frozen
+  - id: codex.terminal.process_session
+    tool_id: exec_command
+    binding_kind: sandbox
+    execution_profile: trusted_local
+    placement: workspace_local
+    exposure: interactive_terminal_protocol
+    support_status: reference_engine_frozen_not_e4
+    # Dead-session interaction failures are now expected to project through
+    # `bb.unsupported_case.v1` rather than leaking raw backend exceptions. This keeps the
+    # failure surface interpretable and lets different harness projections render the same
+    # underlying semantics differently. The current semantic lanes also freeze cleanup-after-exit
+    # and mixed-state listing behavior around this binding family.
+    # Backed today by the new persistent terminal-session primitives and the
+    # local / OCI / remote driver family. This is reference-engine frozen for
+    # the scoped Phase 14 semantic lanes; anything stricter would be a future
+    # parity-strengthening program rather than missing Phase 14 support.
+  - id: codex.terminal.stdin_continuation
+    tool_id: write_stdin
+    binding_kind: sandbox
+    execution_profile: trusted_local
+    placement: workspace_local
+    exposure: interactive_terminal_protocol
+    support_status: reference_engine_frozen_not_e4
+    # Continuation is represented canonically as stdin/signal/poll interactions
+    # over a persistent terminal session, then projected Codex-style as needed.
+    # The effective tool surface can still hide or degrade this binding when the
+    # active driver/profile does not actually support persistent sessions. Phase 14 now
+    # also carries a fallback-selected remote surface lane so the same canonical tool pair
+    # can remain visible while swapping binding strategy.
+
+terminal_sessions:
+  # This section is intentionally explicit even though the top-level Codex lane remains labeled
+  # `reference_engine_frozen_not_e4`. Phase 14 already freezes the semantic/runtime/product
+  # surface here; any future broader parity claim would be a separate program rather than missing
+  # core primitives or product surfaces.
+  enabled: false
+  support_status: reference_engine_frozen_not_e4
+  startup_tool: exec_command
+  continuation_tool: write_stdin
+  interaction_kinds:
+  - stdin
+  - poll
+  - signal
+  registry_surface:
+    model_visible_summary: true
+    host_listing_command: /ps
+  cleanup_surface:
+    host_cleanup_command: /clean
+  session_identity:
+    kernel_session_id: explicit
+    public_handle: explicit
+    backend_handle: explicit
+  call_identity:
+    # Two distinct refs matter here:
+    # - `startup_call_id` groups the session under the originating exec-style tool call
+    # - `causing_call_id` records the interaction that produced a later write/poll/signal event
+    # This is how BreadBoard stays general while still being able to project Codex-style grouping.
+  host_projection:
+    # The public product layer now exposes:
+    # - live multi-session views through Backbone
+    # - host-friendly registry/session/end summaries through Host Kit
+    # - shaped artifact/evidence references through Workspace
+    # This keeps terminal UX/product logic inspectable without turning host projections into
+    # kernel truth.
+    startup_call_grouping: explicit
+    causal_interaction_ref: explicit
+  poll_projection:
+    # Poll is a first-class kernel interaction kind. Codex can still render it as an "empty"
+    # follow-up terminal interaction when no new stdin payload is supplied.
+    kernel_kind: poll
+    codex_rendering: empty_write_or_poll_equivalent
+  failure_projection:
+    # Dead/unknown session interactions should not escape as raw driver exceptions on the public
+    # host path. BreadBoard now shapes them through `bb.unsupported_case.v1`, carrying the
+    # session id and attempted interaction kind so Codex-style hosts can present a coherent
+    # "that background process is gone" story without losing inspectability. Unknown-session
+    # lookups are frozen the same way instead of silently returning a null-ish product surface.
+    dead_session_contract: bb.unsupported_case.v1
+    host_summary: explicit
+  registry_projection:
+    # Registry/listing is derived host projection rather than kernel truth. That distinction is
+    # what lets us support Codex `/ps` semantics cleanly without baking host UI concerns into the
+    # event ontology.
+    derived_projection: true
+  # The strict public lane remains tagged `reference_engine_frozen_not_e4`, but the surface is no
+  # longer just a plan or a draft semantic sketch. Phase 14 now has reference-engine semantic
+  # lanes for:
+  # - start
+  # - write
+  # - poll
+  # - no-output poll
+  # - signal/control interaction
+  # - list
+  # - multi-session list
+  # - cleanup
+  # - unknown-session lookup failure shaping
+  # - dead-session signal failure shaping
+  # - conformance/engine_fixtures/terminal_session/codex_background_*_fixture.json
+  # - conformance/engine_fixtures/effective_tool_surface/codex_background_terminal_surface_fixture.json
+
+# The frozen Codex lane keeps the canonical two-stage loop shape visible even though the exact
+# 2026-03-06 strict replay lane currently has `features.plan: false`.
+#
+# +------------------+
+# | optional plan    |  read/list/glob/grep only
+# +------------------+
+#           |
+#           v
+# +------------------+
+# | build / execute  |  full evidence-backed tool surface
+# +------------------+
+#
+# This reflects Codex's recognizable interaction shape without pretending the current evidence
+# pack already covers every plan-mode variant.
+modes:
+- name: plan
+  prompt: '@pack(base).plan'
+  tools_enabled:
+  - read_file
+  - list_dir
+  - glob
+  - grep
+  tools_disabled: []
+- name: build
+  prompt: '@pack(base).builder'
+  tools_enabled:
+  - '*'
+  tools_disabled: []
+- name: compact
+  prompt: '@pack(base).compact'
+  tools_enabled: []
+
+loop:
+  sequence:
+  - if: features.plan
+    then:
+      mode: plan
+  - mode: build
+  plan_turn_limit: 1
+  turn_strategy:
+    # Codex-like execution allows the assistant to continue after tool output in the same turn.
+    relay: tool_role
+    flow: assistant_continuation
+    allow_multiple_per_turn: true
+
+# -----------------------------------------------------------------------------
+# Upstream Codex collaboration / subagent substrate (observed in source)
+# -----------------------------------------------------------------------------
+# Codex 0.107.0 already exposes richer subagent/collaboration machinery than the current public
+# frozen lane exercises. The notable surfaces visible in upstream source are:
+#
+# 1. Subagent provenance on outbound requests:
+#    - request header: `x-openai-subagent`
+#    - known labels observed in source:
+#      * review
+#      * compact
+#      * memory_consolidation
+#      * collab_spawn    (thread-spawn / collaborator worker)
+#
+# 2. App-server collaboration lifecycle events:
+#    - collab_agent_spawn_begin / collab_agent_spawn_end
+#    - collab_agent_interaction_begin / collab_agent_interaction_end
+#    - collab_waiting_begin / collab_waiting_end
+#    - collab_close_begin / collab_close_end
+#    - collab_resume_begin / collab_resume_end
+#
+# 3. Session / thread source taxonomy:
+#    - cli
+#    - vscode
+#    - exec
+#    - mcp
+#    - subagent(...)
+#
+# 4. Other adjacent visible product surfaces:
+#    - todo_list events and plan_update events
+#    - mcpToolCall items and MCP server status APIs
+#    - approvalPolicy threading through CLI/SDK/app-server layers
+#
+# As of the 2026-03-06 refresh, the public dossier now has fresh exercised collaboration evidence:
+# - sync replay:  docs/conformance/e4_recalibration_evidence/codex_subagent_sync_20260306_v0110/replay_session.json
+# - async replay: docs/conformance/e4_recalibration_evidence/codex_subagent_async_20260306_v0110/replay_session.json
+#
+# The sections below keep that surface visible as configuration rather than burying it in notes.
+
+multi_agent:
+  # Dedicated sync/async Codex collaboration evidence, refreshed against Codex CLI 0.110.0:
+  # - docs/conformance/e4_recalibration_evidence/codex_subagent_sync_20260306_v0110/
+  # - docs/conformance/e4_recalibration_evidence/codex_subagent_async_20260306_v0110/
+  #
+  # +-------------------- sync lane ---------------------+
+  # | main                                               |
+  # |  |- spawn_agent(worker alpha)                      |
+  # |  |- spawn_agent(worker beta)                       |
+  # |  '- wait(all workers) -> final assistant message   |
+  # +----------------------------------------------------+
+  #
+  # +-------------------- async lane --------------------+
+  # | main                                               |
+  # |  |- spawn_agent(worker gamma)                      |
+  # |  |- spawn_agent(worker delta)                      |
+  # |  '- wait(receiver_thread_ids) as workers complete  |
+  # +----------------------------------------------------+
+  #
+  # These collaboration tools are *not* ordinary registry tools. They are part of the Codex
+  # orchestration surface and appear in captured transcripts as collab tool calls.
+  enabled: true
+  event_log_path: misc/multi_agent_runs/codex_cli_subagent_event_log.jsonl
+  team_config:
+    team:
+      id: codex_cli_collab
+      version: 1
+      agents:
+        main:
+          role: main
+          config_ref: agent_configs/codex_0-107-0_e4_3-6-2026.yaml
+          entrypoint: true
+        readonly-worker:
+          role: readonly-worker
+          config_ref: agent_configs/misc/codex_subagent_readonly.yaml
+          entrypoint: false
+          capabilities:
+            read_only: false
+            allow_spawn: false
+      topology:
+        edges:
+        - from: main
+          to: readonly-worker
+          mode:
+          - sync
+          - async
+      orchestration:
+        scheduler:
+          kind: deterministic_event_loop
+          max_concurrent_agents: 2
+        spawn_protocol:
+          # Codex collaboration is surfaced to the model with `spawn_agent`; the async lane
+          # acknowledges spawned worker thread ids and joins them using `wait`.
+          tool_name: spawn_agent
+          async:
+            enabled: true
+            ack_fields:
+            - receiver_thread_ids
+        join_policy:
+          default: block_until_complete
+      coordination:
+        # This block is intentionally small. It makes completion ownership explicit without
+        # turning the public dossier into a full coordination ontology.
+        mission_owner_role: supervisor
+        legacy_completion_sources:
+        - text_sentinel
+        - tool_call
+        - provider_finish
+        preserve_legacy_wake_conditions: true
+        review:
+          allowed_reviewer_roles:
+          - supervisor
+          - system
+          no_progress_action: checkpoint
+          retryable_failure_action: retry
+        intervention:
+          require_supervisor_escalate: true
+          support_claim_limited_actions:
+          - checkpoint
+          - terminate
+      bus:
+        model_visible_topics:
+        - tool_result
+        retention:
+          max_events: 2000
+          max_age_seconds: 86400
+      workspace:
+        sharing:
+          default: shared_workspace
+          write_lock: advisory_only
+
+long_running:
+  # BreadBoard's generic long-running controller is visible in the dossier, but Codex E4 today
+  # is still frozen on the ordinary foreground turn loop.
+  enabled: false
+  controller: longrun_v1
+  reset_policy: fresh
+  episode:
+    max_steps_override: null
+  queue:
+    backend: todo_store
+  reviewer:
+    enabled: false
+    mode: read_only
+  resume:
+    enabled: false
+    state_path: meta/longrun_state.json
+  verification:
+    tiers:
+    - name: smoke
+      commands:
+      - pytest -q tests/test_longrun_controller.py
+      timeout_seconds: 120
+      hard_fail: false
+    - name: full
+      commands:
+      - pytest -q
+      timeout_seconds: 1200
+      hard_fail: true
+  recovery:
+    no_progress_signature_repeats: 0
+  budgets:
+    wall_clock_s: 0
+    total_episodes: 0
+    total_tokens: 0
+    total_cost_usd: 0.0
+
+features:
+  # Codex has plan and todo-like surfaces upstream, but this exact frozen lane keeps them off
+  # because the current strict evidence pack is narrower than the full product.
+  plan: false
+  todos:
+    enabled: false
+    strict: false
+    reset_streak_on_todo: true
+
+completion:
+  # Codex can terminate with a plain assistant answer instead of requiring an explicit tool call.
+  confidence_threshold: 0.6
+  natural_finish:
+    idle_turn_limit: 1
+    no_tool_turns_threshold: 2
+  primary: hybrid
+  tool_finish: mark_task_complete
+  provider_signals: true
+  text_sentinels:
+  - TASK COMPLETE
+  - ALL TESTS PASSED
+  - IMPLEMENTATION COMPLETE
+  - '>>>>>> END RESPONSE'
+  allow_content_only_completion: true
+
+concurrency:
+  # Shell is serialized aggressively; reads can fan out.
+  at_most_one_of:
+  - shell_command
+  groups:
+  - name: fs_reads
+    match_tools:
+    - read_file
+    - list_dir
+    - glob
+    - grep
+    max_parallel: 4
+  - name: edits_and_bash
+    match_tools:
+    - apply_unified_patch
+    - apply_search_replace
+    - write
+    - run_shell
+    max_parallel: 1
+    barrier_after: apply_unified_patch
+  nonblocking_tools:
+  - read_file
+  - list_dir
+  - glob
+  - grep
+  - apply_search_replace

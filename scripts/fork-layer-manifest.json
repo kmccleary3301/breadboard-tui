@@ -162,6 +162,1596 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/breadboard-harness/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/atp_hilbert_like_gpt54_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/atp_hilbert_like_gpt54_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/atp_hilbert_shell_gpt54_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/claude_code_2-1-63_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/codex_0-107-0_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/base_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/breadboard_tui_engine_smoke_mock.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_c_fs_acceptEdits.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_c_fs_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_c_fs_guardrails_fast.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_c_fs_permission_rules_precedence.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_c_fs_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_e4_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_e4_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_e4_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_phase8_async_live.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_phase8_subagent_readonly.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_haiku45_phase8_wakeup_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_sonnet45_c_fs_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/claude_code_sonnet45_c_fs_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/cline_deep_plan_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_background_terminals_phase14_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt51mini_c_fs_parity.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt51mini_e4_live.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt51mini_e4_live__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt51mini_e4_live__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt51mini_mvi_parity.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54_e4_live.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54_e4_live_candidate_a_executor_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54_e4_live_candidate_a_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54_e4_live_deterministic_executor_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54_e4_live_deterministic_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_candidate_a.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_continuation_calibrated_finish_closure_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_continuation_calibrated_finish_closure_executor_v1b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_branch_receipt_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_branch_receipt_executor_v1b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_finish_closure_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_finish_closure_executor_v1b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_invocation_first_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_runtime_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_verifier_owned_executor_v2_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_deterministic_verifier_owned_executor_v2b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_branch_receipt_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_branch_receipt_executor_v1b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_executor_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_finish_closure_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_finish_closure_executor_v1b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_invocation_first_executor_v1_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_runtime_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_verifier_owned_executor_v2_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_execution_first_verifier_owned_executor_v2b_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt54mini_e4_live_multiagent.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt55_e4_capture_probe_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_candidate_a.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_candidate_a_control.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_candidate_a_control_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_candidate_a_runtime_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_candidate_a_runtime_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_deterministic_control.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_deterministic_control_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_deterministic_runtime_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_cli_gpt5_e4_live_deterministic_runtime_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_subagent_readonly.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/codex_workspace_scope_contract.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/copilot_agent_mode_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/cuda_profiler_toolpack_phase14_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/firecrawl_local_toolpack_phase14_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/longrun_aggressive_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/longrun_balanced_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/longrun_conservative_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/multi_agent_sync_main.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/multi_agent_sync_opencode_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/multi_agent_sync_subagent.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/multi_level_modes_config.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_opencode_e4_phase8_async_subagents_v1_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_opencode_e4_phase8_async_subagents_v1_replay__codex0_1070_claude2_1_63_opencode1_2_17_ohmyopencode3_10_0_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_opencode_phase8_async_live.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_opencode_phase8_async_subagents_v1_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_1_effective_config_graph_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_2_context_resource_pack_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_3_capability_registry_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_4_extension_hook_execution_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_5_resource_blob_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_6_protocol_provider_policy_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_7_memory_work_compiler_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p3_8_projection_broker_adapter_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_0_l1_config_context_tool_surface_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_0_l2_tool_execution_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_0_l3_command_network_hook_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_0_l4_mcp_browser_resource_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_0_l5_memory_compaction_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_0_l6_tui_projection_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/oh_my_pi_p6_6_task_job_subagent_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_cli_mock_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_cli_mock_guardrails_prompt_edit.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_cli_mock_workspace_guard.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_compat_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_glob_grep_sentinel_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_glob_grep_sentinel_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_glob_grep_sentinel_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_mvi_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_mvi_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_mvi_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_oc_protofs_gpt5nano_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_oc_protofs_gpt5nano_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_oc_protofs_gpt5nano_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_patch_todo_sentinel_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_patch_todo_sentinel_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_patch_todo_sentinel_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_toolcall_repair_sentinel_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_toolcall_repair_sentinel_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_toolcall_repair_sentinel_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_webfetch_sentinel_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_webfetch_sentinel_replay__codex0_1070_claude2_0_72_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_e4_webfetch_sentinel_replay__codex0_1070_claude2_1_63_opencode1_2_17_20260305.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_gpt5_nano_c_fs_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_grok4fast_c_fs_cli_happy_capture.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_grok4fast_c_fs_compiled.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_grok4fast_c_fs_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_grok4fast_c_fs_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_mock_c_fs.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_mock_zero_tool_sentinel.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_codexmini_c_fs_cli_happy_capture.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_codexmini_c_fs_cli_responses.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_codexmini_c_fs_cli_responses_snapshot.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_codexmini_c_fs_cli_shared.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_codexmini_c_fs_compiled.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_codexmini_c_fs_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt4o_mini_c_fs_compiled.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt4o_mini_c_fs_perturn_append.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt4o_mini_c_fs_plan_strict_compiled.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5mini_c_fs_cli_happy_capture.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5mini_c_fs_cli_shared.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5mini_c_fs_compiled.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5mini_c_fs_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5mini_c_fs_perturn_append.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5nano_c_fs_cli_analysis.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5nano_c_fs_cli_happy_capture.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5nano_c_fs_cli_shared.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5nano_c_fs_compiled.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5nano_c_fs_direct.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openai_gpt5nano_c_fs_guardrails.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openrouter_deepseek_v32exp_c_fs_perturn_append.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openrouter_glm46_c_fs_perturn_append.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openrouter_grok4fast_cli_default.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_openrouter_grok4fast_cli_snapshot.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_phase8_async_live.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_phase8_async_subagents_v1_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_phase8_nested_subagent_replay.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_phase8_subagent_readonly.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/opencode_smoke_mock.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/pi_p5_l1_cli_config_context_tool_surface_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/pi_p5_l2_extension_session_residual_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/rlm_base_v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/template_config.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_agent.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_enhanced_agent.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_enhanced_agent_v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_gpt5_nano_per_turn_append.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_isolated_agent.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_opencode_gpt5_nano_c_fs.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_opencode_no_completion_tool.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/misc/test_simple_native.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/oh_my_opencode_3-10-0_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/opencode_1-2-17_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/daily_driver.v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/daily_driver_roles.v1.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/minimal_harness.v2.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/minimal_harness.v3.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/prompts/daily_driver_system.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/prompts/minimal_system.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/templates/representative_harness.v1.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/v2/claude_code_2-1-63_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/v2/codex_0-107-0_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/v2/oh_my_opencode_3-10-0_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/agent_configs/v2/opencode_1-2-17_e4_3-6-2026.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/atp_hilbert_like/2026-03-09/prompts/system.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/atp_hilbert_like/2026-03-10/system.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/haiku45_harness.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/check-active-git-files.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/check-new-topic.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/compact.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/summarize-previous-conversation.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/system-reminder-end.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/system-reminder-start.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/prompts/system-vendor-logged.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/claude_code/2.1.63/refs/settings-bash-sandbox.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/gpt51mini_harness.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/prompts/gpt_5_1_codex_prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/refs/agents_md.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/refs/custom_prompts.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/refs/execpolicy.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/refs/sandbox.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/templates/agents/orchestrator.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/templates/collaboration_mode/default.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/templates/collaboration_mode/execute.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/templates/collaboration_mode/pair_programming.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/codex/0.107.0/templates/collaboration_mode/plan.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/index.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/phase8_async_harness.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/prompts/builder.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/prompts/plan.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/prompts/system.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/refs/agents.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/refs/mcp-servers.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/refs/permissions.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_opencode/3.10.0/refs/tools.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_pi/16.2.13/harness.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_pi/16.2.13/prompts/system-prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_pi/16.2.13/target.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/oh_my_pi/16.2.13/tool-surface.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/README.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/codexmini_responses_harness.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/prompts/builder.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/prompts/plan.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/prompts/plan_bootstrap_protofs.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/prompts/shell_write_block_opencode.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/prompts/system.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/refs/agents.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/refs/mcp-servers.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/opencode/1.2.17/refs/tools.mdx",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/pi/0.57.1/harness.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/pi/0.57.1/prompts/system-prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/pi/0.57.1/target.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/config/e4_targets/pi/0.57.1/tool-surface.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/contracts/kernel/schemas/bb.effective_config_graph.v1.schema.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/contracts/kernel/schemas/bb.session_transcript.v2.schema.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/check-active-git-files.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/check-new-topic.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/compact.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/ide-opened-file.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/summarize-previous-conversation.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-build-with-tests.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-compact.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-identity.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-reminder-end.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-reminder-start.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-vendor-logged.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/claude_code/system-workflow.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/default.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/completion_guard_abort.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/completion_guard_warning.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/shell_write_block.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/shell_write_block_opencode.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/todo_rate_limit.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/workspace_plan_todo.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/workspace_read_before_edit.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/workspace_require_exploration.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/zero_tool_abort.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/guardrails/zero_tool_warn.prompt.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/longrun/policy_aggressive.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/longrun/policy_balanced.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/longrun/policy_conservative.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/anthropic.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/anthropic_spoof.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/beast.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/builder_grok4.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/codex.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/gemini.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/initialize.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/plan.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/plan_bootstrap_protofs.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/plan_bootstrap_protofs_warmup.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/plan_grok4.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/qwen.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/summarize.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/system_prompts/opencode/title.md",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/.keep",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/apply_patch.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/apply_search_replace.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/apply_unified_patch.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/blob_get.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/blob_put.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/blob_put_file_slice.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/blob_search.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/create_file.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/create_file_from_block.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/eval.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/list_dir.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/llm_batch_query.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/llm_query.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/mark_task_complete.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/read_file.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/record_branch_decision.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/record_proof_receipt.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/record_verification_receipt.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/request_finish_receipt.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/run_shell.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/shell_command.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_attach.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_cancel.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_complete.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_create.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_list.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_note.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_reorder.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_update.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/todo_write.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/implementations/tools/defs/update_plan.yaml",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/sdk/ts-kernel-contracts/src/generated/types/bb.effective_config_graph.v1.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/sdk/ts-kernel-contracts/src/generated/types/bb.session_transcript.v2.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/engine-data/snapshot.manifest.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/package.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/scripts/snapshot-engine-data.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/src/index.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/test/snapshot.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/tsconfig.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
 			"path": "packages/coding-agent/CHANGELOG.md",
 			"class": "manual-review",
 			"rule": "manual-review-boundaries",
