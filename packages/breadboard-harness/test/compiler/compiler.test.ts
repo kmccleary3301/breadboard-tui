@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { canonicalJson } from "../../src/canonical-json";
+import { canonicalJson, JsonFloat } from "../../src/canonical-json";
 import {
 	compileHarnessDefinition,
 	compileHarnessYaml,
@@ -142,5 +142,31 @@ describe("harness compiler", () => {
 			loop: { sequence: [{ mode: "build" }] },
 		});
 		expect(findings.map(finding => [finding.pointer, finding.code])).toEqual([["/workspace/toString", "additionalProperties"]]);
+	});
+	test("accepts integral YAML floats for integer schema properties", () => {
+		const findings = validateHarnessDefinition({
+			schema_version: "bb.harness_definition.v1",
+			version: 1,
+			workspace: { root: "." },
+			providers: { default_model: "main", models: [{ id: "main", adapter: "openai", params: { max_output_tokens: new JsonFloat(1) } }] },
+			modes: [{ name: "build" }],
+			loop: { sequence: [{ mode: "build" }] },
+		});
+		expect(findings).toEqual([]);
+	});
+
+	test("reports one cycle back-edge finding", () => {
+		const cycle: Record<string, unknown> = {};
+		cycle.self = cycle;
+		const findings = validateHarnessDefinition({
+			schema_version: "bb.harness_definition.v1",
+			version: 1,
+			workspace: { root: "." },
+			providers: { default_model: "main", models: [{ id: "main", adapter: "openai" }] },
+			modes: [{ name: "build" }],
+			loop: { sequence: [{ mode: "build" }] },
+			dossier: { bad: cycle },
+		});
+		expect(findings.map(finding => [finding.pointer, finding.code])).toEqual([["/dossier/bad/self", "json_cycle"]]);
 	});
 });

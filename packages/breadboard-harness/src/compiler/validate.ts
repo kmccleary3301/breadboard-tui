@@ -90,6 +90,12 @@ function jsonType(value: unknown): string {
 }
 
 function isInteger(value: unknown): boolean {
+	if (value instanceof JsonFloat) return Number.isInteger(value.value);
+	return (typeof value === "number" && Number.isInteger(value)) || typeof value === "bigint";
+}
+
+function isPythonInteger(value: unknown): boolean {
+	if (value instanceof JsonFloat) return false;
 	return (typeof value === "number" && Number.isInteger(value)) || typeof value === "bigint";
 }
 
@@ -293,6 +299,7 @@ function jsonDomainFindings(value: unknown, path: readonly PathPart[] = [], acti
 		return value.toString().replace(/^-/, "").length <= MAX_JSON_INTEGER_DIGITS ? [] : [{ pointer: pathPointer(path), code: "integer_range", message: "JSON integers must contain at most 640 decimal digits" }];
 	}
 	if (Array.isArray(value) || isObject(value)) {
+		if (active.has(value)) return [{ pointer: pathPointer(path), code: "json_cycle", message: "JSON values must not contain cycles" }];
 		active.add(value);
 		const findings: HarnessValidationFinding[] = [];
 		if (isObject(value)) {
@@ -317,8 +324,8 @@ function sourcePairFindings(document: Record<string, unknown>): HarnessValidatio
 		"bb.agent_config_surface.v2": 2,
 	} as Readonly<Record<string, number>>)[schemaVersion] : undefined;
 	if (expected === undefined) findings.push({ pointer: "/schema_version", code: "unsupported_schema_version", message: "Unsupported schema_version; expected one of 'bb.agent_config_surface.v2', 'bb.harness_definition.v1'" });
-	if (expected !== undefined && (!isInteger(version) || Number(version) !== expected)) findings.push({ pointer: "/version", code: "unsupported_version", message: `Version does not match schema_version; expected ${expected}` });
-	else if (expected === undefined && (!isInteger(version) || ![1, 2].includes(Number(version)))) findings.push({ pointer: "/version", code: "unsupported_version", message: "Unsupported version; expected integer 1 or 2" });
+	if (expected !== undefined && (!isPythonInteger(version) || Number(version) !== expected)) findings.push({ pointer: "/version", code: "unsupported_version", message: `Version does not match schema_version; expected ${expected}` });
+	else if (expected === undefined && (!isPythonInteger(version) || ![1, 2].includes(Number(version)))) findings.push({ pointer: "/version", code: "unsupported_version", message: "Unsupported version; expected integer 1 or 2" });
 	return findings;
 }
 
