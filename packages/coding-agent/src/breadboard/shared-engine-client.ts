@@ -28,7 +28,7 @@ import {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const START_RETRY_MS = 100;
-// v3: leases carry only the admission event, so a v2 owner (which also streams effort events) is never reused.
+// Tracks SHARED_ENGINE_SCHEMA_VERSION so namespace reuse never scans an older worker generation.
 const SHARED_ENGINE_DAEMON_PREFIX = "omp.shared.bb.v3.";
 
 export interface AcquiredSharedBreadboardEngine {

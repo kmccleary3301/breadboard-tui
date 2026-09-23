@@ -13,7 +13,9 @@ export { SHARED_ENGINE_WORKER_ARG } from "../cli/worker-selectors";
 export const SHARED_ENGINE_CONFIG_ENV = "BREADBOARD_SHARED_ENGINE_CONFIG";
 export const SHARED_ENGINE_SOCKET_ENV = "BREADBOARD_SHARED_ENGINE_SOCKET";
 export const SHARED_ENGINE_READY_PATTERN = String.raw`breadboard shared engine serving`;
-export const SHARED_ENGINE_SCHEMA_VERSION = "bb.shared-engine.v2" as const;
+// v3: leases carry only the admission event. The version feeds the engine key, so a v2 worker
+// (which also streams effort events) gets a different socket and daemon name and is never reused.
+export const SHARED_ENGINE_SCHEMA_VERSION = "bb.shared-engine.v3" as const;
 
 export interface SharedEngineLaunch {
 	readonly schemaVersion: typeof SHARED_ENGINE_SCHEMA_VERSION;
