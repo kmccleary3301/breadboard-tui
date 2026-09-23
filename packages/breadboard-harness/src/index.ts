@@ -72,19 +72,22 @@ function validateSnapshot(value: unknown): EngineDataSnapshot {
 		const actualBytes = new TextEncoder().encode(rawFile.content);
 		if (actualBytes.byteLength !== rawFile.bytes) throw new Error(`files[${index}] bytes do not match content`);
 		if (sha256(rawFile.content) !== rawFile.sha256) throw new Error(`files[${index}] sha256 does not match content`);
-		files.push({
-			path: rawFile.path,
-			sha256: rawFile.sha256,
-			bytes: rawFile.bytes as number,
-			content: rawFile.content,
-		});
+		files.push(
+			Object.freeze({
+				path: rawFile.path,
+				sha256: rawFile.sha256,
+				bytes: rawFile.bytes as number,
+				content: rawFile.content,
+			}),
+		);
 	}
-	return {
+	// Frozen: the cached snapshot is shared by every caller, so a consumer must not alter verified content.
+	return Object.freeze({
 		schemaVersion: SNAPSHOT_SCHEMA_VERSION,
 		engineCommit: value.engineCommit,
 		engineTree: value.engineTree,
-		files,
-	};
+		files: Object.freeze(files),
+	});
 }
 
 function snapshotPath(dataDir: string | URL): string {
@@ -93,9 +96,7 @@ function snapshotPath(dataDir: string | URL): string {
 }
 
 /** Read, validate, hash-check, and cache the generated engine-data bundle. */
-export async function loadEngineDataSnapshot(
-	dataDir: string | URL = DEFAULT_DATA_DIR,
-): Promise<EngineDataSnapshot> {
+export async function loadEngineDataSnapshot(dataDir: string | URL = DEFAULT_DATA_DIR): Promise<EngineDataSnapshot> {
 	const path = snapshotPath(dataDir);
 	const cached = snapshotCache.get(path);
 	if (cached !== undefined) return cached;

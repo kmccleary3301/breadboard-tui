@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 
 const SNAPSHOT_NAME = "snapshot.json";
 const SNAPSHOT_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
@@ -14,9 +14,13 @@ const TRACKED_PREFIXES = [
 	"config/e4_targets",
 ] as const;
 const CONTRACT_SCHEMA_PATHS = [
+	"contracts/kernel/schemas/bb.agent_config_surface.v2.schema.json",
 	"contracts/kernel/schemas/bb.effective_config_graph.v1.schema.json",
+	"contracts/kernel/schemas/bb.kernel.common.v1.schema.json",
 	"contracts/kernel/schemas/bb.session_transcript.v2.schema.json",
+	"contracts/public/schemas/bb.harness_definition.v1.schema.json",
 ] as const;
+const CONTRACT_ID_BASE = "https://breadboard.dev/";
 const GENERATED_TYPE_PATHS = [
 	"sdk/ts-kernel-contracts/src/generated/types/bb.effective_config_graph.v1.ts",
 	"sdk/ts-kernel-contracts/src/generated/types/bb.session_transcript.v2.ts",
@@ -105,6 +109,42 @@ function readGitUtf8(engine: string, commit: string, sourcePath: string): { byte
 	return { bytes, content };
 }
 
+/** Resolve a schema `$ref` to a repository path; `undefined` for same-document refs. */
+function refTarget(schemaPath: string, ref: string): string | undefined {
+	const documentRef = ref.split("#", 1)[0]!;
+	if (documentRef === "") return undefined;
+	if (documentRef.startsWith(CONTRACT_ID_BASE)) return documentRef.slice(CONTRACT_ID_BASE.length);
+	if (/^[a-z][a-z0-9+.-]*:/i.test(documentRef)) throw new Error(`${schemaPath}: unsupported external $ref ${ref}`);
+	return posix.normalize(posix.join(posix.dirname(schemaPath), documentRef));
+}
+
+function collectRefs(value: unknown, refs: Set<string>): void {
+	if (Array.isArray(value)) {
+		for (const item of value) collectRefs(item, refs);
+	} else if (value !== null && typeof value === "object") {
+		for (const [key, item] of Object.entries(value)) {
+			if (key === "$ref" && typeof item === "string") refs.add(item);
+			else collectRefs(item, refs);
+		}
+	}
+}
+
+/** Every bundled schema must resolve its `$ref`s inside the bundle, so offline validation needs no engine checkout. */
+function assertSchemaRefClosure(files: readonly SnapshotFile[]): void {
+	const bundled = new Set(files.map(file => file.path));
+	for (const file of files) {
+		if (!file.path.endsWith(".schema.json")) continue;
+		const refs = new Set<string>();
+		collectRefs(JSON.parse(file.content) as unknown, refs);
+		for (const ref of refs) {
+			const target = refTarget(file.path, ref);
+			if (target !== undefined && !bundled.has(target)) {
+				throw new Error(`${file.path}: $ref ${ref} resolves to unbundled ${target}`);
+			}
+		}
+	}
+}
+
 function createSnapshot(engine: string): Snapshot {
 	const commit = runGitText(engine, ["rev-parse", "--verify", "HEAD^{commit}"]).trim();
 	const tree = runGitText(engine, ["rev-parse", "--verify", "HEAD^{tree}"]).trim();
@@ -118,6 +158,7 @@ function createSnapshot(engine: string): Snapshot {
 		files.push({ path: sourcePath, sha256: sha256(bytes), bytes: bytes.byteLength, content });
 	}
 	files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+	assertSchemaRefClosure(files);
 	return { schemaVersion: SNAPSHOT_SCHEMA_VERSION, engineCommit: commit, engineTree: tree, files };
 }
 

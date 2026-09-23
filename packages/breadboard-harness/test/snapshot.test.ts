@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
-import { loadEngineDataSnapshot } from "../src/index";
+import { type EngineDataSnapshotFile, loadEngineDataSnapshot } from "../src/index";
 
 const PACKAGE_ROOT = join(import.meta.dir, "..");
 const DATA_DIR = join(PACKAGE_ROOT, "engine-data");
@@ -15,23 +15,29 @@ const ENGINE =
 	join("/", "Users", "kylemccleary", "projects", "bread" + "board-native-harness-pyref");
 
 async function runCheck(dataDir: string): Promise<{ code: number; output: string }> {
-	const process = Bun.spawn(
-		["bun", SCRIPT, "--engine", ENGINE, "--check", "--data-dir", dataDir],
-		{ stdout: "pipe", stderr: "pipe" },
-	);
-	const [stdout, stderr] = await Promise.all([new Response(process.stdout).text(), new Response(process.stderr).text()]);
+	const process = Bun.spawn(["bun", SCRIPT, "--engine", ENGINE, "--check", "--data-dir", dataDir], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr] = await Promise.all([
+		new Response(process.stdout).text(),
+		new Response(process.stderr).text(),
+	]);
 	return { code: await process.exited, output: `${stdout}\n${stderr}` };
 }
 
 describe("engine data snapshot", () => {
-	test("loader validates every bundled file hash and byte count", async () => {
+	test("callers cannot alter the shared verified snapshot", async () => {
 		const snapshot = await loadEngineDataSnapshot(DATA_DIR);
-		const raw = await readFile(SNAPSHOT_PATH, "utf8");
-		expect(raw).toContain('"schemaVersion": "bb.harness_engine_data_snapshot.v1"');
-		for (const file of snapshot.files) {
-			expect(new TextEncoder().encode(file.content).byteLength).toBe(file.bytes);
-		}
-		expect(snapshot.files.length).toBe(311);
+		const file = snapshot.files[0]!;
+		const content = file.content;
+		expect(() => {
+			(file as { content: string }).content = "tampered";
+		}).toThrow(TypeError);
+		expect(() => {
+			(snapshot.files as EngineDataSnapshotFile[]).push(file);
+		}).toThrow(TypeError);
+		expect((await loadEngineDataSnapshot(DATA_DIR)).files[0]!.content).toBe(content);
 	});
 
 	test("--check and loader reject tampered bundled content", async () => {
