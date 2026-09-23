@@ -30,7 +30,7 @@ export function createStatusLineHost(
 			segmentOptions: settings.getGroup("statusLine").segmentOptions,
 			sessionAccent: settings.get("statusLine.sessionAccent"),
 			transparent: settings.get("statusLine.transparent"),
-			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
+			contextLine: settings.get("statusLine.contextLine"),
 			breadboard: settings.get("statusLine.breadboard"),
 		}),
 		gitEnabled: () => settings.get("git.enabled"),

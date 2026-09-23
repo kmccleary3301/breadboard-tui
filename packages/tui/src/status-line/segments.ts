@@ -11,17 +11,17 @@ import {
 	relativePathWithinNormalizedRoot,
 	relativePathWithinRoot,
 } from "@oh-my-pi/pi-utils";
-import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme";
+import { bindTheme, type SymbolKey, type Theme, type ThemeColor, theme as initialTheme } from "@oh-my-pi/pi-tui/theme";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { fileHyperlink } from "../render/hyperlink";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
+import { getSessionAccentHex } from "../theme/session-color";
 import { summarizeLoopCondition } from "./loop";
 import { formatMetric } from "../components/metric";
 import { formatBillingSummary } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
 import { renderBreadboardActivity, renderBreadboardPolicy } from "./breadboard-presentation";
-import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
+import type { HarnessSnapshot, RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
 
@@ -31,12 +31,43 @@ export type { SegmentContext } from "./types";
 
 const STARTUP_PLACEHOLDER = "…";
 
+let activeTheme: Theme = initialTheme;
+bindTheme(value => {
+	activeTheme = value;
+});
+const theme = new Proxy({} as Theme, {
+	get: (_target, property: string | symbol) => {
+		const value = Reflect.get(activeTheme, property, activeTheme) as unknown;
+		return typeof value === "function" ? value.bind(activeTheme) : value;
+	},
+});
+
 function withIcon(icon: string, text: string): string {
 	return icon ? `${icon} ${text}` : text;
 }
 
 function statusValue(ctx: SegmentContext, value: string): string {
 	return ctx.startupPlaceholder ? STARTUP_PLACEHOLDER : value;
+}
+
+function longRunBudgets(lock: HarnessSnapshot["lock"]): { totalCostUsd?: number; totalTokens?: number } | undefined {
+	if (!lock || !Array.isArray(lock.effective_values)) return undefined;
+	const values = lock.effective_values as readonly unknown[];
+	const valueAt = (path: string): unknown => {
+		for (const entry of values) {
+			if (!entry || typeof entry !== "object") continue;
+			const record = entry as Record<string, unknown>;
+			if (record.path === path) return record.value;
+		}
+		return undefined;
+	};
+	if (valueAt("long_running.enabled") !== true) return undefined;
+	const budgets: { totalCostUsd?: number; totalTokens?: number } = {};
+	const cost = valueAt("long_running.budgets.total_cost_usd");
+	if (typeof cost === "number" && Number.isFinite(cost) && cost > 0) budgets.totalCostUsd = cost;
+	const tokens = valueAt("long_running.budgets.total_tokens");
+	if (typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0) budgets.totalTokens = tokens;
+	return budgets;
 }
 /**
  * Hash-derived accent ANSI for the session title (or preview stand-in title).
@@ -47,7 +78,7 @@ function sessionAccentAnsi(ctx: SegmentContext): string | undefined {
 	if (ctx.sessionAccent === false) return undefined;
 	const name = ctx.session?.sessionManager?.getSessionName() || ctx.previewTitle;
 	if (!name) return undefined;
-	return getSessionAccentAnsi(getSessionAccentHex(name, theme.sessionAccentInputs));
+	return theme.getCustomColorAnsi(getSessionAccentHex(name, theme.sessionAccentInputs));
 }
 /**
  * `theme.fg` for accent-role text: the hash-derived session accent when
@@ -56,7 +87,8 @@ function sessionAccentAnsi(ctx: SegmentContext): string | undefined {
  * PR link, mode badges, session title) — status colors stay `theme.fg`.
  */
 function accentFg(ctx: SegmentContext, color: ThemeColor, text: string): string {
-	return `${sessionAccentAnsi(ctx) ?? theme.getFgAnsi(color)}${text}\x1b[39m`;
+	const ansi = sessionAccentAnsi(ctx) ?? theme.getFgAnsi(color);
+	return ansi ? `${ansi}${text}\x1b[39m` : text;
 }
 
 /** Left-truncate a path/label to `maxLen`, prefixing an ellipsis when clipped. */
@@ -922,9 +954,6 @@ const usageSegment: StatusLineSegment = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Segment Registry
-// ═══════════════════════════════════════════════════════════════════════════
-
 const harnessSegment: StatusLineSegment = {
 	id: "harness",
 	render(ctx) {
@@ -945,7 +974,7 @@ const harnessSegment: StatusLineSegment = {
 const longrunSegment: StatusLineSegment = {
 	id: "longrun",
 	render(ctx) {
-		const budgets = ctx.longRun;
+		const budgets = ctx.longRun ?? longRunBudgets(ctx.harness?.lock ?? null);
 		if (!budgets) return { content: "", visible: false };
 		const caps: string[] = [];
 		if (budgets.totalCostUsd !== undefined) caps.push(`$${budgets.totalCostUsd.toFixed(2)}`);

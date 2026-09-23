@@ -25,9 +25,9 @@ import type {
 	StatusLineHost,
 	StatusLineSession,
 } from "./host";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
+import { getSessionAccentHex } from "../theme/session-color";
 import { sanitizeStatusText } from "../chrome/shared";
-import { getThemeEpoch, theme } from "../theme";
+import { bindTheme, getThemeEpoch, theme as initialTheme, type Theme } from "@oh-my-pi/pi-tui/theme";
 import { type CompactionBoundaries, EMPTY_STRING_PARTS, getToolSchemaMetadataRevision } from "./context-usage";
 import {
 	type CodexResetFireworksEvent,
@@ -58,6 +58,17 @@ const WATCHER_FAILURE_POLL_TTL_MS = 5000;
 const BRAND_FADE_MS = 450;
 /** Repaint cadence while the brand fade is in flight (rust omp's `FADE_FRAME`). */
 const BRAND_FADE_FRAME_MS = 40;
+
+let activeTheme: Theme = initialTheme;
+bindTheme(value => {
+	activeTheme = value;
+});
+const theme = new Proxy({} as Theme, {
+	get: (_target, property: string | symbol) => {
+		const value = Reflect.get(activeTheme, property, activeTheme) as unknown;
+		return typeof value === "function" ? value.bind(activeTheme) : value;
+	},
+});
 
 /**
  * Providers whose subscription quota is a single monthly bucket, so their
@@ -558,7 +569,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#cachedGitStatus: { staged: number; unstaged: number; untracked: number } | null = null;
 	#cachedGitStatusCwd: string | undefined = undefined;
 	#gitStatusLastFetch = 0;
-	#gitStatusInFlightCwd: string | undefined = undefined;
+	#gitStatusGeneration = 0;
+	#gitStatusRequestSeq = 0;
+	#gitStatusActive: { id: number; cwd: string; generation: number } | undefined;
 	#cachedJjBranch: string | null = null;
 	#jjBranchLastFetch = 0;
 	#jjResolveSeq = 0;
@@ -601,6 +614,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#cachedUsageContextKey: string | null = null;
 	#usageFetchedAt = 0;
 	#usageInFlight = false;
+	#usageInFlightContextKey: string | null = null;
 	#usageStartTimer: Timer | null = null;
 	// A timed-out request may still resolve. Its result remains eligible only
 	// until a newer request has applied.
@@ -1048,6 +1062,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#onCodexResetFireworks = undefined;
 		this.#codexResetSnapshots.clear();
 		this.#retireGitWatcher();
+		this.#resetGitStatusCache();
 	}
 
 	/**
@@ -1101,7 +1116,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			this.#startBrandFadeTimer();
 		}
 		const hex = this.#sampleBrandHex(working ? workingHex : idleHex, now);
-		return getSessionAccentAnsi(hex) ?? theme.getFgAnsi(working ? "accent" : "dim");
+		return theme.getCustomColorAnsi(hex) || theme.getFgAnsi(working ? "accent" : "dim");
 	}
 
 	/**
@@ -1220,6 +1235,14 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#lastTokensPerSecondTimestamp = null;
 	}
 
+	#resetGitStatusCache(): void {
+		this.#cachedGitStatus = null;
+		this.#cachedGitStatusCwd = undefined;
+		this.#gitStatusLastFetch = 0;
+		this.#gitStatusActive = undefined;
+		this.#gitStatusGeneration++;
+	}
+
 	/**
 	 * Explicit Git/repository cache invalidation. Aborts any in-flight
 	 * reftable HEAD/PR resolve, bumps the stale-result generation, and drops
@@ -1245,6 +1268,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// so the next render refetches.
 		this.#resetJjRequests();
 		this.#cachedJjBranch = null;
+		this.#resetGitStatusCache();
 		this.#jjBranchLastFetch = 0;
 		this.#cachedJjStatus = null;
 		this.#jjStatusLastFetch = 0;
@@ -1471,14 +1495,19 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return this.#cachedJjStatus;
 		}
 
-		if (this.#gitStatusInFlightCwd !== undefined) {
+		if (this.#gitStatusActive !== undefined) {
 			return this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
 		}
 		if (this.#cachedGitStatusCwd === gitCwd && Date.now() - this.#gitStatusLastFetch < 1000) {
 			return this.#cachedGitStatus;
 		}
 
-		this.#gitStatusInFlightCwd = gitCwd;
+		const request = {
+			id: ++this.#gitStatusRequestSeq,
+			cwd: gitCwd,
+			generation: this.#gitStatusGeneration,
+		};
+		this.#gitStatusActive = request;
 
 		(async () => {
 			let nextStatus: { staged: number; unstaged: number; untracked: number } | null = null;
@@ -1487,17 +1516,16 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			} catch {
 				nextStatus = null;
 			} finally {
-				if (this.#gitStatusInFlightCwd === gitCwd) {
-					const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
-					this.#cachedGitStatus = nextStatus;
-					this.#cachedGitStatusCwd = gitCwd;
-					this.#gitStatusLastFetch = Date.now();
-					this.#gitStatusInFlightCwd = undefined;
-					if (!this.#disposed && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
-						this.#invalidateStatusLineRenderCache();
-						this.#onBranchChange?.();
-					}
-				}
+				if (this.#gitStatusActive?.id === request.id) this.#gitStatusActive = undefined;
+			}
+			if (this.#gitStatusGeneration !== request.generation || this.#disposed) return;
+			const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
+			this.#cachedGitStatus = nextStatus;
+			this.#cachedGitStatusCwd = gitCwd;
+			this.#gitStatusLastFetch = Date.now();
+			if (!this.#disposed && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
+				this.#invalidateStatusLineRenderCache();
+				this.#onBranchChange?.();
 			}
 		})();
 
@@ -1692,20 +1720,38 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			this.#cachedUsage = null;
 			this.#usageFetchedAt = 0;
 			this.#cachedUsageContextKey = usageContextKey;
+			if (this.#usageStartTimer) {
+				clearTimeout(this.#usageStartTimer);
+				this.#usageStartTimer = null;
+			}
 		}
-		if (this.#usageInFlight || this.#usageStartTimer) return;
+		if (
+			(this.#usageInFlight && this.#usageInFlightContextKey === usageContextKey) ||
+			this.#usageStartTimer !== null
+		)
+			return;
 		if (this.#usageFetchedAt > 0 && now - this.#usageFetchedAt < 5 * 60_000) return;
 		if (!this.host.canFetchUsageReports(session)) return;
 		this.#usageInFlight = true;
+		this.#usageInFlightContextKey = usageContextKey;
 		this.#usageStartTimer = setTimeout(() => {
 			this.#usageStartTimer = null;
-			void this.#runUsageRefresh(session);
+			void this.#runUsageRefresh(session, usageContextKey);
 		}, STATUS_USAGE_START_DELAY_MS);
 	}
 
-	async #runUsageRefresh(session: TSession): Promise<void> {
-		if (this.#disposed || this.session !== session) {
-			this.#usageInFlight = false;
+	async #runUsageRefresh(session: TSession, usageContextKey: string): Promise<void> {
+		if (
+			this.#disposed ||
+			this.session !== session ||
+			this.#getUsageContextKey(session) !== usageContextKey ||
+			this.#cachedUsageContextKey !== usageContextKey
+		) {
+			if (this.#usageInFlightContextKey === usageContextKey) {
+				this.#usageInFlight = false;
+				this.#usageInFlightContextKey = null;
+			}
+			if (!this.#disposed && this.session === session) this.refreshUsageInBackground();
 			return;
 		}
 		const sequence = ++this.#usageRefreshSequence;
@@ -1717,20 +1763,37 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				session,
 				await this.#raceUsageRefreshWithSignal(reportsPromise, signal),
 				sequence,
+				usageContextKey,
 			);
 		} catch {
-			if (this.session !== session) return;
+			if (
+				this.session !== session ||
+				this.#getUsageContextKey(session) !== usageContextKey ||
+				this.#cachedUsageContextKey !== usageContextKey
+			) {
+				return;
+			}
 			this.#usageFetchedAt = Date.now();
 			if (signal.aborted && reportsPromise) {
-				this.#observeLateUsageRefresh(session, reportsPromise, sequence);
+				this.#observeLateUsageRefresh(session, reportsPromise, sequence, usageContextKey);
 			}
 		} finally {
-			if (this.session === session) this.#usageInFlight = false;
+			if (!this.#disposed && this.session === session && this.#usageInFlightContextKey === usageContextKey) {
+				this.#usageInFlight = false;
+				this.#usageInFlightContextKey = null;
+				if (this.#getUsageContextKey(session) !== usageContextKey) this.refreshUsageInBackground();
+			}
 		}
 	}
 
-	#applyUsageRefreshReports(session: TSession, reports: unknown, sequence: number): void {
-		if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
+	#applyUsageRefreshReports(session: TSession, reports: unknown, sequence: number, usageContextKey: string): void {
+		if (
+			this.#disposed ||
+			this.session !== session ||
+			this.#getUsageContextKey(session) !== usageContextKey ||
+			this.#cachedUsageContextKey !== usageContextKey ||
+			sequence < this.#latestAppliedUsageRefreshSequence
+		) {
 			return;
 		}
 		this.#latestAppliedUsageRefreshSequence = sequence;
@@ -1747,8 +1810,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const usageChanged = this.#cachedUsage !== normalized;
 		this.#cachedUsage = normalized;
 		this.#usageFetchedAt = Date.now();
-		// Usage fetch is async; without a repaint the top border stays blank until
-		// some unrelated event (git resolve, keystroke, …) rebuilds it.
 		if (usageChanged) {
 			this.#invalidateStatusLineRenderCache();
 			this.#onBranchChange?.();
@@ -1762,13 +1823,24 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		if (event) this.#onCodexResetFireworks?.(event);
 	}
 
-	#observeLateUsageRefresh(session: TSession, reportsPromise: Promise<unknown>, sequence: number): void {
+	#observeLateUsageRefresh(
+		session: TSession,
+		reportsPromise: Promise<unknown>,
+		sequence: number,
+		usageContextKey: string,
+	): void {
 		void reportsPromise
 			.then(reports => {
-				this.#applyUsageRefreshReports(session, reports, sequence);
+				this.#applyUsageRefreshReports(session, reports, sequence, usageContextKey);
 			})
 			.catch(() => {
-				if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
+				if (
+					this.#disposed ||
+					this.session !== session ||
+					this.#getUsageContextKey(session) !== usageContextKey ||
+					this.#cachedUsageContextKey !== usageContextKey ||
+					sequence < this.#latestAppliedUsageRefreshSequence
+				) {
 					return;
 				}
 				this.#usageFetchedAt = Date.now();
@@ -2616,13 +2688,13 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// set `statusLineBg: ""`. Powerline end caps need a contrasting fill to
 		// bridge the bar into the surrounding terminal; without one they read as
 		// stray glyphs, so the cap renderer drops them when the fill is empty.
-		const TRANSPARENT_BG_ANSI = "\x1b[49m";
+		const colorEnabled = theme.getColorMode() !== "none";
+		const transparentBgAnsi = colorEnabled ? "\x1b[49m" : "";
 		const themeBgAnsi = theme.getBgAnsi("statusLineBg");
-		// Plain bottom bars drop the background entirely; the claude top-rule
-		// chip (`plain-right`) keeps it so the group reads as a chip on the rule.
 		const transparentLayout = layout === "plain-full" || layout === "plain-left";
-		const bgAnsi = transparentLayout || effectiveSettings.transparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
-		const transparentBg = bgAnsi === TRANSPARENT_BG_ANSI;
+		const transparentBg =
+			!colorEnabled || transparentLayout || effectiveSettings.transparent || themeBgAnsi === "\x1b[49m";
+		const bgAnsi = transparentBg ? transparentBgAnsi : themeBgAnsi;
 		const fgAnsi = theme.getFgAnsi("text");
 		const sepAnsi = theme.getFgAnsi("statusLineSep");
 		const subagentBadge = this.#subagentBadgeText();
@@ -2722,7 +2794,10 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				: embeddedContextGaugeMinWidth(ctx.contextPercent ?? 0, ctx.contextWindow)
 			: 0;
 		const minimumGapWidth = (): number => {
-			if (!embeddedContextWidth) return left.length > 0 && right.length > 0 ? 1 : 0;
+			if (!embeddedContextWidth) {
+				if (plain) return left.length > 0 && right.length > 0 ? 1 : 0;
+				return left.length > 0 || right.length > 0 ? 1 : 0;
+			}
 			// If the labels cannot coexist with the last surviving segment, fall
 			// back to the original one-cell gauge instead of dropping the entire
 			// status line. At this width the labels cannot render either way.
@@ -2816,15 +2891,16 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 						: separatorDef.endCaps.left
 					: "";
 			const capPrefix = separatorDef.endCaps?.useBgAsFg ? bgAnsi.replace("\x1b[48;", "\x1b[38;") : bgAnsi + sepAnsi;
-			const capText = cap ? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${cap}\x1b[0m` : "";
+			const resetAnsi = theme.getColorMode() === "none" ? "" : "\x1b[0m";
+			const capText = cap ? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${cap}${resetAnsi}` : "";
 			const openText =
 				direction === "left" && bandCap
-					? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${bandCap}\x1b[0m`
+					? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${bandCap}${resetAnsi}`
 					: "";
 
 			let content = bgAnsi + fgAnsi;
 			content += ` ${parts.join(` ${sepAnsi}${sep}${fgAnsi} `)} `;
-			content += "\x1b[0m";
+			content += resetAnsi;
 
 			if (direction === "right") return capText + content;
 			return openText + content + capText;
@@ -2869,12 +2945,15 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const sessionName =
 			effectiveSettings.sessionAccent !== false ? this.session.sessionManager?.getSessionName() : undefined;
 		const accentHex = sessionName ? getSessionAccentHex(sessionName, theme.sessionAccentInputs) : undefined;
-		const usedColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("borderAccent");
+		const usedColor = (accentHex ? theme.getCustomColorAnsi(accentHex) : "") || theme.getFgAnsi("borderAccent");
 		const horizontal = theme.boxRound.horizontal;
+		const plainColors = theme.getColorMode() === "none";
+		const bgReset = plainColors ? "" : "\x1b[49m";
+		const fgReset = plainColors ? "" : "\x1b[39m";
 		const mode = effectiveSettings.contextLine ?? "embedded";
 		const pct = ctx.contextPercent;
 		if (mode === "off" || pct === null || pct === undefined) {
-			return `\x1b[49m${usedColor}${horizontal.repeat(gapWidth)}\x1b[39m`;
+			return `${bgReset}${usedColor}${horizontal.repeat(gapWidth)}${fgReset}`;
 		}
 
 		const clampedPct = Math.min(100, Math.max(0, pct));
@@ -2956,9 +3035,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const overflowColor = theme.getFgAnsi("error");
 		const rawAccentHex = accentHex ?? theme.getColorHex("borderAccent");
 		const dimmedAccentHex = adjustHsv(rawAccentHex, { s: 0.7, v: 0.75 });
-		const thresholdColor = getSessionAccentAnsi(dimmedAccentHex) ?? usedColor;
+		const thresholdColor = theme.getCustomColorAnsi(dimmedAccentHex) || usedColor;
 
-		let out = "\x1b[49m";
+		let out = bgReset;
 		let activeColor = "";
 		for (let i = 0; i < gapWidth; i++) {
 			let color = i < usedCount ? usedColor : unusedColor;
@@ -2982,7 +3061,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			}
 			out += glyph;
 		}
-		return `${out}\x1b[39m`;
+		return `${out}${fgReset}`;
 	}
 
 	/** Auto-compaction boundary percents, or null when unavailable (disabled, no window). */
