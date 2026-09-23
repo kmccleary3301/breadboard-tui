@@ -1,13 +1,13 @@
 import { padding, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { formatAge, formatNumber } from "@oh-my-pi/pi-utils";
 import type { AgentActivityIndex, AgentActivityRow } from "../../../activity";
-import type { Settings } from "../../../config/settings";
 import type { AgentRef, AgentRegistry, AgentStatus } from "../../../registry/agent-registry";
-import { shortenPath, truncateToWidth } from "../../../tools/render-utils";
-import { formatLocalDateTimeWithOffset } from "../../../utils/local-date";
-import type { ObservableSession } from "../../session-observer-registry";
-import { theme } from "../../theme/theme";
-import type { AgentMetrics, AggregateMetrics } from "../agent-hub-projection";
+import { shortenPath, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import { formatLocalDateTimeWithOffset } from "@oh-my-pi/pi-tui/chrome/local-date";
+import type { ObservableSession } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import { theme } from "@oh-my-pi/pi-tui/theme/theme";
+import type { AgentMetrics, AggregateMetrics } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
+import type { AgentRoleDisplay } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
 import {
 	contextGauge,
 	formatChildIds,
@@ -16,12 +16,12 @@ import {
 	formatMetrics,
 	formatRoleBadge,
 	modelBadge,
-	sanitizeDisplayText,
 	sanitizeLine,
 	statusGlyph,
 	statusText,
 	treeBranch,
-} from "../agent-hub-renderer";
+} from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { sanitizeDisplayText } from "@oh-my-pi/pi-tui/overlays/extensions/display-text";
 import {
 	bottomBorder,
 	divider,
@@ -31,7 +31,7 @@ import {
 	splitRow,
 	topBorder,
 	topBorderSplit,
-} from "../overlay-box";
+} from "@oh-my-pi/pi-tui/chrome/overlay-box";
 
 const SPLIT_MIN_WIDTH = 96;
 const DETAIL_MIN_WIDTH = 34;
@@ -48,7 +48,7 @@ export interface RosterViewFrame {
 export interface RosterViewDeps {
 	registry: AgentRegistry;
 	ircUnreadCount: (id: string) => number;
-	settings?: Settings;
+	getRoleInfo?: (role: string) => AgentRoleDisplay;
 	activity: AgentActivityIndex;
 	getRows: () => readonly AgentRef[];
 	getSelectedRow: () => number;
@@ -72,7 +72,7 @@ export interface RosterViewDeps {
 export class RosterView {
 	#registry: AgentRegistry;
 	#ircUnreadCount: (id: string) => number;
-	#settings: Settings | undefined;
+	#getRoleInfo: ((role: string) => AgentRoleDisplay) | undefined;
 	#activity: AgentActivityIndex;
 	#getRows: () => readonly AgentRef[];
 	#getSelectedRow: () => number;
@@ -95,7 +95,7 @@ export class RosterView {
 	constructor(deps: RosterViewDeps) {
 		this.#registry = deps.registry;
 		this.#ircUnreadCount = deps.ircUnreadCount;
-		this.#settings = deps.settings;
+		this.#getRoleInfo = deps.getRoleInfo;
 		this.#activity = deps.activity;
 		this.#getRows = deps.getRows;
 		this.#getSelectedRow = deps.getSelectedRow;
@@ -381,7 +381,7 @@ export class RosterView {
 		add(lifecycle.join(theme.fg("dim", theme.sep.dot)));
 		const modelDetails: string[] = [];
 		const modelRole = progress?.modelRole ?? ref.history?.modelRole;
-		if (modelRole && this.#settings) modelDetails.push(formatRoleBadge(modelRole, this.#settings));
+		if (modelRole && this.#getRoleInfo) modelDetails.push(formatRoleBadge(modelRole, this.#getRoleInfo(modelRole)));
 		const badge = modelBadge(ref, observed);
 		if (badge) modelDetails.push(badge);
 		if (modelDetails.length > 0) add(modelDetails.join(theme.sep.dot));
@@ -481,7 +481,7 @@ export class RosterView {
 
 		const meta: string[] = [];
 		const modelRole = observed?.progress?.modelRole ?? ref.history?.modelRole;
-		if (modelRole && this.#settings) meta.push(formatRoleBadge(modelRole, this.#settings));
+		if (modelRole && this.#getRoleInfo) meta.push(formatRoleBadge(modelRole, this.#getRoleInfo(modelRole)));
 		const badge = modelBadge(ref, observed);
 		if (badge) meta.push(badge);
 		meta.push(theme.fg("dim", formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)))));

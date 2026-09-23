@@ -1,12 +1,12 @@
 import { matchesKey, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { AgentActivityIndex, AgentActivityKind, AgentActivityRow } from "../../../activity";
-import type { Settings } from "../../../config/settings";
 import type { AgentRef, AgentRegistry } from "../../../registry/agent-registry";
-import type { ObservableSession } from "../../session-observer-registry";
-import { theme } from "../../theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
-import { formatRoleBadge, sanitizeLine } from "../agent-hub-renderer";
-import { bottomBorder, divider, row, topBorder } from "../overlay-box";
+import type { ObservableSession } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import type { AgentRoleDisplay } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { theme } from "@oh-my-pi/pi-tui/theme/theme";
+import { matchesSelectDown, matchesSelectUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
+import { formatRoleBadge, sanitizeLine } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/chrome/overlay-box";
 
 type ActivityFilter = "all" | "errors" | "responses" | "tools";
 type ActivityScope = "all" | "agent" | "subtree";
@@ -14,7 +14,7 @@ type ActivityScope = "all" | "agent" | "subtree";
 export interface ActivityViewDeps {
 	activity: AgentActivityIndex;
 	registry: AgentRegistry;
-	settings?: Settings;
+	getRoleInfo?: (role: string) => AgentRoleDisplay;
 	getRows: () => readonly AgentRef[];
 	getSelectedAgentIndex: () => number;
 	getSelectedActivityRow: () => number;
@@ -56,7 +56,7 @@ function activityClock(timestamp: number): string {
 export class ActivityView {
 	#activity: AgentActivityIndex;
 	#registry: AgentRegistry;
-	#settings: Settings | undefined;
+	#getRoleInfo: ((role: string) => AgentRoleDisplay) | undefined;
 	#getRows: () => readonly AgentRef[];
 	#getSelectedAgentIndex: () => number;
 	#getSelectedActivityRow: () => number;
@@ -79,7 +79,7 @@ export class ActivityView {
 	constructor(deps: ActivityViewDeps) {
 		this.#activity = deps.activity;
 		this.#registry = deps.registry;
-		this.#settings = deps.settings;
+		this.#getRoleInfo = deps.getRoleInfo;
 		this.#getRows = deps.getRows;
 		this.#getSelectedAgentIndex = deps.getSelectedAgentIndex;
 		this.#getSelectedActivityRow = deps.getSelectedActivityRow;
@@ -304,7 +304,7 @@ export class ActivityView {
 		const ref = this.#registry.get(activity.agentId);
 		const observed = this.#getObserved(activity.agentId);
 		const role = observed?.progress?.modelRole ?? ref?.history?.modelRole;
-		const roleBadge = role && this.#settings ? `${formatRoleBadge(role, this.#settings)} ` : "";
+		const roleBadge = role && this.#getRoleInfo ? `${formatRoleBadge(role, this.#getRoleInfo(role))} ` : "";
 		const agent = sanitizeLine(activity.agentId, Math.max(8, Math.min(18, Math.floor(width * 0.18))));
 		const title = sanitizeLine(
 			activity.kind === "tool" ? (activity.toolName ?? activity.title) : activity.title,
