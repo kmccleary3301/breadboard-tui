@@ -2051,7 +2051,9 @@ describe("Settings", () => {
 				},
 			});
 			const previousProduct = process.env.BREADBOARD_PRODUCT;
+			const previousMigration = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
 			process.env.BREADBOARD_PRODUCT = "1";
+			process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = "1";
 			try {
 				const settings = await Settings.init({ cwd: projectDir, agentDir });
 				expect(settings.get("symbolPreset")).toBe("nerd");
@@ -2069,9 +2071,50 @@ describe("Settings", () => {
 						unsupportedCommands: "hide",
 					},
 				});
+				const firstBytes = await Bun.file(getConfigPath()).text();
+				await settings.reloadFromDisk();
+				expect(await Bun.file(getConfigPath()).text()).toBe(firstBytes);
 			} finally {
 				if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
 				else process.env.BREADBOARD_PRODUCT = previousProduct;
+				if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
+				else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
+			}
+		});
+		it("keeps a bridge selection from a config overlay above the seeded profile migration", async () => {
+			await writeSettings({
+				breadboard: {
+					engineMode: "local-owned",
+					harness: { default: ".breadboard/bb-omp/r39/bb-omp.harness.yaml" },
+					engineArtifact: { kind: "runtime-bundle", runtimeBundle: { path: "/old/r39.bundle" } },
+				},
+			});
+			const overlayPath = path.join(tempDir.path(), "overlay.yml");
+			await Bun.write(
+				overlayPath,
+				YAML.stringify({
+					breadboard: {
+						engineMode: "local-owned",
+						harness: { default: ".breadboard/bb-omp/r39/overlay.yaml" },
+					},
+				}),
+			);
+			const previousProduct = process.env.BREADBOARD_PRODUCT;
+			const previousMigration = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
+			process.env.BREADBOARD_PRODUCT = "1";
+			process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = "1";
+			try {
+				const settings = await Settings.init({ cwd: projectDir, agentDir, configFiles: [overlayPath] });
+				expect(settings.getRaw("breadboard")).toMatchObject({
+					engineMode: "local-owned",
+					harness: { default: ".breadboard/bb-omp/r39/overlay.yaml" },
+				});
+				expect((await readSettings()).breadboard).toEqual({ harness: { default: "daily_driver" } });
+			} finally {
+				if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
+				else process.env.BREADBOARD_PRODUCT = previousProduct;
+				if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
+				else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
 			}
 		});
 		it("preserves current ask timeout seconds in overrides and persisted config", async () => {

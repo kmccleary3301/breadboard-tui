@@ -614,6 +614,10 @@ export class Settings {
 
 	/** Whether to persist changes */
 	#persist: boolean;
+	/** Explicit one-shot R39-to-native profile migration requested by the launcher. */
+	#nativeProfileMigrationRequested = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION === "1";
+	/** True when the one-shot migration rewrote the global profile. */
+	#nativeProfileMigrationApplied = false;
 
 	private constructor(options: SettingsOptions = {}) {
 		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
@@ -1500,6 +1504,7 @@ export class Settings {
 		this.#fireAllHooks();
 		return this;
 	}
+
 	async #loadGlobalSettings(): Promise<void> {
 		this.#storage = await AgentStorage.open(getAgentDbPath(this.#agentDir));
 		const existingConfig = await this.#loadExistingMainYaml();
@@ -1508,6 +1513,10 @@ export class Settings {
 		} else {
 			await this.#migrateFromLegacy();
 			this.#global = await this.#loadYaml(this.#configPath!);
+		}
+		if (this.#nativeProfileMigrationRequested && this.#migrateR39Profile(this.#global) && this.#configPath) {
+			await this.#writeYamlAtomically(this.#configPath, this.#global);
+			this.#nativeProfileMigrationApplied = true;
 		}
 		await this.#seedLastChangelogVersionMarker();
 	}
@@ -2103,33 +2112,30 @@ export class Settings {
 		}
 	}
 
-	/** Apply schema migrations to raw settings */
-	#migrateRawSettings(raw: RawSettings, captureLegacyChangelogVersion = true): RawSettings {
-		// A R39 product profile selected the Python bridge explicitly and pointed
-		// at its workspace harness. The native daily driver owns those selections;
-		// carry the user's shared preferences while dropping only the obsolete
-		// bridge identity and selecting the built-in daily-driver harness.
-		if (process.env.BREADBOARD_PRODUCT === "1" && isRecord(raw.breadboard)) {
-			const breadboard = raw.breadboard;
-			const harness = isRecord(breadboard.harness) ? breadboard.harness : undefined;
-			const defaultHarness = harness?.default;
-			const isR39Harness =
-				typeof defaultHarness === "string" && /(?:^|[/\\])r39(?:[/\\])/.test(defaultHarness);
-			if (harness !== undefined && isR39Harness && breadboard.engineMode === "local-owned") {
-				for (const key of [
-					"engineMode",
-					"baseUrl",
-					"auth",
-					"tls",
-					"engineArtifact",
-					"ownerExitPolicy",
-					"sessionConfigPath",
-				]) {
-					delete breadboard[key];
-				}
-				harness.default = "daily_driver";
-			}
+	/** Apply the one-shot R39-to-native rewrite to the global profile only. */
+	#migrateR39Profile(raw: RawSettings): boolean {
+		if (process.env.BREADBOARD_PRODUCT !== "1" || !isRecord(raw.breadboard)) return false;
+		const breadboard = raw.breadboard;
+		const harness = isRecord(breadboard.harness) ? breadboard.harness : undefined;
+		const defaultHarness = harness?.default;
+		const isR39Harness = typeof defaultHarness === "string" && /(?:^|[/\\])r39(?:[/\\])/.test(defaultHarness);
+		if (harness === undefined || !isR39Harness || breadboard.engineMode !== "local-owned") return false;
+		for (const key of [
+			"engineMode",
+			"baseUrl",
+			"auth",
+			"tls",
+			"engineArtifact",
+			"ownerExitPolicy",
+			"sessionConfigPath",
+		]) {
+			delete breadboard[key];
 		}
+		harness.default = "daily_driver";
+		return true;
+	}
+	/** Apply schema migrations to raw settings. */
+	#migrateRawSettings(raw: RawSettings, captureLegacyChangelogVersion = true): RawSettings {
 		// queueMode -> steeringMode
 		if ("queueMode" in raw && !("steeringMode" in raw)) {
 			raw.steeringMode = raw.queueMode;
