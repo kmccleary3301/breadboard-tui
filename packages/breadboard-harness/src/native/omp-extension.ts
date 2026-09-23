@@ -1,7 +1,8 @@
-import { stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
-import { NativeHarnessReloadError, type LoadedNativeHarness } from "./load-native-harness";
+import { NativeHarnessReloadError, type LoadedNativeHarness, type NativeHarnessLiveState } from "./load-native-harness";
 import { frameNativeUserMessage } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
@@ -299,6 +300,138 @@ function registerFunctionTools(
 		});
 	}
 }
+interface NativeHarnessSourceInfo {
+	readonly mtimeMs: number;
+	readonly size: number;
+}
+
+interface NativeHarnessWatchOptions {
+	readonly live: NativeHarnessLiveState;
+	readonly specPath: string;
+	readonly context: ExtensionContext;
+	readonly statFile?: (path: string) => Promise<NativeHarnessSourceInfo>;
+	readonly readSource?: (path: string) => Promise<Uint8Array>;
+}
+
+function sha256Source(source: Uint8Array): string {
+	return createHash("sha256").update(source).digest("hex");
+}
+
+export async function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): Promise<() => void> {
+	const statFile =
+		options.statFile ??
+		(async (path: string): Promise<NativeHarnessSourceInfo> => {
+			const info = await stat(path);
+			return { mtimeMs: info.mtimeMs, size: info.size };
+		});
+	const readSource = options.readSource ?? (async (path: string): Promise<Uint8Array> => readFile(path));
+	let disposed = false;
+	let lifecycle = 0;
+	let observed: NativeHarnessSourceInfo | undefined;
+	let lastPublishedHash: string | undefined;
+	let lastObservedHash: string | undefined;
+	let reloadInFlight: Promise<void> | undefined;
+	let reloadAgain = false;
+	let pendingHash: string | undefined;
+	let debounceTimer: Timer | undefined;
+	let intervalTimer: Timer | undefined;
+	const notifyReloadError = (error: unknown): void => {
+		if (disposed) return;
+		const message =
+			error instanceof NativeHarnessReloadError
+				? `Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`
+				: `Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`;
+		options.context.ui.notify(message, "error");
+	};
+	const runReload = async (sourceHash: string): Promise<void> => {
+		if (disposed) return;
+		if (reloadInFlight !== undefined) {
+			reloadAgain = true;
+			pendingHash = sourceHash;
+			return;
+		}
+		const reloadLifecycle = lifecycle;
+		reloadInFlight = options.live
+			.reload(next => {
+				if (disposed || lifecycle !== reloadLifecycle) throw new Error("harness watcher disposed");
+				assertNativeHarnessBindings(next);
+			})
+			.then(() => {
+				if (!disposed && lifecycle === reloadLifecycle) lastPublishedHash = sourceHash;
+			})
+			.catch(notifyReloadError)
+			.finally(() => {
+				reloadInFlight = undefined;
+				if (!disposed && reloadAgain) {
+					reloadAgain = false;
+					const nextHash = pendingHash ?? lastObservedHash;
+					pendingHash = undefined;
+					if (nextHash !== undefined) scheduleReload(nextHash);
+				}
+			});
+		await reloadInFlight;
+	};
+	const scheduleReload = (sourceHash: string): void => {
+		if (disposed) return;
+		if (debounceTimer !== undefined) {
+			options.context.clearTimer(debounceTimer);
+			debounceTimer = undefined;
+		}
+		pendingHash = sourceHash;
+		debounceTimer = options.context.setTimeout(() => {
+			debounceTimer = undefined;
+			if (!disposed) {
+				const hash = pendingHash;
+				pendingHash = undefined;
+				if (hash !== undefined) void runReload(hash);
+			}
+		}, 150);
+	};
+	const poll = async (): Promise<void> => {
+		if (disposed) return;
+		const info = await statFile(options.specPath).catch(() => undefined);
+		if (disposed || info === undefined) return;
+		const source = await readSource(options.specPath).catch(() => undefined);
+		if (disposed || source === undefined) return;
+		const sourceHash = sha256Source(source);
+		const metadataChanged =
+			observed === undefined || observed.mtimeMs !== info.mtimeMs || observed.size !== info.size;
+		observed = info;
+		if (!metadataChanged && sourceHash === lastObservedHash) return;
+		lastObservedHash = sourceHash;
+		if (reloadInFlight !== undefined) {
+			reloadAgain = true;
+			pendingHash = sourceHash;
+		} else {
+			scheduleReload(sourceHash);
+		}
+	};
+	const initialInfo = await statFile(options.specPath).catch(() => undefined);
+	const initialSource = await readSource(options.specPath).catch(() => undefined);
+	if (!disposed && initialInfo !== undefined && initialSource !== undefined) {
+		observed = initialInfo;
+		lastPublishedHash = sha256Source(initialSource);
+		lastObservedHash = lastPublishedHash;
+	}
+	intervalTimer = options.context.setInterval(() => {
+		void poll();
+	}, 1000);
+	return () => {
+		if (disposed) return;
+		disposed = true;
+		lifecycle += 1;
+		reloadAgain = false;
+		pendingHash = undefined;
+		if (debounceTimer !== undefined) {
+			options.context.clearTimer(debounceTimer);
+			debounceTimer = undefined;
+		}
+		if (intervalTimer !== undefined) {
+			options.context.clearTimer(intervalTimer);
+			intervalTimer = undefined;
+		}
+	};
+}
 
 /**
  * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
@@ -358,70 +491,12 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		registerFunctionTools(api, activeHarness, todos, guard);
 		if (live?.editable) {
 			api.on("session_start", async (_event, context) => {
-				let observedMtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs ?? 0;
-				let reloadInFlight: Promise<void> | undefined;
-				let reloadAgain = false;
-				let debounceTimer: Timer | undefined;
-				let disposed = false;
-				const notifyReloadError = (error: unknown): void => {
-					const message =
-						error instanceof NativeHarnessReloadError
-							? `Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`
-							: `Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`;
-					context.ui.notify(message, "error");
-				};
-				const scheduleReload = (): void => {
-					if (disposed) return;
-					if (debounceTimer !== undefined) {
-						context.clearTimer(debounceTimer);
-						debounceTimer = undefined;
-					}
-					debounceTimer = context.setTimeout(() => {
-						debounceTimer = undefined;
-						if (disposed) return;
-						void runReload();
-					}, 150);
-				};
-				const runReload = async (): Promise<void> => {
-					if (disposed) return;
-					if (reloadInFlight !== undefined) {
-						reloadAgain = true;
-						return;
-					}
-					reloadInFlight = live
-						.reload(next => assertNativeHarnessBindings(next))
-						.then(() => undefined)
-						.catch(notifyReloadError)
-						.finally(() => {
-							reloadInFlight = undefined;
-							if (!disposed && reloadAgain) {
-								reloadAgain = false;
-								scheduleReload();
-							}
-						});
-					await reloadInFlight;
-				};
-				const poll = async (): Promise<void> => {
-					if (disposed) return;
-					const mtime = (await stat(activeHarness.specPath).catch(() => undefined))?.mtimeMs;
-					if (disposed || mtime === undefined || mtime <= observedMtime) return;
-					observedMtime = mtime;
-					if (reloadInFlight !== undefined) {
-						reloadAgain = true;
-					} else {
-						scheduleReload();
-					}
-				};
-				context.setInterval(() => {
-					void poll();
-				}, 1000);
-				api.on("session_shutdown", () => {
-					disposed = true;
-					if (debounceTimer !== undefined) {
-						context.clearTimer(debounceTimer);
-						debounceTimer = undefined;
-					}
+				const disposeWatcher = await startNativeHarnessWatcher({
+					live,
+					specPath: activeHarness.specPath,
+					context,
 				});
+				api.on("session_shutdown", disposeWatcher);
 			});
 		}
 		activeHarness.live?.subscribe(change => {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createNativeHarnessExtension } from "../../src/native/omp-extension";
+import { createNativeHarnessExtension, startNativeHarnessWatcher } from "../../src/native/omp-extension";
 import { NativeHarnessReloadError, loadNativeHarness } from "../../src/native/load-native-harness";
 
 const FIXTURE = join(import.meta.dir, "fixtures/r39-workspace/.breadboard/bb-omp/r39");
@@ -151,25 +151,13 @@ describe("native harness live state", () => {
 			graph_hash: g4?.graphHash,
 		});
 	});
-	it("cancels a pending watcher debounce when the session shuts down", async () => {
+	it("hashes equal-metadata edits and disposes an in-flight debounce deterministically", async () => {
 		const root = await workspace();
 		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
-		const handlers = new Map<string, Array<(event: unknown, context: unknown) => unknown>>();
+		let bytes = new TextEncoder().encode("one");
 		let intervalCallback: (() => void) | undefined;
 		let timeoutCallback: (() => void) | undefined;
 		let clearCount = 0;
-		const api = {
-			on(event: string, handler: unknown) {
-				const list = handlers.get(event) ?? [];
-				list.push(handler as (event: unknown, context: unknown) => unknown);
-				handlers.set(event, list);
-			},
-			registerCommand() {},
-			registerTool() {},
-			setActiveTools() {},
-			appendEntry() {},
-		};
-		createNativeHarnessExtension(harness)(api as never);
 		const context = {
 			ui: { notify() {} },
 			setInterval(callback: () => void) {
@@ -184,20 +172,82 @@ describe("native harness live state", () => {
 				clearCount += 1;
 			},
 		};
-		await handlers.get("session_start")?.at(-1)?.({}, context);
-		const sourcePath = join(root, SPEC);
-		const source = await readFile(sourcePath, "utf8");
-		await writeFile(sourcePath, source.replace("  - list_dir\n", ""));
+		const dispose = await startNativeHarnessWatcher({
+			live: harness.live!,
+			specPath: "harness.yaml",
+			context: context as never,
+			statFile: async () => ({ mtimeMs: 1, size: 3 }),
+			readSource: async () => bytes,
+		});
+		bytes = new TextEncoder().encode("two");
 		intervalCallback?.();
-		for (let attempt = 0; attempt < 10 && timeoutCallback === undefined; attempt++) {
-			await new Promise<void>(resolve => setImmediate(resolve));
-		}
+		for (let attempt = 0; attempt < 5 && timeoutCallback === undefined; attempt++) await Promise.resolve();
 		expect(timeoutCallback).toBeDefined();
-		const shutdown = handlers.get("session_shutdown")?.at(-1);
-		await shutdown?.({}, context);
-		expect(clearCount).toBe(1);
+		dispose();
+		expect(clearCount).toBe(2);
 		timeoutCallback?.();
 		await Promise.resolve();
 		expect(harness.live?.generation).toBe(1);
+	});
+	it("does not publish or notify when an in-flight reload crosses shutdown", async () => {
+		const root = await workspace();
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		let bytes = new TextEncoder().encode("one");
+		let intervalCallback: (() => void) | undefined;
+		let timeoutCallback: (() => void) | undefined;
+		let releaseReload: (() => void) | undefined;
+		let notifyCount = 0;
+		let published = false;
+		let clearCount = 0;
+		const context = {
+			ui: { notify() { notifyCount += 1; } },
+			setInterval(callback: () => void) {
+				intervalCallback = callback;
+				return {} as Timer;
+			},
+			setTimeout(callback: () => void) {
+				timeoutCallback = callback;
+				return {} as Timer;
+			},
+			clearTimer() {
+				clearCount += 1;
+			},
+		};
+		const fakeLive = {
+			editable: true,
+			generation: 1,
+			current: () => harness,
+			reload: async (prepare?: (next: typeof harness) => void | Promise<void>) => {
+				await new Promise<void>(resolve => {
+					releaseReload = resolve;
+				});
+				await prepare?.(harness);
+				published = true;
+				return harness;
+			},
+			setReloadValidator() {},
+			subscribe() {
+				return () => {};
+			},
+		};
+		const dispose = await startNativeHarnessWatcher({
+			live: fakeLive,
+			specPath: "harness.yaml",
+			context: context as never,
+			statFile: async () => ({ mtimeMs: 1, size: 3 }),
+			readSource: async () => bytes,
+		});
+		bytes = new TextEncoder().encode("two");
+		intervalCallback?.();
+		for (let attempt = 0; attempt < 5; attempt++) await Promise.resolve();
+		timeoutCallback?.();
+		for (let attempt = 0; attempt < 10 && releaseReload === undefined; attempt++) await Promise.resolve();
+		expect(releaseReload).toBeDefined();
+		dispose();
+		expect(clearCount).toBe(1);
+		releaseReload?.();
+		for (let attempt = 0; attempt < 3; attempt++) await Promise.resolve();
+		expect(published).toBe(false);
+		expect(notifyCount).toBe(0);
 	});
 });
