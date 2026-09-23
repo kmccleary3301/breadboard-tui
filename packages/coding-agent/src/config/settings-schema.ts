@@ -238,7 +238,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	],
 	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
 	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
-	breadboard: ["Harness", "Engine", "Providers", "Subagents"],
+	breadboard: ["Harness", "Engine", "Subagents"],
 };
 
 /** Status line segment identifiers accepted by custom status-line settings. */
@@ -519,29 +519,8 @@ export const SETTINGS_SCHEMA = {
 	// host. Hidden from the UI; populate via env vars or hand-edited config.yml.
 	// Env (`OMP_AUTH_BROKER_URL` / `OMP_AUTH_BROKER_TOKEN`) takes precedence so
 	// per-machine overrides remain trivial.
-	"auth.broker.url": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Providers",
-			label: "Broker URL",
-			description: "Whether an authentication broker endpoint is configured; the endpoint is never shown here",
-			readonly: true,
-		},
-	},
-	"auth.broker.token": {
-		type: "string",
-		default: undefined,
-		credential: true,
-		ui: {
-			tab: "breadboard",
-			group: "Providers",
-			label: "Broker token",
-			description: "Whether an authentication broker token is configured; secrets never render",
-			readonly: true,
-		},
-	},
+	"auth.broker.url": { type: "string", default: undefined },
+	"auth.broker.token": { type: "string", default: undefined, credential: true },
 	"breadboard.engineMode": {
 		type: "string",
 		default: undefined,

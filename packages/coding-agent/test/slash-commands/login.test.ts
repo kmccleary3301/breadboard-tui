@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import { OAuthManualInputManager } from "@oh-my-pi/pi-coding-agent/modes/oauth-manual-input";
-import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 
@@ -10,32 +9,29 @@ type RuntimeHarness = {
 	getWarning: () => string | undefined;
 	getSelectorMode: () => "login" | "logout" | undefined;
 	getSelectorProvider: () => string | undefined;
-	getRevokeProvider: () => string | undefined;
 };
 
-const createRuntimeHarness = (manualInput: OAuthManualInputManager, usesBroker = false): RuntimeHarness => {
+const createRuntimeHarness = (manualInput: OAuthManualInputManager): RuntimeHarness => {
 	let statusMessage: string | undefined;
 	let warningMessage: string | undefined;
 	let selectorMode: "login" | "logout" | undefined;
 	let selectorProvider: string | undefined;
-	let revokeProvider: string | undefined;
-	const ctx = createInteractiveModeContext({
+	const ctx = {
 		oauthManualInput: manualInput,
+		editor: {
+			setText: () => {},
+		} as unknown as InteractiveModeContext["editor"],
 		showStatus: (message: string) => {
 			statusMessage = message;
 		},
 		showWarning: (message: string) => {
 			warningMessage = message;
 		},
-		usesProviderAuthBroker: () => usesBroker,
 		showOAuthSelector: async (mode: "login" | "logout", providerId?: string) => {
 			selectorMode = mode;
 			selectorProvider = providerId;
 		},
-		showProviderRevokeSelector: async (providerId?: string) => {
-			revokeProvider = providerId;
-		},
-	});
+	} as InteractiveModeContext;
 
 	return {
 		runtime: {
@@ -45,7 +41,6 @@ const createRuntimeHarness = (manualInput: OAuthManualInputManager, usesBroker =
 		getWarning: () => warningMessage,
 		getSelectorMode: () => selectorMode,
 		getSelectorProvider: () => selectorProvider,
-		getRevokeProvider: () => revokeProvider,
 	};
 };
 
@@ -105,29 +100,5 @@ describe("/login slash command", () => {
 		expect(handled).toBe(true);
 		expect(harness.getSelectorMode()).toBeUndefined();
 		expect(harness.getWarning()).toBe("No OAuth login is waiting for a manual callback.");
-	});
-
-	it("routes broker-only provider IDs without consulting the native catalog", async () => {
-		const harness = createRuntimeHarness(new OAuthManualInputManager(), true);
-
-		const loginHandled = await executeBuiltinSlashCommand("/login broker-only", harness.runtime);
-
-		expect(loginHandled).toBe(true);
-		expect(harness.getSelectorMode()).toBe("login");
-		expect(harness.getSelectorProvider()).toBe("broker-only");
-	});
-
-	it("routes broker logout and confirmed revoke as distinct commands", async () => {
-		const logoutHarness = createRuntimeHarness(new OAuthManualInputManager(), true);
-		const revokeHarness = createRuntimeHarness(new OAuthManualInputManager(), true);
-
-		const logoutHandled = await executeBuiltinSlashCommand("/logout broker-only", logoutHarness.runtime);
-		const revokeHandled = await executeBuiltinSlashCommand("/revoke broker-only", revokeHarness.runtime);
-
-		expect(logoutHandled).toBe(true);
-		expect(logoutHarness.getSelectorMode()).toBe("logout");
-		expect(logoutHarness.getSelectorProvider()).toBe("broker-only");
-		expect(revokeHandled).toBe(true);
-		expect(revokeHarness.getRevokeProvider()).toBe("broker-only");
 	});
 });

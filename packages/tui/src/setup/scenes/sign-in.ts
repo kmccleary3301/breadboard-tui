@@ -1,6 +1,5 @@
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthPrompt, OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import { type Component, type Focusable, Container } from "../../tui";
 import { Spacer } from "../../components/spacer";
@@ -11,7 +10,11 @@ import { matchesKey } from "../../keys";
 import { type SgrMouseEvent } from "../../mouse";
 import { wrapTextWithAnsi } from "../../utils";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
-import { OAuthSelectorComponent, type ProviderAuthReadPort } from "../../overlays/oauth-selector";
+import { OAuthSelectorComponent } from "../../overlays/oauth-selector";
+import {
+	BreadboardProviderAuthSelectorComponent,
+	type ProviderAuthReadPort,
+} from "../../overlays/breadboard-provider-auth-selector";
 import { getProductIdentity } from "../../product-identity";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
@@ -43,37 +46,10 @@ function isProviderAuthFailure(error: unknown): error is ProviderAuthFailure {
 	);
 }
 
-function createNativeProviderAuthDataSource(authStorage: AuthStorage): ProviderAuthReadPort {
-	return {
-		listProvidersSync: () =>
-			getOAuthProviders().map(provider => ({
-				providerId: provider.id,
-				displayName: provider.name,
-				supportTier: "core" as const,
-				authOwner: "provider" as const,
-				available: provider.available,
-				authSchemes: ["oauth2" as const],
-				loginAvailable: provider.available,
-				oauthFlows: [] as const,
-				storeCredentialsAs: provider.storeCredentialsAs,
-			})),
-		listCredentialsSync: providerId =>
-			authStorage.listStoredCredentials?.(providerId).map(row => ({
-				providerId: row.provider,
-				status: row.disabledCause ? ("disabled" as const) : ("active" as const),
-			})) ?? [],
-		async listProviders() {
-			return this.listProvidersSync?.() ?? [];
-		},
-		async listCredentials(providerId) {
-			return this.listCredentialsSync?.(providerId) ?? [];
-		},
-	};
-}
-
 function loginUrlLink(url: string): string {
 	return `\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`;
 }
+
 
 function loginCopyHint(): string {
 	return theme.fg("dim", "(clipboard copy attempted; Alt+C retries)");
@@ -139,7 +115,7 @@ export class SignInTab implements SetupTab {
 
 	/** Undefined when the product has neither a credential broker nor a native store to sign in to. */
 	#authStorage: AuthStorage | undefined;
-	#selector: OAuthSelectorComponent;
+	#selector: OAuthSelectorComponent | BreadboardProviderAuthSelectorComponent;
 	#statusLines: string[] = [];
 	#authUrl: string | undefined;
 	#authLaunchUrl: string | undefined;
@@ -292,25 +268,43 @@ export class SignInTab implements SetupTab {
 		return !this.#host.ctx.providerAuth && !this.#authStorage;
 	}
 
-	#createSelector(): OAuthSelectorComponent {
-		return new OAuthSelectorComponent(
+	#createSelector(): OAuthSelectorComponent | BreadboardProviderAuthSelectorComponent {
+		const providerAuth = this.#host.ctx.providerAuth;
+		if (providerAuth) {
+			return new BreadboardProviderAuthSelectorComponent(
+				"login",
+				providerAuth,
+				providerId => {
+					void this.#login(providerId);
+				},
+				() => this.#host.finish("skipped"),
+				{
+					requestRender: () => this.#host.requestRender(),
+					disabledProviders: this.#host.ctx.disabledProviders,
+					validateAuth: async providerId =>
+						(await providerAuth.listCredentials(providerId)).some(credential => credential.status === "active"),
+				},
+			);
+		}
+		if (this.#authStorage) {
+			return new OAuthSelectorComponent(
+				"login",
+				this.#authStorage,
+				providerId => {
+					void this.#login(providerId);
+				},
+				() => this.#host.finish("skipped"),
+				{ requestRender: () => this.#host.requestRender(), disabledProviders: this.#host.ctx.disabledProviders },
+			);
+		}
+		return new BreadboardProviderAuthSelectorComponent(
 			"login",
-			this.#host.ctx.providerAuth ??
-				(this.#authStorage ? createNativeProviderAuthDataSource(this.#authStorage) : UNAVAILABLE_PROVIDER_SOURCE),
+			UNAVAILABLE_PROVIDER_SOURCE,
 			providerId => {
 				void this.#login(providerId);
 			},
 			() => this.#host.finish("skipped"),
-			{
-				requestRender: () => this.#host.requestRender(),
-				disabledProviders: this.#host.ctx.disabledProviders,
-				validateAuth: this.#host.ctx.providerAuth
-					? async providerId =>
-							(await this.#host.ctx.providerAuth?.listCredentials(providerId))?.some(
-								credential => credential.status === "active",
-							) === true
-					: undefined,
-			},
+			{ requestRender: () => this.#host.requestRender(), disabledProviders: this.#host.ctx.disabledProviders },
 		);
 	}
 

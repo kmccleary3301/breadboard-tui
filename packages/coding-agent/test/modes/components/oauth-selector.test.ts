@@ -1,10 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import type {
-	AuthCredentialView,
-	AuthProviderView,
-	ProviderAuthReadPort,
-} from "@oh-my-pi/pi-coding-agent/breadboard/provider-auth-port";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { OAuthSelectorComponent } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
@@ -14,116 +9,14 @@ beforeAll(async () => {
 	await initTheme();
 });
 
-function providerDataSource(storedProviders: readonly string[] = []): ProviderAuthReadPort {
-	return {
-		async listProviders() {
-			return getOAuthProviders().map(provider => ({
-				providerId: provider.id,
-				aliases: [],
-				displayName: provider.name,
-				storeCredentialsAs: provider.storeCredentialsAs,
-				supportTier: "core",
-				authOwner: "provider",
-				available: provider.available,
-				authSchemes: ["oauth2"],
-				loginAvailable: provider.available,
-				oauthFlows: [],
-				modelDiscovery: "configured_only",
-			}));
-		},
-		async listCredentials() {
-			return storedProviders.map(
-				providerId =>
-					({
-						schemaVersion: "bb.auth.credential_summary.v1",
-						credentialRef: `${providerId}-credential`,
-						accountId: `${providerId}-account`,
-						providerId,
-						authSchemeId: "oauth2",
-						credentialKind: "oauth2",
-						accountLabel: `${providerId} account`,
-						status: "active",
-						source: "oauth",
-						expiresAtUtc: null,
-						createdAtUtc: "",
-					}) satisfies AuthCredentialView,
-			);
-		},
-	};
-}
+const authStorage = {
+	has: (_providerId: string) => false,
+	hasAuth: (_providerId: string) => false,
+	getCredentialOrigin: (_providerId: string) => undefined,
+} as unknown as AuthStorage;
 
 describe("OAuthSelectorComponent", () => {
-	it("distinguishes pending provider discovery from an empty catalog", async () => {
-		const pending = Promise.withResolvers<readonly AuthProviderView[]>();
-		const source = providerDataSource();
-		const component = new OAuthSelectorComponent(
-			"login",
-			{ ...source, listProviders: () => pending.promise },
-			() => {},
-			() => {},
-		);
-		const loading = component
-			.render(80)
-			.map(line => Bun.stripANSI(line))
-			.join("\n");
-		expect(loading).toMatch(/loading/i);
-		expect(loading).not.toMatch(/no .*providers/i);
-		pending.resolve(await source.listProviders());
-		await component.ready;
-		expect(
-			component
-				.render(80)
-				.map(line => Bun.stripANSI(line))
-				.join("\n"),
-		).not.toMatch(/loading/i);
-	});
-
-	it("does not restart credential validation after closing during discovery", async () => {
-		const pending = Promise.withResolvers<readonly AuthProviderView[]>();
-		const source = providerDataSource(["opencode-go"]);
-		const validated: string[] = [];
-		const component = new OAuthSelectorComponent(
-			"login",
-			{ ...source, listProviders: () => pending.promise },
-			() => {},
-			() => {},
-			{
-				validateAuth: async provider => {
-					validated.push(provider);
-					return true;
-				},
-			},
-		);
-		component.handleInput("\x1b");
-		pending.resolve(await source.listProviders());
-		await component.ready;
-		component.stopValidation();
-		expect(validated).toEqual([]);
-	});
-
-	it("allows revoking stored credentials when a provider cannot accept new logins", async () => {
-		const source = providerDataSource(["opencode-go"]);
-		const providers = (await source.listProviders())
-			.filter(provider => provider.providerId === "opencode-go")
-			.map(provider => ({
-				...provider,
-				available: false,
-				loginAvailable: false,
-				availabilityReason: "provider_managed" as const,
-			}));
-		const selected: string[] = [];
-		const component = new OAuthSelectorComponent(
-			"revoke",
-			{ ...source, listProviders: async () => providers },
-			provider => selected.push(provider),
-			() => {},
-		);
-		await component.ready;
-		component.handleInput("\n");
-		expect(selected).toEqual(["opencode-go"]);
-	});
-
-	it("fuzzy-filters overflowing provider lists from typed input", async () => {
+	it("fuzzy-filters overflowing provider lists from typed input", () => {
 		const providers = getOAuthProviders();
 		expect(providers.length).toBeGreaterThan(10);
 		const target =
@@ -136,11 +29,10 @@ describe("OAuthSelectorComponent", () => {
 		const selected: string[] = [];
 		const component = new OAuthSelectorComponent(
 			"login",
-			providerDataSource(),
+			authStorage,
 			providerId => selected.push(providerId),
 			() => {},
 		);
-		await component.ready;
 
 		for (const char of target.id) {
 			component.handleInput(char);
@@ -156,15 +48,19 @@ describe("OAuthSelectorComponent", () => {
 		component.handleInput("\n");
 		expect(selected).toEqual([target.id]);
 	});
-	it("does not offer env-only providers as logout targets", async () => {
+
+	it("does not offer env-only providers as logout targets", () => {
 		const selected: string[] = [];
 		const component = new OAuthSelectorComponent(
 			"logout",
-			providerDataSource(),
+			{
+				has: (_providerId: string) => false,
+				hasAuth: (providerId: string) => providerId === "opencode-go" || providerId === "opencode-zen",
+				getCredentialOrigin: (_providerId: string) => undefined,
+			} as unknown as AuthStorage,
 			providerId => selected.push(providerId),
 			() => {},
 		);
-		await component.ready;
 
 		for (const char of "opencode-go") {
 			component.handleInput(char);
@@ -180,15 +76,18 @@ describe("OAuthSelectorComponent", () => {
 		expect(selected).toEqual([]);
 	});
 
-	it("offers stored providers as logout targets", async () => {
+	it("offers stored providers as logout targets", () => {
 		const selected: string[] = [];
 		const component = new OAuthSelectorComponent(
 			"logout",
-			providerDataSource(["opencode-go"]),
+			{
+				has: (providerId: string) => providerId === "opencode-go",
+				hasAuth: (providerId: string) => providerId === "opencode-go",
+				getCredentialOrigin: (_providerId: string) => undefined,
+			} as unknown as AuthStorage,
 			providerId => selected.push(providerId),
 			() => {},
 		);
-		await component.ready;
 
 		for (const char of "opencode-go") {
 			component.handleInput(char);
@@ -224,12 +123,11 @@ describe("OAuthSelectorComponent", () => {
 
 			const component = new OAuthSelectorComponent(
 				"login",
-				providerDataSource(),
+				authStorage,
 				() => {},
 				() => {},
 				{ disabledProviders: settings.get("disabledProviders") },
 			);
-			await component.ready;
 			for (const char of victim.id) {
 				component.handleInput(char);
 			}
@@ -251,12 +149,11 @@ describe("OAuthSelectorComponent", () => {
 
 			const component = new OAuthSelectorComponent(
 				"login",
-				providerDataSource(),
+				authStorage,
 				() => {},
 				() => {},
 				{ disabledProviders: settings.get("disabledProviders") },
 			);
-			await component.ready;
 			for (const char of alias.id) {
 				component.handleInput(char);
 			}
@@ -274,12 +171,15 @@ describe("OAuthSelectorComponent", () => {
 			const selected: string[] = [];
 			const component = new OAuthSelectorComponent(
 				"logout",
-				providerDataSource(["opencode-go"]),
+				{
+					has: (providerId: string) => providerId === "opencode-go",
+					hasAuth: (providerId: string) => providerId === "opencode-go",
+					getCredentialOrigin: (_providerId: string) => undefined,
+				} as unknown as AuthStorage,
 				providerId => selected.push(providerId),
 				() => {},
 				{ disabledProviders: settings.get("disabledProviders") },
 			);
-			await component.ready;
 			for (const char of "opencode-go") {
 				component.handleInput(char);
 			}

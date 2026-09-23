@@ -18,8 +18,6 @@ const BREADBOARD_PATHS = [
 	"breadboard.requestTimeoutMs",
 	"breadboard.ownerExitPolicy",
 	"breadboard.sessionConfigPath",
-	"auth.broker.url",
-	"auth.broker.token",
 	"task.maxConcurrency",
 	"task.maxRecursionDepth",
 	"task.maxRuntimeMs",
@@ -51,16 +49,11 @@ describe("BreadBoard settings definitions", () => {
 		}
 	});
 
-	it("keeps provider metadata and the harness concurrency limit read-only", () => {
+	it("keeps the harness concurrency limit read-only", () => {
 		const definitions = getSettingsForTab(settingsHost.entries, "breadboard");
-		for (const path of [
-			"auth.broker.url",
-			"auth.broker.token",
-			"breadboard.harness.max_concurrent_agents",
-		] as const) {
-			const definition = definitions.find(item => item.path === path);
-			expect(definition, `missing read-only row ${path}`).toBeDefined();
-			expect(definition?.readonly, `row ${path} must be read-only`).toBe(true);
-		}
+		const path = "breadboard.harness.max_concurrent_agents";
+		const definition = definitions.find(item => item.path === path);
+		expect(definition, `missing read-only row ${path}`).toBeDefined();
+		expect(definition?.readonly, `row ${path} must be read-only`).toBe(true);
 	});
 });

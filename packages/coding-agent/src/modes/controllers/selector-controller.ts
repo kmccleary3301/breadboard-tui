@@ -122,7 +122,9 @@ import type { ModelHubComponent as ModelHubComponentType, ModelRoleSelectionScop
 import { createModelBrowserSource } from "../model-browser-source";
 import type { ModelPickerComponent as ModelPickerComponentType } from "@oh-my-pi/pi-tui/overlays/model-picker";
 import type { OAuthSelectorComponent as OAuthSelectorComponentType } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
-import { createNativeProviderAuthDataSource } from "../components/oauth-provider-data-source";
+import type {
+	BreadboardProviderAuthSelectorComponent as BreadboardProviderAuthSelectorComponentType,
+} from "@oh-my-pi/pi-tui/overlays/breadboard-provider-auth-selector";
 import { PluginSelectorComponent } from "@oh-my-pi/pi-tui/overlays/plugin-selector";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import { type ResetUsageAccount, ResetUsageSelectorComponent } from "@oh-my-pi/pi-tui/overlays/reset-usage-selector";
@@ -159,6 +161,7 @@ interface ProviderAuthUiModules {
 	LoginDialogComponent: typeof LoginDialogComponentType;
 	LogoutAccountSelectorComponent: typeof LogoutAccountSelectorComponentType;
 	OAuthSelectorComponent: typeof OAuthSelectorComponentType;
+	BreadboardProviderAuthSelectorComponent: typeof BreadboardProviderAuthSelectorComponentType;
 }
 
 /** Synchronous first-use boundary for provider auth catalog and dialog components. */
@@ -170,6 +173,8 @@ function loadProviderAuthUi(): ProviderAuthUiModules {
 		LogoutAccountSelectorComponent: require("@oh-my-pi/pi-tui/overlays/logout-account-selector.js")
 			.LogoutAccountSelectorComponent,
 		OAuthSelectorComponent: require("@oh-my-pi/pi-tui/overlays/oauth-selector.js").OAuthSelectorComponent,
+		BreadboardProviderAuthSelectorComponent: require("@oh-my-pi/pi-tui/overlays/breadboard-provider-auth-selector.js")
+			.BreadboardProviderAuthSelectorComponent,
 	};
 }
 
@@ -2611,9 +2616,9 @@ export class SelectorController {
 			this.ctx.showStatus(`No revocable ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider credentials.`);
 			return;
 		}
-		const { OAuthSelectorComponent } = loadProviderAuthUi();
+		const { BreadboardProviderAuthSelectorComponent } = loadProviderAuthUi();
 		this.showSelector(done => {
-			const selector = new OAuthSelectorComponent(
+			const selector = new BreadboardProviderAuthSelectorComponent(
 				"revoke",
 				providerAuthPort,
 				selectedProviderId => {
@@ -2633,16 +2638,17 @@ export class SelectorController {
 	}
 
 	async showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
-		const { getOAuthProviders, OAuthSelectorComponent } = loadProviderAuthUi();
+		const { getOAuthProviders, OAuthSelectorComponent, BreadboardProviderAuthSelectorComponent } = loadProviderAuthUi();
+		const providerAuthPort = this.providerAuthPort;
 		if (providerId) {
 			let selectedProviderId = providerId;
-			if (this.providerAuthPort) {
+			if (providerAuthPort) {
 				if (mode === "login") {
 					await this.#handleOAuthLogin(providerId);
 					return;
 				}
 				try {
-					const providers = await this.providerAuthPort.listProviders();
+					const providers = await providerAuthPort.listProviders();
 					const provider = providers.find(
 						candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
 					);
@@ -2671,9 +2677,9 @@ export class SelectorController {
 		}
 
 		if (mode === "logout") {
-			if (this.providerAuthPort) {
+			if (providerAuthPort) {
 				try {
-					const credentials = await this.providerAuthPort.listCredentials();
+					const credentials = await providerAuthPort.listCredentials();
 					if (!credentials.some(credential => credential.status === "active")) {
 						this.ctx.showStatus(
 							`No stored ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider credentials to log out.`,
@@ -2703,9 +2709,41 @@ export class SelectorController {
 		}
 
 		this.showSelector(done => {
+			if (providerAuthPort) {
+				const selector = new BreadboardProviderAuthSelectorComponent(
+					mode,
+					providerAuthPort,
+					async selectedProviderId => {
+						selector.stopValidation();
+						done();
+						if (mode === "login") {
+							await this.#handleOAuthLogin(selectedProviderId);
+						} else {
+							await this.#showOAuthLogoutAccountSelector(selectedProviderId);
+						}
+					},
+					() => {
+						selector.stopValidation();
+						done();
+						this.ctx.ui.requestRender();
+					},
+					{
+						disabledProviders: settings.get("disabledProviders"),
+						validateAuth: async selectedProviderId => {
+							const credentials = await providerAuthPort.listCredentials(selectedProviderId);
+							return credentials.some(credential => credential.status === "active");
+						},
+						requestRender: () => {
+							this.ctx.ui.requestRender();
+						},
+					},
+				);
+				return { component: selector, focus: selector };
+			}
+
 			const selector = new OAuthSelectorComponent(
 				mode,
-				this.providerAuthPort ?? createNativeProviderAuthDataSource(this.ctx.session.modelRegistry.authStorage),
+				this.ctx.session.modelRegistry.authStorage,
 				async selectedProviderId => {
 					selector.stopValidation();
 					done();
@@ -2722,11 +2760,7 @@ export class SelectorController {
 				},
 				{
 					disabledProviders: settings.get("disabledProviders"),
-					validateAuth: async (selectedProviderId: string) => {
-						if (this.providerAuthPort) {
-							const credentials = await this.providerAuthPort.listCredentials(selectedProviderId);
-							return credentials.some(credential => credential.status === "active");
-						}
+					validateAuth: async selectedProviderId => {
 						const apiKey = await this.ctx.session.modelRegistry.getApiKeyForProvider(
 							selectedProviderId,
 							this.ctx.session.sessionId,

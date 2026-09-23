@@ -8,8 +8,7 @@ import type {
 	AuthProviderView,
 	ProviderAuthPort,
 } from "../../src/breadboard/provider-auth-port";
-import { createNativeProviderAuthDataSource } from "../../src/modes/components/oauth-provider-data-source";
-import { OAuthSelectorComponent } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
+import { BreadboardProviderAuthSelectorComponent } from "@oh-my-pi/pi-tui/overlays/breadboard-provider-auth-selector";
 import { SelectorController } from "../../src/modes/controllers/selector-controller";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "../../src/modes/types";
@@ -327,7 +326,7 @@ describe("BreadBoard provider auth port integration", () => {
 				return [];
 			},
 		});
-		const selector = new OAuthSelectorComponent(
+		const selector = new BreadboardProviderAuthSelectorComponent(
 			"login",
 			source,
 			providerId => selected.push(providerId),
@@ -364,7 +363,7 @@ describe("BreadBoard provider auth port integration", () => {
 				return [];
 			},
 		});
-		const selector = new OAuthSelectorComponent(
+		const selector = new BreadboardProviderAuthSelectorComponent(
 			"login",
 			source,
 			providerId => selected.push(providerId),
@@ -920,23 +919,4 @@ describe("BreadBoard provider auth port integration", () => {
 		expect(statuses).toEqual(["Logging in to openai…", "Login cancelled"]);
 	});
 
-	test("native data source reports credential summaries without exposing secret bytes", async () => {
-		const authStorage = {
-			getCredentialOrigin: () => ({ kind: "oauth" }),
-			listStoredCredentials: () => [
-				{
-					id: 7,
-					provider: "openai",
-					disabledCause: null,
-					credential: { type: "api_key", key: "super-secret", source: "login" },
-				},
-			],
-		};
-		const source = createNativeProviderAuthDataSource(authStorage as never);
-		const rows = await source.listCredentials("openai");
-		expect(rows).toMatchObject([
-			{ providerId: "openai", credentialRef: "7", credentialKind: "api_key", status: "active" },
-		]);
-		expect(JSON.stringify(rows)).not.toContain("super-secret");
-	});
 });

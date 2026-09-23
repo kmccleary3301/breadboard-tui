@@ -1,5 +1,3 @@
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import type { OAuthProviderInfo } from "@oh-my-pi/pi-ai/oauth/types";
 import {
 	Container,
 	extractPrintableText,
@@ -15,19 +13,37 @@ import { OverlayPanel } from "../chrome/overlay-box";
 import { MenuSelection } from "../components/menu-selection";
 import { centeredViewportRange } from "../components/scroll-viewport";
 
-const OAUTH_SELECTOR_MAX_VISIBLE = 10;
-
-/** Credential presence and provenance needed by the provider picker. */
-export interface OAuthSelectorAuthSource {
-	has(providerId: string): boolean;
-	hasAuth(providerId: string): boolean;
-	getCredentialOrigin(providerId: string):
-		| {
-				kind: "runtime" | "config" | "oauth" | "api_key" | "env" | "fallback";
-				envVar?: string;
-		  }
-		| undefined;
+export type AuthSchemeId = "api_key" | "oauth2";
+export type AuthCredentialStatus = "active" | "disabled" | "revoked" | "reauthorization_required" | "quarantined";
+export interface AuthProviderView {
+	readonly providerId: string;
+	readonly displayName: string;
+	readonly supportTier: "core" | "unsupported";
+	readonly authOwner: "broker" | "provider";
+	readonly available: boolean;
+	readonly availabilityReason?: "provider_managed" | "missing_auth" | "unsupported" | null;
+	readonly authSchemes: readonly AuthSchemeId[];
+	readonly loginAvailable: boolean;
+	readonly storeCredentialsAs?: string;
 }
+export interface AuthCredentialView {
+	readonly providerId: string;
+	readonly status: AuthCredentialStatus;
+	readonly source?: string;
+}
+export interface ProviderAuthReadPort {
+	listProviders(): Promise<ReadonlyArray<AuthProviderView>>;
+	listCredentials(providerId?: string): Promise<ReadonlyArray<AuthCredentialView>>;
+	listProvidersSync?(): ReadonlyArray<AuthProviderView>;
+	listCredentialsSync?(providerId?: string): ReadonlyArray<AuthCredentialView>;
+}
+
+type SelectorProvider = AuthProviderView & {
+	readonly id: string;
+	readonly name: string;
+	readonly storeCredentialsAs?: string;
+};
+const OAUTH_SELECTOR_MAX_VISIBLE = 10;
 
 /**
  * Rendered lines before the provider rows: top border
@@ -45,31 +61,39 @@ const ORIGIN_LABELS = {
 	fallback: "custom provider",
 };
 /**
- * Component that renders an OAuth provider selector.
+ * BreadBoard provider-auth selector. This data-source-backed variant is kept
+ * separate from the native OAuth selector so native callers retain the stock
+ * synchronous auth-storage contract.
  */
-export class OAuthSelectorComponent extends OverlayPanel {
+export class BreadboardProviderAuthSelectorComponent extends OverlayPanel {
 	#listContainer: Container;
-	#menu: MenuSelection<OAuthProviderInfo>;
+	#menu: MenuSelection<SelectorProvider>;
+	#allProviders: SelectorProvider[] = [];
+	#filteredProviders: SelectorProvider[] = [];
 	#hoveredIndex: number | null = null;
 	/** First provider index of the visible ScrollView window (last #updateList). */
 	#scrollStart = 0;
 	#visibleCount = 0;
 	/** Visible list window, shrunk by {@link setMaxHeight} on short screens. */
 	#maxVisible = OAUTH_SELECTOR_MAX_VISIBLE;
-	#mode: "login" | "logout";
-	#authStorage: OAuthSelectorAuthSource;
+	#mode: "login" | "logout" | "revoke";
+	#dataSource: ProviderAuthReadPort;
+	#credentials: AuthCredentialView[] = [];
 	#onSelectCallback: (providerId: string) => void;
 	#onCancelCallback: () => void;
 	#statusMessage: string | undefined;
+	#loading = true;
+	#closed = false;
 	#validateAuthCallback?: (providerId: string) => Promise<boolean>;
 	#requestRenderCallback?: () => void;
 	#authState: Map<string, "checking" | "valid" | "invalid"> = new Map();
-	#spinnerFrame: number = 0;
+	#spinnerFrame = 0;
 	#spinnerInterval?: NodeJS.Timeout;
-	#validationGeneration: number = 0;
+	#validationGeneration = 0;
+	readonly ready: Promise<void>;
 	constructor(
-		mode: "login" | "logout",
-		authStorage: OAuthSelectorAuthSource,
+		mode: "login" | "logout" | "revoke",
+		dataSource: ProviderAuthReadPort,
 		onSelect: (providerId: string) => void,
 		onCancel: () => void,
 		options?: {
@@ -78,28 +102,45 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			requestRender?: () => void;
 		},
 	) {
-		super(mode === "login" ? "Select provider to login" : "Select provider to logout");
+		super(
+			mode === "login"
+				? "Select provider to login"
+				: mode === "logout"
+					? "Select provider to logout"
+					: "Select provider credential to revoke",
+		);
 		this.#mode = mode;
-		this.#authStorage = authStorage;
+		this.#dataSource = dataSource;
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
 		this.#validateAuthCallback = options?.validateAuth;
 		this.#requestRenderCallback = options?.requestRender;
-		this.#menu = new MenuSelection<OAuthProviderInfo>([], {
+		this.#disabledProviders = options?.disabledProviders ?? [];
+		this.#menu = new MenuSelection<SelectorProvider>([], {
 			getKey: provider => provider.id,
 			getSearchText: provider => this.#getProviderSearchText(provider),
 		});
-		// Load all OAuth providers
-		this.#loadProviders(options?.disabledProviders);
-		// Create list container
 		this.#listContainer = new Container();
 		this.addChild(this.#listContainer);
-		// Initial render
+		const syncProviders = dataSource.listProvidersSync?.();
+		const syncCredentials = dataSource.listCredentialsSync?.();
+		if (syncProviders !== undefined && syncCredentials !== undefined) {
+			this.#applyProviders(syncProviders, syncCredentials);
+			this.ready = Promise.resolve();
+		} else {
+			this.ready = this.#loadProviders().catch(error => {
+				if (this.#closed) return;
+				this.#loading = false;
+				this.#statusMessage = error instanceof Error ? error.message : "Unable to load provider status.";
+				this.#updateList();
+				this.#requestRenderCallback?.();
+			});
+		}
 		this.#updateList();
-		this.#startValidation();
 	}
 
 	stopValidation(): void {
+		this.#closed = true;
 		this.#validationGeneration += 1;
 		this.#stopSpinner();
 	}
@@ -122,29 +163,64 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		this.#updateList();
 	}
 	#hasSelectableAuth(providerId: string): boolean {
-		return this.#mode === "logout" ? this.#authStorage.has(providerId) : this.#authStorage.hasAuth(providerId);
+		return this.#credentials.some(credential => {
+			if (credential.providerId !== providerId) return false;
+			return this.#mode === "revoke" ? credential.status !== "revoked" : credential.status === "active";
+		});
 	}
 
-	#loadProviders(disabledProviders: readonly string[] = []): void {
-		const providers = getOAuthProviders();
-		if (this.#mode === "logout") {
-			// Logout stays unfiltered by `disabledProviders`: a now-disabled
-			// provider may still hold stored credentials worth removing.
-			this.#menu.setItems(providers.filter(provider => this.#hasSelectableAuth(provider.id)));
+	#canLogin(provider: AuthProviderView): boolean {
+		if (
+			provider.supportTier !== "core" ||
+			provider.availabilityReason === "provider_managed" ||
+			(!provider.available && provider.availabilityReason !== "missing_auth")
+		) {
+			return false;
+		}
+		return (
+			provider.authSchemes.includes("api_key") ||
+			(provider.authSchemes.includes("oauth2") && provider.loginAvailable)
+		);
+	}
+
+	#availabilityLabel(provider: AuthProviderView): string {
+		if (this.#mode !== "login") return "";
+		if (provider.availabilityReason === "missing_auth") return theme.fg("muted", " (credentials required)");
+		if (this.#canLogin(provider)) return "";
+		const reason = provider.availabilityReason === "provider_managed" ? "provider managed" : "unavailable";
+		return theme.fg("muted", ` (${reason})`);
+	}
+
+	#applyProviders(providers: ReadonlyArray<AuthProviderView>, credentials: ReadonlyArray<AuthCredentialView>): void {
+		this.#loading = false;
+		this.#credentials = credentials.map(credential => ({ ...credential }));
+		const rows = providers.map(provider => ({ ...provider, id: provider.providerId, name: provider.displayName }));
+		if (this.#mode !== "login") {
+			this.#allProviders = rows.filter(provider => this.#hasSelectableAuth(provider.id));
 		} else {
-			const disabled = new Set(disabledProviders);
-			// Hide a login entry when either its own id or the provider id it
-			// stores credentials under is disabled, so alias logins (e.g.
-			// `openai-codex-device` ⇒ `openai-codex`) disappear alongside the
-			// model provider they authenticate.
-			this.#menu.setItems(
-				providers.filter(
-					provider =>
-						!disabled.has(provider.id) &&
-						!(provider.storeCredentialsAs && disabled.has(provider.storeCredentialsAs)),
-				),
+			const disabled = new Set(this.#disabledProviders);
+			this.#allProviders = rows.filter(
+				provider =>
+					!disabled.has(provider.id) &&
+					!(provider.storeCredentialsAs && disabled.has(provider.storeCredentialsAs)),
 			);
 		}
+		this.#menu.setItems(this.#allProviders);
+		this.#filteredProviders = this.#allProviders;
+		this.#updateList();
+		this.#startValidation();
+		this.#requestRenderCallback?.();
+	}
+
+	#disabledProviders: readonly string[] = [];
+
+	async #loadProviders(): Promise<void> {
+		const [providers, credentials] = await Promise.all([
+			this.#dataSource.listProviders(),
+			this.#dataSource.listCredentials(),
+		]);
+		if (this.#closed) return;
+		this.#applyProviders(providers, credentials);
 	}
 
 	#startValidation(): void {
@@ -212,9 +288,13 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	 * the list distinguishes a real login from an env var aliasing the provider.
 	 */
 	#getSourceLabel(providerId: string): string {
-		const origin = this.#authStorage.getCredentialOrigin(providerId);
-		if (!origin) return "";
-		const detail = origin.kind === "env" && origin.envVar ? `env: ${origin.envVar}` : ORIGIN_LABELS[origin.kind];
+		const credential = this.#credentials.find(
+			item =>
+				item.providerId === providerId &&
+				(this.#mode === "revoke" ? item.status !== "revoked" : item.status === "active"),
+		);
+		if (!credential?.source) return "";
+		const detail = ORIGIN_LABELS[credential.source as keyof typeof ORIGIN_LABELS] ?? credential.source;
 		return theme.fg("muted", ` (${detail})`);
 	}
 
@@ -251,16 +331,12 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		return theme.fg("muted", suffix);
 	}
 
-	#getProviderSearchText(provider: OAuthProviderInfo): string {
+	#getProviderSearchText(provider: SelectorProvider): string {
 		let text = `${provider.name} ${provider.id}`;
-		const origin = this.#authStorage.getCredentialOrigin(provider.id);
-		if (origin) {
-			text += ` logged in authenticated ${ORIGIN_LABELS[origin.kind]}`;
-			if (origin.envVar) text += ` ${origin.envVar}`;
-		}
-		if (!provider.available) {
-			text += " unavailable";
-		}
+		const credential = this.#credentials.find(item => item.providerId === provider.id && item.status === "active");
+		if (credential?.source)
+			text += ` logged in authenticated ${ORIGIN_LABELS[credential.source as keyof typeof ORIGIN_LABELS] ?? credential.source}`;
+		if (!this.#canLogin(provider)) text += ` ${provider.availabilityReason ?? "unavailable"}`;
 		return text;
 	}
 
@@ -304,17 +380,18 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			const provider = items[i];
 			if (!provider) continue;
 			const isSelected = i === this.#menu.selectedIndex;
-			const isAvailable = provider.available;
+			const isAvailable = this.#mode !== "login" || this.#canLogin(provider);
 			const statusIndicator = this.#getStatusIndicator(provider.id);
+			const availabilityLabel = this.#availabilityLabel(provider);
 
 			let line = "";
 			if (isSelected) {
 				const prefix = theme.fg("accent", `${theme.nav.cursor} `);
 				const text = isAvailable ? theme.fg("accent", provider.name) : theme.fg("dim", provider.name);
-				line = prefix + text + statusIndicator;
+				line = prefix + text + statusIndicator + availabilityLabel;
 			} else {
 				const text = isAvailable ? `  ${provider.name}` : theme.fg("dim", `  ${provider.name}`);
-				line = text + statusIndicator;
+				line = text + statusIndicator + availabilityLabel;
 			}
 			if (!isSelected && i === this.#hoveredIndex) {
 				line = theme.bg("selectedBg", line);
@@ -337,14 +414,16 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		if (this.#shouldRenderSearchStatus()) {
 			this.#listContainer.addChild(new TruncatedText(this.#renderStatusLine(total), 0, 0));
 		}
-
-		if (total === 0) {
-			const message =
-				this.#menu.items.length === 0
-					? this.#mode === "login"
-						? "No OAuth providers available"
-						: "No stored provider credentials to log out"
-					: "No matching providers";
+		if (total === 0 && !this.#statusMessage) {
+			const message = this.#loading
+				? "Loading providers…"
+				: this.#allProviders.length > 0
+					? "No matching providers"
+					: this.#mode === "login"
+						? "No providers available"
+						: this.#mode === "revoke"
+							? "No stored provider credentials to revoke"
+							: "No stored provider credentials to log out";
 			this.#listContainer.addChild(new TruncatedText(theme.fg("muted", message), 0, 0));
 		}
 		if (this.#statusMessage) {
@@ -397,12 +476,15 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	/** Confirm the selected provider (Enter or mouse click). */
 	#confirmSelection(): void {
 		const selectedProvider = this.#menu.selectedItem;
-		if (selectedProvider?.available) {
+		if (selectedProvider && (this.#mode !== "login" || this.#canLogin(selectedProvider))) {
 			this.#statusMessage = undefined;
 			this.stopValidation();
 			this.#onSelectCallback(selectedProvider.id);
 		} else if (selectedProvider) {
-			this.#statusMessage = "Provider unavailable in this environment.";
+			this.#statusMessage =
+				selectedProvider.availabilityReason === "provider_managed"
+					? "This provider manages login outside BreadBoard."
+					: "Provider unavailable in this environment.";
 			this.#updateList();
 		}
 	}
