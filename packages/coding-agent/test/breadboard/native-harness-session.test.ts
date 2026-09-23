@@ -337,3 +337,104 @@ describe("native harness session", () => {
 		expect(calls[2]?.context.tools?.map(tool => tool.name)).toEqual(["run_shell"]);
 	});
 });
+
+type OmpSessionKind = "stock" | "bb-omp.native" | "bridge";
+
+/** One OMP session per kind over the same settings and workspace: stock OMP, native mode on `bb-omp.native`, or a bridge-owned stream. */
+async function ompSession(
+	kind: OmpSessionKind,
+	responses: MockResponse[] = [],
+): Promise<{ session: AgentSession; harness?: LoadedNativeHarness; calls: ReturnType<typeof createMockModel>["calls"] }> {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), `bb-omp-native-${Snowflake.next()}-`));
+	tempDirs.push(root);
+	const cwd = fs.realpathSync(root);
+	const settings = Settings.isolated({ "retry.enabled": false });
+	const mock = createMockModel({ responses });
+	const options: CreateAgentSessionOptions = {
+		cwd,
+		agentDir: cwd,
+		modelRegistry,
+		sessionManager: SessionManager.inMemory(cwd),
+		settings,
+		model: getBundledModel("openai", "gpt-4o-mini"),
+		disableExtensionDiscovery: true,
+		skills: [],
+		rules: [],
+		contextFiles: [],
+		workspaceTree: { rootPath: cwd, rendered: ".\n", truncated: false, totalLines: 1, agentsMdFiles: [] },
+		promptTemplates: [],
+		slashCommands: [],
+		enableMCP: false,
+		enableLsp: false,
+	};
+	let harness: LoadedNativeHarness | undefined;
+	if (kind === "bb-omp.native") {
+		harness = await loadNativeHarness({ specPath: "bb-omp.native", workspaceRoot: cwd });
+		applyNativeHarnessSessionOptions(options, harness, settings, { approvalSelected: false });
+	}
+	if (kind === "bridge") {
+		options.mainStreamOwnsTurnLifecycle = true;
+		options.mainStreamFn = mock.stream;
+	}
+	const { session } = await createAgentSession(options);
+	sessions.push(session);
+	if (kind !== "bridge") vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+	return { session, harness, calls: mock.calls };
+}
+
+describe("bb-omp.native session", () => {
+	it("keeps OMP's own tools, prompt and settings and appends the BreadBoard identity pack", async () => {
+		const done: MockResponse = { content: [{ type: "text", text: "ok" }], stopReason: "stop" };
+		const stock = await ompSession("stock", [done]);
+		const native = await ompSession("bb-omp.native", [done]);
+		expect(native.harness?.hostSurface).toBe(true);
+		expect(native.session.getActiveToolNames()).toEqual(stock.session.getActiveToolNames());
+		expect(native.session.getActiveToolNames()).toEqual(expect.arrayContaining(["bash", "eval", "task", "read", "edit"]));
+		expect(native.session.settings.get("todo.enabled")).toBe(stock.session.settings.get("todo.enabled"));
+		expect(native.session.settings.get("tools.intentTracing")).toBe(stock.session.settings.get("tools.intentTracing"));
+
+		for (const { session } of [stock, native]) {
+			await session.prompt("hello");
+			await session.waitForIdle();
+		}
+		const stockRequest = stock.calls[0]?.context;
+		const nativeRequest = native.calls[0]?.context;
+		expect(nativeRequest?.tools?.map(tool => tool.name)).toEqual(stockRequest?.tools?.map(tool => tool.name));
+		const identity = native.harness?.systemPrompt ?? "";
+		expect(identity).toStartWith("# BreadBoard");
+		expect(nativeRequest?.systemPrompt).toEqual([...(stockRequest?.systemPrompt ?? []), identity]);
+	});
+
+	it("lifts every OMP control that a bridge-owned session restricts", async () => {
+		const native = (await ompSession("bb-omp.native")).session;
+		const bridge = (await ompSession("bridge")).session;
+		expect(native.mainStreamOwnsTurnLifecycle).toBe(false);
+		expect(bridge.mainStreamOwnsTurnLifecycle).toBe(true);
+		const model = native.model;
+		if (model === undefined) throw new Error("the fixture session has a model");
+		const controls: ReadonlyArray<readonly [string, (session: AgentSession) => unknown]> = [
+			["advisor", session => session.setAdvisorEnabled(true)],
+			["compaction", session => session.setAutoCompactionEnabled(false)],
+			["plan", session => session.setPlanReferencePath("plan.md")],
+			["automation", session => session.followUp("continue after this turn")],
+			["prewalk", session => session.armPrewalk(model)],
+			["thinking", session => session.setThinkingLevel("auto")],
+			["context", session => session.dropImages()],
+			["provider-state", session => session.pinCurrentProviderOAuthAccount(1)],
+			["model-roles", session => session.setModel(model)],
+			["native-session-transition", session => session.newSession()],
+		];
+		for (const [control, run] of controls) {
+			const attempt = async (session: AgentSession): Promise<unknown> => {
+				try {
+					await run(session);
+					return undefined;
+				} catch (error) {
+					return error;
+				}
+			};
+			expect({ control, error: String(await attempt(native)) }).toEqual({ control, error: "undefined" });
+			expect({ control, error: String(await attempt(bridge)) }).toEqual({ control, error: expect.stringMatching(/BreadBoard/) });
+		}
+	});
+});

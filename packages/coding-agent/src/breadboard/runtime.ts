@@ -6,6 +6,7 @@
  */
 import * as fsSync from "node:fs";
 import * as path from "node:path";
+import { builtinNativeHarness, DEFAULT_NATIVE_HARNESS_ID } from "@breadboard/harness";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { detectSensitiveValues, REDACTED_VALUE } from "@breadboard/sdk/session";
 import type { AgentEvent, StreamFn } from "@oh-my-pi/pi-agent-core";
@@ -155,8 +156,10 @@ export function resolveNativeSurfaceEngineSelection(
 }
 
 /**
- * The harness spec a native-mode session runs, or undefined outside native mode. Precedence:
- * `--harness`, the selected config's `sessionConfigPath`, then `breadboard.harness.default`.
+ * The harness a native-mode session runs, or undefined outside native mode: a built-in harness id
+ * or a spec path. Precedence: `--harness`, the selected config's `sessionConfigPath`, then
+ * `breadboard.harness.default`. `daily_driver`, that setting's default, names the daily-driver
+ * harness, which in native mode is the built-in `bb-omp.native`.
  */
 export function resolveNativeHarnessSpec(
 	parsed: Pick<Args, "engineMode" | "engineUrl" | "harness">,
@@ -171,12 +174,13 @@ export function resolveNativeHarnessSpec(
 		selectedConfig: parseSelectedBreadboardConfig(activeSettings.getRaw("breadboard")),
 		workspacePath,
 	});
-	const spec = parsed.harness ?? effective.sessionConfigPath ?? configuredHarnessId(activeSettings);
-	if (!/\.ya?ml$/u.test(spec)) {
+	const configured = parsed.harness ?? effective.sessionConfigPath ?? configuredHarnessId(activeSettings);
+	const spec = configured === "daily_driver" ? DEFAULT_NATIVE_HARNESS_ID : configured;
+	if (builtinNativeHarness(spec) === undefined && !/\.ya?ml$/u.test(spec)) {
 		throw new BreadboardRunConfigError(
 			"invalid_session_config",
 			"sessionConfigPath",
-			`native mode runs a harness spec (.yaml); "${spec}" is not one. Pass --harness <path/to/harness.yaml>.`,
+			`native mode runs a built-in harness (${DEFAULT_NATIVE_HARNESS_ID}) or a harness spec (.yaml); "${spec}" is neither. Pass --harness <path/to/harness.yaml>.`,
 		);
 	}
 	return spec;

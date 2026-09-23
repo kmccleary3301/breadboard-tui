@@ -1,4 +1,3 @@
-import { relative } from "node:path";
 import { isJsonRecord, type LoadedNativeHarness, nativeLockValue } from "@breadboard/harness";
 import type { HarnessPort, HarnessProvenance, HarnessSnapshot } from "./harness-port";
 
@@ -23,7 +22,7 @@ function lockProvenance(lock: LoadedNativeHarness["lock"]): Readonly<Record<stri
 function harnessName(harness: LoadedNativeHarness): string {
 	const profileName = nativeLockValue(harness.lock, "profile.name");
 	if (typeof profileName === "string" && profileName.trim()) return profileName;
-	const last = harness.specPath.split(/[\\/]/u).at(-1) ?? harness.specPath;
+	const last = harness.harnessId.split("/").at(-1) ?? harness.harnessId;
 	return last.replace(/\.(?:yaml|yml)$/u, "");
 }
 
@@ -32,7 +31,7 @@ function harnessName(harness: LoadedNativeHarness): string {
  * snapshot is that lock, verified by its own `graph_hash`. No engine, no generation.
  */
 export function createNativeHarnessPort(harness: LoadedNativeHarness, now: () => number = Date.now): HarnessPort {
-	const harnessId = relative(harness.workspaceRoot, harness.specPath);
+	const harnessId = harness.harnessId;
 	const snapshot: HarnessSnapshot = Object.freeze({
 		harnessId,
 		name: harnessName(harness),

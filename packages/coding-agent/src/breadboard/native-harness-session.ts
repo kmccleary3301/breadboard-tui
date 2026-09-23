@@ -3,8 +3,10 @@ import type { Settings } from "../config/settings";
 import type { CreateAgentSessionOptions } from "../sdk";
 
 /**
- * Configure an OMP session to run a compiled harness: its system prompt, exactly its function
- * tools, the built-ins those tools delegate to, and its approval policy. CLI `--model` and
+ * Configure an OMP session to run a compiled harness. A harness with its own surface supplies the
+ * system prompt, exactly its function tools, the built-ins those tools delegate to, and its approval
+ * policy. A host-surface harness (`bb-omp.native`) leaves OMP's tools, prompt, settings and prompt
+ * inputs as they are and only appends its prompt blocks. CLI `--model` and
  * `--approval-mode`/`--auto-approve` win over the harness.
  */
 export function applyNativeHarnessSessionOptions(
@@ -13,6 +15,14 @@ export function applyNativeHarnessSessionOptions(
 	activeSettings: Settings,
 	cli: { readonly approvalSelected: boolean },
 ): void {
+	options.extensions = [...(options.extensions ?? []), createNativeHarnessExtension(harness)];
+	if (options.model === undefined && options.modelPattern === undefined && harness.defaultModel !== undefined) {
+		options.modelPattern = harness.defaultModel;
+	}
+	// Python's prompt mode asks before edits and shell (`permissions/broker.py:119-129`).
+	if (harness.permissions.mode === "prompt" && !cli.approvalSelected) activeSettings.override("tools.approvalMode", "always-ask");
+	if (harness.hostSurface) return;
+
 	options.systemPrompt = harness.systemPrompt;
 	delete options.customSystemPrompt;
 	delete options.appendSystemPrompt;
@@ -20,12 +30,6 @@ export function applyNativeHarnessSessionOptions(
 	options.dateCwdReminder = false;
 	options.toolNames = harness.toolSurface.native.map(tool => tool.name);
 	options.toolDelegates = nativeToolDelegates(harness);
-	options.extensions = [...(options.extensions ?? []), createNativeHarnessExtension(harness)];
-	if (options.model === undefined && options.modelPattern === undefined && harness.defaultModel !== undefined) {
-		options.modelPattern = harness.defaultModel;
-	}
-	// Python's prompt mode asks before edits and shell (`permissions/broker.py:119-129`).
-	if (harness.permissions.mode === "prompt" && !cli.approvalSelected) activeSettings.override("tools.approvalMode", "always-ask");
 	// The harness owns todos through its TodoWrite tool; OMP's own todo reminders would add turns Python never sends.
 	activeSettings.override("todo.enabled", false);
 	// Python sends the compiled tool schemas unchanged; OMP's intent field would add a required `i` property.
