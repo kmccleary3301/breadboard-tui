@@ -74,7 +74,7 @@ const SPLIT_MIN_WIDTH = 96;
 const DETAIL_MIN_WIDTH = 34;
 const ROSTER_MIN_WIDTH = 48;
 
-export type AgentHubSection = "agents" | "activity";
+export type AgentHubSection = "agents" | "activity" | (string & {});
 type ActivityFilter = "all" | "errors" | "responses" | "tools";
 type ActivityScope = "all" | "agent" | "subtree";
 
@@ -163,7 +163,7 @@ export interface AgentHubViewFactoryContext<TRecord extends AgentRecordLike = Ag
 
 export type AgentHubViewFactory<TRecord extends AgentRecordLike = AgentRecordLike> = (
 	context: AgentHubViewFactoryContext<TRecord>,
-) => Partial<Record<AgentHubSection, AgentHubSectionView>>;
+) => Partial<Record<string, AgentHubSectionView>>;
 
 export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike> {
 	/** Progress/status snapshot source (task lifecycle + progress channels). */
@@ -386,6 +386,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		this.#proseOnlyThinking = deps.proseOnlyThinking;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
+		this.#cwd = deps.cwd ?? getProjectDir();
 		this.#nativeMutationRestriction = deps.nativeMutationRestriction ?? (() => undefined);
 		this.#sectionViews =
 			deps.viewFactory?.({

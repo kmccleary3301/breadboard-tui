@@ -50,7 +50,7 @@ export function createAgentHubRuntime(
 	const registry = options.registry ?? AgentRegistry.global();
 	const irc = options.irc ?? IrcBus.global();
 	const activity = options.activity ?? new AgentActivityIndex({ remote: options.remote });
-	const viewFactory: AgentHubViewFactory<AgentRef> = context => ({
+	const viewFactory: AgentHubViewFactory = context => ({
 		messages: new AgentHubMessagesView({
 			registry,
 			irc,
@@ -64,6 +64,7 @@ export function createAgentHubRuntime(
 		}),
 		harness: new HarnessView({
 			getSnapshot: () => (options.harnessPort?.current() ?? context.harnessSnapshot()) as HarnessSnapshot | null,
+			requestRender: context.requestRender,
 			initialPanel: context.initialHarnessPanel as HarnessPanel | undefined,
 			renderTabs: context.renderTabs,
 		}),

@@ -2,7 +2,7 @@ import { matchesKey, visibleWidth } from "@oh-my-pi/pi-tui";
 import { detectSensitiveValues } from "@breadboard/sdk/session";
 import type { HarnessProvenance, HarnessSnapshot } from "../../../breadboard/harness-port";
 import { theme } from "@oh-my-pi/pi-tui/theme/theme";
-import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/overlays/overlay-box";
+import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/chrome/overlay-box";
 
 const REDACTED_DISPLAY = "<redacted>";
 export type HarnessPanel = "overview" | "team" | "tools" | "prompts" | "compute" | "longrun" | "trust" | "evidence";
