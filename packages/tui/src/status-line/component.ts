@@ -544,6 +544,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 */
 	#vibeWorkerTokenRate: (() => number | null) | null = null;
 	#collabStatus: CollabStatus | null = null;
+	#streamStatus: { viewers: number } | null = null;
+	#recording = false;
 	#harness: HarnessSnapshot | null = null;
 	#breadboardActivity: BreadboardComposerActivity | null = null;
 	#focusedAgentId: string | undefined;
@@ -2586,7 +2588,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				outputTokens: placeholders ? undefined : ctx.usageStats.output,
 				vim: ctx.vim?.display !== "none" ? ctx.vim?.mode : undefined,
 			};
-			const preset = effectiveSettings.preset;
+			const preset = effectiveSettings.preset ?? "bb-balanced";
 			if (layout === "box" || layout === "band" || layout === "plain-right") {
 				return renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard).top;
 			}

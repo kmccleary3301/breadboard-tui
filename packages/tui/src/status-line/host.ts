@@ -1,7 +1,8 @@
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Tool, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
-import type { BreadboardComposerActivity, HarnessSnapshot } from "./types";
+import type { CompactionBoundaries } from "./context-usage";
+import type { BreadboardComposerActivity, HarnessSnapshot, StatusLineSettings } from "./types";
 
 export interface StatusAccountIdentity {
 	accountId?: string;

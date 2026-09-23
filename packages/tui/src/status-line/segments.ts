@@ -605,6 +605,7 @@ const contextPctSegment: StatusLineSegment = {
 		if (ctx.options.context_pct?.minPercent !== undefined && (pct ?? 0) < ctx.options.context_pct.minPercent) {
 			return { content: "", visible: false };
 		}
+		const color = getContextUsageThemeColor(getContextUsageLevel(pct ?? 0, window));
 		if (ctx.breadboardOwned) {
 			if (pct === null || !window || ctx.startupPlaceholder) return { content: "", visible: false };
 			return {
@@ -993,6 +994,8 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	cache_read: cacheReadSegment,
 	cache_write: cacheWriteSegment,
 	cache_hit: cacheHitSegment,
+	session_name: sessionNameSegment,
+	usage: usageSegment,
 	collab: collabSegment,
 	stream: streamSegment,
 	vim: vimSegment,
