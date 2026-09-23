@@ -1,0 +1,66 @@
+{
+  "tool": "list_dir",
+  "case": "depth-one-hidden-order",
+  "input": {
+    "path": ".",
+    "depth": 1
+  },
+  "initial": {
+    "z.txt": "z",
+    "a.txt": "a",
+    ".hidden": "h",
+    "nested/b.txt": "b",
+    "nested/a.txt": "a"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"items\": [{\"path\": \".hidden\", \"type\": \"file\"}, {\"path\": \"a.txt\", \"type\": \"file\"}, {\"path\": \"nested\", \"type\": \"dir\"}, {\"path\": \"z.txt\", \"type\": \"file\"}], \"entries\": [{\"path\": \".hidden\", \"type\": \"file\"}, {\"path\": \"a.txt\", \"type\": \"file\"}, {\"path\": \"nested\", \"type\": \"dir\"}, {\"path\": \"z.txt\", \"type\": \"file\"}], \"tree_format\": false}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "items": [
+        {
+          "path": ".hidden",
+          "type": "file"
+        },
+        {
+          "path": "a.txt",
+          "type": "file"
+        },
+        {
+          "path": "nested",
+          "type": "dir"
+        },
+        {
+          "path": "z.txt",
+          "type": "file"
+        }
+      ],
+      "entries": [
+        {
+          "path": ".hidden",
+          "type": "file"
+        },
+        {
+          "path": "a.txt",
+          "type": "file"
+        },
+        {
+          "path": "nested",
+          "type": "dir"
+        },
+        {
+          "path": "z.txt",
+          "type": "file"
+        }
+      ],
+      "tree_format": false
+    },
+    "isError": false
+  },
+  "final": {
+    ".hidden": "h",
+    "a.txt": "a",
+    "nested/a.txt": "a",
+    "nested/b.txt": "b",
+    "z.txt": "z"
+  }
+}

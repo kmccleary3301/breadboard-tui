@@ -1,0 +1,18 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "add-dev-null",
+  "input": "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,2 @@\n+new\n+file\n",
+  "initial": {},
+  "python": {
+    "text": "{\"ok\": true, \"stdout\": \"\", \"stderr\": \"Falling back to direct application...\\n\"}",
+    "details": {
+      "ok": true,
+      "stdout": "",
+      "stderr": "Falling back to direct application...\n"
+    },
+    "isError": false
+  },
+  "final": {
+    "new.txt": "new\nfile\n"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "tool": "read_file",
+  "case": "offset-limit",
+  "input": {
+    "path": "src.txt",
+    "offset": 2,
+    "limit": 5
+  },
+  "initial": {
+    "src.txt": "alpha\nbeta\ngamma\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/src.txt\", \"content\": \"pha\\nb\", \"truncated\": true, \"offset\": 2, \"limit\": 5}",
+    "details": {
+      "path": "<WORKSPACE>/src.txt",
+      "content": "pha\nb",
+      "truncated": true,
+      "offset": 2,
+      "limit": 5
+    },
+    "isError": false
+  },
+  "final": {
+    "src.txt": "alpha\nbeta\ngamma\n"
+  }
+}

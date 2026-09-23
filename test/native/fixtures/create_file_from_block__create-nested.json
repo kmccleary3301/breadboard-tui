@@ -1,0 +1,21 @@
+{
+  "tool": "create_file_from_block",
+  "case": "create-nested",
+  "input": {
+    "filePath": "nested/new.txt",
+    "content": "hello\n"
+  },
+  "initial": {},
+  "python": {
+    "text": "{\"ok\": true, \"path\": \"<WORKSPACE>/nested/new.txt\", \"bytes\": 6}",
+    "details": {
+      "ok": true,
+      "path": "<WORKSPACE>/nested/new.txt",
+      "bytes": 6
+    },
+    "isError": false
+  },
+  "final": {
+    "nested/new.txt": "hello\n"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "tool": "read_file",
+  "case": "directory",
+  "input": {
+    "path": "dir"
+  },
+  "initial": {
+    "dir/file.txt": "x"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/dir\", \"content\": \"\", \"truncated\": false, \"offset\": 0, \"limit\": null}",
+    "details": {
+      "path": "<WORKSPACE>/dir",
+      "content": "",
+      "truncated": false,
+      "offset": 0,
+      "limit": null
+    },
+    "isError": false
+  },
+  "final": {
+    "dir/file.txt": "x"
+  }
+}

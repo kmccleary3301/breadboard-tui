@@ -1,0 +1,62 @@
+{
+  "tool": "list_dir",
+  "case": "depth-two",
+  "input": {
+    "path": ".",
+    "depth": 2
+  },
+  "initial": {
+    "nested/b.txt": "b",
+    "nested/deeper/c.txt": "c",
+    "root.txt": "r"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"items\": [{\"path\": \"nested\", \"type\": \"dir\"}, {\"path\": \"nested/b.txt\", \"type\": \"file\"}, {\"path\": \"nested/deeper\", \"type\": \"dir\"}, {\"path\": \"root.txt\", \"type\": \"file\"}], \"entries\": [{\"path\": \"nested\", \"type\": \"dir\"}, {\"path\": \"nested/b.txt\", \"type\": \"file\"}, {\"path\": \"nested/deeper\", \"type\": \"dir\"}, {\"path\": \"root.txt\", \"type\": \"file\"}], \"tree_format\": false}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "items": [
+        {
+          "path": "nested",
+          "type": "dir"
+        },
+        {
+          "path": "nested/b.txt",
+          "type": "file"
+        },
+        {
+          "path": "nested/deeper",
+          "type": "dir"
+        },
+        {
+          "path": "root.txt",
+          "type": "file"
+        }
+      ],
+      "entries": [
+        {
+          "path": "nested",
+          "type": "dir"
+        },
+        {
+          "path": "nested/b.txt",
+          "type": "file"
+        },
+        {
+          "path": "nested/deeper",
+          "type": "dir"
+        },
+        {
+          "path": "root.txt",
+          "type": "file"
+        }
+      ],
+      "tree_format": false
+    },
+    "isError": false
+  },
+  "final": {
+    "nested/b.txt": "b",
+    "nested/deeper/c.txt": "c",
+    "root.txt": "r"
+  }
+}

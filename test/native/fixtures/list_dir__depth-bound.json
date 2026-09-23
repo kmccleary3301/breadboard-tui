@@ -1,0 +1,34 @@
+{
+  "tool": "list_dir",
+  "case": "depth-bound",
+  "input": {
+    "path": ".",
+    "depth": 0
+  },
+  "initial": {
+    "nested/file.txt": "x"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"items\": [{\"path\": \"nested\", \"type\": \"dir\"}], \"entries\": [{\"path\": \"nested\", \"type\": \"dir\"}], \"tree_format\": false}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "items": [
+        {
+          "path": "nested",
+          "type": "dir"
+        }
+      ],
+      "entries": [
+        {
+          "path": "nested",
+          "type": "dir"
+        }
+      ],
+      "tree_format": false
+    },
+    "isError": false
+  },
+  "final": {
+    "nested/file.txt": "x"
+  }
+}

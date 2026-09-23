@@ -1,0 +1,26 @@
+{
+  "tool": "read_file",
+  "case": "bounds",
+  "input": {
+    "path": "src.txt",
+    "offset": -4,
+    "limit": 0
+  },
+  "initial": {
+    "src.txt": "alpha\nbeta\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/src.txt\", \"content\": \"\", \"truncated\": true, \"offset\": 0, \"limit\": 0}",
+    "details": {
+      "path": "<WORKSPACE>/src.txt",
+      "content": "",
+      "truncated": true,
+      "offset": 0,
+      "limit": 0
+    },
+    "isError": false
+  },
+  "final": {
+    "src.txt": "alpha\nbeta\n"
+  }
+}

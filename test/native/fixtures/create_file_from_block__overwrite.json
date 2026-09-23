@@ -1,0 +1,23 @@
+{
+  "tool": "create_file_from_block",
+  "case": "overwrite",
+  "input": {
+    "filePath": "existing.txt",
+    "content": "new"
+  },
+  "initial": {
+    "existing.txt": "old"
+  },
+  "python": {
+    "text": "{\"ok\": true, \"path\": \"<WORKSPACE>/existing.txt\", \"bytes\": 3}",
+    "details": {
+      "ok": true,
+      "path": "<WORKSPACE>/existing.txt",
+      "bytes": 3
+    },
+    "isError": false
+  },
+  "final": {
+    "existing.txt": "new"
+  }
+}

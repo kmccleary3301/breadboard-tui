@@ -1,0 +1,25 @@
+{
+  "tool": "read_file",
+  "case": "path-escape",
+  "input": {
+    "path": "../outside.txt"
+  },
+  "initial": {
+    "src.txt": "alpha\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"content\": \"\", \"truncated\": false, \"offset\": 0, \"limit\": null, \"error\": \"path_outside_workspace\"}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "content": "",
+      "truncated": false,
+      "offset": 0,
+      "limit": null,
+      "error": "path_outside_workspace"
+    },
+    "isError": true
+  },
+  "final": {
+    "src.txt": "alpha\n"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "tool": "read_file",
+  "case": "normal",
+  "input": {
+    "path": "src.txt"
+  },
+  "initial": {
+    "src.txt": "alpha\nbeta\ngamma\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/src.txt\", \"content\": \"alpha\\nbeta\\ngamma\\n\", \"truncated\": false, \"offset\": 0, \"limit\": null}",
+    "details": {
+      "path": "<WORKSPACE>/src.txt",
+      "content": "alpha\nbeta\ngamma\n",
+      "truncated": false,
+      "offset": 0,
+      "limit": null
+    },
+    "isError": false
+  },
+  "final": {
+    "src.txt": "alpha\nbeta\ngamma\n"
+  }
+}

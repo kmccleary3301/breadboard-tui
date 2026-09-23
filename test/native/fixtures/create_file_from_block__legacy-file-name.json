@@ -1,0 +1,21 @@
+{
+  "tool": "create_file_from_block",
+  "case": "legacy-file-name",
+  "input": {
+    "file_name": "legacy.txt",
+    "content": "legacy"
+  },
+  "initial": {},
+  "python": {
+    "text": "{\"ok\": true, \"path\": \"<WORKSPACE>/legacy.txt\", \"bytes\": 6}",
+    "details": {
+      "ok": true,
+      "path": "<WORKSPACE>/legacy.txt",
+      "bytes": 6
+    },
+    "isError": false
+  },
+  "final": {
+    "legacy.txt": "legacy"
+  }
+}

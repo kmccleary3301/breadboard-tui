@@ -1,0 +1,20 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "path-escape",
+  "input": "--- a/../outside.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-one\n+two\n",
+  "initial": {
+    "a.txt": "one\n"
+  },
+  "python": {
+    "text": "{\"ok\": false, \"stdout\": \"\", \"stderr\": \"error: ../outside.txt: does not exist in index\\n\"}",
+    "details": {
+      "ok": false,
+      "stdout": "",
+      "stderr": "error: ../outside.txt: does not exist in index\n"
+    },
+    "isError": true
+  },
+  "final": {
+    "a.txt": "one\n"
+  }
+}

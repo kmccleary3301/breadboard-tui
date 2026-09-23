@@ -1,0 +1,20 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "context-mismatch",
+  "input": "--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n one\n-WRONG\n+two\n",
+  "initial": {
+    "a.txt": "one\ntwo\n"
+  },
+  "python": {
+    "text": "{\"ok\": false, \"stdout\": \"\", \"stderr\": \"error: repository lacks the necessary blob to perform 3-way merge.\\nFalling back to direct application...\\nerror: patch failed: a.txt:1\\nerror: a.txt: patch does not apply\\n\"}",
+    "details": {
+      "ok": false,
+      "stdout": "",
+      "stderr": "error: repository lacks the necessary blob to perform 3-way merge.\nFalling back to direct application...\nerror: patch failed: a.txt:1\nerror: a.txt: patch does not apply\n"
+    },
+    "isError": true
+  },
+  "final": {
+    "a.txt": "one\ntwo\n"
+  }
+}

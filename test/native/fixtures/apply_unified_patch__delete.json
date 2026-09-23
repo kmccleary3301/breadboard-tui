@@ -1,0 +1,18 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "delete",
+  "input": "--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n",
+  "initial": {
+    "gone.txt": "gone\n"
+  },
+  "python": {
+    "text": "{\"ok\": true, \"stdout\": \"\", \"stderr\": \"Falling back to direct application...\\n\"}",
+    "details": {
+      "ok": true,
+      "stdout": "",
+      "stderr": "Falling back to direct application...\n"
+    },
+    "isError": false
+  },
+  "final": {}
+}

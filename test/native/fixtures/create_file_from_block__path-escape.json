@@ -1,0 +1,19 @@
+{
+  "tool": "create_file_from_block",
+  "case": "path-escape",
+  "input": {
+    "filePath": "../outside.txt",
+    "content": "no"
+  },
+  "initial": {},
+  "python": {
+    "text": "{\"ok\": false, \"path\": \"<WORKSPACE>\", \"error\": \"path_outside_workspace\"}",
+    "details": {
+      "ok": false,
+      "path": "<WORKSPACE>",
+      "error": "path_outside_workspace"
+    },
+    "isError": true
+  },
+  "final": {}
+}

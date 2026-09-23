@@ -1,0 +1,24 @@
+{
+  "tool": "list_dir",
+  "case": "path-escape",
+  "input": {
+    "path": "../outside"
+  },
+  "initial": {
+    "root.txt": "r"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"entries\": [], \"items\": [], \"tree_format\": false, \"error\": \"path_outside_workspace\"}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "entries": [],
+      "items": [],
+      "tree_format": false,
+      "error": "path_outside_workspace"
+    },
+    "isError": true
+  },
+  "final": {
+    "root.txt": "r"
+  }
+}

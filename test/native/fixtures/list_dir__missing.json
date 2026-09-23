@@ -1,0 +1,23 @@
+{
+  "tool": "list_dir",
+  "case": "missing",
+  "input": {
+    "path": "missing"
+  },
+  "initial": {
+    "root.txt": "r"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/missing\", \"items\": [], \"entries\": [], \"tree_format\": false}",
+    "details": {
+      "path": "<WORKSPACE>/missing",
+      "items": [],
+      "entries": [],
+      "tree_format": false
+    },
+    "isError": false
+  },
+  "final": {
+    "root.txt": "r"
+  }
+}
