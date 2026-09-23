@@ -155,27 +155,10 @@ function claudeCodeDefinition(definition: NativeToolDefinition): NativeToolDefin
 
 function codexPythonSchemaOrder(definition: NativeToolDefinition): NativeToolDefinition {
 	if (definition.name === "shell_command") {
-		const properties = definition.parameters.properties;
-		if (!isRecord(properties)) return definition;
-		const nullableProperties: JsonRecord = {};
-		for (const [name, value] of Object.entries(properties)) {
-			if (!isRecord(value) || name === "command") {
-				nullableProperties[name] = value;
-				continue;
-			}
-			const type = value.type;
-			if (typeof type !== "string") {
-				nullableProperties[name] = value;
-				continue;
-			}
-			const { type: _type, ...rest } = value;
-			nullableProperties[name] = { ...rest, anyOf: [{ type }, { type: "null" }] };
-		}
 		return {
 			...definition,
 			parameters: {
 				...definition.parameters,
-				properties: nullableProperties,
 				required: ["command", "justification", "timeout_ms", "with_escalated_permissions", "workdir"],
 			},
 		};
