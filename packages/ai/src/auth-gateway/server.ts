@@ -123,22 +123,6 @@ function rememberGatewayEffort(sessionKey: string, options: SimpleStreamOptions)
 	}
 }
 
-// ParsedFormatRequest / ParsedFormatOptions / FormatModule come from ./types.
-
-export type ModelResolver = (modelId: string) => Model<Api> | undefined;
-
-export interface AuthGatewayBootOptions extends AuthGatewayServerOptions {
-	/** Source of credentials. Caller wires this to a broker-backed AuthStorage. */
-	storage: AuthStorage;
-	/**
-	 * Resolve a client-requested model id to a pi-ai Model. Caller supplies
-	 * this from a ModelRegistry (lives in `coding-agent` to avoid an inverse
-	 * dependency in `pi-ai`).
-	 */
-	resolveModel: ModelResolver;
-	/** Optional supplier for `/v1/models` listing. Returns the full model array. */
-	listModels?: () => Iterable<Model<Api>>;
-}
 // `parseBind` lives in ../utils/parse-bind so the gateway and broker can't
 // drift on accepted inputs (e.g. empty hostname, IPv6 brackets).
 
