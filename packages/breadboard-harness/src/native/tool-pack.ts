@@ -115,12 +115,53 @@ function researchToolFamily(lock: JsonRecord): ResearchToolFamily | undefined {
 	if (joined.includes("oh_my_pi")) return "oh_my_pi";
 	return undefined;
 }
+const CLAUDE_SCHEMA_URI = "http://json-schema.org/draft-07/schema#";
+
+function claudeCodeDefinition(definition: NativeToolDefinition): NativeToolDefinition {
+	const parameters: JsonRecord = {
+		...definition.parameters,
+		"$schema": CLAUDE_SCHEMA_URI,
+		required: Array.isArray(definition.parameters.required) ? definition.parameters.required : [],
+	};
+	const propertiesValue = parameters.properties;
+	if (isRecord(propertiesValue)) {
+		const properties: JsonRecord = { ...propertiesValue };
+		const patchProperty = (name: string, patch: JsonRecord): void => {
+			const current = properties[name];
+			if (isRecord(current)) properties[name] = { ...current, ...patch };
+		};
+		switch (definition.name) {
+			case "Grep":
+				patchProperty("output_mode", { enum: ["content", "files_with_matches", "count"] });
+				break;
+			case "NotebookEdit":
+				patchProperty("cell_type", { enum: ["code", "markdown"] });
+				patchProperty("edit_mode", { enum: ["replace", "insert", "delete"] });
+				break;
+			case "TaskOutput":
+				patchProperty("timeout", { minimum: 0, maximum: 600000 });
+				break;
+			case "WebFetch":
+				patchProperty("url", { format: "uri" });
+				break;
+			case "WebSearch":
+				patchProperty("query", { minLength: 2 });
+				break;
+		}
+		parameters.properties = properties;
+	}
+	return { ...definition, parameters };
+}
+
 function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
 	const family = researchToolFamily(lock);
 	if (family === undefined) return base;
 	const definitions = new Map(base);
 	const additions = family === "codex" ? RESEARCH_TOOL_DEFINITIONS.opencode : RESEARCH_TOOL_DEFINITIONS[family];
-	for (const definition of additions) definitions.set(definition.name, definition);
+	for (const definition of additions) {
+		const selected = family === "claude_code" ? claudeCodeDefinition(definition) : definition;
+		definitions.set(selected.name, selected);
+	}
 	return definitions;
 }
 
