@@ -1,0 +1,34 @@
+{
+  "tool": "list_dir",
+  "case": "private-root-filters-private-depth-two",
+  "input": {
+    "path": ".breadboard",
+    "depth": 2
+  },
+  "initial": {
+    ".breadboard/artifacts/x.txt": "secret artifact\n",
+    ".breadboard/artifacts/nested/y.txt": "nested secret\n",
+    ".breadboard/attachments/a.bin": "private attachment\n",
+    ".breadboard/other/visible.txt": "visible control\n",
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/.breadboard\", \"items\": [{\"path\": \"other\", \"type\": \"dir\"}, {\"path\": \"other/visible.txt\", \"type\": \"file\"}], \"entries\": [{\"path\": \"other\", \"type\": \"dir\"}, {\"path\": \"other/visible.txt\", \"type\": \"file\"}], \"tree_format\": false}",
+    "details": {
+      "path": "<WORKSPACE>/.breadboard",
+      "items": [
+        {"path": "other", "type": "dir"},
+        {"path": "other/visible.txt", "type": "file"}
+      ],
+      "entries": [
+        {"path": "other", "type": "dir"},
+        {"path": "other/visible.txt", "type": "file"}
+      ],
+      "tree_format": false
+    },
+    "isError": false
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  }
+}

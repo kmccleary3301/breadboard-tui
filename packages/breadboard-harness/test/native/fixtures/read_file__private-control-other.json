@@ -1,0 +1,28 @@
+{
+  "tool": "read_file",
+  "case": "control-other",
+  "input": {
+    "path": ".breadboard/other/visible.txt"
+  },
+  "initial": {
+    ".breadboard/artifacts/x.txt": "secret artifact\n",
+    ".breadboard/artifacts/nested/y.txt": "nested secret\n",
+    ".breadboard/attachments/a.bin": "private attachment\n",
+    ".breadboard/other/visible.txt": "visible control\n",
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>/.breadboard/other/visible.txt\", \"content\": \"visible control\\n\", \"truncated\": false, \"offset\": 0, \"limit\": null}",
+    "details": {
+      "path": "<WORKSPACE>/.breadboard/other/visible.txt",
+      "content": "visible control\n",
+      "truncated": false,
+      "offset": 0,
+      "limit": null
+    },
+    "isError": false
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  }
+}

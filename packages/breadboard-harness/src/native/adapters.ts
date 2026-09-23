@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
-import { applyPatchOperationsDirect, convertPatchToUnified } from "./patch";
+import { applyPatchOperationsDirect, convertPatchToUnified, normalizeWorkspacePath } from "./patch";
 import type { NativeToolResult } from "./types";
 
 export function pythonJson(value: CanonicalJson): string {
@@ -13,6 +13,31 @@ export function pythonJson(value: CanonicalJson): string {
 
 function result(details: CanonicalJson, isError = false): NativeToolResult {
 	return { text: pythonJson(details), details, ...(isError ? { isError: true } : {}) };
+}
+
+/** Mirrors `agent_llm_openai.py:5264-5273`; list filtering follows :5519-5521. */
+function privateWorkspacePath(workspaceRoot: string, requested: string): boolean {
+	const root = resolve(workspaceRoot);
+	const normalized = normalizeWorkspacePath(root, requested);
+	const relativePath = relative(root, normalized);
+	const parts = relativePath.split(/[\\/]/u).filter(Boolean);
+	return parts[0] === ".breadboard" && (parts[1] === "artifacts" || parts[1] === "attachments");
+}
+
+function patchTouchesPrivateWorkspace(workspaceRoot: string, patch: string): boolean {
+	const pattern = /^(?:\*\*\* (?:Add|Update|Delete) File:|\*\*\* Move to:|---|\+\+\+|(?:rename|copy) (?:from|to))\s+(?:[ab][/])?("?[^"\t\n]+"?)(?:\t.*)?$/gmu;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(patch)) !== null) {
+		const requested = match[1]!.trim().replace(/^"+|"+$/gu, "");
+		if (privateWorkspacePath(workspaceRoot, requested)) return true;
+	}
+	return false;
+}
+
+function privateTreeEntry(workspaceRoot: string, target: string, entry: CanonicalJson): boolean {
+	return isJsonRecord(entry) && typeof entry.path === "string"
+		? privateWorkspacePath(workspaceRoot, resolve(target, entry.path))
+		: false;
 }
 
 function workspacePath(workspaceRoot: string, requested: string): string {
@@ -31,6 +56,10 @@ export async function readFileAdapter(
 	workspaceRoot: string,
 	input: Readonly<{ path: string; offset?: number; limit?: number }>,
 ): Promise<NativeToolResult> {
+	if (privateWorkspacePath(workspaceRoot, input.path)) {
+		return result({ error: "artifact store is private; use an authorized attachment URI" }, true);
+	}
+
 	let path: string;
 	try {
 		path = workspacePath(workspaceRoot, input.path);
@@ -89,15 +118,20 @@ export async function listDirAdapter(
 		return pathError(workspaceRoot, input.path, { entries: [], items: [], tree_format: false });
 	}
 	const depth = Math.max(1, Math.trunc(input.depth || 1));
-	const items = await treeEntries(path, depth, "");
+	const items = (await treeEntries(path, depth, "")).filter(
+		entry => !privateTreeEntry(workspaceRoot, path, entry),
+	);
 	return result({ path, items, entries: items, tree_format: false });
 }
-
 export async function createFileFromBlockAdapter(
 	workspaceRoot: string,
 	input: Readonly<{ filePath?: string; file_name?: string; content: string }>,
 ): Promise<NativeToolResult> {
 	const requested = input.file_name || input.filePath || "";
+	if (privateWorkspacePath(workspaceRoot, requested)) {
+		return result({ error: "private workspace storage is unavailable to model tools" }, true);
+	}
+
 	let path: string;
 	try {
 		path = workspacePath(workspaceRoot, requested);
@@ -136,6 +170,10 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 	const root = resolve(workspaceRoot);
 	const patchSourceText = patch;
 	let patchText = patchSourceText;
+	if (patchTouchesPrivateWorkspace(root, patchSourceText)) {
+		return result({ error: "private workspace storage is unavailable to model tools" }, true);
+	}
+
 	if (
 		patchText.includes("*** Add File:")
 		|| patchText.includes("*** Update File:")

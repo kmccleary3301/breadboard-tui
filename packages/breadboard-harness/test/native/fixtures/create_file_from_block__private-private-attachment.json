@@ -1,0 +1,25 @@
+{
+  "tool": "create_file_from_block",
+  "case": "private-attachment",
+  "input": {
+    "filePath": ".breadboard/attachments/new.txt",
+    "content": "should not write\n"
+  },
+  "initial": {
+    ".breadboard/artifacts/x.txt": "secret artifact\n",
+    ".breadboard/artifacts/nested/y.txt": "nested secret\n",
+    ".breadboard/attachments/a.bin": "private attachment\n",
+    ".breadboard/other/visible.txt": "visible control\n",
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"error\": \"private workspace storage is unavailable to model tools\"}",
+    "details": {
+      "error": "private workspace storage is unavailable to model tools"
+    },
+    "isError": true
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  }
+}
