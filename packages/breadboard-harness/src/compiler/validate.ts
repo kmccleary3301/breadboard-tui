@@ -90,7 +90,7 @@ function jsonType(value: unknown): string {
 }
 
 function isInteger(value: unknown): boolean {
-	return (typeof value === "number" && Number.isInteger(value)) || typeof value === "bigint" || (value instanceof JsonFloat && Number.isInteger(value.value));
+	return (typeof value === "number" && Number.isInteger(value)) || typeof value === "bigint";
 }
 
 function acceptsType(value: unknown, type: string): boolean {
@@ -105,6 +105,20 @@ function acceptsType(value: unknown, type: string): boolean {
 		default: return true;
 	}
 }
+
+const SCHEMA_SCOPE = new WeakMap<object, JsonSchema>();
+
+function recordSchemaScope(value: unknown, root: JsonSchema): void {
+	if (!value || typeof value !== "object" || SCHEMA_SCOPE.has(value)) return;
+	SCHEMA_SCOPE.set(value, root);
+	if (Array.isArray(value)) {
+		for (const item of value) recordSchemaScope(item, root);
+		return;
+	}
+	for (const child of Object.values(value)) recordSchemaScope(child, root);
+}
+
+for (const schema of SCHEMAS.values()) recordSchemaScope(schema, schema);
 
 function resolveRef(ref: string, root: JsonSchema): JsonSchema {
 	const separator = ref.indexOf("#");
@@ -128,7 +142,8 @@ function dereference(schema: JsonSchema, root: JsonSchema): JsonSchema {
 	const seen = new Set<JsonSchema>();
 	while (typeof current.$ref === "string" && !seen.has(current)) {
 		seen.add(current);
-		current = resolveRef(current.$ref, root);
+		const localRoot = SCHEMA_SCOPE.get(current) ?? root;
+		current = resolveRef(current.$ref, localRoot);
 	}
 	return current;
 }
@@ -196,8 +211,7 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 		if (!valid) {
 			const compatible = branchErrors.filter(items => !items.some(item => item.validator === "type" && item.path.length === path.length));
 			if (compatible.length > 0) {
-				const context = compatible.flat();
-				errors.push(error(path, keyword, branches, schema, context));
+				errors.push(error(path, keyword, branches, schema, compatible.flat()));
 			} else {
 				errors.push(error(path, keyword, branches, schema));
 			}
@@ -207,23 +221,23 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 		const properties = isObject(schema.properties) ? schema.properties : {};
 		if (Array.isArray(schema.required)) {
 			for (const name of [...schema.required].filter((item): item is string => typeof item === "string").sort(compareCodePoints)) {
-				if (!(name in value)) errors.push(error([...path, name], "required", name, schema));
+				if (!Object.hasOwn(value, name)) errors.push(error([...path, name], "required", name, schema));
 			}
 		}
 		if (schema.additionalProperties === false) {
 			const patterns = isObject(schema.patternProperties) ? Object.keys(schema.patternProperties).map(pattern => new RegExp(pattern, "u")) : [];
 			for (const name of Object.keys(value).sort(compareCodePoints)) {
-				if (!(name in properties) && !patterns.some(pattern => pattern.test(name))) {
+				if (!Object.hasOwn(properties, name) && !patterns.some(pattern => pattern.test(name))) {
 					errors.push(error([...path, name], "additionalProperties", name, schema));
 				}
 			}
 		}
 		for (const name of Object.keys(value)) {
-			const child = properties[name];
+			const child = Object.hasOwn(properties, name) ? properties[name] : undefined;
 			if (isObject(child)) errors.push(...validateSchema(value[name], child, [...path, name], root));
 		}
 		if (isObject(schema.additionalProperties)) {
-			for (const name of Object.keys(value)) if (!(name in properties)) errors.push(...validateSchema(value[name], schema.additionalProperties, [...path, name], root));
+			for (const name of Object.keys(value)) if (!Object.hasOwn(properties, name)) errors.push(...validateSchema(value[name], schema.additionalProperties, [...path, name], root));
 		}
 		if (isObject(schema.patternProperties)) {
 			for (const [pattern, child] of Object.entries(schema.patternProperties)) {
@@ -279,7 +293,6 @@ function jsonDomainFindings(value: unknown, path: readonly PathPart[] = [], acti
 		return value.toString().replace(/^-/, "").length <= MAX_JSON_INTEGER_DIGITS ? [] : [{ pointer: pathPointer(path), code: "integer_range", message: "JSON integers must contain at most 640 decimal digits" }];
 	}
 	if (Array.isArray(value) || isObject(value)) {
-		if (active.has(value)) return [{ pointer: pathPointer(path), code: "json_cycle", message: "JSON values must not contain cycles" }];
 		active.add(value);
 		const findings: HarnessValidationFinding[] = [];
 		if (isObject(value)) {
@@ -295,7 +308,7 @@ function jsonDomainFindings(value: unknown, path: readonly PathPart[] = [], acti
 
 function sourcePairFindings(document: Record<string, unknown>): HarnessValidationFinding[] {
 	const findings: HarnessValidationFinding[] = [];
-	for (const name of ["schema_version", "version"] as const) if (!(name in document)) findings.push({ pointer: `/${name}`, code: "required", message: `'${name}' is a required property` });
+	for (const name of ["schema_version", "version"] as const) if (!Object.hasOwn(document, name)) findings.push({ pointer: `/${name}`, code: "required", message: `'${name}' is a required property` });
 	if (findings.length > 0) return findings;
 	const schemaVersion = document.schema_version;
 	const version = document.version;

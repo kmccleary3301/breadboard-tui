@@ -6,6 +6,7 @@ import {
 	compileHarnessYaml,
 	HarnessCompileError,
 	parseHarnessYaml,
+	validateHarnessDefinition,
 } from "../../src/compiler";
 
 const MINIMAL_V3 = `schema_version: bb.harness_definition.v1
@@ -112,5 +113,34 @@ describe("harness compiler", () => {
 				],
 			});
 		}
+	});
+	test("rejects YAML float discriminators as unsupported versions", () => {
+		expect(() => compileHarnessYaml(MINIMAL_V3.replace("version: 1", "version: 1.0"), { sourceRef: "invalid.yaml" })).toThrow(
+			"invalid Harness Definition: /version [unsupported_version]",
+		);
+	});
+
+	test("resolves nested local references in external schema definitions", () => {
+		expect(validateHarnessDefinition({
+			schema_version: "bb.harness_definition.v1",
+			version: 1,
+			workspace: { root: "." },
+			providers: { default_model: "main", models: [{ id: "main", adapter: "openai" }] },
+			modes: [{ name: "build" }],
+			loop: { sequence: [{ mode: "build" }] },
+			multi_agent: { team_config: { team: { agents: { a: { role: "builder" } } } } },
+		})).toEqual([]);
+	});
+
+	test("treats inherited object names as additional properties", () => {
+		const findings = validateHarnessDefinition({
+			schema_version: "bb.harness_definition.v1",
+			version: 1,
+			workspace: { root: ".", toString: true },
+			providers: { default_model: "main", models: [{ id: "main", adapter: "openai" }] },
+			modes: [{ name: "build" }],
+			loop: { sequence: [{ mode: "build" }] },
+		});
+		expect(findings.map(finding => [finding.pointer, finding.code])).toEqual([["/workspace/toString", "additionalProperties"]]);
 	});
 });
