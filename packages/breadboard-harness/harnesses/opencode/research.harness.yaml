@@ -24,6 +24,10 @@ prompts:
       system: prompts/system.md
       plan: prompts/plan.md
       builder: prompts/builder.md
+  environment:
+    enabled: true
+    format: opencode
+    file_limit: 200
   tool_prompt_mode: none
 modes:
   - name: build

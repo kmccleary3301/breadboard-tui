@@ -1,3 +1,5 @@
+import { readdir, stat } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { readEngineDataFile } from "../engine-data";
 import { isJsonRecord, type CanonicalJson, type JsonRecord } from "../canonical-json";
 import { HOST_SYSTEM_PROMPT } from "./host-surface";
@@ -127,8 +129,152 @@ function perTurnCatalog(surface: NativeToolSurfacePack, persistent = false): str
 				`<FUNCTIONS>\n${functionPrompt}\n\n${functionPrompt}\n\n\n</FUNCTIONS>\n`,
 		);
 	}
+
 	sections.push("END SYSTEM MESSAGE\n");
 	return sections.join("");
+}
+interface EnvironmentTreeNode {
+	path: readonly string[];
+	children: EnvironmentTreeNode[];
+}
+
+async function opencodeEnvironmentTree(workspaceRoot: string, fileLimit: number): Promise<string> {
+	const files: string[] = [];
+	const visited = new Set<string>();
+	const walk = async (directory: string): Promise<void> => {
+		let realDirectory: string;
+		try {
+			realDirectory = (await stat(directory)).isDirectory() ? resolve(directory) : "";
+		} catch {
+			return;
+		}
+		if (!realDirectory || visited.has(realDirectory)) return;
+		visited.add(realDirectory);
+		let entries;
+		try {
+			entries = await readdir(directory, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const child = join(directory, entry.name);
+			const childRelative = relative(workspaceRoot, child);
+			if (childRelative.split("/").includes(".git") || childRelative.includes(".opencode")) continue;
+			let isDirectory = entry.isDirectory();
+			if (entry.isSymbolicLink()) {
+				try {
+					isDirectory = (await stat(child)).isDirectory();
+				} catch {
+					continue;
+				}
+			}
+			if (isDirectory) await walk(child);
+			else files.push(childRelative);
+		}
+	};
+	await walk(workspaceRoot);
+
+	const root: EnvironmentTreeNode = { path: [], children: [] };
+	const getPath = (node: EnvironmentTreeNode, parts: readonly string[], create: boolean): EnvironmentTreeNode | undefined => {
+		let current: EnvironmentTreeNode | undefined = node;
+		for (const part of parts) {
+			const parent: EnvironmentTreeNode | undefined = current;
+			if (parent === undefined) return undefined;
+			let child: EnvironmentTreeNode | undefined = parent.children.find((candidate: EnvironmentTreeNode) => candidate.path.at(-1) === part);
+			if (child === undefined) {
+				if (!create) return undefined;
+				child = { path: [...parent.path, part], children: [] };
+				parent.children.push(child);
+			}
+			current = child;
+		}
+		return current;
+	};
+	for (const file of files) getPath(root, file.split("/"), true);
+	const sortNode = (node: EnvironmentTreeNode): void => {
+		node.children.sort((left, right) => {
+			const leftDirectory = left.children.length > 0 ? 0 : 1;
+			const rightDirectory = right.children.length > 0 ? 0 : 1;
+			return leftDirectory - rightDirectory || String(left.path.at(-1)).localeCompare(String(right.path.at(-1)));
+		});
+		for (const child of node.children) sortNode(child);
+	};
+	sortNode(root);
+
+	const result: EnvironmentTreeNode = { path: [], children: [] };
+	let current: EnvironmentTreeNode[] = [root];
+	let processed = 0;
+	const limit = Number.isInteger(fileLimit) && fileLimit > 0 ? fileLimit : 50;
+	while (current.length > 0) {
+		const nextLevel: EnvironmentTreeNode[] = [];
+		for (const node of current) nextLevel.push(...node.children.filter(child => child.children.length > 0));
+		const maxChildren = Math.max(0, ...current.map(node => node.children.length));
+		for (let index = 0; index < maxChildren && processed < limit; index++) {
+			for (const node of current) {
+				if (processed >= limit || index >= node.children.length) break;
+				const child = node.children[index]!;
+				getPath(result, child.path, true);
+				processed++;
+			}
+		}
+		if (processed >= limit) {
+			for (const node of [...current, ...nextLevel]) {
+				const compare = getPath(result, node.path, false);
+				if (compare === undefined || compare.children.length === node.children.length) continue;
+				compare.children.push({ path: [...compare.path, `[${node.children.length - compare.children.length} truncated]`], children: [] });
+			}
+			break;
+		}
+		current = nextLevel;
+	}
+	const lines: string[] = [];
+	const render = (node: EnvironmentTreeNode, depth: number): void => {
+		const name = node.path.at(-1);
+		if (name === undefined) return;
+		lines.push(`${"\t".repeat(depth)}${name}${node.children.length > 0 ? "/" : ""}`);
+		for (const child of node.children) render(child, depth + 1);
+	};
+	for (const child of result.children) render(child, 0);
+	return lines.join("\n");
+}
+
+async function findGitRoot(workspaceRoot: string): Promise<boolean> {
+	let current = resolve(workspaceRoot);
+	while (true) {
+		try {
+			await stat(join(current, ".git"));
+			return true;
+		} catch {
+			const parent = dirname(current);
+			if (parent === current) return false;
+			current = parent;
+		}
+	}
+}
+
+async function appendOpenCodeEnvironment(lock: JsonRecord, system: string, workspaceRoot: string | undefined): Promise<string> {
+	if (nativeLockValue(lock, "prompts.environment.enabled") !== true || nativeLockValue(lock, "prompts.environment.format") !== "opencode" || workspaceRoot === undefined) {
+		return system;
+	}
+	const rawLimit = nativeLockValue(lock, "prompts.environment.file_limit");
+	const fileLimit = typeof rawLimit === "number" || typeof rawLimit === "string" ? Number(rawLimit) : 200;
+	const workspace = resolve(workspaceRoot);
+	const isGit = await findGitRoot(workspace);
+	const tree = isGit ? await opencodeEnvironmentTree(workspace, fileLimit) : "";
+	const env = [
+		"Here is some useful information about the environment you are running in:",
+		"<env>",
+		`  Working directory: ${workspace}`,
+		`  Is directory a git repo: ${isGit ? "yes" : "no"}`,
+		`  Platform: ${process.platform}`,
+		`  Today's date: ${new Date().toDateString()}`,
+		"</env>",
+		"<files>",
+		`  ${tree}`,
+		"</files>",
+	].join("\n");
+	if (!system) return env;
+	return `${system}${system.endsWith("\n") ? "\n" : "\n\n"}${env}`;
 }
 
 /**
@@ -144,6 +290,7 @@ export async function assembleNativePrompts(
 	resources: ReadonlyMap<string, Uint8Array>,
 	surface: NativeToolSurfacePack,
 	modeOverride?: string,
+	workspaceRoot?: string,
 ): Promise<{ system: string; perTurn: string }> {
 	const mode = modeOverride ?? selectedMode(lock);
 	const packs = packValues(lock);
@@ -207,7 +354,7 @@ export async function assembleNativePrompts(
 		}
 	}
 	const dedupe = nativeLockValue(lock, "prompts.dedupe") === true;
-	const assembledSystem = assemble(system, mode, dedupe);
+	const assembledSystem = await appendOpenCodeEnvironment(lock, assemble(system, mode, dedupe), workspaceRoot);
 	const toolPromptMode = nativeLockValue(lock, "prompts.tool_prompt_mode");
 	const perTurn =
 		toolPromptMode === "none"

@@ -206,7 +206,7 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 	if (hostMode === undefined) {
 		for (const [mode, rawToolSurface] of await loadNativeToolSurfaces(lock)) {
 			const toolSurface = bindWorkspaceSurface(rawToolSurface, input.workspaceRoot);
-			const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode);
+			const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, mode, input.workspaceRoot);
 			stages.push(
 				Object.freeze({
 					mode,
@@ -220,7 +220,7 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 	} else {
 		// The host's own tools answer every turn, so there is no harness tool catalog to frame into messages.
 		const toolSurface: NativeToolSurfacePack = Object.freeze({ mode: hostMode, native: [], textInvoked: [] });
-		const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, hostMode);
+		const prompts = await assembleNativePrompts(lock, promptTexts, toolSurface, hostMode, input.workspaceRoot);
 		stages.push(
 			Object.freeze({
 				mode: hostMode,

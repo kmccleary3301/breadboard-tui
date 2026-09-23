@@ -24,6 +24,10 @@ prompts:
       system: prompts/system.md
       builder: prompts/builder.md
   tool_prompt_mode: none
+  environment:
+    enabled: true
+    format: opencode
+    file_limit: 200
 modes:
   - name: build
     tools_enabled: [bash, read, glob, grep, list, task, webfetch, todowrite, todoread, skill, lsp_hover, lsp_goto_definition, lsp_find_references, lsp_document_symbols, lsp_workspace_symbols, lsp_diagnostics, lsp_servers, lsp_prepare_rename, lsp_rename, lsp_code_actions, lsp_code_action_resolve, ast_grep_search, ast_grep_replace, slashcommand, background_task, background_output, background_cancel, call_omo_agent, look_at, interactive_bash, context7_resolve-library-id, context7_get-library-docs, websearch_exa_web_search_exa, grep_app_searchGitHub]
