@@ -133,7 +133,7 @@ describe("macOS spelling feature gates", () => {
 		await updated.promise;
 		expect(onUpdate).toHaveBeenCalledTimes(1);
 		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toBe(
-			theme.underline(theme.fg("error", "recieved")),
+			`\x1b[4:3m\x1b[58:2::255:95:95m${theme.fg("error", "recieved")}\x1b[4:0m\x1b[59m`,
 		);
 		expect(provider.getWordCompletion(["recieved"], 0, 8)).toBeNull();
 		expect(await provider.tryAutocorrect(["recieved "], 0, 9)).toBeNull();
@@ -223,7 +223,7 @@ describe("macOS spelling feature gates", () => {
 			provider.decorateTypos(text, decorationContext(text));
 			await updated.promise;
 			expect(provider.decorateTypos(text, decorationContext(text))).toBe(
-				"workflowz \x1b[4:3m\x1b[58:2::255:95:95mrecieved\x1b[4:0m\x1b[59m",
+				`workflowz \x1b[4:3m\x1b[58:2::255:95:95m${theme.fg("error", "recieved")}\x1b[4:0m\x1b[59m`,
 			);
 		} finally {
 			setMagicKeywords([]);
@@ -272,7 +272,9 @@ describe("macOS spelling feature gates", () => {
 		provider.onUpdate = updated.resolve;
 		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toBe("recieved");
 		await updated.promise;
-		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toContain("\x1b[4m");
+		expect(provider.decorateTypos("recieved", decorationContext("recieved"))).toBe(
+			`\x1b[4:3m\x1b[58:2::255:95:95m${theme.fg("error", "recieved")}\x1b[4:0m\x1b[59m`,
+		);
 	});
 
 	it("does no spelling work for huge editor buffers", async () => {
