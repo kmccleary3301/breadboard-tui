@@ -201,12 +201,8 @@ export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike>
 	expandKeys?: KeyId[];
 	/** Host-provided optional section implementations for fork-specific views. */
 	viewFactory?: AgentHubViewFactory<TRecord>;
-	/** Read-only harness snapshot accessor used by an optional host view. */
-	harnessPort?: { current(): unknown };
 	/** Host-owned native lifecycle policy for mutating subagents. */
 	nativeMutationRestriction?: () => string | undefined;
-	/** Compatibility input retained for hosts that expose the native ownership bit. */
-	mainStreamOwnsTurnLifecycle?: boolean;
 	/** Initial harness panel when a host provides a harness view. */
 	initialHarnessPanel?: string;
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
@@ -399,7 +395,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				switchSection: section => this.#switchSection(section),
 				managePeer: (action, peer) => this.#manageMessagePeer(action, peer),
 				mutationRestriction: () => this.#nativeMutationRestriction(),
-				harnessSnapshot: () => deps.harnessPort?.current() ?? null,
+				harnessSnapshot: () => null,
 				initialHarnessPanel: deps.initialHarnessPanel,
 			}) ?? {};
 
@@ -620,7 +616,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#onDataChange(): void {
 		this.#refreshRows();
-		this.#refreshSectionViews();
 		this.#requestRender();
 	}
 
@@ -699,6 +694,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			if (children) children.push(ref);
 			else this.#childrenByParent.set(parent, [ref]);
 		}
+		this.#statusCounts = { running: 0, idle: 0, parked: 0, aborted: 0 };
 		for (const ref of rosterRows) this.#statusCounts[ref.status]++;
 		this.#refreshAggregate();
 		this.#refreshActivityData(rosterRows);
@@ -1340,7 +1336,9 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const sectionView = this.#sectionViews[this.#section];
 		if (sectionView?.handleWheel) {
 			sectionView.handleWheel(delta);
-		} else if (this.#section === "activity") {
+			return;
+		}
+		if (this.#section === "activity") {
 			if (this.#activityRows.length > 0) {
 				this.#activityFollow = false;
 				this.#selectedActivityRow = Math.max(
@@ -1359,11 +1357,11 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	}
 
 	setHoverIndex(index: number | null): void {
+		if (this.#section !== "agents") return;
 		if (index === this.#hoveredRow) return;
 		this.#hoveredRow = index;
 		this.#requestRender();
 	}
-
 	clickItem(index: number): void {
 		const sectionView = this.#sectionViews[this.#section];
 		if (sectionView?.clickItem) {

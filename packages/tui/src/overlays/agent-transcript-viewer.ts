@@ -73,8 +73,6 @@ export interface AgentTranscriptViewerDeps {
 	hubKeys: KeyId[];
 	/** Host-owned native lifecycle policy for subagent prompts. */
 	nativeMutationRestriction?: () => string | undefined;
-	/** Compatibility input retained for hosts that expose the native ownership bit. */
-	mainStreamOwnsTurnLifecycle?: boolean;
 	requestRender: () => void;
 	/** Close just this viewer (Esc), returning to the hub table. */
 	onClose: () => void;
