@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { validateBundledSchema } from "../../src/compiler/validate";
 import type {
 	PublicApprovalRequestedPayload,
 	PublicInputAcceptedPayload,
@@ -37,4 +38,21 @@ type _CompletedFieldsAreRequired = Assert<
 // Keep the compile-time assertions above exercised by the test runner's typecheck.
 test("public event payload required-field contract is compiled", () => {
 	expect(true).toBe(true);
+});
+
+test("public start and cancel request samples validate bundled schemas", () => {
+	expect(
+		validateBundledSchema("https://breadboard.dev/contracts/public/schemas/bb.session_start_request.v1.schema.json", {
+			lock_id: "lock",
+			task: "task",
+		}),
+	).toEqual([]);
+	expect(
+		validateBundledSchema(
+			"https://breadboard.dev/contracts/public/schemas/bb.session_cancel_request.v1.schema.json",
+			{
+				reason: "operator request",
+			},
+		),
+	).toEqual([]);
 });
