@@ -8,7 +8,7 @@ import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { discoverAuthStorage } from "../sdk";
 import { createProductionLifecycleSupervisor } from "./lifecycle/lifecycle-production";
-import type { LifecycleResult } from "./lifecycle/lifecycle-state";
+import type { LifecycleReason, LifecycleResult, LifecycleStateName } from "./lifecycle/lifecycle-state";
 import { resolveBreadboardRunConfig } from "./lifecycle/run-config";
 import { startBreadboardOmpGateway } from "./omp-auth-gateway";
 import {
@@ -23,7 +23,17 @@ import {
 } from "./shared-engine-protocol";
 
 const encoder = new TextEncoder();
-const CLEANUP_RETRY_MS = 1_000;
+/** Retry policy for a drain the supervisor denied; attempts reset when a client event re-arms cleanup. */
+export interface SharedEngineCleanupRetryPolicy {
+	readonly initialDelayMs: number;
+	readonly maxDelayMs: number;
+	readonly maxAttempts: number;
+}
+const DEFAULT_CLEANUP_RETRY: SharedEngineCleanupRetryPolicy = {
+	initialDelayMs: 1_000,
+	maxDelayMs: 60_000,
+	maxAttempts: 8,
+};
 const CLEANUP_GRACE_MS = 100;
 const FIRST_LEASE_TIMEOUT_MS = 30_000;
 
@@ -47,6 +57,16 @@ interface SharedEngineLeaseServerOptions {
 	readonly info: SharedEngineInfo;
 	readonly closeEngine: () => Promise<LifecycleResult>;
 	readonly refreshAuth: () => Promise<void>;
+	readonly cleanupRetry?: SharedEngineCleanupRetryPolicy;
+}
+
+/** Terminal cleanup outcome: the engine owner was retained and no further attempt is scheduled. */
+export interface SharedEngineCleanupAbandoned {
+	readonly kind: "cleanup_abandoned";
+	readonly attempts: number;
+	readonly state?: LifecycleStateName;
+	readonly reason?: LifecycleReason;
+	readonly error?: string;
 }
 
 /** Owns admission and client lifetimes; engine shutdown remains authenticated by the supervisor. */
@@ -60,6 +80,13 @@ export class SharedEngineLeaseServer {
 	#draining = false;
 	#retiring = false;
 	#finished = false;
+	#cleanupAttempts = 0;
+	#abandoned: SharedEngineCleanupAbandoned | undefined;
+
+	/** Set once cleanup stops retrying; cleared when a new lease or retirement re-arms it. */
+	get cleanupAbandoned(): SharedEngineCleanupAbandoned | undefined {
+		return this.#abandoned;
+	}
 
 	constructor(private readonly options: SharedEngineLeaseServerOptions) {}
 
@@ -83,7 +110,13 @@ export class SharedEngineLeaseServer {
 
 	retire(): void {
 		this.#retiring = true;
+		this.#rearmCleanup();
 		this.#scheduleCleanup(CLEANUP_GRACE_MS);
+	}
+
+	#rearmCleanup(): void {
+		this.#cleanupAttempts = 0;
+		this.#abandoned = undefined;
 	}
 
 	#handle(request: IncomingMessage, response: ServerResponse): void {
@@ -112,6 +145,7 @@ export class SharedEngineLeaseServer {
 	#lease(request: IncomingMessage, response: ServerResponse): void {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
+		this.#rearmCleanup();
 		let released = false;
 		const close = (): void => {
 			if (released) return;
@@ -134,7 +168,7 @@ export class SharedEngineLeaseServer {
 	}
 
 	#scheduleCleanup(delay: number): void {
-		if (this.#leases.size > 0 || this.#draining || this.#finished) return;
+		if (this.#leases.size > 0 || this.#draining || this.#finished || this.#abandoned) return;
 		clearTimeout(this.#timer);
 		this.#timer = setTimeout(() => {
 			this.#timer = undefined;
@@ -143,15 +177,14 @@ export class SharedEngineLeaseServer {
 	}
 
 	async #cleanup(): Promise<void> {
-		if (this.#leases.size > 0 || this.#draining || this.#finished) return;
+		if (this.#leases.size > 0 || this.#draining || this.#finished || this.#abandoned) return;
 		this.#draining = true;
+		this.#cleanupAttempts += 1;
+		let outcome: Omit<SharedEngineCleanupAbandoned, "kind" | "attempts"> | undefined;
 		try {
 			const result = await this.options.closeEngine();
 			if (result.kind !== "stopped") {
-				logger.warn("BreadBoard shared engine cleanup retained its owner", {
-					state: result.state.name,
-					reason: result.state.reason,
-				});
+				outcome = { state: result.state.name, reason: result.state.reason };
 				return;
 			}
 			this.#finished = true;
@@ -164,12 +197,39 @@ export class SharedEngineLeaseServer {
 		} catch (error) {
 			logger.error("BreadBoard shared engine cleanup failed", { error: String(error) });
 			if (this.#finished) this.#closed.reject(error);
+			else outcome = { error: String(error) };
 		} finally {
 			this.#draining = false;
-			// A denied drain did not stop the engine. Reopen admissions between attempts,
+			// A denied drain did not stop the engine. Admissions stay open between attempts,
 			// retaining owner renewal and the gateway while external clients remain.
-			if (!this.#finished) this.#scheduleCleanup(CLEANUP_RETRY_MS);
+			if (!this.#finished && outcome) this.#retryOrAbandon(outcome);
 		}
+	}
+
+	#retryOrAbandon(outcome: Omit<SharedEngineCleanupAbandoned, "kind" | "attempts">): void {
+		const policy = this.options.cleanupRetry ?? DEFAULT_CLEANUP_RETRY;
+		// Only contention (drain_denied) or a thrown attempt can clear by waiting; other refusals,
+		// such as drain_recovery_failed, require operator recovery and must not be re-driven.
+		const retryable = outcome.reason === "drain_denied" || outcome.error !== undefined;
+		if (retryable && this.#cleanupAttempts < policy.maxAttempts) {
+			logger.warn("BreadBoard shared engine cleanup retained its owner", {
+				...outcome,
+				attempt: this.#cleanupAttempts,
+			});
+			const delay = Math.min(policy.initialDelayMs * 2 ** (this.#cleanupAttempts - 1), policy.maxDelayMs);
+			this.#scheduleCleanup(delay);
+			return;
+		}
+		this.#abandoned = { kind: "cleanup_abandoned", attempts: this.#cleanupAttempts, ...outcome };
+		const { info } = this.options;
+		logger.error("BreadBoard shared engine cleanup abandoned; the engine owner is retained", {
+			...this.#abandoned,
+			engineKey: info.key,
+			engineInstanceId: info.engineInstanceId,
+			engineBootId: info.engineBootId,
+			enginePid: info.pid,
+			osProcessStartToken: info.osProcessStartToken,
+		});
 	}
 }
 

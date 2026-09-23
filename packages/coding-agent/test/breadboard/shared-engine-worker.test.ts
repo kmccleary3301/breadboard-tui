@@ -4,11 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lifecycleFailure, type LifecycleResult } from "../../src/breadboard/lifecycle/lifecycle-state";
 import { parseSharedEngineEvent, SHARED_ENGINE_SCHEMA_VERSION } from "../../src/breadboard/shared-engine-protocol";
-import { SharedEngineLeaseServer } from "../../src/breadboard/shared-engine-worker";
+import {
+	type SharedEngineCleanupRetryPolicy,
+	SharedEngineLeaseServer,
+} from "../../src/breadboard/shared-engine-worker";
 
 const stopped: LifecycleResult = { kind: "stopped", state: { name: "stopped", mode: "local-owned", attempt: 0 } };
 
-async function fixture(closeEngine: () => Promise<LifecycleResult>) {
+async function fixture(closeEngine: () => Promise<LifecycleResult>, cleanupRetry?: SharedEngineCleanupRetryPolicy) {
 	const root = await mkdtemp(join(tmpdir(), "bb-shared-"));
 	const socket = join(root, "lease.sock");
 	const server = new SharedEngineLeaseServer({
@@ -23,6 +26,7 @@ async function fixture(closeEngine: () => Promise<LifecycleResult>) {
 		},
 		closeEngine,
 		refreshAuth: async () => {},
+		...(cleanupRetry === undefined ? {} : { cleanupRetry }),
 	});
 	const controllers: AbortController[] = [];
 	await server.start(socket);
@@ -137,3 +141,66 @@ test("a denied drain keeps the engine reusable and a new lease postpones the ret
 		await host.close();
 	}
 });
+
+async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() > deadline) throw new Error("condition not reached");
+		await Bun.sleep(5);
+	}
+}
+
+test("a drain needing operator recovery is abandoned after one attempt instead of re-driven", async () => {
+	let calls = 0;
+	let recovered = false;
+	const host = await fixture(async () => {
+		calls += 1;
+		return recovered ? stopped : lifecycleFailure("local-owned", "drain-recovery-failed", "drain_recovery_failed");
+	});
+	try {
+		(await host.lease()).abort();
+		await waitFor(() => host.server.cleanupAbandoned !== undefined, 2_000);
+		await Bun.sleep(1_300);
+		expect(calls).toBe(1);
+		expect(host.server.cleanupAbandoned).toMatchObject({
+			kind: "cleanup_abandoned",
+			attempts: 1,
+			reason: "drain_recovery_failed",
+		});
+		const response = await host.request("/info");
+		expect(response.status).toBe(200);
+		await response.text();
+	} finally {
+		recovered = true;
+		await host.close();
+	}
+}, 5_000);
+
+test("a persistently denied drain backs off, stops at the attempt bound, and a new lease re-arms it", async () => {
+	const attemptsAt: number[] = [];
+	let denied = true;
+	const host = await fixture(
+		async () => {
+			attemptsAt.push(Date.now());
+			return denied ? lifecycleFailure("local-owned", "restart-blocked", "drain_denied") : stopped;
+		},
+		{ initialDelayMs: 20, maxDelayMs: 80, maxAttempts: 4 },
+	);
+	try {
+		(await host.lease()).abort();
+		await waitFor(() => host.server.cleanupAbandoned !== undefined, 2_000);
+		await Bun.sleep(300);
+		expect(attemptsAt).toHaveLength(4);
+		expect(host.server.cleanupAbandoned).toMatchObject({ attempts: 4, reason: "drain_denied" });
+		const gaps = attemptsAt.slice(1).map((at, index) => at - attemptsAt[index]);
+		expect(gaps[1]).toBeGreaterThan(gaps[0]);
+		denied = false;
+		(await host.lease()).abort();
+		expect(host.server.cleanupAbandoned).toBeUndefined();
+		await host.server.closed;
+		expect(attemptsAt).toHaveLength(5);
+	} finally {
+		denied = false;
+		await host.close();
+	}
+}, 5_000);
