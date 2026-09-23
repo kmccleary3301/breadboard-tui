@@ -3,10 +3,10 @@ import type { AgentActivityIndex, AgentActivityKind, AgentActivityRow } from "..
 import type { Settings } from "../../../config/settings";
 import type { AgentRef, AgentRegistry } from "../../../registry/agent-registry";
 import type { ObservableSession } from "../../session-observer-registry";
-import { theme } from "../../theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
-import { formatRoleBadge, sanitizeLine } from "../agent-hub-renderer";
-import { bottomBorder, divider, row, topBorder } from "../overlay-box";
+import { theme } from "@oh-my-pi/pi-tui/theme/theme";
+import { matchesSelectDown, matchesSelectUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
+import { formatRoleBadge, sanitizeLine } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/overlays/overlay-box";
 
 type ActivityFilter = "all" | "errors" | "responses" | "tools";
 type ActivityScope = "all" | "agent" | "subtree";

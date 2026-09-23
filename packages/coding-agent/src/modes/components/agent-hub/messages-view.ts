@@ -4,10 +4,11 @@ import type { IrcBus, IrcHistoryRecord, IrcReadCursor } from "../../../irc/bus";
 import { deriveIrcConversations, type IrcConversation } from "../../../irc/conversations";
 import { type AgentRegistry, MAIN_AGENT_ID } from "../../../registry/agent-registry";
 import { truncateToWidth } from "../../../tools/render-utils";
-import { theme } from "../../theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
-import { sanitizeDisplayText, sanitizeLine } from "../agent-hub-renderer";
-import { bottomBorder, divider, row, topBorder } from "../overlay-box";
+import { theme } from "@oh-my-pi/pi-tui/theme/theme";
+import { matchesSelectDown, matchesSelectUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
+import { sanitizeLine } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { sanitizeDisplaySingleLine } from "@oh-my-pi/pi-tui/overlays/extensions/display-text";
+import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/overlays/overlay-box";
 
 function activityClock(timestamp: number): string {
 	return new Date(timestamp).toLocaleTimeString(undefined, {

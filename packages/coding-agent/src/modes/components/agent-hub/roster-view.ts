@@ -6,8 +6,8 @@ import type { AgentRef, AgentRegistry, AgentStatus } from "../../../registry/age
 import { shortenPath, truncateToWidth } from "../../../tools/render-utils";
 import { formatLocalDateTimeWithOffset } from "../../../utils/local-date";
 import type { ObservableSession } from "../../session-observer-registry";
-import { theme } from "../../theme/theme";
-import type { AgentMetrics, AggregateMetrics } from "../agent-hub-projection";
+import { theme } from "@oh-my-pi/pi-tui/theme/theme";
+import type { AgentMetrics, AggregateMetrics } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
 import {
 	contextGauge,
 	formatChildIds,
@@ -16,12 +16,12 @@ import {
 	formatMetrics,
 	formatRoleBadge,
 	modelBadge,
-	sanitizeDisplayText,
 	sanitizeLine,
 	statusGlyph,
 	statusText,
 	treeBranch,
-} from "../agent-hub-renderer";
+} from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { sanitizeDisplaySingleLine } from "@oh-my-pi/pi-tui/overlays/extensions/display-text";
 import {
 	bottomBorder,
 	divider,
@@ -31,7 +31,7 @@ import {
 	splitRow,
 	topBorder,
 	topBorderSplit,
-} from "../overlay-box";
+} from "@oh-my-pi/pi-tui/overlays/overlay-box";
 
 const SPLIT_MIN_WIDTH = 96;
 const DETAIL_MIN_WIDTH = 34;

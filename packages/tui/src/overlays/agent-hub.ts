@@ -24,19 +24,15 @@ import {
 	type AgentActivityKind,
 	type AgentActivityRow,
 	activityRowsFromProgress,
-} from "../../activity";
-import type { KeyId } from "../../config/keybindings";
-import type { Settings } from "../../config/settings";
-import type { MessageRenderer } from "../../extensibility/extensions/types";
-import { IrcBus } from "../../irc/bus";
-import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
-import { type AgentRef, AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "../../registry/agent-registry";
-import { registerPersistedSubagents } from "../../registry/persisted-agents";
-import { USER_INTERRUPT_LABEL } from "../../session/messages";
-import { nativeControlRestriction } from "../../breadboard/native-control-policy";
-import { shortenPath, truncateToWidth } from "../../tools/render-utils";
-import { formatLocalDateTimeWithOffset } from "../../utils/local-date";
-import type { ObservableSession, SessionObserverRegistry } from "../session-observer-registry";
+} from "./agent-activity";
+import type { KeyId } from "../app-keybindings";
+import type { MessageRenderer } from "../chat/extension-types";
+import type { AgentLifecycleLike, IrcBusLike } from "./agent-hub-types";
+import { type AgentRecordLike, type AgentHubRegistry, type AgentStatus, MAIN_AGENT_ID } from "./agent-hub-types";
+import { USER_INTERRUPT_LABEL } from "../chat/messages";
+import { shortenPath, truncateToWidth } from "../render/render-utils";
+import { formatLocalDateTimeWithOffset } from "../chrome/local-date";
+import type { ObservableSession, SessionObserverRegistry } from "./session-observer-registry";
 import { theme } from "../theme/theme";
 import { matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import {
@@ -65,27 +61,20 @@ import {
 	treeContinuation,
 	treeMetadataIndent,
 } from "./agent-hub-renderer";
-import { AgentTranscriptViewer } from "./agent-transcript-viewer";
-import { HarnessView, type HarnessPanel } from "./agent-hub/harness-view";
-import type { HarnessPort } from "../../breadboard/harness-port";
-import { AgentHubMessagesView, type AgentHubRemote } from "./agent-hub/messages-view";
-import {
-	bottomBorder,
-	divider,
-	dividerSplit,
-	row,
-	splitBodyWidth,
-	splitRow,
-	topBorder,
-	topBorderSplit,
-} from "./overlay-box";
+import { sanitizeDisplaySingleLine } from "./extensions/display-text";
+import { AgentTranscriptViewer, type AgentTranscriptSource } from "./agent-transcript-viewer";
+import type { AgentRoleDisplay } from "./agent-hub-renderer";
+import { fuzzyMatch } from "../fuzzy";
+import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
+import { SplitPane } from "../components/layout/split-pane";
+import { Stack } from "../components/layout/stack";
 
 /** Two-pane mode needs a useful roster and a readable inspector. */
 const SPLIT_MIN_WIDTH = 96;
 const DETAIL_MIN_WIDTH = 34;
 const ROSTER_MIN_WIDTH = 48;
 
-export type AgentHubSection = "agents" | "activity" | "messages" | "harness";
+export type AgentHubSection = "agents" | "activity";
 type ActivityFilter = "all" | "errors" | "responses" | "tools";
 type ActivityScope = "all" | "agent" | "subtree";
 
@@ -121,7 +110,60 @@ function activityClock(timestamp: number): string {
 		hour12: false,
 	});
 }
-export type { AgentHubRemote, AgentHubRemoteTranscript } from "./agent-hub/messages-view";
+/** Result of one host-backed transcript read for the Agent Hub viewer. */
+export interface AgentHubRemoteTranscript {
+	text: string;
+	newSize: number;
+	/** Terminal read failure reported by the host; guests should surface it instead of retrying hot. */
+	error?: string;
+}
+
+/** Guest-side proxy for hub actions executed on the collab host. */
+export interface AgentHubRemote {
+	chat(id: string, text: string): void;
+	kill(id: string): void;
+	revive(id: string): void;
+	/** Optional message history transport used by host-provided message views. */
+	readMessages?(): Promise<unknown[] | null>;
+	/** Optional message send transport used by host-provided message views. */
+	sendMessage?(to: string, body: string, replyTo?: string): Promise<string | undefined>;
+	/** Mirrors readFileIncremental: text from fromByte (complete JSONL lines), newSize = next fromByte base; null = temporarily unavailable. */
+	readTranscript(id: string, fromByte: number): Promise<AgentHubRemoteTranscript | null>;
+}
+
+/**
+ * Optional coding-agent-owned section implementation. The tui owns routing and
+ * layout; hosts own data access and feature-specific presentation.
+ */
+export interface AgentHubSectionView {
+	render(width: number, height: number, hitRows?: Array<number | undefined>): readonly string[];
+	handleInput(keyData: string): void | boolean;
+	handleWheel?(delta: -1 | 1): void;
+	clickItem?(index: number): void;
+	hitTest?(line: number): number | undefined;
+	refresh?(): void;
+	sectionChanged?(): void;
+	dispose?(): void;
+	readonly composing?: boolean;
+}
+
+export interface AgentHubViewFactoryContext<TRecord extends AgentRecordLike = AgentRecordLike> {
+	registry: AgentHubRegistry<TRecord>;
+	irc: IrcBusLike;
+	remote?: AgentHubRemote;
+	renderTabs: () => string;
+	requestRender: () => void;
+	onDone: () => void;
+	switchSection: (section: AgentHubSection) => void;
+	managePeer: (action: "r" | "x", peer: string) => string | undefined;
+	mutationRestriction: () => string | undefined;
+	harnessSnapshot: () => unknown;
+	initialHarnessPanel?: string;
+}
+
+export type AgentHubViewFactory<TRecord extends AgentRecordLike = AgentRecordLike> = (
+	context: AgentHubViewFactoryContext<TRecord>,
+) => Partial<Record<AgentHubSection, AgentHubSectionView>>;
 
 export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike> {
 	/** Progress/status snapshot source (task lifecycle + progress channels). */
@@ -157,20 +199,26 @@ export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike>
 	proseOnlyThinking?: () => boolean;
 	/** Keys toggling tool output expansion (app.tools.expand). */
 	expandKeys?: KeyId[];
-	/** BreadBoard harness snapshot for the read-only harness hub section. */
-	harnessPort?: HarnessPort;
-	/** Current external turn-lifecycle ownership for native subagent mutations. */
-	mainStreamOwnsTurnLifecycle: boolean;
+	/** Host-provided optional section implementations for fork-specific views. */
+	viewFactory?: AgentHubViewFactory<TRecord>;
+	/** Read-only harness snapshot accessor used by an optional host view. */
+	harnessPort?: { current(): unknown };
+	/** Host-owned native lifecycle policy for mutating subagents. */
+	nativeMutationRestriction?: () => string | undefined;
+	/** Compatibility input retained for hosts that expose the native ownership bit. */
+	mainStreamOwnsTurnLifecycle?: boolean;
+	/** Initial harness panel when a host provides a harness view. */
+	initialHarnessPanel?: string;
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
 	/** Current main session file; used to seed parked historical subagents after restart. */
 	sessionFile?: string | null;
 	/** Initial top-level projection; slash commands deep-link into this surface. */
 	initialSection?: AgentHubSection;
-	/** Initial harness panel when the harness section is selected. */
-	initialHarnessPanel?: HarnessPanel;
-	/** Injectable unified activity source; production creates one from local or remote transcripts. */
-	activity?: AgentActivityIndex;
+	/** Unified local or remote activity source. */
+	activity: AgentActivitySource;
+	/** Whether observer progress should update live activity rows. */
+	manageActivityLive?: boolean;
 
 	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
 	remote?: AgentHubRemote;
@@ -193,6 +241,8 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#ageTimer: NodeJS.Timeout | undefined;
 	#dataChangeTimer?: NodeJS.Timeout;
 	#remote: AgentHubRemote | undefined;
+	#sectionViews: Partial<Record<AgentHubSection, AgentHubSectionView>> = {};
+	#nativeMutationRestriction: () => string | undefined = () => undefined;
 	#disposed = false;
 	/** Resolves after persisted historical subagents have been registered and rows refreshed. */
 	readonly persistedSubagentsReady: Promise<void>;
@@ -201,8 +251,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#section: AgentHubSection;
 	#activity: AgentActivitySource;
 	#manageActivityLive: boolean;
-	readonly #mainSessionFile: string | undefined;
-	#mainActivitySync: Promise<void> | undefined;
 	#activityRows: AgentActivityRow[] = [];
 	#selectedActivityRow = 0;
 	#activityFilter: ActivityFilter = "all";
@@ -213,9 +261,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#activitySyncGeneration = 0;
 	#activitySyncStamp = new Map<string, string>();
 
-	#messages: AgentHubMessagesView;
-	#harness: HarnessView;
-	#harnessPort: HarnessPort | undefined;
 	// Table state
 	#rows: TRecord[] = [];
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
@@ -310,7 +355,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#proseOnlyThinking: (() => boolean) | undefined;
 	#expandKeys: KeyId[];
 	#focusAgent: ((id: string) => Promise<void>) | undefined;
-	#mainStreamOwnsTurnLifecycle: boolean;
 
 	// Fullscreen transcript overlay opened by openChat(), if any.
 	#transcriptOverlay: OverlayHandle | undefined;
@@ -319,17 +363,14 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	constructor(deps: AgentHubDeps<TRecord>) {
 		super();
 		this.#section = deps.initialSection ?? "agents";
-		this.#activity = deps.activity ?? new AgentActivityIndex({ remote: deps.remote });
-		this.#manageActivityLive = !deps.activity;
-		this.#mainSessionFile = deps.remote ? undefined : (deps.sessionFile ?? undefined);
-		this.#registry = deps.registry ?? AgentRegistry.global();
+		this.#activity = deps.activity;
+		this.#manageActivityLive = deps.manageActivityLive ?? true;
+		this.#registry = deps.registry;
 		this.#observers = deps.observers;
-		this.#settings = deps.settings;
-		this.#irc = deps.irc ?? IrcBus.global();
-		if (!deps.remote) this.#irc.configureHistory(deps.sessionFile);
-		// Lazy: the lifecycle global self-constructs against the global
-		// registry, so only touch it when revive/kill actually needs it.
-		this.#lifecycle = () => deps.lifecycle ?? AgentLifecycleManager.global();
+		this.#getRoleInfo = deps.getRoleInfo;
+		this.#transcript = deps.transcript;
+		this.#irc = deps.irc;
+		this.#lifecycle = deps.lifecycle;
 		this.#onDone = deps.onDone;
 		this.#requestRender = deps.requestRender;
 		this.#hubKeys = deps.hubKeys;
@@ -341,54 +382,33 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				requestRender: () => deps.requestRender(),
 				requestComponentRender: () => deps.requestRender(),
 			} as unknown as TUI);
-		this.#getTool = deps.getTool;
-		this.#isBuiltInTool = deps.isBuiltInTool;
-		this.#getMessageRenderer = deps.getMessageRenderer;
-		this.#cwd = deps.cwd ?? getProjectDir();
 		this.#hideThinkingBlock = deps.hideThinkingBlock;
 		this.#proseOnlyThinking = deps.proseOnlyThinking;
 		this.#expandKeys = deps.expandKeys ?? ["ctrl+o"];
 		this.#focusAgent = deps.focusAgent;
-		this.#mainStreamOwnsTurnLifecycle = deps.mainStreamOwnsTurnLifecycle === true;
-		this.#harnessPort = deps.harnessPort;
-		this.#harness = new HarnessView({
-			getSnapshot: () => this.#harnessPort?.current() ?? null,
-			requestRender: this.#requestRender,
-			renderTabs: () => this.#sectionTabs(),
-			initialPanel: deps.initialHarnessPanel,
-		});
-		this.#messages = new AgentHubMessagesView({
-			registry: this.#registry,
-			irc: this.#irc,
-			remote: this.#remote,
-			renderTabs: () => this.#sectionTabs(),
-			onDone: this.#onDone,
-			switchSection: () => this.#switchSection("activity"),
-			managePeer: (action, peer) => this.#manageMessagePeer(action, peer),
-			requestRender: this.#requestRender,
-			mutationRestriction: () => this.#nativeMutationRestriction(),
-		});
+		this.#nativeMutationRestriction = deps.nativeMutationRestriction ?? (() => undefined);
+		this.#sectionViews =
+			deps.viewFactory?.({
+				registry: this.#registry,
+				irc: this.#irc,
+				remote: this.#remote,
+				renderTabs: () => this.#sectionTabs(),
+				requestRender: this.#requestRender,
+				onDone: this.#onDone,
+				switchSection: section => this.#switchSection(section),
+				managePeer: (action, peer) => this.#manageMessagePeer(action, peer),
+				mutationRestriction: () => this.#nativeMutationRestriction(),
+				harnessSnapshot: () => deps.harnessPort?.current() ?? null,
+				initialHarnessPanel: deps.initialHarnessPanel,
+			}) ?? {};
 
 		this.#unsubscribers.push(this.#registry.onChange(() => this.#scheduleDataChange()));
-		if (this.#harnessPort) {
-			this.#unsubscribers.push(this.#harnessPort.subscribe(() => this.#requestRender()));
-		}
 		this.#unsubscribers.push(this.#observers.onChange(() => this.#scheduleDataChange()));
-		if (!this.#remote) {
-			this.#unsubscribers.push(
-				this.#irc.history.onChange(() => {
-					this.#messages.refresh();
-					this.#requestRender();
-				}),
-			);
-		}
 		this.#ageTimer = setInterval(() => {
 			if (this.#hasFallbackLiveSessions) {
 				this.#refreshAggregate(true);
 			}
 			this.#requestRender();
-			if (this.#remote) this.#messages.refresh();
-			if (this.#mainSessionFile) this.#refreshActivityData([]);
 		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
 
@@ -433,20 +453,20 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			clearTimeout(this.#dataChangeTimer);
 			this.#dataChangeTimer = undefined;
 		}
-		this.#messages.dispose();
+		for (const view of Object.values(this.#sectionViews)) view?.dispose?.();
 		this.#closeTranscriptOverlay();
 	}
 
 	override render(width: number): readonly string[] {
 		const termHeight = this.#ui.terminal?.rows || process.stdout.rows || 40;
+		const sectionView = this.#sectionViews[this.#section];
+		if (sectionView) this.#hitRows.length = 0;
 		const frame = (
-			this.#section === "activity"
-				? this.#renderActivityTable(width, termHeight)
-				: this.#section === "messages"
-					? this.#messages.render(width, termHeight, this.#hitRows)
-					: this.#section === "harness"
-						? this.#harness.render(width, termHeight)
-						: this.#renderTable(width, termHeight)
+			sectionView
+				? sectionView.render(width, termHeight, this.#hitRows)
+				: this.#section === "activity"
+					? this.#renderActivityTable(width, termHeight)
+					: this.#renderTable(width, termHeight)
 		).map(line => clampHubLine(line, width));
 		if (frame.length <= termHeight) return frame;
 
@@ -478,12 +498,13 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				return;
 			}
 		}
-		if (this.#section === "activity" && this.#activitySearchEditing) {
-			this.#handleActivitySearchInput(keyData);
+		const sectionView = this.#sectionViews[this.#section];
+		if (sectionView?.composing) {
+			sectionView.handleInput(keyData);
 			return;
 		}
-		if (this.#section === "messages" && this.#messages.composing) {
-			this.#messages.handleInput(keyData);
+		if (this.#section === "activity" && this.#activitySearchEditing) {
+			this.#handleActivitySearchInput(keyData);
 			return;
 		}
 		if (keyData === "1") {
@@ -494,20 +515,21 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			this.#switchSection("activity");
 			return;
 		}
-		if (keyData === "3") {
+		if (keyData === "3" && this.#sectionViews.messages) {
 			this.#switchSection("messages");
 			return;
 		}
-		if (keyData === "4") {
+		if (keyData === "4" && this.#sectionViews.harness) {
 			this.#switchSection("harness");
 			return;
 		}
+		if (sectionView) {
+			const handled = sectionView.handleInput(keyData);
+			if (handled === false && matchesKey(keyData, "escape")) this.#onDone();
+			return;
+		}
 		if (this.#section === "activity") this.#handleActivityInput(keyData);
-		else if (this.#section === "messages") this.#messages.handleInput(keyData);
-		else if (this.#section === "harness") {
-			if (matchesKey(keyData, "escape")) this.#onDone();
-			else this.#harness.handleInput(keyData);
-		} else this.#handleTableInput(keyData);
+		else this.#handleTableInput(keyData);
 	}
 
 	/**
@@ -551,7 +573,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			proseOnlyThinking: this.#proseOnlyThinking,
 			expandKeys: this.#expandKeys,
 			hubKeys: this.#hubKeys,
-			mainStreamOwnsTurnLifecycle: this.#mainStreamOwnsTurnLifecycle,
+			nativeMutationRestriction: this.#nativeMutationRestriction,
 			requestRender: this.#requestRender,
 			onClose: () => this.#closeTranscriptOverlay(viewer),
 			onHubClose: () => {
@@ -597,7 +619,12 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#onDataChange(): void {
 		this.#refreshRows();
+		this.#refreshSectionViews();
 		this.#requestRender();
+	}
+
+	#refreshSectionViews(): void {
+		for (const view of Object.values(this.#sectionViews)) view?.refresh?.();
 	}
 
 	#refreshRows(): void {
@@ -671,12 +698,11 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			if (children) children.push(ref);
 			else this.#childrenByParent.set(parent, [ref]);
 		}
-		this.#statusCounts = { running: 0, idle: 0, parked: 0, aborted: 0 };
 		for (const ref of rosterRows) this.#statusCounts[ref.status]++;
 		this.#refreshAggregate();
 		this.#refreshActivityData(rosterRows);
 		this.#refreshActivityRows();
-		this.#messages.refresh();
+		this.#refreshSectionViews();
 	}
 
 	#refreshActivityData(refs: readonly TRecord[]): void {
@@ -696,12 +722,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 		const generation = ++this.#activitySyncGeneration;
 		const pending: Promise<void>[] = [];
-		if (this.#mainSessionFile) {
-			this.#mainActivitySync ??= this.#activity.sync(MAIN_AGENT_ID, this.#mainSessionFile).finally(() => {
-				this.#mainActivitySync = undefined;
-			});
-			pending.push(this.#mainActivitySync);
-		}
 		for (const ref of refs) {
 			if (!this.#remote && !ref.sessionFile) continue;
 			const stamp = `${ref.sessionFile ?? ""}:${ref.lastActivity}`;
@@ -751,7 +771,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			search: this.#activitySearch,
 			limit: 2_000,
 		});
-		rows = rows.filter(row => row.agentId !== MAIN_AGENT_ID || row.kind === "lifecycle");
 		if (this.#activityFilter === "errors") rows = rows.filter(row => row.status === "error");
 		this.#activityRows = rows;
 		if (rows.length === 0) this.#selectedActivityRow = 0;
@@ -784,7 +803,10 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			this.#section === section
 				? theme.bg("selectedBg", theme.bold(theme.fg("accent", ` ${label} `)))
 				: theme.fg("muted", ` ${label} `);
-		return `${tab("agents", "1 Agents")}${theme.fg("dim", theme.sep.dot)}${tab("activity", "2 Activity")}${theme.fg("dim", theme.sep.dot)}${tab("messages", "3 Messages")}${theme.fg("dim", theme.sep.dot)}${tab("harness", "4 Harness")}`;
+		const tabs = [tab("agents", "1 Agents"), tab("activity", "2 Activity")];
+		if (this.#sectionViews.messages) tabs.push(tab("messages", "3 Messages"));
+		if (this.#sectionViews.harness) tabs.push(tab("harness", "4 Harness"));
+		return tabs.join(theme.fg("dim", theme.sep.dot));
 	}
 
 	#renderActivityTable(width: number, termHeight: number): string[] {
@@ -900,7 +922,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#footer(showingNarrowDetails: boolean, availableWidth: number): string {
 		const nextView = this.#viewMode === "roster" ? "by parent" : "flat";
-		const canManage = !this.#nativeMutationRestriction();
 		const filter =
 			this.#agentFilter.length > 0 ? `/${this.#agentFilter}${this.#agentFilterEditing ? "▌" : ""}  ·  ` : "";
 		if (showingNarrowDetails) {
@@ -910,14 +931,11 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			);
 		}
 		if (availableWidth < 96) {
-			return theme.fg(
-				"dim",
-				`${filter}j/k:select  Enter:open  t:${nextView}  Tab:details  ${canManage ? "r/x:manage" : "read-only"}  Esc:close`,
-			);
+			return theme.fg("dim", `${filter}j/k:select  Enter:open  t:${nextView}  Tab:details  r/x:manage  Esc:close`);
 		}
 		return theme.fg(
 			"dim",
-			`${filter}1:agents  2:activity  j/k/wheel:select  PgUp/PgDn:details  Enter/click:open  t:${nextView}  ${canManage ? "r:revive  x:kill" : "read-only"}  Esc:close`,
+			`${filter}1:agents  2:activity  j/k/wheel:select  PgUp/PgDn:details  Enter/click:open  t:${nextView}  r:revive  x:kill  Esc:close`,
 		);
 	}
 
@@ -938,20 +956,11 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 					hitRows.push(undefined);
 				}
 			} else {
-				const emptyState = this.#mainStreamOwnsTurnLifecycle
-					? [
-							`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("BreadBoard-owned session")}`,
-							theme.fg("dim", "Native agent launch and management have no BreadBoard route."),
-							theme.fg("dim", "Use /harness to inspect the active configuration."),
-						]
-					: [
-							`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("No agents in this session")}`,
-							theme.fg(
-								"dim",
-								"Finished, parked, and killed subagents remain with the session that created them.",
-							),
-							theme.fg("dim", "Resume that session with omp-dev --continue, or spawn a task here."),
-						];
+				const emptyState = [
+					`${theme.fg("muted", theme.status.shadowed)} ${theme.bold("No agents in this session")}`,
+					theme.fg("dim", "Finished, parked, and killed subagents remain with the session that created them."),
+					theme.fg("dim", "Resume that session with omp-dev --continue, or spawn a task here."),
+				];
 				for (const line of emptyState.slice(0, budget)) {
 					lines.push(line);
 					hitRows.push(undefined);
@@ -1327,7 +1336,10 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	handleWheel(delta: -1 | 1): void {
 		this.#hoveredRow = null;
-		if (this.#section === "activity") {
+		const sectionView = this.#sectionViews[this.#section];
+		if (sectionView?.handleWheel) {
+			sectionView.handleWheel(delta);
+		} else if (this.#section === "activity") {
 			if (this.#activityRows.length > 0) {
 				this.#activityFollow = false;
 				this.#selectedActivityRow = Math.max(
@@ -1335,9 +1347,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 					Math.min(this.#selectedActivityRow + delta, this.#activityRows.length - 1),
 				);
 			}
-		} else if (this.#section === "messages") {
-			this.#messages.handleWheel(delta);
-			return;
 		} else if (this.#rows.length > 0) {
 			this.#selectRow(Math.max(0, Math.min(this.#selectedRow + delta, this.#rows.length - 1)));
 		}
@@ -1345,17 +1354,21 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	}
 
 	hitTest(line: number): number | undefined {
-		return this.#hitRows[line];
+		return this.#sectionViews[this.#section]?.hitTest?.(line) ?? this.#hitRows[line];
 	}
 
 	setHoverIndex(index: number | null): void {
-		if (this.#section !== "agents") return;
 		if (index === this.#hoveredRow) return;
 		this.#hoveredRow = index;
 		this.#requestRender();
 	}
 
 	clickItem(index: number): void {
+		const sectionView = this.#sectionViews[this.#section];
+		if (sectionView?.clickItem) {
+			sectionView.clickItem(index);
+			return;
+		}
 		if (this.#section === "activity") {
 			if (index === this.#selectedActivityRow) {
 				const activity = this.#activityRows[index];
@@ -1365,10 +1378,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			this.#activityFollow = false;
 			this.#selectedActivityRow = index;
 			this.#requestRender();
-			return;
-		}
-		if (this.#section === "messages") {
-			this.#messages.clickItem(index);
 			return;
 		}
 		const selected = this.#rows[index];
@@ -1381,11 +1390,12 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#switchSection(section: AgentHubSection): void {
 		if (this.#section === section) return;
+		if (section !== "agents" && section !== "activity" && !this.#sectionViews[section]) return;
 		this.#section = section;
 		this.#hoveredRow = null;
 		this.#narrowDetailsOpen = false;
 		if (section === "activity") this.#refreshActivityRows();
-		if (section === "messages") this.#messages.sectionChanged();
+		this.#sectionViews[section]?.sectionChanged?.();
 		this.#requestRender();
 	}
 
@@ -1568,16 +1578,12 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		}
 	}
 
-	#nativeMutationRestriction(): string | undefined {
-		return nativeControlRestriction("subagents", this.#mainStreamOwnsTurnLifecycle);
-	}
-
 	#manageMessagePeer(action: "r" | "x", peer: string): string | undefined {
 		const restriction = this.#nativeMutationRestriction();
 		if (restriction) return restriction;
 		const index = this.#rows.findIndex(ref => ref.id === peer);
 		if (index < 0) return `Agent ${peer} is no longer registered`;
-		this.#selectedRow = index;
+		this.#selectRow(index);
 		if (action === "r") this.#reviveSelected();
 		else this.#killSelected();
 		return undefined;
@@ -1592,17 +1598,16 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#activateAgent(ref: TRecord): void {
 		this.#notice = undefined;
 		const focusAgent = this.#focusAgent;
-		if (focusAgent && !this.#remote && ref.kind !== "advisor" && ref.status !== "aborted") {
-			const restriction = this.#nativeMutationRestriction();
-			if (restriction) {
-				this.#notice = restriction;
-				this.#requestRender();
-				return;
-			}
-		}
+		// Aborted agents and advisor refs are read-only transcripts with no
 		// revivable session; open the in-hub viewer instead of failing ensureLive.
 		if (ref.kind === "advisor" || ref.status === "aborted" || this.#remote || !focusAgent) {
 			this.openChat(ref.id);
+			return;
+		}
+		const restriction = this.#nativeMutationRestriction();
+		if (restriction) {
+			this.#notice = restriction;
+			this.#requestRender();
 			return;
 		}
 		void (async () => {
@@ -1617,14 +1622,14 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	}
 
 	#reviveSelected(): void {
+		const ref = this.#rows[this.#selectedRow];
+		if (!ref) return;
 		const restriction = this.#nativeMutationRestriction();
 		if (restriction) {
 			this.#notice = restriction;
 			this.#requestRender();
 			return;
 		}
-		const ref = this.#rows[this.#selectedRow];
-		if (!ref) return;
 		if (ref.kind === "advisor") {
 			this.#notice = `"${ref.id}" is a read-only advisor transcript — nothing to revive.`;
 			this.#requestRender();
@@ -1652,14 +1657,14 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	}
 
 	#killSelected(): void {
+		const ref = this.#rows[this.#selectedRow];
+		if (!ref) return;
 		const restriction = this.#nativeMutationRestriction();
 		if (restriction) {
 			this.#notice = restriction;
 			this.#requestRender();
 			return;
 		}
-		const ref = this.#rows[this.#selectedRow];
-		if (!ref) return;
 		if (ref.kind === "advisor") {
 			this.#notice = `"${ref.id}" is a read-only advisor transcript — cannot be killed.`;
 			this.#requestRender();
