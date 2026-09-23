@@ -664,8 +664,11 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	/** Previous public name when a rename changed minting. Forwarded through
 	 *  RegisteredToolAdapter so approval falls back to legacy `deny`/`prompt`. */
 	legacyName?: string;
-	/** If true, a successful call ends the agent run before the next model call. */
-	terminal?: boolean;
+	/**
+	 * If true, a successful call ends the agent run before the next model call. A function decides
+	 * per successful result.
+	 */
+	terminal?: boolean | ((result: AgentToolResult<TDetails>) => boolean);
 	/** Optional environment hook applied when the interactive user shell invokes this tool's shell surface. */
 	shellEnv?: ToolShellEnvironmentHook;
 	/** Authoritative originating file for a discovered custom-tool module. */

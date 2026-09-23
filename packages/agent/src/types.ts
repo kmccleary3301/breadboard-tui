@@ -1048,8 +1048,11 @@ export interface AgentTool<
 	 * batch boundary. Honored only when `interruptMode` is "immediate".
 	 */
 	interruptible?: boolean | ((args: Partial<Static<TParameters>>) => boolean);
-	/** If true, a successful call ends the agent run before the next model call, as a completion tool does. */
-	terminal?: boolean;
+	/**
+	 * If true, a successful call ends the agent run before the next model call, as a completion tool
+	 * does. A function decides per successful result, so a guarded completion can keep the run going.
+	 */
+	terminal?: boolean | ((result: AgentToolResult<TDetails>) => boolean);
 	/**
 	 * Controls how the INTENT_FIELD (`i`) is handled for this tool.
 	 * - `"require"` (default): `i` is injected and required in the parameter schema.

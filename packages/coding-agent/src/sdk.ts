@@ -451,6 +451,11 @@ export interface CreateAgentSessionOptions {
 
 	/** Provider-facing system prompt override. Replaces the fully rendered default blocks. */
 	systemPrompt?: string | string[] | ((defaultPrompt: string[]) => string | string[]);
+	/**
+	 * Prepend the date/cwd reminder to the first user turn of each request. Default: true. Callers
+	 * that own the whole prompt contract through {@link systemPrompt} can turn it off.
+	 */
+	dateCwdReminder?: boolean;
 	/** Already-loaded custom prompt text rendered through the bundled custom system prompt template. */
 	customSystemPrompt?: string;
 	/** Already-loaded text appended through the bundled system prompt templates. */
@@ -3590,7 +3595,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			modelRegistry.getApiKey(model, providerSessionId),
 		);
 		blobBroker?.prewarm();
-		const dateCwdReminder = new DateCwdReminderInjector();
+		const dateCwdReminder = options.dateCwdReminder === false ? undefined : new DateCwdReminderInjector();
 		const snapcompactSystemPromptMode = settings.get("snapcompact.systemPrompt");
 		const snapcompactInline =
 			snapcompactSystemPromptMode !== "none" || settings.get("snapcompact.toolResults")
@@ -3621,11 +3626,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Keep per-request volatility out of the system prompt: the date/cwd
 			// reminder rides on the first user turn so open-weight providers keep
 			// their tool-schema prefix cache (#7404).
-			return dateCwdReminder.transform(
-				transformed,
-				formatLocalCalendarDate(),
-				normalizePromptPath(sessionManager.getCwd()),
-			);
+			return dateCwdReminder
+				? dateCwdReminder.transform(transformed, formatLocalCalendarDate(), normalizePromptPath(sessionManager.getCwd()))
+				: transformed;
 		};
 		const onPayload = async (payload: unknown, model?: Model) => {
 			return await extensionRunner.emitBeforeProviderRequest(payload, model);

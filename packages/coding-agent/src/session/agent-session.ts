@@ -895,6 +895,8 @@ export class AgentSession {
 	 */
 	#yieldTerminationPending = false;
 	#synchronouslyTerminatedYieldToolCallIds = new Set<string>();
+	/** Terminal-tool calls whose success ended the run; `turn_settle` skips that turn. */
+	#runEndingToolCallIds = new Set<string>();
 	#providerSessionState = new Map<string, ProviderSessionState>();
 	#hindsightSessionState: HindsightSessionState | undefined = undefined;
 	readonly #memory: SessionMemory;
@@ -4175,12 +4177,14 @@ export class AgentSession {
 	/** Steers `turn_settle` messages into the run so they precede the loop's next model call. */
 	async #emitTurnSettle(context: AgentTurnEndContext): Promise<void> {
 		// A terminal result already ended the run; a steered message would leak into the next prompt.
-		if (
-			this.#yieldTerminationPending ||
-			context.toolResults.some(result => !result.isError && this.getToolByName(result.toolName)?.terminal === true)
-		)
-			return;
-		const payloads = await this.#extensionRunner?.emitTurnSettle({
+		let endedByTerminalTool = false;
+		for (const result of context.toolResults) {
+			if (this.#runEndingToolCallIds.delete(result.toolCallId)) endedByTerminalTool = true;
+		}
+		if (this.#yieldTerminationPending || endedByTerminalTool) return;
+		const runner = this.#extensionRunner;
+		if (!runner?.hasHandlers("turn_settle")) return;
+		const payloads = await runner.emitTurnSettle({
 			turnIndex: this.#turnIndex,
 			message: context.message,
 			toolResults: context.toolResults,
@@ -4200,6 +4204,11 @@ export class AgentSession {
 		}
 	}
 
+	#endsRun(ctx: AfterToolCallContext): boolean {
+		const terminal = this.getToolByName(ctx.toolCall.name)?.terminal;
+		return typeof terminal === "function" ? terminal(ctx.result) : terminal === true;
+	}
+
 	#afterToolCall(ctx: AfterToolCallContext): AfterToolCallResult | undefined {
 		if (
 			this.#isTerminalYieldToolResult({
@@ -4212,8 +4221,9 @@ export class AgentSession {
 			this.#markTerminalYieldToolCall(ctx.toolCall.id);
 			this.#synchronouslyTerminatedYieldToolCallIds.add(ctx.toolCall.id);
 			this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
-		} else if (!ctx.isError && this.getToolByName(ctx.toolCall.name)?.terminal === true) {
+		} else if (!ctx.isError && this.#endsRun(ctx)) {
 			// A terminal tool (for example a harness's completion tool) ends the run once it succeeds.
+			this.#runEndingToolCallIds.add(ctx.toolCall.id);
 			this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
 		}
 		return this.#ttsr.afterToolCall(ctx);
