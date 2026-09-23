@@ -18,7 +18,7 @@ beforeAll(async () => {
 	resetSettingsForTest();
 	await Settings.init({ inMemory: true });
 	Settings.instance.set("tui.hyperlinks", "always");
-	await initTheme(false);
+	await initTheme(false, undefined, undefined, undefined, undefined, "truecolor");
 	// The host registers keywords at startup; without this nothing glows.
 	setMagicKeywords(MAGIC_KEYWORDS);
 });
