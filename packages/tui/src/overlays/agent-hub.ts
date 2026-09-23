@@ -237,6 +237,8 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#ageTimer: NodeJS.Timeout | undefined;
 	#dataChangeTimer?: NodeJS.Timeout;
 	#remote: AgentHubRemote | undefined;
+	readonly #mainSessionFile: string | undefined;
+	#mainActivitySync: Promise<void> | undefined;
 	#sectionViews: Partial<Record<AgentHubSection, AgentHubSectionView>> = {};
 	#nativeMutationRestriction: () => string | undefined = () => undefined;
 	#disposed = false;
@@ -371,6 +373,8 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		this.#requestRender = deps.requestRender;
 		this.#hubKeys = deps.hubKeys;
 		this.#remote = deps.remote;
+		this.#mainSessionFile = deps.remote ? undefined : (deps.sessionFile ?? undefined);
+		if (!deps.remote) this.#irc.configureHistory?.(deps.sessionFile);
 		this.#loadingPersistedSubagents = !this.#remote && Boolean(deps.sessionFile?.endsWith(".jsonl"));
 		this.#ui =
 			deps.ui ??
@@ -399,6 +403,17 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				initialHarnessPanel: deps.initialHarnessPanel,
 			}) ?? {};
 
+		if (!this.#remote) {
+			const history = this.#irc.history;
+			if (history) {
+				this.#unsubscribers.push(
+					history.onChange(() => {
+						this.#refreshSectionViews();
+						this.#requestRender();
+					}),
+				);
+			}
+		}
 		this.#unsubscribers.push(this.#registry.onChange(() => this.#scheduleDataChange()));
 		this.#unsubscribers.push(this.#observers.onChange(() => this.#scheduleDataChange()));
 		this.#ageTimer = setInterval(() => {
@@ -406,6 +421,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				this.#refreshAggregate(true);
 			}
 			this.#requestRender();
+			if (this.#mainSessionFile) this.#refreshActivityData([]);
 		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
 
@@ -719,6 +735,12 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 		const generation = ++this.#activitySyncGeneration;
 		const pending: Promise<void>[] = [];
+		if (this.#mainSessionFile) {
+			this.#mainActivitySync ??= this.#activity.sync(MAIN_AGENT_ID, this.#mainSessionFile).finally(() => {
+				this.#mainActivitySync = undefined;
+			});
+			pending.push(this.#mainActivitySync);
+		}
 		for (const ref of refs) {
 			if (!this.#remote && !ref.sessionFile) continue;
 			const stamp = `${ref.sessionFile ?? ""}:${ref.lastActivity}`;
@@ -769,6 +791,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			limit: 2_000,
 		});
 		if (this.#activityFilter === "errors") rows = rows.filter(row => row.status === "error");
+		rows = rows.filter(row => row.agentId !== MAIN_AGENT_ID || row.kind === "lifecycle");
 		this.#activityRows = rows;
 		if (rows.length === 0) this.#selectedActivityRow = 0;
 		else if (this.#activityFollow) this.#selectedActivityRow = rows.length - 1;
