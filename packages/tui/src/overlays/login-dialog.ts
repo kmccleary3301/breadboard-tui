@@ -25,9 +25,21 @@ export class LoginDialogComponent extends OverlayPanel {
 		tui: TUI,
 		providerId: string,
 		onComplete: (success: boolean, message?: string) => void,
-		openUrl: (url: string) => void,
-		providerDisplayName?: string,
+		openUrlOrProviderDisplayName: ((url: string) => void) | string = () => {},
+		providerDisplayNameOrOpenUrl?: string | ((url: string) => void),
 	) {
+		const openUrl =
+			typeof openUrlOrProviderDisplayName === "function"
+				? openUrlOrProviderDisplayName
+				: typeof providerDisplayNameOrOpenUrl === "function"
+					? providerDisplayNameOrOpenUrl
+					: () => {};
+		const providerDisplayName =
+			typeof openUrlOrProviderDisplayName === "string"
+				? openUrlOrProviderDisplayName
+				: typeof providerDisplayNameOrOpenUrl === "string"
+					? providerDisplayNameOrOpenUrl
+					: undefined;
 		const providerInfo = providerDisplayName ? undefined : getOAuthProviders().find(p => p.id === providerId);
 		const providerName = providerDisplayName ?? providerInfo?.name ?? providerId;
 		super(`Login to ${providerName}`);
@@ -53,6 +65,8 @@ export class LoginDialogComponent extends OverlayPanel {
 				const resolve = this.#inputResolver;
 				if (!resolve) return;
 				this.#clearInputHandlers();
+				this.#input.setValue("");
+				this.#input.input.mask = false;
 				resolve(value);
 			},
 			onCancel: () => {
@@ -62,6 +76,7 @@ export class LoginDialogComponent extends OverlayPanel {
 		});
 	}
 
+
 	get signal(): AbortSignal {
 		return this.#abortController.signal;
 	}
@@ -69,7 +84,7 @@ export class LoginDialogComponent extends OverlayPanel {
 	#cancel(): void {
 		this.#abortController.abort();
 		this.#input.setValue("");
-		this.#input.mask = false;
+		this.#input.input.mask = false;
 		const reject = this.#inputRejecter;
 		this.#clearInputHandlers();
 		reject?.(new Error("Login cancelled"));
@@ -137,7 +152,7 @@ export class LoginDialogComponent extends OverlayPanel {
 			this.#contentContainer.addChild(this.#input);
 			this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 0, 0));
 		}
-
+		this.#input.input.mask = false;
 		this.#tui.requestRender();
 
 		if (signal?.aborted) {
@@ -190,7 +205,7 @@ export class LoginDialogComponent extends OverlayPanel {
 		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel, Enter to submit)"), 0, 0));
 
 		this.#input.setValue("");
-		this.#input.mask = prompt.secret === true;
+		this.#input.input.mask = prompt.secret === true;
 		this.#tui.requestRender();
 
 		this.#inputAbortCleanup?.();

@@ -27,8 +27,12 @@ export const STATUS_LINE_SEGMENT_IDS = [
 	"collab",
 	"stream",
 	"vim",
+	"harness",
+	"longrun",
+	"bb_activity",
+	"bb_policy",
+	"overflow",
 ] as const;
-
 /** One identifier from the supported status-line segment catalog. */
 export type StatusLineSegmentId = (typeof STATUS_LINE_SEGMENT_IDS)[number];
 
@@ -43,7 +47,18 @@ export const CUSTOM_STATUS_LINE_DEFAULTS: {
 
 export const CONTEXT_LINE_MODE_VALUES = ["off", "percentage", "annotated", "embedded"] as const;
 export type ContextLineMode = (typeof CONTEXT_LINE_MODE_VALUES)[number];
-export const STATUS_LINE_PRESET_VALUES = ["default", "minimal", "compact", "full", "nerd", "ascii", "custom"] as const;
+export const STATUS_LINE_PRESET_VALUES = [
+	"default",
+	"minimal",
+	"compact",
+	"full",
+	"nerd",
+	"ascii",
+	"custom",
+	"bb-balanced",
+	"bb-quiet",
+	"bb-detailed",
+] as const;
 export type StatusLinePreset = (typeof STATUS_LINE_PRESET_VALUES)[number];
 export const STATUS_LINE_SEPARATOR_VALUES = [
 	"powerline",

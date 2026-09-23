@@ -22,9 +22,8 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../index";
-import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
-import { teamSize } from "../../breadboard/harness-lock-view";
-import type { HarnessSnapshot } from "../../breadboard/harness-port";
+import { Spacer } from "../components/spacer";
+import { Text } from "../components/text";
 import type { ShapeTarget } from "@oh-my-pi/snapcompact";
 import type {
 	ContextLineMode,
@@ -33,23 +32,22 @@ import type {
 	StatusLineSeparatorStyle,
 } from "../status-line/schema";
 import {
-	SETTINGS_SCHEMA,
 	SETTING_TABS,
 	TAB_METADATA,
 	type SettingTab,
 	type SettingsHost,
 	type SettingsDisplayEntry,
+	type SettingsBreadboardContext,
 } from "./settings-defs";
 import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../thinking";
 import { getTabBarTheme } from "../chrome/shared";
+import { getComposerShapeOptions, type ComposerShapeIdentity } from "./composer-shape-registry";
 import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./composer-shape-preview";
-import { getComposerShapeOptions } from "./composer-shape-registry";
+import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
 import { PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
-import { nativeSettingRestriction, nativeSettingsGroupRestriction } from "../../breadboard/native-control-policy";
-import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "../status-line/presets";
 import { isBreadboardPreset } from "../status-line/breadboard-presentation";
 import {
@@ -129,7 +127,7 @@ function createSettingsSelectField(
 export class BreadboardCustomizeSubmenu extends Container {
 	#selectList!: SelectList;
 	#selectListLineOffset = 0;
-	#editor: SelectSubmenu | null = null;
+	#editor: SelectFormField | null = null;
 	#draft: BreadboardFieldSettings;
 	readonly #original: BreadboardFieldSettings;
 
@@ -153,8 +151,8 @@ export class BreadboardCustomizeSubmenu extends Container {
 		onSelect: (preset: StatusLinePreset) => void,
 		onPreview: (preset: StatusLinePreset) => void,
 		onCancel: () => void,
+		presets: ReadonlyArray<SelectItem>,
 	): void {
-		const presets = SETTINGS_SCHEMA["statusLine.preset"].ui.options;
 		const choices: SelectItem[] = [
 			...presets.filter(option => isBreadboardPreset(option.value)),
 			{
@@ -165,7 +163,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 			...presets.filter(option => !isBreadboardPreset(option.value)),
 		];
 		this.clear();
-		this.#editor = new SelectSubmenu(
+		this.#editor = createSettingsSelectField(
 			"Information layout",
 			"Choose a preset or customize individual fields.",
 			choices,
@@ -177,15 +175,16 @@ export class BreadboardCustomizeSubmenu extends Container {
 					return;
 				}
 				const choice = presets.find(option => option.value === value);
-				if (choice) onSelect(choice.value);
+				if (choice) onSelect(choice.value as StatusLinePreset);
 			},
 			onCancel,
 			value => {
 				const choice = presets.find(option => option.value === value);
-				onPreview(choice?.value ?? current);
+				onPreview((choice?.value ?? current) as StatusLinePreset);
 			},
 			undefined,
 			this.preview,
+			this.requestRender,
 		);
 		this.addChild(this.#editor);
 		this.requestRender?.();
@@ -274,7 +273,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 		const definition = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
 		if (!definition) return;
 		this.clear();
-		this.#editor = new SelectSubmenu(
+		this.#editor = createSettingsSelectField(
 			definition.label,
 			"Choose Preset to follow the selected layout, or pin this field independently.",
 			definition.options.map(option => ({
@@ -301,6 +300,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 			},
 			undefined,
 			this.preview,
+			this.requestRender,
 		);
 		this.addChild(this.#editor);
 		this.requestRender?.();
@@ -700,12 +700,16 @@ export interface SettingsRuntimeContext {
 	imageBudget?: ImageBudget;
 	/** Schedules a re-render after async preview work completes. */
 	requestRender?: () => void;
-	/** Effective BreadBoard harness lock used by read-only policy rows. */
-	harness?: HarnessSnapshot | null;
+	/** Current harness snapshot, retained for host refresh updates. */
+	harness?: SettingsBreadboardContext["harness"];
+	/** Optional BreadBoard host seam; native policy stays in coding-agent. */
+	breadboard?: SettingsBreadboardContext;
 	/** Effective session ownership used to hide native groups that cannot affect the engine. */
-	mainStreamOwnsTurnLifecycle: boolean;
+	mainStreamOwnsTurnLifecycle?: boolean;
 	/** Live status renderer for composer-shape previews (the session's status line). */
 	composerPreviewStatus?: ComposerPreviewStatusSource;
+	/** Product labels for the composer selector; supplied by the host. */
+	composerIdentity?: ComposerShapeIdentity;
 }
 
 /** Status line settings subset for preview */
@@ -807,10 +811,11 @@ export class SettingsSelectorComponent implements Component {
 		this.#switchToTab("appearance");
 	}
 	/** Update the lock-derived policy row when the active harness changes. */
-	setHarness(harness: HarnessSnapshot | null | undefined): void {
-		this.context.harness = harness ?? null;
+	setHarness(harness: SettingsBreadboardContext["harness"]): void {
+		this.#context.harness = harness;
+		if (this.#context.breadboard) this.#context.breadboard = { ...this.#context.breadboard, harness };
 		if (this.#currentTabId === "breadboard") {
-			this.#refreshCurrentTabItems(getSettingsForTab("breadboard"));
+			this.#refreshCurrentTabItems(getSettingsForTab(this.#context.settings.entries, "breadboard"));
 		}
 		this.invalidate();
 	}
@@ -1139,7 +1144,7 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	#settingRestriction(def: SettingDef): string | undefined {
-		return nativeSettingRestriction(def.path, def.group, this.context.mainStreamOwnsTurnLifecycle);
+		return this.#context.breadboard?.nativeSettingRestriction?.(def.path, def.group);
 	}
 
 	/** Value-change dispatch for the search result list (any tab's setting). */
@@ -1243,7 +1248,7 @@ export class SettingsSelectorComponent implements Component {
 	 */
 	#getCurrentValue(def: SettingDef): unknown {
 		if (def.path === "breadboard.harness.max_concurrent_agents") {
-			return teamSize(this.#context.harness?.lock ?? null);
+			return this.#context.breadboard?.teamSize ?? null;
 		}
 		return this.#context.settings.get(def.path);
 	}
@@ -1278,11 +1283,11 @@ export class SettingsSelectorComponent implements Component {
 		currentValue: string,
 		done: (value?: string) => void,
 	): Component {
-		if (def.path === "statusLine.preset" && IS_BREADBOARD_PRODUCT) {
-			const original = this.#context.settings.get("statusLine.breadboard");
-			const originalPreset = this.#context.settings.get("statusLine.preset");
+		if (def.path === "statusLine.preset" && this.#context.breadboard?.enabled === true) {
+			const original = this.#context.settings.get("statusLine.breadboard") as BreadboardFieldSettings;
+			const originalPreset = this.#context.settings.get("statusLine.preset") as StatusLinePreset;
 			const preset = isBreadboardPreset(originalPreset) ? originalPreset : "bb-balanced";
-			const preview = new ComposerShapePreview(this.#context.settings.get("composer.shape"), {
+			const preview = new ComposerShapePreview(String(this.#context.settings.get("composer.shape")), {
 				requestRender: this.#context.requestRender,
 				status: this.#context.composerPreviewStatus,
 			});
@@ -1307,12 +1312,14 @@ export class SettingsSelectorComponent implements Component {
 			customizer.showPresets(
 				originalPreset,
 				value => {
-					this.#context.settings.set("statusLine.preset", value);
-					this.#callbacks.onChange("statusLine.preset", value);
-					done(value);
+					const selectedPreset = value as StatusLinePreset;
+					this.#context.settings.set("statusLine.preset", selectedPreset);
+					this.#callbacks.onChange("statusLine.preset", selectedPreset);
+					done(selectedPreset);
 				},
-				value => this.#callbacks.onStatusLinePreview?.({ preset: value, breadboard: original }),
+				value => this.#callbacks.onStatusLinePreview?.({ preset: value as StatusLinePreset, breadboard: original }),
 				cancel,
+				def.options,
 			);
 			return customizer;
 		}
@@ -1329,7 +1336,7 @@ export class SettingsSelectorComponent implements Component {
 		} else if (def.path === "theme.dark" || def.path === "theme.light") {
 			options = this.#context.availableThemes.map(t => ({ value: t, label: t }));
 		} else if (def.path === "composer.shape") {
-			options = getComposerShapeOptions();
+			options = getComposerShapeOptions(this.#context.composerIdentity);
 		}
 		// Preview handlers
 		let onPreview: ((value: string) => void | Promise<void>) | undefined;
@@ -1676,7 +1683,7 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	#showPluginsTab(): void {
-		const restriction = nativeSettingsGroupRestriction("Extensions", this.#context.mainStreamOwnsTurnLifecycle);
+		const restriction = this.#context.breadboard?.nativeSettingsGroupRestriction?.("Extensions");
 		if (restriction) {
 			this.#pluginUnavailable = new UnavailableSettingsPanel(restriction, () => this.#callbacks.onCancel());
 			return;

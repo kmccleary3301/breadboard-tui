@@ -1,8 +1,7 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
-import { lockValue } from "../../../breadboard/harness-lock-view";
-import type { HarnessSnapshot } from "../../../breadboard/harness-port";
+import type { HarnessSnapshot } from "./types";
 import { thinkingLevelGlyph } from "../render/render-utils";
 import { sanitizeStatusText } from "../chrome/shared";
 import { type ThemeColor, theme } from "../theme/theme";
@@ -72,7 +71,16 @@ export function renderBreadboardActivity(
 
 export function renderBreadboardPolicy(harness: HarnessSnapshot | null | undefined): string {
 	if (!harness?.verifiedIdentity || harness.verifiedIdentity.lockHash !== harness.lockHash) return "";
-	const response = lockValue(harness.lock, "permissions.options.default_response")?.value;
+	const values = harness.lock?.effective_values;
+	if (!Array.isArray(values)) return "";
+	const entry = values.find(
+		value =>
+			typeof value === "object" &&
+			value !== null &&
+			"path" in value &&
+			value.path === "permissions.options.default_response",
+	);
+	const response = entry && typeof entry === "object" && "value" in entry ? entry.value : undefined;
 	if (response !== "ask" && response !== "allow" && response !== "deny") return "";
 	return theme.fg(response === "allow" ? "warning" : "muted", `Default: ${response}`);
 }

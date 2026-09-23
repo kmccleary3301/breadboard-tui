@@ -11,16 +11,18 @@ import {
 	relativePathWithinNormalizedRoot,
 	relativePathWithinRoot,
 } from "@oh-my-pi/pi-utils";
-import { longRunBudgets } from "../../../breadboard/harness-lock-view";
-import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme/theme";
+import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { fileHyperlink } from "../render/hyperlink";
-import { getSessionAccentHex } from "../theme/session-color";
-import { summarizeLoopCondition } from "../../loop-condition";
+import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
+import { summarizeLoopCondition } from "./loop";
+import { formatMetric } from "../components/metric";
+import { formatBillingSummary } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
 import { renderBreadboardActivity, renderBreadboardPolicy } from "./breadboard-presentation";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
+
 export type { SegmentContext } from "./types";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -45,7 +47,7 @@ function sessionAccentAnsi(ctx: SegmentContext): string | undefined {
 	if (ctx.sessionAccent === false) return undefined;
 	const name = ctx.session?.sessionManager?.getSessionName() || ctx.previewTitle;
 	if (!name) return undefined;
-	return theme.getCustomColorAnsi(getSessionAccentHex(name, theme.sessionAccentInputs));
+	return getSessionAccentAnsi(getSessionAccentHex(name, theme.sessionAccentInputs));
 }
 /**
  * `theme.fg` for accent-role text: the hash-derived session accent when
@@ -54,8 +56,7 @@ function sessionAccentAnsi(ctx: SegmentContext): string | undefined {
  * PR link, mode badges, session title) — status colors stay `theme.fg`.
  */
 function accentFg(ctx: SegmentContext, color: ThemeColor, text: string): string {
-	const ansi = sessionAccentAnsi(ctx) ?? theme.getFgAnsi(color);
-	return ansi ? `${ansi}${text}\x1b[39m` : text;
+	return `${sessionAccentAnsi(ctx) ?? theme.getFgAnsi(color)}${text}\x1b[39m`;
 }
 
 /** Left-truncate a path/label to `maxLen`, prefixing an ellipsis when clipped. */
@@ -75,23 +76,12 @@ function leadingGlyph(display: string): string {
 	return space === -1 ? display : display.slice(0, space);
 }
 
-let cachedDisplayRootInput: string | undefined;
-let cachedDisplayRootOutput: string | undefined;
-
 function stripDisplayRoot(pwd: string): string {
-	if (pwd === cachedDisplayRootInput && cachedDisplayRootOutput !== undefined) return cachedDisplayRootOutput;
-
-	let displayPath = pwd;
 	for (const root of [path.join(os.homedir(), "Projects"), "/work"]) {
 		const relative = relativePathWithinRoot(root, pwd);
-		if (relative) {
-			displayPath = relative;
-			break;
-		}
+		if (relative) return relative;
 	}
-	cachedDisplayRootInput = pwd;
-	cachedDisplayRootOutput = displayPath;
-	return displayPath;
+	return pwd;
 }
 
 /**
@@ -175,14 +165,19 @@ const piSegment: StatusLineSegment = {
 				visible: true,
 			};
 		}
+		// Brand fg fades between dim gray (idle) and the accent (working) across
+		// turn edges; the component samples the tween into `brandFgAnsi`.
 		const fgAnsi = ctx.brandFgAnsi ?? theme.getFgAnsi("dim");
-		// Preserve the active product mark while retaining upstream's active-turn spinner and timer.
-		const mark = ctx.identityMark ?? theme.icon.omp;
+		// While a turn runs the brand icon becomes a braille spinner plus a
+		// whole-unit turn timer (port of rust omp's status-band active brand).
+		// No trailing pad: the group renderer owns inter-segment spacing, so a
+		// trailing space here would double the gap at the first separator (#11103).
 		const content =
 			ctx.turnElapsedMs != null
 				? `${brandSpinnerFrame(ctx.now?.getTime())} ${statusValue(ctx, brandTimer(ctx.turnElapsedMs))}`
-				: mark || "";
-		return { content: fgAnsi ? `${fgAnsi}${content}\x1b[39m` : content, visible: true };
+				: (ctx.identityMark ?? theme.icon.omp) || "";
+		const rendered = fgAnsi ? `${fgAnsi}${content}\x1b[39m` : content;
+		return { content: rendered, visible: true };
 	},
 };
 /** Current braille-spinner glyph on the shared clock, at the Loader's 80ms cadence. */
@@ -610,6 +605,7 @@ const contextPctSegment: StatusLineSegment = {
 		if (ctx.options.context_pct?.minPercent !== undefined && (pct ?? 0) < ctx.options.context_pct.minPercent) {
 			return { content: "", visible: false };
 		}
+		const color = getContextUsageThemeColor(getContextUsageLevel(pct ?? 0, window));
 		if (ctx.breadboardOwned) {
 			if (pct === null || !window || ctx.startupPlaceholder) return { content: "", visible: false };
 			return {
@@ -620,8 +616,6 @@ const contextPctSegment: StatusLineSegment = {
 				visible: true,
 			};
 		}
-
-		const color = getContextUsageThemeColor(getContextUsageLevel(pct ?? 0, window));
 		// Async-compaction indicator: pulse the auto icon while a background
 		// speculation runs, hold it in accent once a result is armed.
 		let autoIcon = "";
@@ -926,6 +920,11 @@ const usageSegment: StatusLineSegment = {
 		return { content, visible: true };
 	},
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Segment Registry
+// ═══════════════════════════════════════════════════════════════════════════
+
 const harnessSegment: StatusLineSegment = {
 	id: "harness",
 	render(ctx) {
@@ -934,38 +933,24 @@ const harnessSegment: StatusLineSegment = {
 		const options = ctx.options.harness;
 		const name = options?.showGeneration === false ? harness.name.replace(/\.(?:harness|ya?ml)$/u, "") : harness.name;
 		const parts = [truncateToWidth(sanitizeStatusText(name), options?.maxLength ?? TRUNCATE_LENGTHS.SHORT)];
-		if (harness.mode !== null) {
-			const mode = truncateToWidth(sanitizeStatusText(harness.mode), TRUNCATE_LENGTHS.SHORT);
-			if (mode.length > 0) parts.push(mode);
-		}
-		if (options?.showGeneration !== false && harness.generation !== null) {
+		if (harness.mode) parts.push(truncateToWidth(sanitizeStatusText(harness.mode), TRUNCATE_LENGTHS.SHORT));
+		if (options?.showGeneration !== false && harness.generation) {
 			const generation = sanitizeStatusText(harness.generation);
-			if (generation.length > 0) {
-				const shortGen = generation.startsWith("sha256:")
-					? generation.slice(7, 15)
-					: generation.length > 8
-						? generation.slice(0, 8)
-						: generation;
-				parts.push(`g${shortGen}`);
-			}
+			parts.push(`g${generation.startsWith("sha256:") ? generation.slice(7, 15) : generation.slice(0, 8)}`);
 		}
-		return {
-			content: theme.fg("accent", parts.join(" · ")),
-			visible: true,
-		};
+		return { content: theme.fg("accent", parts.join(" · ")), visible: true };
 	},
 };
 
 const longrunSegment: StatusLineSegment = {
 	id: "longrun",
 	render(ctx) {
-		const budgets = longRunBudgets(ctx.harness?.lock ?? null);
+		const budgets = ctx.longRun;
 		if (!budgets) return { content: "", visible: false };
 		const caps: string[] = [];
 		if (budgets.totalCostUsd !== undefined) caps.push(`$${budgets.totalCostUsd.toFixed(2)}`);
 		if (budgets.totalTokens !== undefined) caps.push(`${formatNumber(budgets.totalTokens)} tok`);
-		const label = caps.length > 0 ? `longrun ≤ ${caps.join(" · ")}` : "longrun";
-		return { content: theme.fg("muted", label), visible: true };
+		return { content: theme.fg("muted", caps.length ? `longrun ≤ ${caps.join(" · ")}` : "longrun"), visible: true };
 	},
 };
 
@@ -973,11 +958,7 @@ const breadboardActivitySegment: StatusLineSegment = {
 	id: "bb_activity",
 	render(ctx) {
 		if (ctx.startupPlaceholder) return { content: "", visible: false };
-		const content = renderBreadboardActivity(
-			ctx.breadboardActivity,
-			ctx.turnElapsedMs,
-			Math.max(1, Math.min(36, ctx.width - 2)),
-		);
+		const content = renderBreadboardActivity(ctx.breadboardActivity, ctx.turnElapsedMs, Math.max(1, Math.min(36, ctx.width - 2)));
 		return { content, visible: content.length > 0 };
 	},
 };
@@ -989,10 +970,6 @@ const breadboardPolicySegment: StatusLineSegment = {
 		return { content, visible: content.length > 0 };
 	},
 };
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Segment Registry
-// ═══════════════════════════════════════════════════════════════════════════
 
 export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	pi: piSegment,
@@ -1022,6 +999,8 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	collab: collabSegment,
 	stream: streamSegment,
 	vim: vimSegment,
+	harness: harnessSegment,
+	longrun: longrunSegment,
 	bb_activity: breadboardActivitySegment,
 	bb_policy: breadboardPolicySegment,
 };

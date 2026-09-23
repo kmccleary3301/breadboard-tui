@@ -16,9 +16,8 @@ import {
 	padding,
 	truncateToWidth,
 	visibleWidth,
-} from "@oh-my-pi/pi-tui";
-import type { ComposerShape } from "../../config/settings-schema";
-import { DEFAULT_PRODUCT_IDENTITY } from "../prompt/welcome";
+} from "../index";
+import type { ComposerShape } from "./composer-shape-registry";
 import { theme } from "../theme/theme";
 
 /**
@@ -35,7 +34,7 @@ export interface ComposerPreviewStatusSource {
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number };
 	/** Plain standalone bottom bar carrying the given segment groups. */
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string;
-	/** Responsive overflow for shapes with a top attachment; omitted by non-responsive renderers. */
+	/** Responsive overflow for shapes with a top attachment. */
 	renderOverflowBar?(
 		width: number,
 		topWidth: number,
@@ -52,7 +51,7 @@ export interface ComposerShapePreviewOptions {
 	previewTitle?: string;
 }
 /** Stand-in session title shown while the previewed session is unnamed. */
-const PREVIEW_TITLE = DEFAULT_PRODUCT_IDENTITY.cliName;
+const PREVIEW_TITLE = "omp";
 
 export function renderComposerShapePreview(
 	shape: ComposerShape,
@@ -71,7 +70,7 @@ export function renderComposerShapePreview(
 	let topBorder: EditorTopBorder | undefined;
 	if (status) {
 		if (style.statusAttachment === "top-border") {
-			topBorder = status.getTopBorder(topWidth, previewTitle);
+			topBorder = status.getTopBorder(Math.max(1, topWidth), previewTitle);
 		} else if (style.statusAttachment === "top-band") {
 			topBorder = status.getBandTopBorder(topWidth, previewTitle);
 		} else if (style.statusAttachment === "top-rule-chip") {
@@ -117,8 +116,6 @@ export function renderComposerShapePreview(
 		}),
 	);
 	const bottom = style.renderBottom(ctx);
-	if (bottom !== undefined) lines.push(bottom);
-
 	let overflow: string | undefined;
 	if (style.statusAttachment !== "none" && status?.renderOverflowBar) {
 		const layout =

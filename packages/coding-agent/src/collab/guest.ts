@@ -206,15 +206,15 @@ export class CollabGuestLink {
 	#pendingUiRequests = new Map<number, AbortController>();
 	#nextReqId = 1;
 	readonly #hubRemote: AgentHubRemote = {
-		chat: (id, text) => {
+		chat: (id: string, text: string) => {
 			if (this.#rejectReadOnly()) return;
 			this.#socket?.send({ t: "agent-cmd", cmd: "chat", agentId: id, text });
 		},
-		kill: id => {
+		kill: (id: string) => {
 			if (this.#rejectReadOnly()) return;
 			this.#socket?.send({ t: "agent-cmd", cmd: "kill", agentId: id });
 		},
-		revive: id => {
+		revive: (id: string) => {
 			if (this.#rejectReadOnly()) return;
 			this.#socket?.send({ t: "agent-cmd", cmd: "revive", agentId: id });
 		},
@@ -234,7 +234,7 @@ export class CollabGuestLink {
 			socket.send({ t: "fetch-irc-history", reqId });
 			return promise;
 		},
-		sendMessage: (to, body, replyTo) => {
+		sendMessage: (to: string, body: string, replyTo?: string) => {
 			if (this.#rejectReadOnly()) return Promise.resolve("IRC send is disabled on a read-only link");
 			const socket = this.#socket;
 			if (!socket) return Promise.resolve("Collab host is disconnected");
@@ -251,7 +251,7 @@ export class CollabGuestLink {
 			socket.send({ t: "irc-send", reqId, to, body, replyTo });
 			return promise;
 		},
-		readTranscript: (id, fromByte) => {
+		readTranscript: (id: string, fromByte: number) => {
 			const socket = this.#socket;
 			if (!socket || this.#agentHasTranscript.get(id) === false) {
 				return Promise.resolve(null);

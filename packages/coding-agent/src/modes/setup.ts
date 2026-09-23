@@ -58,9 +58,19 @@ function resolveWebSearchSelection(ctx: InteractiveModeContext, id: SearchProvid
 
 /** Bind application preferences and runtime effects to the setup presentation. */
 export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
-	const modelSource = createModelBrowserSource(ctx.settings);
 	return {
 		identity: ACTIVE_PRODUCT_IDENTITY,
+		settings: {
+			get: key => ctx.settings.get(key as never),
+			set: (key, value) => ctx.settings.set(key as never, value as never),
+			getGroup: group => ctx.settings.getGroup(group as never) as Record<string, unknown>,
+			flush: () => ctx.settings.flush(),
+		},
+		modelSelection: {
+			get currentModel() {
+				return ctx.session.model;
+			},
+		},
 		get statusLine() {
 			return ctx.statusLine;
 		},

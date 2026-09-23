@@ -32,10 +32,9 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		action: "log out" | "revoke" = "log out",
 	) {
 		super(`Select ${providerName} account to ${action}`);
-		this.#action = action;
-		this.#accounts = accounts;
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
+		this.#action = action;
 		const active = accounts.find(account => account.active);
 		this.#menu = new MenuSelection<LogoutAccount>(
 			accounts,

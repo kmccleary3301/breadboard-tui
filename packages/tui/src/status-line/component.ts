@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import {
 	getAntigravityCounterKeyForModel,
 	scopeAntigravityLimitsForModel,
@@ -19,26 +19,16 @@ import {
 	visibleWidth,
 } from "../index";
 import { adjustHsv, formatNumber, getProjectDir, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils";
-import type { HarnessSnapshot } from "../../../breadboard/harness-port";
-import { readBreadboardComposerMetrics } from "../../../breadboard/composer-metrics";
-import { settings } from "../../../config/settings";
-import { ACTIVE_PRODUCT_IDENTITY, OMP_PRODUCT_IDENTITY, type ProductIdentity } from "../../../product-identity";
-import type { AgentSession } from "../../../session/agent-session";
-import { messageFingerprint } from "../../../session/session-stats";
-import type { OAuthAccountIdentity } from "../../../session/auth-storage";
-import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/active-oauth-account";
-import { type ActiveRepoContext, resolveActiveRepoContextSync } from "../../../utils/active-repo-context";
-import { withTimeoutSignal } from "../../../utils/fetch-timeout";
-import { GH_COMMAND_TIMEOUT_MS, github } from "../../../utils/github";
-import { getSessionAccentHex } from "../../../utils/session-color";
-import { calculateTokensPerSecond } from "../../../utils/token-rate";
+import type {
+	ActiveRepoContext,
+	StatusAccountIdentity as OAuthAccountIdentity,
+	StatusLineHost,
+	StatusLineSession,
+} from "./host";
+import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { sanitizeStatusText } from "../chrome/shared";
-import { getThemeEpoch, theme } from "../theme/theme";
-import {
-	type CompactionBoundaries,
-	computeCompactionBoundaries,
-	getToolSchemaMetadataRevision,
-} from "../chrome/context-usage";
+import { getThemeEpoch, theme } from "../theme";
+import { type CompactionBoundaries, EMPTY_STRING_PARTS, getToolSchemaMetadataRevision } from "./context-usage";
 import {
 	type CodexResetFireworksEvent,
 	type CodexResetUsageSnapshot,
@@ -55,6 +45,7 @@ import type {
 	BreadboardComposerActivity,
 	CollabStatus,
 	EffectiveStatusLineSettings,
+	HarnessSnapshot,
 	StatusLineSegmentId,
 	StatusLineSegmentOptions,
 	StatusLineSettings,
@@ -67,8 +58,6 @@ const WATCHER_FAILURE_POLL_TTL_MS = 5000;
 const BRAND_FADE_MS = 450;
 /** Repaint cadence while the brand fade is in flight (rust omp's `FADE_FRAME`). */
 const BRAND_FADE_FRAME_MS = 40;
-/** Bound stale external snapshots while reusing status chrome across burst renders. */
-const STATUS_RENDER_CACHE_MS = 250;
 
 /**
  * Providers whose subscription quota is a single monthly bucket, so their
@@ -130,6 +119,126 @@ function reportMatchesExactIdentity(report: UsageReport, identity: OAuthAccountI
 // ═══════════════════════════════════════════════════════════════════════════
 // Context-usage memo
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cheap structural fingerprint of a message's tokenizable content. O(blocks) —
+ * only reads string `.length` and primitives, never copies or serializes.
+ * Detects in-place growth of the streaming tail (and other in-place mutations)
+ * so the cached `getContextUsage()` result is recomputed when — and only when —
+ * the numbers it depends on change.
+ */
+function messageFingerprint(msg: AgentMessage): string {
+	const role = (msg as { role?: string }).role ?? "";
+	const ts = (msg as { timestamp?: number }).timestamp ?? 0;
+	let textLen = 0;
+	let blocks = 0;
+	let images = 0;
+	if (role === "bashExecution") {
+		const b = msg as { command?: unknown; output?: unknown };
+		if (typeof b.command === "string") textLen += b.command.length;
+		if (typeof b.output === "string") textLen += b.output.length;
+	} else if (role === "user") {
+		const content = (msg as { content?: unknown }).content;
+		if (typeof content === "string") {
+			textLen += content.length;
+		} else if (Array.isArray(content)) {
+			blocks = content.length;
+			for (const block of content) {
+				if (block?.type === "text" && typeof block.text === "string") textLen += block.text.length;
+			}
+		}
+	} else if (role === "assistant") {
+		const assistantMsg = msg as AssistantMessage;
+		const usageExt = assistantMsg.usage as unknown as { promptTokensDetails?: unknown };
+		const usageTotal = assistantMsg.usage?.totalTokens ?? 0;
+		const promptBuckets = usageExt?.promptTokensDetails ? 1 : 0;
+		const stopReason = assistantMsg.stopReason ?? "";
+
+		let signatureLen = 0;
+		let redactedLen = 0;
+		const msgExt = assistantMsg as unknown as {
+			thinkingSignature?: string;
+			textSignature?: string;
+			thoughtSignature?: string;
+			redactedThinking?: { data?: string };
+		};
+		const thinkingSignature = msgExt.thinkingSignature;
+		if (typeof thinkingSignature === "string") {
+			signatureLen += thinkingSignature.length;
+		}
+		const textSignature = msgExt.textSignature;
+		if (typeof textSignature === "string") {
+			signatureLen += textSignature.length;
+		}
+		const thoughtSignature = msgExt.thoughtSignature;
+		if (typeof thoughtSignature === "string") {
+			signatureLen += thoughtSignature.length;
+		}
+		const redactedData = msgExt.redactedThinking?.data;
+		if (typeof redactedData === "string") {
+			redactedLen += redactedData.length;
+		}
+
+		const content = (msg as { content?: unknown }).content;
+		if (Array.isArray(content)) {
+			blocks = content.length;
+			for (const block of content) {
+				if (!block || typeof block !== "object") continue;
+				const b = block as {
+					type?: string;
+					text?: string;
+					thinking?: string;
+					thinkingSignature?: string;
+					signature?: string;
+					textSignature?: string;
+					thoughtSignature?: string;
+					data?: string;
+					name?: string;
+					arguments?: unknown;
+				};
+				if (b.type === "text" && typeof b.text === "string") textLen += b.text.length;
+				else if (b.type === "thinking") {
+					if (typeof b.thinking === "string") textLen += b.thinking.length;
+					if (typeof b.thinkingSignature === "string") signatureLen += b.thinkingSignature.length;
+					if (typeof b.signature === "string") signatureLen += b.signature.length;
+					if (typeof b.textSignature === "string") signatureLen += b.textSignature.length;
+					if (typeof b.thoughtSignature === "string") signatureLen += b.thoughtSignature.length;
+				} else if (b.type === "redactedThinking" && typeof b.data === "string") {
+					redactedLen += b.data.length;
+				} else if (b.type === "toolCall") {
+					if (typeof b.name === "string") textLen += b.name.length;
+					if (b.arguments !== undefined) {
+						try {
+							textLen += JSON.stringify(b.arguments, (_key, value) =>
+								typeof value === "bigint" ? value.toString() : value,
+							).length;
+						} catch {
+							textLen += String(b.arguments).length;
+						}
+					}
+				}
+			}
+		}
+		return `${role}:${ts}:${textLen}:${blocks}:${images}:${signatureLen}:${redactedLen}:${usageTotal}:${promptBuckets}:${stopReason}`;
+	} else if (role === "toolResult" || role === "hookMessage") {
+		const content = (msg as { content?: unknown }).content;
+		if (typeof content === "string") {
+			textLen += content.length;
+		} else if (Array.isArray(content)) {
+			blocks = content.length;
+			for (const block of content) {
+				if (!block || typeof block !== "object") continue;
+				const b = block as { type?: string; text?: string };
+				if (b.type === "text" && typeof b.text === "string") textLen += b.text.length;
+				else if (b.type === "image") images++;
+			}
+		}
+	} else if (role === "branchSummary" || role === "compactionSummary") {
+		const s = (msg as { summary?: unknown }).summary;
+		if (typeof s === "string") textLen += s.length;
+	}
+	return `${role}:${ts}:${textLen}:${blocks}:${images}`;
+}
 
 interface ContextUsageMemo {
 	messagesRef: readonly AgentMessage[];
@@ -202,7 +311,6 @@ interface StatusLineExternalInputs {
 interface CachedStatusLine {
 	content: string;
 	dimmedContent: string;
-	overflow?: string;
 	width: number;
 	availableWidth: number;
 	renderRevision: number;
@@ -344,28 +452,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#standalone: false | "full" | "left-only" = false;
 	#topAttachment: ComposerStyle["statusAttachment"] = "top-border";
 	#standaloneGap = false;
-	#topBorderWidth: (width: number) => number = width => Math.max(1, width - 6);
 	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#renderRevision = 0;
-	#renderCache:
-		| {
-				width: number;
-				revision: number;
-				bucket: number;
-				standalone: false | "full" | "left-only";
-				autocompleteActive: boolean;
-				lines: readonly string[];
-		  }
-		| undefined;
-	#topBorderCache:
-		| {
-				width: number;
-				layout: "box" | "band" | "plain-right";
-				previewTitle: string | undefined;
-				revision: number;
-				result: { content: string; width: number; revision: number };
-		  }
-		| undefined;
 	/** Fully rendered bars for the current revision/clock tick, keyed by layout. */
 	#statusLineRenderCache: Record<StatusLineLayout, CachedStatusLine | undefined> = {
 		box: undefined,
@@ -456,19 +544,18 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 */
 	#vibeWorkerTokenRate: (() => number | null) | null = null;
 	#collabStatus: CollabStatus | null = null;
+	#streamStatus: { viewers: number } | null = null;
+	#recording = false;
 	#harness: HarnessSnapshot | null = null;
 	#breadboardActivity: BreadboardComposerActivity | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
-	#repositoryProbeImmediate: NodeJS.Immediate | undefined;
 
 	// Git status caching (1s TTL)
 	#cachedGitStatus: { staged: number; unstaged: number; untracked: number } | null = null;
 	#cachedGitStatusCwd: string | undefined = undefined;
 	#gitStatusLastFetch = 0;
-	#gitStatusGeneration = 0;
-	#gitStatusRequestSeq = 0;
-	#gitStatusActive: { id: number; cwd: string; generation: number } | undefined;
+	#gitStatusInFlightCwd: string | undefined = undefined;
 	#cachedJjBranch: string | null = null;
 	#jjBranchLastFetch = 0;
 	#jjResolveSeq = 0;
@@ -526,22 +613,10 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#contextUsageCache: ContextUsageMemo | undefined;
 
 	constructor(
-		private session: AgentSession,
-		private readonly identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
+		private session: TSession,
+		private readonly host: StatusLineHost<TSession>,
 	) {
-		this.#settings = {
-			preset: settings.get("statusLine.preset"),
-			leftSegments: settings.get("statusLine.leftSegments"),
-			rightSegments: settings.get("statusLine.rightSegments"),
-			separator: settings.get("statusLine.separator"),
-			showHookStatus: settings.get("statusLine.showHookStatus"),
-			segmentOptions: settings.getGroup("statusLine").segmentOptions,
-			sessionAccent: settings.get("statusLine.sessionAccent"),
-			transparent: settings.get("statusLine.transparent"),
-			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
-			contextLine: settings.get("statusLine.contextLine"),
-			breadboard: settings.get("statusLine.breadboard"),
-		};
+		this.#settings = host.getSettings();
 	}
 
 	#gitEnabled(): boolean {
@@ -549,13 +624,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	}
 	#hasGitBackedSegment(): boolean {
 		const effectiveSettings = this.#resolveSettings();
-		if (isBreadboardPreset(effectiveSettings.preset)) {
-			const fields = resolveBreadboardFields(
-				effectiveSettings.preset ?? "bb-balanced",
-				effectiveSettings.breadboard,
-			);
-			return fields.branch === "shown" || fields.folder !== "hidden";
-		}
 		return (
 			hasGitBackedSegment(effectiveSettings.leftSegments) || hasGitBackedSegment(effectiveSettings.rightSegments)
 		);
@@ -606,22 +674,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		cache.repository = vcs.repo(cache.effectiveGitCwd);
 		cache.repositoryCheckedAt = now;
 		return cache.repository;
-	}
-	#scheduleRepositoryProbe(cache: ActiveRepoCache): void {
-		if (
-			this.#disposed ||
-			this.#repositoryProbeImmediate ||
-			Date.now() - cache.repositoryCheckedAt < WATCHER_FAILURE_POLL_TTL_MS
-		) {
-			return;
-		}
-		this.#repositoryProbeImmediate = setImmediate(() => {
-			this.#repositoryProbeImmediate = undefined;
-			if (this.#disposed || this.#activeRepoCache !== cache || !this.#resolveRepository(cache)) return;
-			this.#setupGitWatcher();
-			this.#clearRenderedOutput();
-			this.#onBranchChange?.();
-		});
 	}
 
 	#resolveDisplayRepository(cache: ActiveRepoCache): VcsRepo | null {
@@ -677,7 +729,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#effectiveSettings = undefined;
 		this.#invalidateStatusLineRenderCache();
 		if (this.#onBranchChange) this.#setupGitWatcher();
-		this.#clearRenderedOutput();
 		this.#syncPricingTimer();
 	}
 
@@ -688,7 +739,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	setAutoCompactEnabled(enabled: boolean): void {
 		if (this.#autoCompactEnabled === enabled) return;
 		this.#autoCompactEnabled = enabled;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	setRunningSubagents(agentIds: readonly string[]): void {
@@ -700,7 +751,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		}
 		this.#subagentCount = agentIds.length;
 		this.#runningSubagentIds = new Set(agentIds);
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	/**
@@ -727,7 +778,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		if (meter.activeMs === 0 && meter.activeStartedAt === null) return;
 		meter.activeMs = 0;
 		meter.activeStartedAt = null;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	/**
@@ -741,7 +792,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const meter = this.#meter();
 		if (meter.activeStartedAt !== null) return;
 		meter.activeStartedAt = Date.now();
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	/**
@@ -755,7 +806,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		if (meter.activeStartedAt === null) return;
 		meter.activeMs += Math.max(0, Date.now() - meter.activeStartedAt);
 		meter.activeStartedAt = null;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	/**
@@ -815,7 +866,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#planModeStatus = next;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	setLoopModeStatus(status: NonNullable<SegmentContext["loopMode"]> | undefined): void {
@@ -829,7 +880,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#loopModeStatus = next;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	setGoalModeStatus(status: { enabled: boolean; paused: boolean } | undefined): void {
@@ -841,14 +892,14 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#goalModeStatus = next;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	setVibeModeStatus(status: { enabled: boolean } | undefined): void {
 		const next = status ?? null;
 		if (this.#vibeModeStatus === next || this.#vibeModeStatus?.enabled === next?.enabled) return;
 		this.#vibeModeStatus = next;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	/** Mirror of the editor's modal state; `undefined` clears it (Vim mode off). */
@@ -864,7 +915,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#vimStatus = next;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	/**
@@ -876,7 +927,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 */
 	setVibeWorkerTokenRateProvider(provider: (() => number | null) | undefined): void {
 		this.#vibeWorkerTokenRate = provider ?? null;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	setCollabStatus(status: CollabStatus | null): void {
@@ -889,18 +940,17 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#collabStatus = status;
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 	setHarness(harness: HarnessSnapshot | null | undefined): void {
 		this.#harness = harness ?? null;
-		this.invalidate();
+		this.#invalidateStatusLineRenderCache();
 	}
 
-	setBreadboardActivity(activity: BreadboardComposerActivity | null): void {
-		if (this.#breadboardActivity?.kind === activity?.kind && this.#breadboardActivity?.label === activity?.label)
-			return;
-		this.#breadboardActivity = activity;
-		this.#clearRenderedOutput();
+	setBreadboardActivity(activity: BreadboardComposerActivity | null | undefined): void {
+		if (this.#breadboardActivity?.kind === activity?.kind && this.#breadboardActivity?.label === activity?.label) return;
+		this.#breadboardActivity = activity ?? null;
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	setStreamStatus(status: { viewers: number } | null): void {
@@ -931,7 +981,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#sortedHookStatuses = Array.from(this.#hookStatuses.entries())
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([, status]) => status);
-		this.#clearRenderedOutput();
+		this.#invalidateStatusLineRenderCache();
 	}
 
 	watchBranch(onBranchChange: () => void): void {
@@ -992,11 +1042,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#onCodexResetFireworks = undefined;
 		this.#codexResetSnapshots.clear();
 		this.#retireGitWatcher();
-		if (this.#repositoryProbeImmediate) {
-			clearImmediate(this.#repositoryProbeImmediate);
-			this.#repositoryProbeImmediate = undefined;
-		}
-		this.#resetGitStatusCache();
 	}
 
 	/**
@@ -1050,7 +1095,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			this.#startBrandFadeTimer();
 		}
 		const hex = this.#sampleBrandHex(working ? workingHex : idleHex, now);
-		return theme.getCustomColorAnsi(hex);
+		return getSessionAccentAnsi(hex) ?? theme.getFgAnsi(working ? "accent" : "dim");
 	}
 
 	/**
@@ -1140,19 +1185,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#usageStartTimer = null;
 	}
 
-	#clearRenderedOutput(): void {
-		this.#renderCache = undefined;
-		this.#topBorderCache = undefined;
-		this.#statusLineInputRevision++;
-	}
-
 	#invalidateStatusLineRenderCache(): void {
-		this.#clearRenderedOutput();
+		this.#statusLineInputRevision++;
 	}
 
 	invalidate(): void {
 		this.#renderRevision++;
-		this.#clearRenderedOutput();
 		this.#syncPricingTimer();
 		// Generic repaint invalidation (theme change, message event, model
 		// switch, …). Must NOT abort or restart a live reftable HEAD/PR resolve:
@@ -1184,14 +1222,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * repo/cwd switch. Generic repaints use {@link invalidate} instead and
 	 * must never reach this path.
 	 */
-	#resetGitStatusCache(): void {
-		this.#cachedGitStatus = null;
-		this.#cachedGitStatusCwd = undefined;
-		this.#gitStatusLastFetch = 0;
-		this.#gitStatusActive = undefined;
-		this.#gitStatusGeneration++;
-	}
-
 	invalidateGitCaches(): void {
 		this.#invalidateStatusLineRenderCache();
 		this.#cachedBranch = undefined;
@@ -1213,8 +1243,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#cachedJjStatus = null;
 		this.#jjStatusLastFetch = 0;
 		this.#jjCacheGeneration++;
-		this.#resetGitStatusCache();
-		this.#clearRenderedOutput();
 	}
 
 	/**
@@ -1282,7 +1310,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				const changed = next !== this.#cachedJjBranch;
 				this.#cachedJjBranch = next;
 				if (changed) {
-					this.#clearRenderedOutput();
+					this.#invalidateStatusLineRenderCache();
 					this.#onBranchChange?.();
 				}
 			})();
@@ -1344,9 +1372,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				this.#cachedBranchRepoId = repoId;
 				this.#cachedBranch = next;
 				this.#branchLastFetch = Date.now();
-				if (prev !== next && this.#onBranchChange) {
-					this.#clearRenderedOutput();
-					this.#onBranchChange();
+				if (prev !== next) {
+					this.#invalidateStatusLineRenderCache();
+					this.#onBranchChange?.();
 				}
 			})();
 			return this.#cachedBranchCwd === gitCwd ? (this.#cachedBranch ?? null) : null;
@@ -1430,26 +1458,21 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				const prev = this.#cachedJjStatus;
 				this.#cachedJjStatus = next;
 				if (JSON.stringify(prev) !== JSON.stringify(next)) {
-					this.#clearRenderedOutput();
+					this.#invalidateStatusLineRenderCache();
 					this.#onBranchChange?.();
 				}
 			})();
 			return this.#cachedJjStatus;
 		}
 
-		if (this.#gitStatusActive) {
+		if (this.#gitStatusInFlightCwd !== undefined) {
 			return this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
 		}
 		if (this.#cachedGitStatusCwd === gitCwd && Date.now() - this.#gitStatusLastFetch < 1000) {
 			return this.#cachedGitStatus;
 		}
 
-		const request = {
-			id: ++this.#gitStatusRequestSeq,
-			cwd: gitCwd,
-			generation: this.#gitStatusGeneration,
-		};
-		this.#gitStatusActive = request;
+		this.#gitStatusInFlightCwd = gitCwd;
 
 		(async () => {
 			let nextStatus: { staged: number; unstaged: number; untracked: number } | null = null;
@@ -1458,21 +1481,16 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			} catch {
 				nextStatus = null;
 			} finally {
-				if (
-					this.#disposed ||
-					this.#gitStatusActive?.id !== request.id ||
-					this.#gitStatusGeneration !== request.generation
-				) {
-					return;
-				}
-				const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
-				this.#cachedGitStatus = nextStatus;
-				this.#cachedGitStatusCwd = gitCwd;
-				this.#gitStatusLastFetch = Date.now();
-				this.#gitStatusActive = undefined;
-				if (this.#onBranchChange && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
-					this.#clearRenderedOutput();
-					this.#onBranchChange();
+				if (this.#gitStatusInFlightCwd === gitCwd) {
+					const prev = this.#cachedGitStatusCwd === gitCwd ? this.#cachedGitStatus : null;
+					this.#cachedGitStatus = nextStatus;
+					this.#cachedGitStatusCwd = gitCwd;
+					this.#gitStatusLastFetch = Date.now();
+					this.#gitStatusInFlightCwd = undefined;
+					if (!this.#disposed && JSON.stringify(prev) !== JSON.stringify(nextStatus)) {
+						this.#invalidateStatusLineRenderCache();
+						this.#onBranchChange?.();
+					}
 				}
 			}
 		})();
@@ -1528,7 +1546,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				if (lookupContext && isSamePrCacheContext(latestContext, lookupContext)) {
 					this.#cachedPr = value;
 					this.#cachedPrContext = lookupContext;
-					this.#clearRenderedOutput();
 				}
 			};
 			try {
@@ -1676,23 +1693,13 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#usageInFlight = true;
 		this.#usageStartTimer = setTimeout(() => {
 			this.#usageStartTimer = null;
-			void this.#runUsageRefresh(session, fetcher, usageContextKey);
+			void this.#runUsageRefresh(session);
 		}, STATUS_USAGE_START_DELAY_MS);
 	}
 
-	async #runUsageRefresh(
-		session: AgentSession,
-		fetcher: (signal?: AbortSignal) => Promise<unknown>,
-		usageContextKey: string,
-	): Promise<void> {
-		if (
-			this.#disposed ||
-			this.session !== session ||
-			this.#getUsageContextKey(session) !== usageContextKey ||
-			this.#cachedUsageContextKey !== usageContextKey
-		) {
+	async #runUsageRefresh(session: TSession): Promise<void> {
+		if (this.#disposed || this.session !== session) {
 			this.#usageInFlight = false;
-			if (!this.#disposed && this.session === session) this.refreshUsageInBackground();
 			return;
 		}
 		const sequence = ++this.#usageRefreshSequence;
@@ -1704,36 +1711,20 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				session,
 				await this.#raceUsageRefreshWithSignal(reportsPromise, signal),
 				sequence,
-				usageContextKey,
 			);
 		} catch {
-			if (
-				this.session !== session ||
-				this.#getUsageContextKey(session) !== usageContextKey ||
-				this.#cachedUsageContextKey !== usageContextKey
-			) {
-				return;
-			}
+			if (this.session !== session) return;
 			this.#usageFetchedAt = Date.now();
 			if (signal.aborted && reportsPromise) {
-				this.#observeLateUsageRefresh(session, reportsPromise, sequence, usageContextKey);
+				this.#observeLateUsageRefresh(session, reportsPromise, sequence);
 			}
 		} finally {
-			if (!this.#disposed && this.session === session) {
-				this.#usageInFlight = false;
-				if (this.#getUsageContextKey(session) !== usageContextKey) this.refreshUsageInBackground();
-			}
+			if (this.session === session) this.#usageInFlight = false;
 		}
 	}
 
-	#applyUsageRefreshReports(session: AgentSession, reports: unknown, sequence: number, usageContextKey: string): void {
-		if (
-			this.#disposed ||
-			this.session !== session ||
-			this.#getUsageContextKey(session) !== usageContextKey ||
-			this.#cachedUsageContextKey !== usageContextKey ||
-			sequence < this.#latestAppliedUsageRefreshSequence
-		) {
+	#applyUsageRefreshReports(session: TSession, reports: unknown, sequence: number): void {
+		if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
 			return;
 		}
 		this.#latestAppliedUsageRefreshSequence = sequence;
@@ -1753,7 +1744,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// Usage fetch is async; without a repaint the top border stays blank until
 		// some unrelated event (git resolve, keystroke, …) rebuilds it.
 		if (usageChanged) {
-			this.#clearRenderedOutput();
+			this.#invalidateStatusLineRenderCache();
 			this.#onBranchChange?.();
 		}
 		if (!resetSnapshot) return;
@@ -1765,24 +1756,13 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		if (event) this.#onCodexResetFireworks?.(event);
 	}
 
-	#observeLateUsageRefresh(
-		session: AgentSession,
-		reportsPromise: Promise<unknown>,
-		sequence: number,
-		usageContextKey: string,
-	): void {
+	#observeLateUsageRefresh(session: TSession, reportsPromise: Promise<unknown>, sequence: number): void {
 		void reportsPromise
 			.then(reports => {
-				this.#applyUsageRefreshReports(session, reports, sequence, usageContextKey);
+				this.#applyUsageRefreshReports(session, reports, sequence);
 			})
 			.catch(() => {
-				if (
-					this.#disposed ||
-					this.session !== session ||
-					this.#getUsageContextKey(session) !== usageContextKey ||
-					this.#cachedUsageContextKey !== usageContextKey ||
-					sequence < this.#latestAppliedUsageRefreshSequence
-				) {
+				if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
 					return;
 				}
 				this.#usageFetchedAt = Date.now();
@@ -2152,8 +2132,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const state = this.session.state;
 
 		// Trigger background fetch (5-min TTL); render uses cached value
-		const breadboardOwned = this.session.mainStreamOwnsTurnLifecycle || this.identity.id === "breadboard";
-		if (!breadboardOwned) this.refreshUsageInBackground();
+		this.refreshUsageInBackground();
 
 		// Get usage statistics
 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
@@ -2213,13 +2192,10 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			focusedAgentId: this.#focusedAgentId,
 			sessionAccent: sessionAccentEnabled,
 			previewTitle,
-			harness: this.#harness,
-			breadboardOwned,
-			breadboardActivity: this.#breadboardActivity,
-			identityMark:
-				this.identity.id === OMP_PRODUCT_IDENTITY.id
-					? theme.icon.omp
-					: this.identity.compactLogo[theme.getSymbolPreset()],
+			identityMark: this.host.getIdentityMark?.(),
+			harness: this.#harness ?? this.host.getHarness?.(this.session) ?? null,
+			breadboardOwned: this.host.isBreadboardOwned?.(this.session) ?? false,
+			breadboardActivity: this.#breadboardActivity ?? this.host.getBreadboardActivity?.(this.session) ?? null,
 			activeRepo: activeRepoCache.activeRepo,
 			width,
 			options: segmentOptions ?? {},
@@ -2242,8 +2218,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			contextPercent,
 			contextTokens,
 			contextWindow,
-			autoCompactEnabled: !breadboardOwned && this.#autoCompactEnabled,
-			compactionSpeculation: breadboardOwned ? "idle" : compactionSpeculation,
+			autoCompactEnabled: this.#autoCompactEnabled,
+			compactionSpeculation,
 			speculationBlinkOn: this.#speculationBlinkOn,
 			subagentCount: this.#subagentCount,
 			activeMs: this.getActiveMs(),
@@ -2257,6 +2233,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			},
 			worktree: activeRepoCache.worktree,
 			usage: this.#cachedUsage,
+			longRun: this.host.getLongRunBudgets?.(this.session) ?? null,
 		};
 	}
 
@@ -2297,10 +2274,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			leftSegments,
 			rightSegments,
 			separator: this.#settings.separator ?? presetDef.separator,
-			contextLine:
-				this.session.mainStreamOwnsTurnLifecycle || this.identity.id === "breadboard"
-					? "off"
-					: this.#settings.contextLine,
 			segmentOptions: mergedSegmentOptions,
 		};
 	}
@@ -2540,12 +2513,10 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return cached;
 		}
 
-		const rendered = this.#renderStatusLine(width, layout, previewTitle, options, nowMs);
-		const content = rendered.content;
+		const content = this.#renderStatusLine(width, layout, previewTitle, options, nowMs);
 		const result = {
 			content,
 			dimmedContent: this.#dimWhileFocusProxied(content),
-			overflow: rendered.overflow,
 			width: visibleWidth(content),
 			availableWidth: width,
 			renderRevision: this.#renderRevision,
@@ -2579,23 +2550,17 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		previewTitle: string | undefined,
 		options: { readonly placeholders?: boolean } | undefined,
 		nowMs: number,
-	): { content: string; overflow?: string } {
+	): string {
 		const effectiveSettings = this.#resolveSettings();
-		if (!this.session.mainStreamOwnsTurnLifecycle && this.identity.id !== "breadboard") this.#syncPricingTimer();
+		this.#syncPricingTimer();
 		const placeholders = options?.placeholders === true;
 		const plain = layout !== "box" && layout !== "band";
-		const breadboardFields = isBreadboardPreset(effectiveSettings.preset)
-			? resolveBreadboardFields(effectiveSettings.preset ?? "bb-balanced", effectiveSettings.breadboard)
-			: undefined;
-		const includePath = breadboardFields
-			? breadboardFields.folder !== "hidden"
-			: hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
+		const includePath =
+			hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
 		const gitEnabled = this.#gitEnabled();
 		const includeGit =
 			gitEnabled &&
-			(breadboardFields
-				? breadboardFields.branch === "shown"
-				: hasGitSegment(effectiveSettings.leftSegments) || hasGitSegment(effectiveSettings.rightSegments));
+			(hasGitSegment(effectiveSettings.leftSegments) || hasGitSegment(effectiveSettings.rightSegments));
 		const includePr =
 			gitEnabled && (hasPrSegment(effectiveSettings.leftSegments) || hasPrSegment(effectiveSettings.rightSegments));
 		const liveCtx = this.#buildSegmentContext(
@@ -2608,52 +2573,43 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			previewTitle,
 		);
 		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: true } : liveCtx;
-		if (breadboardFields) {
-			const metrics = placeholders ? null : readBreadboardComposerMetrics(this.session, this.#harness);
+		if (isBreadboardPreset(effectiveSettings.preset)) {
 			const snapshot = {
-				modelName: placeholders ? "Connecting" : (this.session.model?.name ?? this.session.model?.id ?? "No model"),
-				workspace: ctx.worktree
-					? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
-					: path.basename(getProjectDir()),
+				modelName: placeholders ? "Connecting" : (ctx.session.state.model?.name ?? ctx.session.state.model?.id ?? "No model"),
+				workspace: ctx.worktree ? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}` : path.basename(getProjectDir()),
 				workspacePath: getProjectDir(),
-				sessionName: this.session.sessionManager?.getSessionName?.() || previewTitle,
+				sessionName: ctx.session.sessionManager.getSessionName() ?? previewTitle,
 				harness: ctx.harness,
 				branch: ctx.git.branch,
-				effort: metrics?.effort,
-				spend: metrics?.spend,
 				activity: placeholders ? null : ctx.breadboardActivity,
 				elapsedMs: placeholders ? null : ctx.turnElapsedMs,
 				context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
 				inputTokens: placeholders ? undefined : ctx.usageStats.input,
 				outputTokens: placeholders ? undefined : ctx.usageStats.output,
-				vim:
-					ctx.vim && ctx.vim.display !== "none"
-						? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
-						: undefined,
+				vim: ctx.vim?.display !== "none" ? ctx.vim?.mode : undefined,
 			};
 			const preset = effectiveSettings.preset ?? "bb-balanced";
 			if (layout === "box" || layout === "band" || layout === "plain-right") {
-				const rows = renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard);
-				return { content: rows.top, overflow: rows.bottom };
+				return renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard).top;
 			}
-			return { content: renderBreadboardStatusLine(snapshot, preset, width, layout, effectiveSettings.breadboard) };
+			return renderBreadboardStatusLine(snapshot, preset, width, layout, effectiveSettings.breadboard);
 		}
 		const separatorDef = plain
-			? {
-					left: theme.getSymbolPreset() === "ascii" ? "|" : "·",
-					right: theme.getSymbolPreset() === "ascii" ? "|" : "·",
-				}
+			? { left: "·", right: "·" }
 			: getSeparator(effectiveSettings.separator ?? "powerline-thin", theme);
 
-		// Transparent bars inherit the terminal's default background. Powerline
-		// end caps need a contrasting fill, so they are also dropped in plain mode.
-		const colorEnabled = theme.getColorMode() !== "none";
-		const transparentBgAnsi = colorEnabled ? "\x1b[49m" : "";
+		// `transparent` reuses the empty-string sentinel (`\x1b[49m`) so the bar
+		// inherits the terminal's default background, matching custom themes that
+		// set `statusLineBg: ""`. Powerline end caps need a contrasting fill to
+		// bridge the bar into the surrounding terminal; without one they read as
+		// stray glyphs, so the cap renderer drops them when the fill is empty.
+		const TRANSPARENT_BG_ANSI = "\x1b[49m";
 		const themeBgAnsi = theme.getBgAnsi("statusLineBg");
+		// Plain bottom bars drop the background entirely; the claude top-rule
+		// chip (`plain-right`) keeps it so the group reads as a chip on the rule.
 		const transparentLayout = layout === "plain-full" || layout === "plain-left";
-		const transparentBg =
-			!colorEnabled || transparentLayout || effectiveSettings.transparent || themeBgAnsi === "\x1b[49m";
-		const bgAnsi = transparentBg ? transparentBgAnsi : themeBgAnsi;
+		const bgAnsi = transparentLayout || effectiveSettings.transparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
+		const transparentBg = bgAnsi === TRANSPARENT_BG_ANSI;
 		const fgAnsi = theme.getFgAnsi("text");
 		const sepAnsi = theme.getFgAnsi("statusLineSep");
 		const subagentBadge = this.#subagentBadgeText();
@@ -2753,10 +2709,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				: embeddedContextGaugeMinWidth(ctx.contextPercent ?? 0, ctx.contextWindow)
 			: 0;
 		const minimumGapWidth = (): number => {
-			if (!embeddedContextWidth) {
-				if (plain) return left.length > 0 && right.length > 0 ? 1 : 0;
-				return left.length > 0 || right.length > 0 ? 1 : 0;
-			}
+			if (!embeddedContextWidth) return left.length > 0 && right.length > 0 ? 1 : 0;
 			// If the labels cannot coexist with the last surviving segment, fall
 			// back to the original one-cell gauge instead of dropping the entire
 			// status line. At this width the labels cannot render either way.
@@ -2858,7 +2811,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 			let content = bgAnsi + fgAnsi;
 			content += ` ${parts.join(` ${sepAnsi}${sep}${fgAnsi} `)} `;
-			if (colorEnabled) content += "\x1b[0m";
+			content += "\x1b[0m";
 
 			if (direction === "right") return capText + content;
 			return openText + content + capText;
@@ -2866,24 +2819,22 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 		const leftGroup = renderGroup(left, "left");
 		const rightGroup = renderGroup(right, "right");
-		if (!leftGroup && !rightGroup) return { content: "" };
+		if (!leftGroup && !rightGroup) return "";
 
 		if (topFillWidth === 0 || (plain && (left.length === 0 || right.length === 0))) {
-			return { content: leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup };
+			return leftGroup + (leftGroup && rightGroup ? " " : "") + rightGroup;
 		}
 
 		const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
 		if (plain) {
 			// Standalone composers: no gauge line between the groups, just air.
-			return { content: leftGroup + padding(gapWidth) + rightGroup };
+			return leftGroup + padding(gapWidth) + rightGroup;
 		}
 		// Box layout: with one group absent (an unnamed session hides
 		// `session_name`, emptying the default preset's right group) the gauge
 		// runs to the border edge instead of disappearing, so embedded context
 		// labels don't fall back to a context chip until the session is titled.
-		return {
-			content: leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup,
-		};
+		return leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup;
 	}
 
 	/**
@@ -2905,13 +2856,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const sessionName =
 			effectiveSettings.sessionAccent !== false ? this.session.sessionManager?.getSessionName() : undefined;
 		const accentHex = sessionName ? getSessionAccentHex(sessionName, theme.sessionAccentInputs) : undefined;
-		const usedColor = accentHex ? theme.getCustomColorAnsi(accentHex) : theme.getFgAnsi("borderAccent");
+		const usedColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("borderAccent");
 		const horizontal = theme.boxRound.horizontal;
-		const contextMode = effectiveSettings.contextLine ?? "embedded";
+		const mode = effectiveSettings.contextLine ?? "embedded";
 		const pct = ctx.contextPercent;
-		if (contextMode === "off" || pct === null || pct === undefined) {
-			const line = horizontal.repeat(gapWidth);
-			return usedColor ? `\x1b[49m${usedColor}${line}\x1b[39m` : line;
+		if (mode === "off" || pct === null || pct === undefined) {
+			return `\x1b[49m${usedColor}${horizontal.repeat(gapWidth)}\x1b[39m`;
 		}
 
 		const clampedPct = Math.min(100, Math.max(0, pct));
@@ -2952,7 +2902,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// the line is long enough for the markers to read as positions.
 		let speculationIdx = -1;
 		let thresholdIdx = -1;
-		if ((contextMode === "annotated" || contextMode === "embedded") && ctx.autoCompactEnabled && gapWidth >= 8) {
+		if ((mode === "annotated" || mode === "embedded") && ctx.autoCompactEnabled && gapWidth >= 8) {
 			const boundaries = this.#compactionBoundaries(ctx.contextWindow);
 			if (boundaries) {
 				const cellFor = (percent: number) =>
@@ -2993,10 +2943,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const overflowColor = theme.getFgAnsi("error");
 		const rawAccentHex = accentHex ?? theme.getColorHex("borderAccent");
 		const dimmedAccentHex = adjustHsv(rawAccentHex, { s: 0.7, v: 0.75 });
-		const thresholdColor = theme.getCustomColorAnsi(dimmedAccentHex) || usedColor;
+		const thresholdColor = getSessionAccentAnsi(dimmedAccentHex) ?? usedColor;
 
-		const colorEnabled = theme.getColorMode() !== "none";
-		let out = colorEnabled ? "\x1b[49m" : "";
+		let out = "\x1b[49m";
 		let activeColor = "";
 		for (let i = 0; i < gapWidth; i++) {
 			let color = i < usedCount ? usedColor : unusedColor;
@@ -3020,7 +2969,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			}
 			out += glyph;
 		}
-		return colorEnabled ? `${out}\x1b[39m` : out;
+		return `${out}\x1b[39m`;
 	}
 
 	/** Auto-compaction boundary percents, or null when unavailable (disabled, no window). */
@@ -3038,54 +2987,23 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		return this.#buildStatusLine(width, layout, undefined, { placeholders: true }).content;
 	}
 
-	#renderTopBorder(
-		width: number,
-		layout: "box" | "band" | "plain-right",
-		previewTitle?: string,
-	): { content: string; width: number; revision: number } {
-		const cacheable =
-			!isBreadboardPreset(this.#resolveSettings().preset) &&
-			this.getTurnElapsedMs() === null &&
-			this.#brandFade === null &&
-			this.session.compactionSpeculation !== "running" &&
-			this.#loopModeStatus === null &&
-			this.#vibeWorkerTokenRate === null &&
-			this.#cachedUsage === null &&
-			this.#lastTokensPerSecond === null &&
-			(this.#activeRepoCache?.repository === null || this.#activeRepoCache?.repository === undefined);
-		const cached = this.#topBorderCache;
-		if (
-			cacheable &&
-			cached?.width === width &&
-			cached.layout === layout &&
-			cached.previewTitle === previewTitle &&
-			cached.revision === this.#renderRevision
-		) {
-			if (this.#gitWatcherUnavailable) {
-				this.#scheduleRepositoryProbe(this.#resolveActiveRepoCache());
-			}
-			return cached.result;
-		}
-
-		const line = this.#buildStatusLine(width, layout, previewTitle);
-		const result = {
-			content: line.dimmedContent,
-			width: line.width,
+	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
+		const statusLine = this.#buildStatusLine(width, "box", previewTitle);
+		return {
+			content: statusLine.dimmedContent,
+			width: statusLine.width,
 			revision: this.#renderRevision,
 		};
-		this.#topBorderCache = cacheable
-			? { width, layout, previewTitle, revision: this.#renderRevision, result }
-			: undefined;
-		return result;
-	}
-
-	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		return this.#renderTopBorder(width, "box", previewTitle);
 	}
 
 	/** Flush-left soft-capped powerline band (the band composer's top row). */
 	getBandTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		return this.#renderTopBorder(width, "band", previewTitle);
+		const statusLine = this.#buildStatusLine(width, "band", previewTitle);
+		return {
+			content: statusLine.dimmedContent,
+			width: statusLine.width,
+			revision: this.#renderRevision,
+		};
 	}
 
 	/** Dim the whole bar while focus-proxied. Group/cap terminators emit full
@@ -3103,28 +3021,26 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * `bottomBarGap` inserts a blank spacer row above the bar for styles whose
 	 * editor has no bottom chrome.
 	 */
-	setComposerStyle(
-		style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">,
-		topBorderWidth?: (width: number) => number,
-	): void {
+	setComposerStyle(style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">): void {
 		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
 		this.#topAttachment = style.statusAttachment;
 		this.#standaloneGap = style.bottomBarGap;
-		this.#topBorderWidth =
-			topBorderWidth ?? (width => (style.statusAttachment === "top-border" ? Math.max(1, width - 6) : width));
-		this.#clearRenderedOutput();
 		this.#syncPricingTimer();
 	}
 
 	/** While true, the standalone bar yields its row to the editor's autocomplete menu. */
 	setAutocompleteActiveProbe(probe: (() => boolean) | undefined): void {
 		this.#autocompleteActiveProbe = probe;
-		this.#clearRenderedOutput();
 	}
 
 	/** Plain right-group content for the claude composer's top rule. */
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		return this.#renderTopBorder(width, "plain-right", previewTitle);
+		const statusLine = this.#buildStatusLine(width, "plain-right", previewTitle);
+		return {
+			content: statusLine.dimmedContent,
+			width: statusLine.width,
+			revision: this.#renderRevision,
+		};
 	}
 
 	/**
@@ -3135,18 +3051,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 */
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string {
 		return this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle).dimmedContent;
-	}
-
-	/** Overflow shares the exact top-row allocation, including its inner chrome width. */
-	renderOverflowBar(
-		width: number,
-		topWidth: number,
-		layout: "box" | "band" | "plain-right",
-		previewTitle?: string,
-	): string | undefined {
-		if (!isBreadboardPreset(this.#resolveSettings().preset)) return undefined;
-		const overflow = this.#buildStatusLine(topWidth, layout, previewTitle).overflow;
-		return overflow ? padding(Math.max(0, Math.floor((width - topWidth) / 2))) + overflow : "";
 	}
 	/**
 	 * Status bar lines for a composer layout, rendered through the real
@@ -3179,11 +3083,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			});
 			if (rule !== undefined) lines.push(rule);
 		}
-		if (isBreadboardPreset(this.#resolveSettings().preset) && attachment !== "none") {
-			const layout = attachment === "top-border" ? "box" : attachment === "top-band" ? "band" : "plain-right";
-			const overflow = this.renderOverflowBar(width, width, layout);
-			if (overflow) lines.push(overflow);
-		} else if (bottomBar !== "none") {
+		if (bottomBar !== "none") {
 			const main = this.renderBottomBar(width, bottomBar);
 			if (main) lines.push(main);
 		}
@@ -3191,35 +3091,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	}
 
 	render(width: number): readonly string[] {
-		const autocompleteActive = this.#autocompleteActiveProbe?.() === true;
-		const bucket = Math.floor(Date.now() / STATUS_RENDER_CACHE_MS);
-		const cacheable =
-			this.getTurnElapsedMs() === null &&
-			!isBreadboardPreset(this.#resolveSettings().preset) &&
-			this.#brandFade === null &&
-			this.session.compactionSpeculation !== "running";
-		const cached = this.#renderCache;
-		if (
-			cacheable &&
-			cached?.width === width &&
-			cached.revision === this.#renderRevision &&
-			cached.bucket === bucket &&
-			cached.standalone === this.#standalone &&
-			cached.autocompleteActive === autocompleteActive
-		) {
-			return cached.lines;
-		}
-
 		const lines: string[] = [];
-		if (isBreadboardPreset(this.#resolveSettings().preset) && this.#topAttachment !== "none" && !autocompleteActive) {
-			const layout =
-				this.#topAttachment === "top-border" ? "box" : this.#topAttachment === "top-band" ? "band" : "plain-right";
-			const overflow = this.renderOverflowBar(width, this.#topBorderWidth(width), layout);
-			if (overflow) {
-				if (this.#standaloneGap) lines.push("");
-				lines.push(overflow);
-			}
-		} else if (this.#standalone && !autocompleteActive) {
+		if (this.#standalone && !this.#autocompleteActiveProbe?.()) {
 			const content = this.renderBottomBar(width, this.#standalone === "left-only" ? "left" : "full");
 			if (content) {
 				if (this.#standaloneGap) lines.push("");
@@ -3230,16 +3103,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		if (showHooks && this.#sortedHookStatuses.length > 0) {
 			lines.push(...this.#sortedHookStatuses.map(text => truncateToWidth(sanitizeStatusText(text), width)));
 		}
-		this.#renderCache = cacheable
-			? {
-					width,
-					revision: this.#renderRevision,
-					bucket,
-					standalone: this.#standalone,
-					autocompleteActive,
-					lines,
-				}
-			: undefined;
 		return lines;
 	}
 }

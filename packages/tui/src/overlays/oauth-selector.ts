@@ -7,32 +7,43 @@ import {
 	Spacer,
 	TruncatedText,
 } from "../index";
-import type { AuthCredentialView, AuthProviderView, ProviderAuthReadPort } from "../../breadboard/provider-auth-port";
 import { theme } from "../theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { OverlayPanel } from "../chrome/overlay-box";
 import { MenuSelection } from "../components/menu-selection";
 import { centeredViewportRange } from "../components/scroll-viewport";
 
+export type AuthSchemeId = "api_key" | "oauth2";
+export type AuthCredentialStatus = "active" | "disabled" | "revoked" | "reauthorization_required" | "quarantined";
+export interface AuthProviderView {
+	readonly providerId: string;
+	readonly displayName: string;
+	readonly supportTier: "core" | "unsupported";
+	readonly authOwner: "broker" | "provider";
+	readonly available: boolean;
+	readonly availabilityReason?: "provider_managed" | "missing_auth" | "unsupported" | null;
+	readonly authSchemes: readonly AuthSchemeId[];
+	readonly loginAvailable: boolean;
+	readonly storeCredentialsAs?: string;
+}
+export interface AuthCredentialView {
+	readonly providerId: string;
+	readonly status: AuthCredentialStatus;
+	readonly source?: string;
+}
+export interface ProviderAuthReadPort {
+	listProviders(): Promise<ReadonlyArray<AuthProviderView>>;
+	listCredentials(providerId?: string): Promise<ReadonlyArray<AuthCredentialView>>;
+	listProvidersSync?(): ReadonlyArray<AuthProviderView>;
+	listCredentialsSync?(providerId?: string): ReadonlyArray<AuthCredentialView>;
+}
+
 type SelectorProvider = AuthProviderView & {
 	readonly id: string;
 	readonly name: string;
 	readonly storeCredentialsAs?: string;
 };
-
 const OAUTH_SELECTOR_MAX_VISIBLE = 10;
-
-/** Credential presence and provenance needed by the provider picker. */
-export interface OAuthSelectorAuthSource {
-	has(providerId: string): boolean;
-	hasAuth(providerId: string): boolean;
-	getCredentialOrigin(providerId: string):
-		| {
-				kind: "runtime" | "config" | "oauth" | "api_key" | "env" | "fallback";
-				envVar?: string;
-		  }
-		| undefined;
-}
 
 /**
  * Rendered lines before the provider rows: top border
@@ -41,7 +52,7 @@ export interface OAuthSelectorAuthSource {
 const LIST_ROW_OFFSET = 1;
 
 /** Compact, human-readable tag for each credential-origin leg. */
-const ORIGIN_LABELS: Record<string, string> = {
+const ORIGIN_LABELS = {
 	runtime: "--api-key",
 	config: "config",
 	oauth: "login",
@@ -55,6 +66,8 @@ const ORIGIN_LABELS: Record<string, string> = {
 export class OAuthSelectorComponent extends OverlayPanel {
 	#listContainer: Container;
 	#menu: MenuSelection<SelectorProvider>;
+	#allProviders: SelectorProvider[] = [];
+	#filteredProviders: SelectorProvider[] = [];
 	#hoveredIndex: number | null = null;
 	/** First provider index of the visible ScrollView window (last #updateList). */
 	#scrollStart = 0;
@@ -72,9 +85,9 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#validateAuthCallback?: (providerId: string) => Promise<boolean>;
 	#requestRenderCallback?: () => void;
 	#authState: Map<string, "checking" | "valid" | "invalid"> = new Map();
-	#spinnerFrame: number = 0;
+	#spinnerFrame = 0;
 	#spinnerInterval?: NodeJS.Timeout;
-	#validationGeneration: number = 0;
+	#validationGeneration = 0;
 	readonly ready: Promise<void>;
 	constructor(
 		mode: "login" | "logout" | "revoke",
@@ -100,6 +113,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		this.#onCancelCallback = onCancel;
 		this.#validateAuthCallback = options?.validateAuth;
 		this.#requestRenderCallback = options?.requestRender;
+		this.#disabledProviders = options?.disabledProviders ?? [];
 		this.#menu = new MenuSelection<SelectorProvider>([], {
 			getKey: provider => provider.id,
 			getSearchText: provider => this.#getProviderSearchText(provider),
@@ -129,6 +143,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		this.#stopSpinner();
 	}
 
+
 	/**
 	 * Fit the selector into `lines` rendered rows by shrinking the visible list
 	 * window (the window is centered on the selection, so the selected row is
@@ -152,6 +167,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			return this.#mode === "revoke" ? credential.status !== "revoked" : credential.status === "active";
 		});
 	}
+
 	#canLogin(provider: AuthProviderView): boolean {
 		if (
 			provider.supportTier !== "core" ||
@@ -160,17 +176,12 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		) {
 			return false;
 		}
-		return (
-			provider.authSchemes.includes("api_key") ||
-			(provider.authSchemes.includes("oauth2") && provider.loginAvailable)
-		);
+		return provider.authSchemes.includes("api_key") || (provider.authSchemes.includes("oauth2") && provider.loginAvailable);
 	}
 
 	#availabilityLabel(provider: AuthProviderView): string {
 		if (this.#mode !== "login") return "";
-		if (provider.availabilityReason === "missing_auth") {
-			return theme.fg("muted", " (credentials required)");
-		}
+		if (provider.availabilityReason === "missing_auth") return theme.fg("muted", " (credentials required)");
 		if (this.#canLogin(provider)) return "";
 		const reason = provider.availabilityReason === "provider_managed" ? "provider managed" : "unavailable";
 		return theme.fg("muted", ` (${reason})`);
@@ -179,32 +190,26 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#applyProviders(providers: ReadonlyArray<AuthProviderView>, credentials: ReadonlyArray<AuthCredentialView>): void {
 		this.#loading = false;
 		this.#credentials = credentials.map(credential => ({ ...credential }));
-		const rows = providers.map(provider => ({
-			...provider,
-			id: provider.providerId,
-			name: provider.displayName,
-		}));
+		const rows = providers.map(provider => ({ ...provider, id: provider.providerId, name: provider.displayName }));
 		if (this.#mode !== "login") {
 			this.#allProviders = rows.filter(provider => this.#hasSelectableAuth(provider.id));
 		} else {
-			const disabled = getDisabledProviderIds();
+			const disabled = new Set(this.#disabledProviders);
 			this.#allProviders = rows.filter(
-				provider =>
-					!disabled.has(provider.id) &&
-					!(provider.storeCredentialsAs && disabled.has(provider.storeCredentialsAs)),
+				provider => !disabled.has(provider.id) && !(provider.storeCredentialsAs && disabled.has(provider.storeCredentialsAs)),
 			);
 		}
+		this.#menu.setItems(this.#allProviders);
 		this.#filteredProviders = this.#allProviders;
 		this.#updateList();
 		this.#startValidation();
 		this.#requestRenderCallback?.();
 	}
 
+	#disabledProviders: readonly string[] = [];
+
 	async #loadProviders(): Promise<void> {
-		const [providers, credentials] = await Promise.all([
-			this.#dataSource.listProviders(),
-			this.#dataSource.listCredentials(),
-		]);
+		const [providers, credentials] = await Promise.all([this.#dataSource.listProviders(), this.#dataSource.listCredentials()]);
 		if (this.#closed) return;
 		this.#applyProviders(providers, credentials);
 	}
@@ -275,12 +280,10 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	 */
 	#getSourceLabel(providerId: string): string {
 		const credential = this.#credentials.find(
-			item =>
-				item.providerId === providerId &&
-				(this.#mode === "revoke" ? item.status !== "revoked" : item.status === "active"),
+			item => item.providerId === providerId && (this.#mode === "revoke" ? item.status !== "revoked" : item.status === "active"),
 		);
 		if (!credential?.source) return "";
-		const detail = ORIGIN_LABELS[credential.source] ?? credential.source;
+		const detail = ORIGIN_LABELS[credential.source as keyof typeof ORIGIN_LABELS] ?? credential.source;
 		return theme.fg("muted", ` (${detail})`);
 	}
 
@@ -320,8 +323,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#getProviderSearchText(provider: SelectorProvider): string {
 		let text = `${provider.name} ${provider.id}`;
 		const credential = this.#credentials.find(item => item.providerId === provider.id && item.status === "active");
-		if (credential?.source)
-			text += ` logged in authenticated ${ORIGIN_LABELS[credential.source] ?? credential.source}`;
+		if (credential?.source) text += ` logged in authenticated ${ORIGIN_LABELS[credential.source as keyof typeof ORIGIN_LABELS] ?? credential.source}`;
 		if (!this.#canLogin(provider)) text += ` ${provider.availabilityReason ?? "unavailable"}`;
 		return text;
 	}
@@ -365,7 +367,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		for (let i = startIndex; i < endIndex; i++) {
 			const provider = items[i];
 			if (!provider) continue;
-const isSelected = i === this.#menu.selectedIndex;
+			const isSelected = i === this.#menu.selectedIndex;
 			const isAvailable = this.#mode !== "login" || this.#canLogin(provider);
 			const statusIndicator = this.#getStatusIndicator(provider.id);
 			const availabilityLabel = this.#availabilityLabel(provider);
@@ -400,11 +402,10 @@ const isSelected = i === this.#menu.selectedIndex;
 		if (this.#shouldRenderSearchStatus()) {
 			this.#listContainer.addChild(new TruncatedText(this.#renderStatusLine(total), 0, 0));
 		}
-
 		if (total === 0 && !this.#statusMessage) {
 			const message = this.#loading
 				? "Loading providers…"
-				: this.#menu.items.length > 0
+				: this.#allProviders.length > 0
 					? "No matching providers"
 					: this.#mode === "login"
 						? "No providers available"

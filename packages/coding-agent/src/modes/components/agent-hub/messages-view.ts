@@ -3,11 +3,27 @@ import { Snowflake } from "@oh-my-pi/pi-utils";
 import type { IrcBus, IrcHistoryRecord, IrcReadCursor } from "../../../irc/bus";
 import { deriveIrcConversations, type IrcConversation } from "../../../irc/conversations";
 import { type AgentRegistry, MAIN_AGENT_ID } from "../../../registry/agent-registry";
-import { truncateToWidth } from "../../../tools/render-utils";
-import { theme } from "../../theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
-import { sanitizeDisplayText, sanitizeLine } from "../agent-hub-renderer";
-import { bottomBorder, divider, row, topBorder } from "../overlay-box";
+import { truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import { theme } from "@oh-my-pi/pi-tui/theme/theme";
+import { matchesSelectDown, matchesSelectUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
+import { sanitizeLine } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+import { sanitizeDisplaySingleLine, sanitizeDisplayText } from "@oh-my-pi/pi-tui/overlays/extensions/display-text";
+import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/chrome/overlay-box";
+import type { AgentHubRemote } from "@oh-my-pi/pi-tui/overlays/agent-hub";
+function isIrcHistoryRecord(value: unknown): value is IrcHistoryRecord {
+	if (typeof value !== "object" || value === null) return false;
+	const record = value as { message?: unknown; outcome?: unknown; updatedAt?: unknown };
+	if (typeof record.outcome !== "string" || typeof record.updatedAt !== "number") return false;
+	if (typeof record.message !== "object" || record.message === null) return false;
+	const message = record.message as { id?: unknown; from?: unknown; to?: unknown; body?: unknown; ts?: unknown };
+	return (
+		typeof message.id === "string" &&
+		typeof message.from === "string" &&
+		typeof message.to === "string" &&
+		typeof message.body === "string" &&
+		typeof message.ts === "number"
+	);
+}
 
 function activityClock(timestamp: number): string {
 	return new Date(timestamp).toLocaleTimeString(undefined, {
@@ -18,20 +34,6 @@ function activityClock(timestamp: number): string {
 	});
 }
 
-export interface AgentHubRemoteTranscript {
-	text: string;
-	newSize: number;
-	error?: string;
-}
-
-export interface AgentHubRemote {
-	chat(id: string, text: string): void;
-	kill(id: string): void;
-	revive(id: string): void;
-	readMessages?(): Promise<IrcHistoryRecord[] | null>;
-	sendMessage?(to: string, body: string, replyTo?: string): Promise<string | undefined>;
-	readTranscript(id: string, fromByte: number): Promise<AgentHubRemoteTranscript | null>;
-}
 
 export interface AgentHubMessagesViewDeps {
 	registry: AgentRegistry;
@@ -237,7 +239,7 @@ export class AgentHubMessagesView {
 		try {
 			const records = await this.#remote.readMessages();
 			if (!records || this.#disposed) return;
-			this.#remoteHistoryRecords = records;
+			this.#remoteHistoryRecords = records.filter(isIrcHistoryRecord);
 			this.#refreshMessages();
 			this.#requestRender();
 		} finally {
@@ -584,7 +586,7 @@ export class AgentHubMessagesView {
 							body,
 							replyTo: this.#messageReplyTo,
 							broadcastId,
-						}),
+						} as Parameters<IrcBus["send"]>[0]),
 					),
 				);
 				const failed = receipts.filter(receipt => receipt.outcome === "failed").length;

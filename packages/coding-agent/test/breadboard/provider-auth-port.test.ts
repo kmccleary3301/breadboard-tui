@@ -9,9 +9,9 @@ import type {
 	ProviderAuthPort,
 } from "../../src/breadboard/provider-auth-port";
 import { createNativeProviderAuthDataSource } from "../../src/modes/components/oauth-provider-data-source";
-import { OAuthSelectorComponent } from "../../src/modes/components/oauth-selector";
+import { OAuthSelectorComponent } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
 import { SelectorController } from "../../src/modes/controllers/selector-controller";
-import { initTheme } from "../../src/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "../../src/modes/types";
 import * as openModule from "../../src/utils/open";
 

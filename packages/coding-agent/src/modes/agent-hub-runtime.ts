@@ -1,9 +1,13 @@
 import * as fs from "node:fs";
-import type { AgentHubDeps, AgentHubRemote } from "@oh-my-pi/pi-tui/overlays/agent-hub";
+import type { AgentHubDeps, AgentHubRemote, AgentHubViewFactory } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import type { AgentTranscriptSource } from "@oh-my-pi/pi-tui/overlays/agent-transcript-viewer";
+import { nativeControlRestriction } from "../breadboard/native-control-policy";
+import type { HarnessPort, HarnessSnapshot } from "../breadboard/harness-port";
 import { AgentActivityIndex } from "../activity";
 import { getRoleInfo } from "../config/model-roles";
 import type { Settings } from "../config/settings";
+import { AgentHubMessagesView } from "./components/agent-hub/messages-view";
+import { HarnessView, type HarnessPanel } from "./components/agent-hub/harness-view";
 import { IrcBus } from "../irc/bus";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry } from "../registry/agent-registry";
@@ -27,20 +31,54 @@ export function createAgentHubRuntime(
 		remote?: AgentHubRemote;
 		settings?: Settings;
 		sessionFile?: string | null;
+		harnessPort?: HarnessPort;
+		mainStreamOwnsTurnLifecycle?: boolean;
 	} = {},
 ): Pick<
 	AgentHubDeps<AgentRef>,
-	"registry" | "lifecycle" | "irc" | "activity" | "manageActivityLive" | "transcript" | "loadPersisted" | "getRoleInfo"
+	| "registry"
+	| "lifecycle"
+	| "irc"
+	| "activity"
+	| "manageActivityLive"
+	| "transcript"
+	| "loadPersisted"
+	| "getRoleInfo"
+	| "viewFactory"
+	| "nativeMutationRestriction"
 > {
 	const registry = options.registry ?? AgentRegistry.global();
+	const irc = options.irc ?? IrcBus.global();
+	const activity = options.activity ?? new AgentActivityIndex({ remote: options.remote });
+	const viewFactory: AgentHubViewFactory = context => ({
+		messages: new AgentHubMessagesView({
+			registry,
+			irc,
+			remote: options.remote,
+			renderTabs: context.renderTabs,
+			requestRender: context.requestRender,
+			onDone: context.onDone,
+			switchSection: () => context.switchSection("activity"),
+			managePeer: context.managePeer,
+			mutationRestriction: context.mutationRestriction,
+		}),
+		harness: new HarnessView({
+			getSnapshot: () => (options.harnessPort?.current() ?? context.harnessSnapshot()) as HarnessSnapshot | null,
+			requestRender: context.requestRender,
+			initialPanel: context.initialHarnessPanel as HarnessPanel | undefined,
+			renderTabs: context.renderTabs,
+		}),
+	});
 	return {
 		registry,
 		lifecycle: () => options.lifecycle ?? AgentLifecycleManager.global(),
-		irc: options.irc ?? IrcBus.global(),
-		activity: options.activity ?? new AgentActivityIndex({ remote: options.remote }),
+		irc,
+		activity,
 		manageActivityLive: !options.activity,
 		transcript: agentTranscriptSource,
 		loadPersisted: shouldContinue => registerPersistedSubagents(registry, options.sessionFile, { shouldContinue }),
 		getRoleInfo: options.settings ? role => getRoleInfo(role, options.settings!) : undefined,
+		viewFactory,
+		nativeMutationRestriction: () => nativeControlRestriction("subagents", options.mainStreamOwnsTurnLifecycle === true),
 	};
 }
