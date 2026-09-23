@@ -186,15 +186,19 @@ export function validateSessionTranscript(value: unknown): readonly HarnessValid
 	return validateBundledSchema(SESSION_TRANSCRIPT_SCHEMA_ID, value);
 }
 
-/** File name of the export inside the session's artifacts directory. */
-export const SESSION_TRANSCRIPT_FILE = "bb-transcript.v2.json";
+const SESSION_ID_FILE_NAME = /^[A-Za-z0-9._-]+$/u;
 
 /**
- * Where the transcript goes: the session's artifacts directory (`<session file without .jsonl>/`). OMP moves and
- * deletes that directory with the session, and session listing reads only `*.jsonl` there.
+ * Where the transcript for session `sessionId` goes: `bb-transcript.v2.<sessionId>.json` in the session's artifacts
+ * directory (`<session file without .jsonl>/`). OMP moves and deletes that directory with the session, and session
+ * listing reads only `*.jsonl` there. The id in the name keeps a copy honest: `/fork` copies the parent's artifacts
+ * into the child's, and the copied file still names the parent session it describes.
  */
-export function sessionTranscriptPath(artifactsDir: string): string {
-	return join(artifactsDir, SESSION_TRANSCRIPT_FILE);
+export function sessionTranscriptPath(artifactsDir: string, sessionId: string): string {
+	if (!SESSION_ID_FILE_NAME.test(sessionId) || sessionId === "." || sessionId === "..") {
+		throw new Error(`OMP session id ${JSON.stringify(sessionId)} cannot name a transcript file`);
+	}
+	return join(artifactsDir, `bb-transcript.v2.${sessionId}.json`);
 }
 
 /**
@@ -210,8 +214,8 @@ export async function writeSessionTranscript(artifactsDir: string, transcript: S
 			.join("; ");
 		throw new Error(`bb.session_transcript.v2 export is invalid (${findings.length} finding(s)): ${summary}`);
 	}
+	const path = sessionTranscriptPath(artifactsDir, transcript.session_id);
 	await mkdir(artifactsDir, { recursive: true });
-	const path = sessionTranscriptPath(artifactsDir);
 	const temporary = `${path}.${process.pid}.tmp`;
 	await writeFile(temporary, `${JSON.stringify(transcript, null, 2)}\n`, "utf8");
 	await rename(temporary, path);

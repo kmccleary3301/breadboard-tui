@@ -1,8 +1,8 @@
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { copySessionArtifacts, SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	buildSessionTranscript,
 	readSessionTranscriptSource,
@@ -153,17 +153,17 @@ describe("bb.session_transcript.v2 export", () => {
 		await expect(writeSessionTranscript(artifactsDir, transcript)).rejects.toThrow(
 			"bb.session_transcript.v2 export is invalid",
 		);
-		expect(await Bun.file(sessionTranscriptPath(artifactsDir)).exists()).toBe(false);
+		expect(await readdir(artifactsDir).catch(() => [])).toEqual([]);
 	});
 
 	test("the transcript lives in the artifacts directory without changing listing or resume", async () => {
 		const { manager, cwd, sessionDir, file, artifactsDir } = await recordedSession();
 		const before = await readFile(file, "utf8");
 		const written = await writeSessionTranscript(artifactsDir, await transcriptOf(manager));
-		expect(written).toBe(join(artifactsDir, "bb-transcript.v2.json"));
+		expect(written).toBe(join(artifactsDir, `bb-transcript.v2.${manager.getSessionId()}.json`));
 		expect(JSON.parse(await readFile(written, "utf8"))).toEqual(await transcriptOf(manager));
 		// The export leaves no temporary file behind.
-		expect(await readdir(artifactsDir)).toEqual(["bb-transcript.v2.json"]);
+		expect(await readdir(artifactsDir)).toEqual([basename(written)]);
 
 		expect(await readFile(file, "utf8")).toBe(before);
 		const listed = await SessionManager.list(cwd, sessionDir);
@@ -174,21 +174,40 @@ describe("bb.session_transcript.v2 export", () => {
 		expect(transcript.items.map(item => item.event_id)).toEqual(reopened.getBranch().map(entry => entry.id));
 	});
 
-	test("the transcript moves and is deleted with its session", async () => {
+	test("the transcript moves and is deleted with its session, and a fork's copy keeps the parent's name", async () => {
 		const moved = await recordedSession();
+		const id = moved.manager.getSessionId();
 		await writeSessionTranscript(moved.artifactsDir, await transcriptOf(moved.manager));
 		const target = await mkdtemp(join(tmpdir(), "bb-transcript-moved-"));
 		directories.push(target);
 		await moved.manager.moveTo(moved.cwd, target);
 		const movedArtifacts = moved.manager.getArtifactsDir();
 		if (movedArtifacts === null) throw new Error("moved session has no artifacts directory");
-		expect(await Bun.file(sessionTranscriptPath(movedArtifacts)).exists()).toBe(true);
-		expect(await Bun.file(sessionTranscriptPath(moved.artifactsDir)).exists()).toBe(false);
+		expect(await Bun.file(sessionTranscriptPath(movedArtifacts, id)).exists()).toBe(true);
+		expect(await Bun.file(sessionTranscriptPath(moved.artifactsDir, id)).exists()).toBe(false);
 
 		const dropped = await recordedSession();
-		await writeSessionTranscript(dropped.artifactsDir, await transcriptOf(dropped.manager));
+		const droppedPath = await writeSessionTranscript(dropped.artifactsDir, await transcriptOf(dropped.manager));
 		await dropped.manager.dropSession(dropped.file);
-		expect(await Bun.file(sessionTranscriptPath(dropped.artifactsDir)).exists()).toBe(false);
+		expect(await Bun.file(droppedPath).exists()).toBe(false);
+
+		const parent = await recordedSession();
+		await writeSessionTranscript(parent.artifactsDir, await transcriptOf(parent.manager));
+		const child = SessionManager.create(parent.cwd, parent.sessionDir);
+		child.appendMessage({ role: "user", content: "forked", timestamp: 7 });
+		await child.ensureOnDisk();
+		const childFile = child.getSessionFile();
+		const childArtifacts = child.getArtifactsDir();
+		if (childFile === undefined || childArtifacts === null) throw new Error("child session has no file");
+		await copySessionArtifacts(parent.file, childFile);
+		const copied = sessionTranscriptPath(childArtifacts, parent.manager.getSessionId());
+		expect(JSON.parse(await readFile(copied, "utf8")).session_id).toBe(parent.manager.getSessionId());
+		expect(await Bun.file(sessionTranscriptPath(childArtifacts, child.getSessionId())).exists()).toBe(false);
+	});
+
+	test("a session id that cannot name a file is refused", () => {
+		expect(() => sessionTranscriptPath("/tmp/artifacts", "../escape")).toThrow("cannot name a transcript file");
+		expect(() => sessionTranscriptPath("/tmp/artifacts", "..")).toThrow("cannot name a transcript file");
 	});
 
 	test("items hold entries as the session file persisted them, not the in-memory copies", async () => {
