@@ -48,7 +48,7 @@ describe("native stage machine", () => {
 		machine.endTurn(true);
 		expect(machine.current.mode).toBe("build");
 	});
-	test("resets plan turns for the next agent run", () => {
+	test("resets plan turns while preserving the session's disabled plan mode", () => {
 		const machine = createNativeStageMachine(
 			lock([{ if: "features.plan", then: { mode: "plan" } }, { mode: "build" }], true, 2),
 			[stage("plan"), stage("build")],
@@ -56,14 +56,14 @@ describe("native stage machine", () => {
 		machine.endTurn(true);
 		expect(machine.planTurns).toBe(1);
 		expect(machine.current.mode).toBe("plan");
+		machine.endTurn(true);
+		expect(machine.current.mode).toBe("build");
 
-		// Python creates fresh SessionState metadata for each run
-		// (`agent_llm_openai.py:5736-5844`, `modes.py:1018-1020`).
+		// Python creates fresh SessionState metadata but keeps the persistent config
+		// (`agent_llm_openai.py:5736-5848`, `modes.py:1018-1020`).
 		machine.reset();
 		expect(machine.planTurns).toBe(0);
-		expect(machine.current.mode).toBe("plan");
-		machine.endTurn(true);
-		expect(machine.current.mode).toBe("plan");
+		expect(machine.current.mode).toBe("build");
 		machine.endTurn(true);
 		expect(machine.current.mode).toBe("build");
 	});

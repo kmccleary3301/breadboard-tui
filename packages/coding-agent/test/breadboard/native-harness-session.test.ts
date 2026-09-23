@@ -123,7 +123,7 @@ function userTexts(messages: readonly AgentMessage[]): string[] {
 		return [typeof content === "string" ? content : textOf({ content })];
 	});
 }
-function configureStagedHarness(harness: LoadedNativeHarness): LoadedNativeHarness {
+function configureStagedHarness(harness: LoadedNativeHarness, planTurnLimit = 1): LoadedNativeHarness {
 	const toolByName = new Map(harness.registeredToolSurface.native.map(tool => [tool.name, tool]));
 	const pack = (mode: string, names: string[]) => ({
 		mode,
@@ -157,7 +157,7 @@ function configureStagedHarness(harness: LoadedNativeHarness): LoadedNativeHarne
 		: [];
 	effectiveValues.push(
 		{ path: "features.plan", value: true },
-		{ path: "loop.plan_turn_limit", value: 1 },
+		{ path: "loop.plan_turn_limit", value: planTurnLimit },
 	);
 	const lock = { ...harness.lock, effective_values: effectiveValues };
 	return {
@@ -305,5 +305,35 @@ describe("native harness session", () => {
 		expect(calls[0]?.context.tools?.map(tool => tool.name)).toEqual(["read_file"]);
 		expect(calls[1]?.context.systemPrompt).toEqual(["BUILD_STAGE_PROMPT"]);
 		expect(calls[1]?.context.tools?.map(tool => tool.name)).toEqual(["run_shell"]);
+	});
+	it("keeps build mode on the second prompt after a two-turn plan run", async () => {
+		const { session, calls } = await nativeSession(
+			[
+				{
+					content: [
+						{
+							type: "text",
+							text: '<TOOL_CALL> TodoWrite(todos=[{"content":"closed work","status":"completed"}]) </TOOL_CALL>',
+						},
+						{ type: "toolCall", id: "read-1", name: "read_file", arguments: { path: "prompts/daily_driver_system.md" } },
+					],
+					stopReason: "toolUse",
+				},
+				{ content: [{ type: "text", text: "first run complete" }], stopReason: "stop" },
+				{ content: [{ type: "text", text: "second run complete" }], stopReason: "stop" },
+			],
+			{},
+			harness => configureStagedHarness(harness, 2),
+		);
+
+		await session.prompt("first run");
+		await session.waitForIdle();
+		await session.prompt("second run");
+		await session.waitForIdle();
+
+		expect(calls).toHaveLength(3);
+		expect(calls[0]?.context.systemPrompt).toEqual(["PLAN_STAGE_PROMPT"]);
+		expect(calls[2]?.context.systemPrompt).toEqual(["BUILD_STAGE_PROMPT"]);
+		expect(calls[2]?.context.tools?.map(tool => tool.name)).toEqual(["run_shell"]);
 	});
 });

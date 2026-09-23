@@ -59,7 +59,6 @@ function planTurnLimit(lock: JsonRecord): number {
 export class NativeStageMachine {
 	readonly #stages: ReadonlyMap<string, NativeHarnessStage>;
 	readonly #steps: readonly StageStep[];
-	readonly #initialFeatures: ReadonlyMap<string, boolean>;
 	#features: Map<string, boolean>;
 	readonly #planLimit: number;
 	#current: NativeHarnessStage;
@@ -69,7 +68,6 @@ export class NativeStageMachine {
 		this.#stages = stages;
 		this.#steps = stepsFromLock(lock);
 		this.#features = featureValues(lock);
-		this.#initialFeatures = new Map(this.#features);
 		this.#planLimit = planTurnLimit(lock);
 		const initial = this.#selectMode();
 		if (initial !== undefined) {
@@ -88,10 +86,9 @@ export class NativeStageMachine {
 	get planTurns(): number {
 		return this.#planTurns;
 	}
-	/** Reset per-run mode state, matching Python's fresh SessionState for each agent run. */
+	/** Reset per-run mode state while preserving session-level feature transitions. */
 	reset(): void {
 		this.#planTurns = 0;
-		this.#features = new Map(this.#initialFeatures);
 		this.#current = this.#selectMode() ?? this.#current;
 	}
 
