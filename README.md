@@ -69,6 +69,14 @@ Unsigned development evidence is rejected unless `--allow-unsigned-development` 
 
 Managed `install`, `update`, `rollback`, `uninstall`, and `status` actions verify the archive before changing a private destination and retain authenticated predecessor revisions for rollback. Release-candidate installation also requires legal inputs, an engine release-envelope declaration, and the independently supplied whole-archive digest.
 
+## Persistent code evaluation
+
+Harnesses that expose `eval` provide separate, engine-owned IPython and JavaScript kernels in process-backed coding sessions. `eval(language="py"|"js", code=...)` supports top-level `await` and retains variables across calls and turns. The installed engine bundles both runtimes; host Python and Bun installations are not required.
+
+`reset=true` resets only the selected language. Ordinary code exceptions retain its namespace; timeout, cancellation, or worker failure discards it and reports the state loss. The default timeout is 30 seconds; `timeout=0` disables the deadline, not cancellation. Kernels end with the live session; reopening a transcript does not restore in-memory objects.
+
+Evaluation uses the shell approval policy and the same workspace and process-sandbox restrictions as shell commands. Saved approvals distinguish language, code, timeout, and reset. Docker-backed sandboxes explicitly reject eval rather than executing it on the host. Native OMP's `tool`, `agent`, and `workpool` prelude is not available.
+
 ## Recorded-run comparison
 
 The downstream `bb` product compares recorded Sessions through the installed engine:

@@ -10,6 +10,7 @@
 - Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
 - Added shared OMP subscription authentication for attached local BreadBoard engines through an authenticated loopback inference gateway, retaining BreadBoard tools and permissions without copying provider credentials.
 - Added a caller-workspace launcher with separate per-project runtime state and workspace-contained harness resources; conflicting project resources are never overwritten.
+- Added engine-owned persistent IPython and JavaScript evaluation for process-backed sessions, with bundled runtimes, per-language reset, shell approvals, bounded output, cancellation, and session-owned cleanup. Docker-backed eval and native OMP's tool/delegation prelude are not supported.
 
 ### Changed
 
