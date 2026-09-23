@@ -139,7 +139,7 @@ function claudeCodeDefinition(definition: NativeToolDefinition): NativeToolDefin
 				patchProperty("edit_mode", { enum: ["replace", "insert", "delete"] });
 				break;
 			case "TaskOutput":
-				patchProperty("timeout", { minimum: 0, maximum: 600000 });
+				patchProperty("timeout", { maximum: 600000, minimum: 0 });
 				break;
 			case "WebFetch":
 				patchProperty("url", { format: "uri" });
