@@ -23,6 +23,7 @@ const transport = new NativeRpcTransport({
 
 const events: PublicSessionEvent[] = [];
 let publicEventsSchemaValid = true;
+const replyTexts: string[] = [];
 let approvalRequests = 0;
 let cancelPromise: Promise<void> | undefined;
 let cancelIssuedWhileTurn = false;
