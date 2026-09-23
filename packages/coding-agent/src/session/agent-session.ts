@@ -4183,6 +4183,9 @@ export class AgentSession {
 			this.#markTerminalYieldToolCall(ctx.toolCall.id);
 			this.#synchronouslyTerminatedYieldToolCallIds.add(ctx.toolCall.id);
 			this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
+		} else if (!ctx.isError && this.getToolByName(ctx.toolCall.name)?.terminal === true) {
+			// A terminal tool (for example a harness's completion tool) ends the run once it succeeds.
+			this.agent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
 		}
 		return this.#ttsr.afterToolCall(ctx);
 	}
