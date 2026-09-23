@@ -154,13 +154,13 @@ export class BreadboardCustomizeSubmenu extends Container {
 		presets: ReadonlyArray<SelectItem>,
 	): void {
 		const choices: SelectItem[] = [
-			...presets.filter(option => isBreadboardPreset(option.value)),
+			...presets.filter(option => isBreadboardPreset(option.value as StatusLinePreset)),
 			{
 				value: "__customize",
 				label: "Customize…",
 				description: "Edit the current layout without changing shape or glyphs",
 			},
-			...presets.filter(option => !isBreadboardPreset(option.value)),
+			...presets.filter(option => !isBreadboardPreset(option.value as StatusLinePreset)),
 		];
 		this.clear();
 		this.#editor = createSettingsSelectField(

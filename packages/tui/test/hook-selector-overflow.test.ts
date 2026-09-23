@@ -3,10 +3,10 @@ import { HookSelectorComponent } from "@oh-my-pi/pi-tui/overlays/hook-selector";
 import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 
-beforeAll(() => {
-	const dark = getBuiltinThemes().dark;
+beforeAll(async () => {
+	const dark = await getThemeByName("dark");
 	if (!dark) throw new Error("Failed to load dark theme for tests");
-	setThemeInstance(createTheme(dark, { mode: "truecolor" }));
+	setThemeInstance(dark);
 });
 describe("HookSelectorComponent", () => {
 	it("keeps outlined options within render width", () => {

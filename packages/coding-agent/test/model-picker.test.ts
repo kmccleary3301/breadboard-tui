@@ -31,11 +31,11 @@ function makeModel(provider: string, id: string, contextWindow = 128_000, kind?:
 	});
 }
 
-const darkThemeJson = getBuiltinThemes().dark;
-if (!darkThemeJson) throw new Error("Failed to load dark theme for ModelPicker tests");
-const testTheme = createTheme(darkThemeJson, { mode: "truecolor" });
+let testTheme = await getThemeByName("dark");
+if (!testTheme) throw new Error("Failed to load dark theme for ModelPicker tests");
 
 function installTestTheme(): void {
+	if (!testTheme) throw new Error("Failed to load dark theme for ModelPicker tests");
 	setThemeInstance(testTheme);
 }
 
@@ -108,7 +108,7 @@ describe("ModelPicker", () => {
 		const chat = makeModel("test", "chat-model");
 		const image = makeModel("test", "image-model", 128_000, "image");
 		const settings = Settings.isolated({ modelRoles: { image: "test/image-model" } });
-		const { picker } = createPicker({ models: [chat, image], scoped: true, settings });
+		const { picker } = createPicker({ mainStreamOwnsTurnLifecycle: false, models: [chat, image], scoped: true, settings });
 
 		picker.handleInput("image");
 
