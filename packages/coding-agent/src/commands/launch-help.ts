@@ -135,14 +135,15 @@ export const launchHelp = {
 } satisfies CommandMetadata;
 
 if (IS_BREADBOARD_PRODUCT) {
+	// Help is rendered before settings pick the engine mode, so each restriction names the modes it applies to.
 	for (const [name, flag] of Object.entries(launchHelp.flags)) {
 		const restriction = nativeStartupFlagRestriction(`--${name}`, true);
-		if (restriction) flag.description = `Unavailable: ${restriction}`;
+		if (restriction) flag.description = `${flag.description}. Unavailable with a BreadBoard engine mode: ${restriction}`;
 	}
 	launchHelp.flags["approval-mode"].description =
-		"Engine permission override: yolo; always-ask and write are unavailable (configure the harness instead)";
+		"Override tools.approvalMode for this session (always-ask|write|yolo); with a BreadBoard engine mode only yolo applies and the harness sets other policies";
 	launchHelp.flags["no-session"].description =
-		"Do not save the frontend transcript; BreadBoard engine journals remain durable";
+		"Do not save the session transcript; BreadBoard engine journals stay durable in engine modes";
 	launchHelp.examples = [
 		`# Interactive mode in the selected workspace\n  ${APP_NAME}`,
 		`# Choose a harness and an engine model\n  ${APP_NAME} --harness path/to/config.yaml --model provider/model`,
