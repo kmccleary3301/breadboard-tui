@@ -1,4 +1,5 @@
 import {
+	Container,
 	extractPrintableText,
 	matchesKey,
 	ScrollView,
@@ -42,6 +43,7 @@ type SelectorProvider = AuthProviderView & {
 	readonly name: string;
 	readonly storeCredentialsAs?: string;
 };
+const OAUTH_SELECTOR_MAX_VISIBLE = 10;
 
 /**
  * Rendered lines before the provider rows: top border
