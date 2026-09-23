@@ -79,6 +79,13 @@ function symlinkResolutionError(error: unknown): NativeToolResult | undefined {
 	if (error instanceof Error && "code" in error && error.code === "ELOOP") return result({ error: error.message }, true);
 	return undefined;
 }
+function leavesWorkspace(workspaceRoot: string, path: string): boolean {
+	const lexicalRoot = resolve(workspaceRoot);
+	const resolvedRoot = resolveSymlinkAware(lexicalRoot, lexicalRoot);
+	const resolvedPath = resolveSymlinkAware(lexicalRoot, path);
+	const relativePath = relative(resolvedRoot, resolvedPath);
+	return relativePath === ".." || relativePath.startsWith("../") || isAbsolute(relativePath);
+}
 
 
 function patchTouchesPrivateWorkspace(workspaceRoot: string, patch: string): boolean {
@@ -92,9 +99,9 @@ function patchTouchesPrivateWorkspace(workspaceRoot: string, patch: string): boo
 }
 
 function privateTreeEntry(workspaceRoot: string, target: string, entry: CanonicalJson): boolean {
-	return isJsonRecord(entry) && typeof entry.path === "string"
-		? privateWorkspacePath(workspaceRoot, resolve(target, entry.path))
-		: false;
+	if (!isJsonRecord(entry) || typeof entry.path !== "string") return false;
+	const requested = resolve(target, entry.path);
+	return leavesWorkspace(workspaceRoot, requested) || privateWorkspacePath(workspaceRoot, requested);
 }
 
 function workspacePath(workspaceRoot: string, requested: string): string {
@@ -102,7 +109,7 @@ function workspacePath(workspaceRoot: string, requested: string): string {
 	const candidate = resolve(root, requested || ".");
 	const rest = relative(root, candidate);
 	if (rest === ".." || rest.startsWith("../") || isAbsolute(rest)) throw new Error("path_outside_workspace");
-	return candidate;
+	return leavesWorkspace(root, candidate) ? root : candidate;
 }
 
 function pathError(workspaceRoot: string, requested: string, extra: JsonRecord): NativeToolResult {
@@ -149,7 +156,7 @@ export async function readFileAdapter(
 	return result({ path, content, truncated, offset, limit: input.limit ?? null });
 }
 
-async function treeEntries(directory: string, depth: number, prefix: string): Promise<CanonicalJson[]> {
+async function treeEntries(directory: string, depth: number, prefix: string, workspaceRoot: string): Promise<CanonicalJson[]> {
 	let entries;
 	try {
 		entries = await readdir(directory, { withFileTypes: true });
@@ -162,7 +169,9 @@ async function treeEntries(directory: string, depth: number, prefix: string): Pr
 		const path = `${prefix}${entry.name}`;
 		if (entry.isDirectory()) {
 			output.push({ path, type: "dir" });
-			if (depth > 1) output.push(...(await treeEntries(resolve(directory, entry.name), depth - 1, `${path}/`)));
+			if (depth > 1 && !leavesWorkspace(workspaceRoot, resolve(directory, entry.name))) {
+				output.push(...(await treeEntries(resolve(directory, entry.name), depth - 1, `${path}/`, workspaceRoot)));
+			}
 		} else if (entry.isFile()) {
 			output.push({ path, type: "file" });
 		}
@@ -183,7 +192,7 @@ export async function listDirAdapter(
 	const depth = Math.max(1, Math.trunc(input.depth || 1));
 	let items: CanonicalJson[];
 	try {
-		items = (await treeEntries(path, depth, "")).filter(
+		items = (await treeEntries(path, depth, "", workspaceRoot)).filter(
 			entry => !privateTreeEntry(workspaceRoot, path, entry),
 		);
 	} catch (error) {
@@ -219,6 +228,9 @@ export async function createFileFromBlockAdapter(
 		path = workspacePath(workspaceRoot, requested);
 	} catch {
 		return result({ ok: false, path: resolve(workspaceRoot), error: "path_outside_workspace" }, true);
+	}
+	if (path === resolve(workspaceRoot)) {
+		return result({ ok: false, path, error: "workspace_file_path_required" }, true);
 	}
 	try {
 		await mkdir(dirname(path), { recursive: true });
@@ -274,6 +286,9 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 	for (const path of patchPaths(patchSourceText)) {
 		if (isAbsolute(path) || path.split(/[\\/]/u).includes("..")) {
 			return result({ ok: false, stdout: "", stderr: `error: ${path}: does not exist in index\n` }, true);
+		}
+		if (leavesWorkspace(root, resolve(root, path))) {
+			return result({ ok: false, stdout: "", stderr: `error: ${path}: Operation not permitted\n` }, true);
 		}
 	}
 	if (!patchText.trim()) return result({ ok: false, error: "empty patch" }, true);

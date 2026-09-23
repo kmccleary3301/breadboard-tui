@@ -20,6 +20,7 @@ type Fixture = {
 	python: { text: string; details: Record<string, unknown>; isError?: boolean };
 	final: Record<string, string>;
 	symlinks?: Record<string, string>;
+	outside?: Record<string, string>;
 };
 
 async function run(root: string, fixture: Fixture): Promise<NativeToolResult> {
@@ -66,14 +67,25 @@ describe("R39 native adapters", () => {
 		test(fixturePath, async () => {
 			const fixture = JSON.parse(await readFile(join(FIXTURES, fixturePath), "utf8")) as Fixture;
 			const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-"));
+			const outsidePaths: string[] = [];
+			let outsideRoot: string | undefined;
 			try {
 				for (const [path, content] of Object.entries(fixture.initial)) {
 					const target = join(root, path);
 					await mkdir(resolve(target, ".."), { recursive: true });
 					await writeFile(target, content, "utf8");
 				}
+				if (Object.keys(fixture.outside ?? {}).length > 0) {
+					outsideRoot = await mkdtemp(join(tmpdir(), "bb-native-adapter-outside-"));
+					outsidePaths.push(outsideRoot);
+					for (const [path, content] of Object.entries(fixture.outside ?? {})) {
+						const target = join(outsideRoot, path);
+						await mkdir(resolve(target, ".."), { recursive: true });
+						await writeFile(target, content, "utf8");
+					}
+				}
 				for (const [path, target] of Object.entries(fixture.symlinks ?? {})) {
-					await symlink(target, join(root, path), "dir");
+					await symlink(target === "__OUTSIDE__" ? outsideRoot! : target, join(root, path), "dir");
 				}
 				if (fixture.tool === "apply_unified_patch") {
 					await command(root, ["init"]);
@@ -86,6 +98,7 @@ describe("R39 native adapters", () => {
 				expect(await files(root)).toEqual(fixture.final);
 			} finally {
 				await rm(root, { recursive: true, force: true });
+				for (const path of new Set(outsidePaths)) await rm(path, { recursive: true, force: true });
 			}
 		}, 30_000);
 	}

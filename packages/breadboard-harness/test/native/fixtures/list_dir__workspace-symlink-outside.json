@@ -1,0 +1,40 @@
+{
+  "tool": "list_dir",
+  "case": "outside-alias",
+  "input": {
+    "path": "alias",
+    "depth": 1
+  },
+  "initial": {
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"items\": [{\"path\": \"visible.txt\", \"type\": \"file\"}], \"entries\": [{\"path\": \"visible.txt\", \"type\": \"file\"}], \"tree_format\": false}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "items": [
+        {
+          "path": "visible.txt",
+          "type": "file"
+        }
+      ],
+      "entries": [
+        {
+          "path": "visible.txt",
+          "type": "file"
+        }
+      ],
+      "tree_format": false
+    },
+    "isError": false
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": "__OUTSIDE__"
+  },
+  "outside": {
+    ".bb-r39-ticket25-list/secret.txt": "outside secret\n"
+  }
+}

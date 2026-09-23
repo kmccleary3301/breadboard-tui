@@ -1,0 +1,29 @@
+{
+  "tool": "create_file_from_block",
+  "case": "outside-alias",
+  "input": {
+    "file_name": "alias/.bb-r39-ticket25-create/new.txt",
+    "content": "must not escape\n"
+  },
+  "initial": {
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"ok\": false, \"path\": \"<WORKSPACE>\", \"error\": \"workspace_file_path_required\"}",
+    "details": {
+      "ok": false,
+      "path": "<WORKSPACE>",
+      "error": "workspace_file_path_required"
+    },
+    "isError": true
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": "__OUTSIDE__"
+  },
+  "outside": {
+    ".bb-r39-ticket25-create/.keep": "outside directory\n"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "outside-alias",
+  "input": "--- a/alias/.bb-r39-ticket25-patch/target.txt\n+++ b/alias/.bb-r39-ticket25-patch/target.txt\n@@ -1 +1 @@\n-before\n+after\n",
+  "initial": {
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"ok\": false, \"stdout\": \"\", \"stderr\": \"error: alias/.bb-r39-ticket25-patch/target.txt: Operation not permitted\\n\"}",
+    "details": {
+      "ok": false,
+      "stdout": "",
+      "stderr": "error: alias/.bb-r39-ticket25-patch/target.txt: Operation not permitted\n"
+    },
+    "isError": true
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": "__OUTSIDE__"
+  },
+  "outside": {
+    ".bb-r39-ticket25-patch/target.txt": "before\n"
+  }
+}

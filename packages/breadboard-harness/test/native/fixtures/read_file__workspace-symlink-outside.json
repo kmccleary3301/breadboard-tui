@@ -1,0 +1,30 @@
+{
+  "tool": "read_file",
+  "case": "outside-alias",
+  "input": {
+    "path": "alias/.bb-r39-ticket25-read/secret.txt"
+  },
+  "initial": {
+    "visible.txt": "root control\n"
+  },
+  "python": {
+    "text": "{\"path\": \"<WORKSPACE>\", \"content\": \"\", \"truncated\": false, \"offset\": 0, \"limit\": null}",
+    "details": {
+      "path": "<WORKSPACE>",
+      "content": "",
+      "truncated": false,
+      "offset": 0,
+      "limit": null
+    },
+    "isError": false
+  },
+  "final": {
+    "visible.txt": "root control\n"
+  },
+  "symlinks": {
+    "alias": "__OUTSIDE__"
+  },
+  "outside": {
+    ".bb-r39-ticket25-read/secret.txt": "outside secret\n"
+  }
+}
