@@ -21,6 +21,7 @@ export const NATIVE_TEXT_RESULTS_MESSAGE_TYPE = "breadboard-native-text-results"
 
 /** Custom message type for Python's completion-guard advisory, also sent as a user message. */
 export const NATIVE_GUARD_MESSAGE_TYPE = "breadboard-native-completion-guard";
+export const NATIVE_HARNESS_GENERATION_ENTRY = "breadboard-native-harness-generation";
 
 /** Details key marking a `mark_task_complete` result the completion guard held (Python `_completion_guard_blocked`). */
 const GUARD_BLOCKED = "completion_guard_blocked";
@@ -70,7 +71,7 @@ class CompletionGuard {
 const PERMISSION_REJECTED =
 	"The user rejected permission to use this specific tool call. You may try again with different parameters.";
 
-interface NativeCall {
+export interface NativeCall {
 	readonly input: JsonRecord;
 	readonly harness: LoadedNativeHarness;
 	readonly context: ExtensionContext;
@@ -80,7 +81,7 @@ interface NativeCall {
 	readonly guard: CompletionGuard;
 }
 
-interface NativeBinding {
+export interface NativeBinding {
 	/** OMP approval tier. `always-ask` prompts for `write` and `exec`, as Python's prompt mode asks for edit and shell. */
 	readonly approval: "read" | "write" | "exec";
 	/** Built-in whose implementation this tool's `ctx.invokeTool` runs. */
@@ -135,7 +136,7 @@ async function invokeBuiltin(call: NativeCall, params: Record<string, unknown>):
  * How each R39 function tool executes. Names, schemas and descriptions come from the vendored
  * tool definitions; execution is OMP's (`bash`, `eval`) or an adapter tested against Python fixtures.
  */
-const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
+export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	read_file: {
 		approval: "read",
 		run: call =>
@@ -298,36 +299,64 @@ function registerFunctionTools(
  */
 export function createNativeHarnessExtension(harness: LoadedNativeHarness): ExtensionFactory {
 	return api => {
-		const transcript = { specPath: harness.harnessId, graphHash: harness.graphHash };
-		if (harness.hostSurface) {
-			registerSessionTranscriptExport(api, transcript);
-			const blocks = harness.systemPrompt ? [harness.systemPrompt] : [];
-			api.on("before_agent_start", event => ({ systemPrompt: [...event.systemPrompt, ...blocks] }));
-			return;
-		}
+		let activeHarness = harness;
+		let pendingHarness = harness;
+		let stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
+		let policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
 		const todos = new TodoWriteState();
-		const policy = new NativeTurnPolicy(harness.registeredToolSurface);
-		const stageMachine = createNativeStageMachine(harness.lock, harness.stages);
+		const guard = new CompletionGuard();
 		const promptOverride = [stageMachine.current.systemPrompt];
+		const transcript = { specPath: harness.harnessId, graphHash: harness.graphHash };
+		const recordGeneration = (generation: number, current: LoadedNativeHarness): void => {
+			api.appendEntry(NATIVE_HARNESS_GENERATION_ENTRY, {
+				generation,
+				spec_path: current.harnessId,
+				graph_hash: current.graphHash,
+			});
+		};
 		const applyStage = async (): Promise<void> => {
 			const stage = stageMachine.current;
 			promptOverride.splice(0, promptOverride.length, stage.systemPrompt);
 			await api.setActiveTools(stage.toolSurface.native.map(tool => tool.name));
 		};
-		const guard = new CompletionGuard();
-		registerFunctionTools(api, harness, todos, guard);
+		const commitPendingHarness = async (): Promise<void> => {
+			if (pendingHarness === activeHarness) return;
+			activeHarness = pendingHarness;
+			stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
+			policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
+			await applyStage();
+		};
+
 		registerSessionTranscriptExport(api, transcript);
+		api.on("session_start", () => {
+			recordGeneration(activeHarness.live?.generation ?? 1, activeHarness);
+		});
+		if (activeHarness.hostSurface) {
+			const blocks = activeHarness.systemPrompt ? [activeHarness.systemPrompt] : [];
+			api.on("before_agent_start", event => ({ systemPrompt: [...event.systemPrompt, ...blocks] }));
+			return;
+		}
+
+		registerFunctionTools(api, activeHarness, todos, guard);
+		activeHarness.live?.subscribe(change => {
+			pendingHarness = change.harness;
+			registerFunctionTools(api, change.harness, todos, guard);
+			recordGeneration(change.generation, change.harness);
+		});
 		api.on("agent_start", async () => {
+			await commitPendingHarness();
 			stageMachine.reset();
 			guard.beginRun();
 			await applyStage();
 		});
 		api.on("before_agent_start", () => ({ systemPrompt: promptOverride }));
 		api.on("turn_start", async () => {
+			await commitPendingHarness();
 			policy.beginTurn();
 			await applyStage();
 		});
-		api.on("turn_prepare", () => {
+		api.on("turn_prepare", async () => {
+			await commitPendingHarness();
 			const stage = stageMachine.current;
 			return {
 				mode: stage.mode,
@@ -337,7 +366,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		});
 		api.on("tool_call", event => policy.admit(event.toolName));
 		api.on("turn_settle", async (event, context) => {
-			const text = await runTextCalls(event.message, harness, policy, todos, context);
+			const text = await runTextCalls(event.message, activeHarness, policy, todos, context);
 			stageMachine.endTurn(todos.hasItems);
 			const messages = [
 				...(text === undefined ? [] : [{ customType: NATIVE_TEXT_RESULTS_MESSAGE_TYPE, content: text, display: true }]),

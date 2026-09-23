@@ -1,4 +1,5 @@
 import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
+import { NativeHarnessReloadError } from "@breadboard/harness";
 import type { PublicResult } from "@breadboard/sdk";
 import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { HarnessCommandSpec, HarnessSnapshot } from "../breadboard/harness-port";
@@ -493,6 +494,28 @@ export async function executeHarnessSlashCommand(
 			return true;
 		}
 		if (verb === "list") return harnessList(runtime, rest || undefined);
+		if (verb === "reload") {
+			const port = runtime.ctx.harnessPort;
+			if (!port?.reloadNativeHarness) {
+				runtime.ctx.showStatus("Harness reload unavailable: this session has no live native harness.");
+				return true;
+			}
+			try {
+				const next = await port.reloadNativeHarness();
+				runtime.ctx.showStatus(
+					next === null ? "Harness reload produced no snapshot." : `Harness reloaded at generation ${next.generation}.`,
+				);
+			} catch (error) {
+				if (error instanceof NativeHarnessReloadError) {
+					runtime.ctx.showStatus(
+						`Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`,
+					);
+				} else {
+					runtime.ctx.showStatus(`Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
+			return true;
+		}
 		if (verb === "use") {
 			if (!rest) {
 				runtime.ctx.showStatus("Usage: /harness use <name|path>");
@@ -536,6 +559,7 @@ export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
 		allowArgs: true,
 		subcommands: [
 			{ name: "list", description: "List available harnesses", usage: "[directory]" },
+			{ name: "reload", description: "Compile the workspace harness and apply it at the next turn", usage: "" },
 			{ name: "use", description: "Start a new session on a harness", usage: "<name|path>" },
 			{ name: "explain", description: "Show field provenance", usage: "[field]" },
 			{ name: "diff", description: "Compare harness locks", usage: "<a> <b>" },

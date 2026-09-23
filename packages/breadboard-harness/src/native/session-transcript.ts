@@ -175,6 +175,21 @@ export function buildSessionTranscript(
 			leaf_id: last?.event_id ?? null,
 		},
 	};
+	const generations = items.flatMap(item => {
+		const content = isJsonRecord(item.content as CanonicalJson) ? (item.content as JsonRecord) : undefined;
+		if (content === undefined || content.type !== "custom") return [];
+		if (content.customType !== "breadboard-native-harness-generation") return [];
+		const data = isJsonRecord(content.data) ? content.data : undefined;
+		if (data === undefined || typeof data.generation !== "number") return [];
+		return [
+			{
+				generation: data.generation,
+				spec_path: typeof data.spec_path === "string" ? data.spec_path : null,
+				graph_hash: typeof data.graph_hash === "string" ? data.graph_hash : null,
+			},
+		];
+	});
+	if (generations.length > 0) metadata.harness_generations = generations;
 	if (options.harness !== undefined) {
 		metadata.harness = { spec_path: options.harness.specPath, graph_hash: options.harness.graphHash };
 	}

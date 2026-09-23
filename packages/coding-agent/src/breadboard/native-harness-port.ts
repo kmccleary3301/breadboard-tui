@@ -28,24 +28,44 @@ function harnessName(harness: LoadedNativeHarness): string {
 
 /**
  * The harness hub, palette and status in native mode: the session runs the lock it loaded, so the
- * snapshot is that lock, verified by its own `graph_hash`. No engine, no generation.
+ * snapshot is that lock, verified by its own `graph_hash`. Workspace generations are published by
+ * the loader's live state; built-ins retain a typed reload refusal.
  */
 export function createNativeHarnessPort(harness: LoadedNativeHarness, now: () => number = Date.now): HarnessPort {
-	const harnessId = harness.harnessId;
-	const snapshot: HarnessSnapshot = Object.freeze({
-		harnessId,
-		name: harnessName(harness),
-		lockHash: harness.graphHash,
-		verifiedIdentity: { harnessId, lockHash: harness.graphHash },
-		generation: null,
-		mode: harness.toolSurface.mode,
-		lock: harness.lock,
-		provenance: lockProvenance(harness.lock),
-		loadedAt: now(),
+	const live = harness.live;
+	let snapshot: HarnessSnapshot;
+	const listeners = new Set<(snapshot: HarnessSnapshot | null) => void>();
+	const makeSnapshot = (current: LoadedNativeHarness, generation: number): HarnessSnapshot => {
+		const harnessId = current.harnessId;
+		return Object.freeze({
+			harnessId,
+			name: harnessName(current),
+			lockHash: current.graphHash,
+			verifiedIdentity: { harnessId, lockHash: current.graphHash },
+			generation: String(generation),
+			mode: current.toolSurface.mode,
+			lock: current.lock,
+			provenance: lockProvenance(current.lock),
+			loadedAt: now(),
+		});
+	};
+	snapshot = makeSnapshot(harness, live?.generation ?? 1);
+	live?.subscribe(change => {
+		snapshot = makeSnapshot(change.harness, change.generation);
+		for (const listener of listeners) listener(snapshot);
 	});
 	return {
 		current: () => snapshot,
 		refresh: async () => snapshot,
-		subscribe: () => () => {},
+		reloadNativeHarness: live
+			? async () => {
+					await live.reload();
+					return snapshot;
+				}
+			: undefined,
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
 	};
 }
