@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { renderBuiltinHarnessLock } from "../../scripts/builtin-harness-locks";
 import { builtinNativeHarnesses, DEFAULT_NATIVE_HARNESS_ID } from "../../src/native/builtin-harnesses";
 import { loadNativeHarness } from "../../src/native/load-native-harness";
-
+import { NATIVE_BINDINGS } from "../../src/native/omp-extension";
 const scratch: string[] = [];
 afterEach(async () => {
 	await Promise.all(scratch.splice(0).map(path => rm(path, { recursive: true, force: true })));
@@ -52,6 +52,15 @@ describe("built-in native harnesses", () => {
 				id: harness.id,
 				meta: expected.metaText,
 			});
+		}
+	});
+
+	test("every research-pack function tool resolves to a native binding", async () => {
+		for (const harness of builtinNativeHarnesses().filter(item => item.id !== DEFAULT_NATIVE_HARNESS_ID)) {
+			const loaded = await loadNativeHarness({ specPath: harness.id, workspaceRoot: await workspace() });
+			for (const tool of loaded.registeredToolSurface.native) {
+				expect(NATIVE_BINDINGS[tool.name]).toBeDefined();
+			}
 		}
 	});
 

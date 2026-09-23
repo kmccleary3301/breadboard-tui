@@ -13,8 +13,10 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	Skill: "manage_skill",
 	WebSearch: "web_search",
 	bash: "bash",
+	shell_command: "bash",
 	read: "read",
 	edit: "edit",
+	apply_patch: "edit",
 	write: "write",
 	glob: "glob",
 	grep: "grep",
@@ -41,7 +43,33 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	learn: "learn",
 };
 
+const MISSING_PACK_TOOL_NAMES = [
+	"apply_patch",
+	"shell_command",
+	"blob.get",
+	"blob.put",
+	"blob.put_file_slice",
+	"blob.search",
+	"create_file",
+	"llm.batch_query",
+	"llm.query",
+	"record_branch_decision",
+	"record_proof_receipt",
+	"record_verification_receipt",
+	"request_finish_receipt",
+	"todo.attach",
+	"todo.cancel",
+	"todo.complete",
+	"todo.create",
+	"todo.list",
+	"todo.note",
+	"todo.reorder",
+	"todo.update",
+	"update_plan",
+] as const;
+
 function mappedInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
+	if (name === "shell_command") return { command: input.command ?? "", timeout: input.timeout };
 	if (name === "Bash") return { command: input.command ?? "", timeout: input.timeout };
 	if (name === "Read") return { path: input.file_path ?? "", offset: input.offset, limit: input.limit };
 	if (name === "Write") return { filePath: input.file_path, content: input.content ?? "" };
@@ -86,15 +114,16 @@ async function delegate(call: NativeCall, toolName: string, input: Record<string
 	};
 }
 
-const names = Object.values(RESEARCH_TOOL_DEFINITIONS).flatMap(definitions =>
-	definitions.map(definition => definition.name),
-);
+const names = [
+	...Object.values(RESEARCH_TOOL_DEFINITIONS).flatMap(definitions => definitions.map(definition => definition.name)),
+	...MISSING_PACK_TOOL_NAMES,
+];
 
 export const RESEARCH_NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = Object.fromEntries(
 	[...new Set(names)].map(name => [
 		name,
 		{
-			approval: /^(Bash|bash|background_|task|webfetch|eval|interactive_bash)$/u.test(name) ? "exec" : "read",
+			approval: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(name) ? "exec" : "read",
 			...(DIRECT_DELEGATES[name] === undefined ? {} : { delegate: DIRECT_DELEGATES[name] }),
 			run: (call: NativeCall) => delegate(call, name, call.input),
 		},
