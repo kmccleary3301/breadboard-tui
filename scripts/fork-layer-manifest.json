@@ -757,7 +757,7 @@
 			"layer": 2
 		},
 		{
-			"path": "packages/coding-agent/src/modes/components/agent-hub.ts",
+			"path": "packages/coding-agent/src/modes/agent-hub-runtime.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -782,57 +782,7 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/components/assistant-message.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/attachment-chips.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/modes/components/breadboard-tool-renderers.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/collab-prompt-message.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/composer-shape-preview.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/composer-shape-registry.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/custom-editor.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/diff.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/login-dialog.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/logout-account-selector.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/move-overlay.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -840,91 +790,6 @@
 			"path": "packages/coding-agent/src/modes/components/oauth-provider-data-source.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/oauth-selector.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/plan-save-overlay.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/segment-track.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/settings-defs.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/settings-selector.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/status-line/component.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/status-line/presets.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/status-line/segments.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/status-line/types.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/tips.txt",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/tool-execution.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/transcript-container.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/user-message.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/welcome.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/composer-attachments.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/composer-cache.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/composer.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/controllers/command-controller.ts",
@@ -947,24 +812,9 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/gradient-highlight.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/modes/interactive-mode.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/macos-spelling.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/prompt-action-autocomplete.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/session-teardown.ts",
@@ -972,52 +822,7 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/index.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/lazy.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/scenes/composer.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/scenes/model.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/scenes/outro.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/scenes/sign-in.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/scenes/splash.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/scenes/types.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/startup-splash.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/setup-wizard/wizard-overlay.ts",
+			"path": "packages/coding-agent/src/modes/setup.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1027,52 +832,7 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/theme/color.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/defaults/breadboard-light.json",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/defaults/breadboard.json",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/defaults/index.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/schema.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/shimmer.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/symbols.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/theme-class.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/theme.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/theme/tui-adapters.ts",
+			"path": "packages/coding-agent/src/modes/status-line-host.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1182,11 +942,6 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/src/tui/hyperlink.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/src/utils/command-usage.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1200,11 +955,6 @@
 			"path": "packages/coding-agent/src/utils/reduced-motion.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/utils/session-color.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/utils/title-generator.ts",
@@ -1399,11 +1149,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/test/composer-cache.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/test/extensions-runner.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1427,11 +1172,6 @@
 			"path": "packages/coding-agent/test/helpers/retry-ambiguous-replay.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/hook-selector-overflow.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/test/input-controller-escape.test.ts",
@@ -1464,11 +1204,6 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/test/macos-spelling.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/test/main-session-resolution-error.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1489,16 +1224,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/test/modes/components/ask-dialog.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/components/attachment-chips.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1507,11 +1232,6 @@
 			"path": "packages/coding-agent/test/modes/components/composer-shape-preview.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/components/custom-editor.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/test/modes/components/effective-lock-fixture.ts",
@@ -1529,16 +1249,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/test/modes/components/plan-review-overlay.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/components/segment-track.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/test/modes/components/settings-defs-breadboard.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1547,11 +1257,6 @@
 			"path": "packages/coding-agent/test/modes/components/status-line-harness.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/components/transcript-container.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/test/modes/components/user-message-keywords.test.ts",
@@ -1579,17 +1284,7 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/test/modes/orchestrate.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/test/modes/session-teardown.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/workflow.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1619,22 +1314,12 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/test/session-color.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/test/session-exit-diagnostics.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/test/setup-identity.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/setup-wizard-sign-in.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1709,11 +1394,6 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/test/task/task-progress-render.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/test/terminal-title-state.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1724,37 +1404,12 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/test/theme-highlight-diff-parity.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/test/theme-lazy-status-color.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/test/tool-execution-write-repaint.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/tools/bash-sixel-render.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/test/tools/edit-renderer.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/tools/glob-renderer.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/tools/grep-renderer.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1765,11 +1420,6 @@
 		},
 		{
 			"path": "packages/coding-agent/test/welcome-history-resize.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/test/welcome-tip.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1833,6 +1483,36 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/src/chat/assistant-message.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/chat/collab-prompt-message.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/chat/tool-execution.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/chat/user-message.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/chrome/diff.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/chrome/transcript-container.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/tui/src/components/editor.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1853,9 +1533,244 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/src/overlays/agent-hub.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/overlays/composer-shape-preview.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/overlays/composer-shape-registry.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/overlays/login-dialog.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/overlays/logout-account-selector.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/overlays/oauth-selector.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/overlays/plan-save-overlay.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/overlays/settings-defs.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/overlays/settings-selector.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/product-identity.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/prompt/attachment-chips.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/prompt/composer-attachments.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/prompt/composer-cache.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/prompt/composer.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/prompt/custom-editor.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/prompt/prompt-action-autocomplete.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/prompt/tips.txt",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/prompt/welcome.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/reduced-motion.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/render/hyperlink.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/composer.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/information-layout.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/model.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/outro.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/sign-in.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/splash.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/scenes/types.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/startup-splash.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/wizard-overlay.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/setup/wizard.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/status-line/breadboard-fields.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/status-line/breadboard-presentation.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/status-line/component.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/status-line/presets.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/status-line/segments.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/status-line/types.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/tui/src/terminal-capabilities.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/src/theme/color.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/defaults/breadboard-light.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/defaults/breadboard.json",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/defaults/index.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/schema.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/session-color.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/shimmer.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/symbols.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/theme-class.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/theme.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/src/theme/tui-adapters.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/tui/src/tui.ts",
@@ -1868,7 +1783,32 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/test/ask-dialog.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/attachment-chips.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/tui/test/autocomplete.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/bash-render.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/composer-cache.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/custom-editor.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1893,7 +1833,22 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/test/glob-render.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/grep-render.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/tui/test/history-frame-plan.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/hook-selector-overflow.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1901,6 +1856,11 @@
 			"path": "packages/tui/test/input-render-scheduling.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/macos-spelling.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/tui/test/markdown.test.ts",
@@ -1911,6 +1871,46 @@
 			"path": "packages/tui/test/notifications.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/test/plan-review-overlay.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/segment-track.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/test/session-color.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/tui/test/task-progress-render.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/theme-highlight-diff-parity.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/tool-execution-write-repaint.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/transcript-container.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/welcome-tip.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/utils/src/chalk.ts",
@@ -1967,11 +1967,6 @@
 			"rule": "manual-review-boundaries",
 			"owner": "omp-entrypoint",
 			"layer": 2
-		},
-		{
-			"path": "packages/wire/test/constants.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "scripts/audit-fork-delta.test.ts",
