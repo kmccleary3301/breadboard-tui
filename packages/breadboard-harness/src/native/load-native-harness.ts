@@ -289,6 +289,7 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 	const editable = builtinNativeHarness(options.specPath) === undefined;
 	const listeners = new Set<(change: NativeHarnessGenerationChange) => void>();
 	let reloadValidator: ((harness: LoadedNativeHarness) => void | Promise<void>) | undefined;
+	let reloadInFlight: Promise<LoadedNativeHarness> | undefined;
 	let live: NativeHarnessLiveState;
 	const withLive = (harness: LoadedNativeHarness): LoadedNativeHarness =>
 		Object.freeze({ ...harness, live });
@@ -298,12 +299,14 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 			return generation;
 		},
 		current: () => current,
-		reload: async (prepare?: (harness: LoadedNativeHarness) => void | Promise<void>) => {
-			if (!editable) {
-				throw new NativeHarnessReloadError(
-					"builtin",
-					generation,
-					`Harness ${current.harnessId} is built in and cannot be live-edited.`,
+		reload: (prepare?: (harness: LoadedNativeHarness) => void | Promise<void>) => {
+			if (reloadInFlight !== undefined) return reloadInFlight;
+			const operation = (async () => {
+				if (!editable) {
+					throw new NativeHarnessReloadError(
+						"builtin",
+						generation,
+						`Harness ${current.harnessId} is built in and cannot be live-edited.`,
 				);
 			}
 			let next: LoadedNativeHarness;
@@ -342,6 +345,11 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 			const change = { previousGeneration, generation, harness: current } as const;
 			for (const listener of listeners) listener(change);
 			return current;
+			})();
+			reloadInFlight = operation.finally(() => {
+				reloadInFlight = undefined;
+			});
+			return reloadInFlight;
 		},
 		setReloadValidator(validator) {
 			reloadValidator = validator;
