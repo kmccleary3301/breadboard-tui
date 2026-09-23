@@ -65,6 +65,9 @@ for directory in "$native_root" "$native_root/agent" "$native_root/config" "$nat
   [[ ! -L "$directory" && ( ! -e "$directory" || -d "$directory" ) ]] || exit 1
   mkdir -p "$directory"
 done
+if [[ "$pending" == 1 ]]; then
+  export BREADBOARD_NATIVE_PROFILE_MIGRATION=1
+fi
 set +e
 /usr/bin/env -i \\
   HOME="\${HOME:?HOME is required}" \\
