@@ -11,6 +11,7 @@ import type { ProductIdentity } from "../../prompt/welcome";
 
 /** Terminal capabilities used by setup overlays and the startup splash. */
 export interface SetupUiHost {
+	readonly identity?: ProductIdentity;
 	readonly ui: Pick<TUI, "showOverlay" | "setFocus" | "requestRender" | "invalidate"> & {
 		readonly terminal: { readonly rows: number };
 	};

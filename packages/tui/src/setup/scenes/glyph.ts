@@ -6,17 +6,19 @@ import { WizardStep } from "../../components/wizard-step";
 import { getSelectListTheme, type SymbolPreset, setSymbolPreset, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
-const GLYPH_PRESETS = ["nerd", "unicode", "ascii"] as const satisfies readonly SymbolPreset[];
+const GLYPH_PRESETS = ["unicode", "nerd", "emoji", "ascii"] as const satisfies readonly SymbolPreset[];
 
 const GLYPH_LABELS: Readonly<Record<SymbolPreset, string>> = {
-	nerd: "Nerd Font",
 	unicode: "Unicode",
+	nerd: "Nerd Font",
+	emoji: "Emoji",
 	ascii: "ASCII",
 };
 
 const GLYPH_SAMPLES: Readonly<Record<SymbolPreset, string>> = {
-	nerd: "      󰉋  ",
 	unicode: "✔  ✖  📁  ⬢  ╭─╮  ├─  •  ⠋  →",
+	nerd: "      󰉋  ",
+	emoji: "✅  ❌  📁  🔷  ✨  🔄  ➡️",
 	ascii: "[ok]  [x]  >  +  [D]  +-+  |--  *  ->",
 };
 
@@ -24,7 +26,7 @@ const GLYPH_SAMPLES: Readonly<Record<SymbolPreset, string>> = {
 const GLYPH_ITEMS: readonly SelectItem[] = GLYPH_PRESETS.map((preset, index) => ({
 	value: preset,
 	label: `${index + 1}  ${GLYPH_LABELS[preset]}`,
-	description: preset === "nerd" ? `${GLYPH_SAMPLES.nerd}  ╭─╮  ├─  ◆  ✔  ✖` : GLYPH_SAMPLES[preset],
+	description: GLYPH_SAMPLES[preset],
 }));
 
 class GlyphSceneController implements SetupSceneController {
@@ -59,7 +61,7 @@ class GlyphSceneController implements SetupSceneController {
 
 	handleInput(data: string): void {
 		if (this.#committing) return;
-		const quickIndex = data >= "1" && data <= "3" ? Number(data) - 1 : -1;
+		const quickIndex = data >= "1" && data <= "4" ? Number(data) - 1 : -1;
 		if (quickIndex >= 0) {
 			const preset = GLYPH_PRESETS[quickIndex];
 			this.#selectList.setSelectedIndex(quickIndex);

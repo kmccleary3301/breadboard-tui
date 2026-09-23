@@ -1,6 +1,8 @@
 import { type Component, type OverlayFocusOwner } from "../tui";
 import { matchesKey } from "../keys";
 import type { SetupUiHost } from "./scenes/types";
+import { DEFAULT_PRODUCT_IDENTITY } from "../prompt/welcome";
+import { theme } from "../theme/theme";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 
 /** Timing controls for the standalone startup animation. */
@@ -57,7 +59,16 @@ class StartupSplashComponent implements Component, OverlayFocusOwner {
 
 	render(width: number): readonly string[] {
 		const elapsedMs = Math.min(this.#durationMs, Math.max(0, this.#now() - this.#phaseStartedAt));
-		return renderSetupSplash(Math.max(1, width), Math.max(1, this.ctx.ui.terminal.rows), elapsedMs);
+		const identity = this.ctx.identity ?? DEFAULT_PRODUCT_IDENTITY;
+		const appearance = theme.isLight ? "light" : "dark";
+		return renderSetupSplash(
+			Math.max(1, width),
+			Math.max(1, this.ctx.ui.terminal.rows),
+			elapsedMs,
+			identity,
+			appearance,
+			theme.getColorMode(),
+		);
 	}
 
 	#startTimer(): void {

@@ -3,8 +3,7 @@ import { matchesKey } from "../keys";
 import { centerLine, padding } from "../utils";
 import { padToWidth } from "../render/utils";
 import { routeSgrMouseInput, type SgrMouseEvent } from "../mouse";
-import { APP_NAME } from "@oh-my-pi/pi-utils";
-import { gradientLogo, PI_LOGO } from "../prompt/welcome";
+import { DEFAULT_PRODUCT_IDENTITY, gradientLogo } from "../prompt/welcome";
 import { theme } from "../theme/theme";
 import type { SetupHost } from "./scenes/types";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
@@ -154,24 +153,34 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	render(width: number): readonly string[] {
 		const safeWidth = Math.max(1, width);
 		const height = Math.max(1, this.ctx.ui.terminal.rows);
+		const identity = this.ctx.identity ?? DEFAULT_PRODUCT_IDENTITY;
+		const appearance = theme.isLight ? "light" : "dark";
+		const mode = theme.getColorMode();
 		let lines: string[];
 		switch (this.#phase) {
 			case "splash":
-				lines = renderSetupSplash(safeWidth, height, performance.now() - this.#phaseStartedAt);
+				lines = renderSetupSplash(safeWidth, height, performance.now() - this.#phaseStartedAt, identity, appearance, mode);
 				break;
 			case "transition": {
 				const elapsed = performance.now() - this.#phaseStartedAt;
 				const progress = Math.min(1, elapsed / SCENE_TRANSITION_MS);
-				const splash = renderSetupSplash(safeWidth, height, SETUP_SPLASH_MS + elapsed);
-				const scene = this.#renderScene(safeWidth, height);
+				const splash = renderSetupSplash(safeWidth, height, SETUP_SPLASH_MS + elapsed, identity, appearance, mode);
+				const scene = this.#renderScene(safeWidth, height, identity, appearance, mode);
 				lines = dissolveFrames(splash, scene, progress, height);
 				break;
 			}
 			case "outro":
-				lines = renderSetupOutro(safeWidth, height, performance.now() - this.#phaseStartedAt);
+				lines = renderSetupOutro(
+					safeWidth,
+					height,
+					performance.now() - this.#phaseStartedAt,
+					identity,
+					appearance,
+					mode,
+				);
 				break;
 			case "scene":
-				lines = this.#renderScene(safeWidth, height);
+				lines = this.#renderScene(safeWidth, height, identity, appearance, mode);
 				break;
 			case "done":
 				lines = [];
@@ -180,16 +189,22 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		return this.#fitToScreen(lines, safeWidth, height);
 	}
 
-	#renderScene(width: number, height: number): string[] {
+	#renderScene(
+		width: number,
+		height: number,
+		identity: NonNullable<SetupHost["identity"]>,
+		appearance: "dark" | "light",
+		mode: Parameters<typeof renderSetupSplash>[5],
+	): string[] {
 		const scene = this.scenes[this.#sceneIndex];
 		const title = this.#activeScene?.title ?? scene?.title ?? "Setup";
 		const subtitle = this.#activeScene?.subtitle;
 		const contentWidth = Math.max(MIN_CONTENT_WIDTH, width - SCENE_MARGIN_X * 2);
-		const logo = gradientLogo(PI_LOGO, 0);
+		const logo = gradientLogo(identity.logoArt, 0, undefined, identity.gradientPalettes[appearance], mode);
 		const header = [
 			"",
 			...logo.map(line => centerLine(line, width)),
-			centerLine(theme.bold(theme.fg("accent", APP_NAME)), width),
+			centerLine(theme.bold(theme.fg("accent", identity.displayName)), width),
 			centerLine(theme.fg("muted", `Setup step ${this.#sceneIndex + 1} of ${this.scenes.length}`), width),
 			"",
 			indentLine(theme.bold(title), width, SCENE_MARGIN_X),
