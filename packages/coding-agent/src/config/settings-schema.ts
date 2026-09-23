@@ -12,7 +12,7 @@ import {
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import { DEFAULT_LIVE_VOICE, LIVE_VOICE_OPTIONS, LIVE_VOICE_VALUES } from "../live/voices";
 import { MAGIC_KEYWORDS, type MagicKeywordId } from "../modes/magic-keywords";
-import type { AnyUiMetadata, SettingTab, SubmenuOption, UiBase } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import type { AnyUiMetadata } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import {
 	COMPACTION_METHOD_CHOICES,
 	type CompactionMethod,
