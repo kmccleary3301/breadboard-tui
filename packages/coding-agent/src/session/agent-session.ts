@@ -1476,7 +1476,7 @@ export class AgentSession {
 		this.#extensionRunner = config.extensionRunner;
 		this.#detachTurnPrepare = this.agent.addBeforeModelCall(async (context: Context, signal?: AbortSignal) => {
 			const runner = this.#extensionRunner;
-			if (!runner?.hasHandlers("turn_prepare")) return;
+			if (!runner?.hasHandlers?.("turn_prepare")) return;
 			const result = await runner.emitTurnPrepare({
 				turnIndex: this.#turnIndex,
 				previousMode: this.#turnPrepareMode,
@@ -4248,7 +4248,7 @@ export class AgentSession {
 		}
 		if (this.#yieldTerminationPending || endedByTerminalTool) return;
 		const runner = this.#extensionRunner;
-		if (!runner?.hasHandlers("turn_settle")) return;
+		if (!runner?.hasHandlers?.("turn_settle")) return;
 		const payloads = await runner.emitTurnSettle({
 			turnIndex: this.#turnIndex,
 			message: context.message,
