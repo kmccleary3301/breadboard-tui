@@ -1,5 +1,5 @@
 import { NativeRpcTransport } from "../src/sdk/native-rpc";
-
+import type { PublicSessionEvent } from "../src/sdk/public-session-event";
 const binaryPath = Bun.argv[2] ?? Bun.env.BB_BINARY;
 if (!binaryPath) throw new Error("usage: bun run packages/breadboard-harness/examples/sdk-session.ts /path/to/bb");
 
@@ -20,7 +20,7 @@ const transport = new NativeRpcTransport({
 	},
 });
 
-const events: string[] = [];
+const events: PublicSessionEvent[] = [];
 const replyTexts: string[] = [];
 let approvalRequests = 0;
 let cancelPromise: Promise<void> | undefined;
@@ -36,7 +36,7 @@ try {
 	);
 	const created = await transport.createSession({ task });
 	for await (const event of eventStream) {
-		events.push(event.kind);
+		events.push(event);
 		if (event.kind === "approval.requested") approvalRequests += 1;
 		if (event.kind === "assistant_message" && typeof event.payload.text === "string" && event.payload.text)
 			replyTexts.push(event.payload.text);

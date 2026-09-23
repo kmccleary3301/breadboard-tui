@@ -223,6 +223,7 @@ describe("NativeRpcTransport", () => {
 			approval: { kind: "forward", decide: () => ({ decision: "allow" }) },
 			spawn: async () => reversed.process,
 		});
+
 		await allow.start();
 		await allow.prompt("ask");
 		await eventually(() => reversed.writes.find(line => line.includes("approval-1")));
@@ -236,6 +237,31 @@ describe("NativeRpcTransport", () => {
 		await eventually(() => unknown.writes.find(line => line.includes("approval-1")));
 		expect(unknown.writes.at(-1)).toContain('"cancelled":true');
 		await deny.stop();
+	});
+	test("resets or continues public sequence state across resume", async () => {
+		const peer = fakePeer();
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => peer.process });
+		const events = transport.events();
+		await transport.createSession({ task: "hello" });
+		await events.next();
+		await events.next();
+		peer.emit({ type: "agent_end" });
+		const completed = (await events.next()).value as PublicSessionEvent;
+		expect(completed).toMatchObject({ kind: "session.completed", seq: 2, session_id: "s1" });
+		await transport.resumeSession("/tmp/existing.jsonl");
+		const resumed = (await events.next()).value as PublicSessionEvent;
+		expect(resumed).toMatchObject({ kind: "session.resumed", seq: 3, session_id: "s1" });
+		await transport.prompt("again");
+		const accepted = (await events.next()).value as PublicSessionEvent;
+		expect(accepted).toMatchObject({ kind: "input.accepted", seq: 4, session_id: "s1" });
+		for (const event of [completed, resumed, accepted])
+			expect(
+				validateBundledSchema(
+					"https://breadboard.dev/contracts/public/schemas/bb.public_session_event.v1.schema.json",
+					event,
+				),
+			).toEqual([]);
+		await transport.stop();
 	});
 	test("resumes an existing session from the startup session file and supports cancellation", async () => {
 		const peer = fakePeer();

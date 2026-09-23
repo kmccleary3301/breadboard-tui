@@ -11,14 +11,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { RpcFrameDecoder, encodeRpcFrame, MAX_RPC_FRAME_BYTES } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
 import type { NativeSessionTranscriptV2 } from "./contracts";
-import type {
-	PublicAssistantMessagePayload,
-	PublicLifecyclePayload,
-	PublicSessionEvent,
-	PublicSessionEventKind,
-	PublicToolCallPayload,
-	PublicToolResultPayload,
-} from "./public-session-event";
+import type { PublicSessionEvent, PublicSessionEventKind } from "./public-session-event";
 
 /** The two harness selectors accepted by the native CLI. */
 export type NativeHarnessSelection =
@@ -394,6 +387,7 @@ export class NativeRpcTransport {
 
 	async resumeSession(sessionFile: string): Promise<NativeSessionCreateResponse> {
 		if (!sessionFile) throw new Error("resumeSession requires a session file");
+		const previousSessionId = this.#session?.session_id;
 		if (!this.#process) {
 			this.#resumeSession = sessionFile;
 			await this.start();
@@ -403,11 +397,15 @@ export class NativeRpcTransport {
 			if (result.cancelled) throw new Error("Native RPC session resume was cancelled");
 		}
 		const state = await this.#state();
+		if (previousSessionId !== state.sessionId) this.#publicEventSeq = 0;
+		this.#publicTerminal = false;
+		this.#cancelRequested = false;
 		this.#session = {
 			session_id: state.sessionId,
 			...(state.sessionFile === undefined ? {} : { session_file: state.sessionFile }),
 			status: "paused",
 		};
+		this.#emitPublic("session.resumed", {}, "bb.payload.product_session.lifecycle.v1");
 		return {
 			session_id: state.sessionId,
 			status: "paused",
@@ -508,10 +506,10 @@ export class NativeRpcTransport {
 		}
 	}
 
-	#emitPublic(
-		kind: PublicSessionEventKind,
-		payload: PublicLifecyclePayload | PublicAssistantMessagePayload | PublicToolCallPayload | PublicToolResultPayload,
-		payloadSchemaVersion: PublicSessionEvent["payload_schema_version"],
+	#emitPublic<K extends PublicSessionEventKind>(
+		kind: K,
+		payload: Extract<PublicSessionEvent, { readonly kind: K }>["payload"],
+		payloadSchemaVersion: Extract<PublicSessionEvent, { readonly kind: K }>["payload_schema_version"],
 	): void {
 		const sessionId = this.#session?.session_id;
 		if (!sessionId || this.#publicTerminal) return;
@@ -532,7 +530,7 @@ export class NativeRpcTransport {
 			kind,
 			payload,
 			payload_schema_version: payloadSchemaVersion,
-		});
+		} as PublicSessionEvent);
 	}
 
 	#projectSessionFrame(frame: RpcSessionEventFrame): void {
