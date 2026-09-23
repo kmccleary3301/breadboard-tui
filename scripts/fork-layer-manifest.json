@@ -720,6 +720,16 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/extensibility/extensions/runner.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/src/extensibility/extensions/types.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/coding-agent/src/irc/bus.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1390,6 +1400,11 @@
 		},
 		{
 			"path": "packages/coding-agent/test/composer-cache.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/coding-agent/test/extensions-runner.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
