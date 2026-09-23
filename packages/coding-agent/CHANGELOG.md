@@ -13,6 +13,8 @@
 - Added engine-owned persistent IPython and JavaScript evaluation for process-backed sessions, with bundled runtimes, per-language reset, shell approvals, bounded output, cancellation, and session-owned cleanup. Docker-backed eval and native OMP's tool/delegation prelude are not supported.
 
 ### Changed
+- The installed product now defaults to the native `bb-omp.native` harness when no engine mode is configured. Python bridge modes remain selectable through `breadboard.engineMode`, `--engine-mode`, or `BREADBOARD_ENGINE_MODE`; the R39 launcher remains the documented rollback.
+
 
 - BreadBoard Balanced now shows compact context and available spend alongside folder, session, branch, and model identity. Unknown accounting and subscription billing remain hidden; effort follows actual gateway request metadata or verified harness configuration.
 - BreadBoard composer metadata reflows between attached edges, preserving whole numeric badges and stable identity alignment as activity changes. Full folder paths, token counts, and session or turn spend are selectable.

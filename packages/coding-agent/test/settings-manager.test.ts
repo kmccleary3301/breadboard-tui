@@ -2034,6 +2034,46 @@ describe("Settings", () => {
 		});
 	});
 	describe("migrations", () => {
+		it("migrates an R39 bridge profile to native without changing shared preferences", async () => {
+			await writeSettings({
+				symbolPreset: "nerd",
+				composer: { shape: "rule" },
+				theme: { dark: "titanium", light: "light" },
+				statusLine: { preset: "bb-balanced" },
+				breadboard: {
+					engineMode: "local-owned",
+					harness: {
+						default: ".breadboard/bb-omp/r39/bb-omp.harness.yaml",
+						paletteHeader: false,
+						unsupportedCommands: "hide",
+					},
+					engineArtifact: { kind: "runtime-bundle", runtimeBundle: { path: "/old/r39.bundle" } },
+				},
+			});
+			const previousProduct = process.env.BREADBOARD_PRODUCT;
+			process.env.BREADBOARD_PRODUCT = "1";
+			try {
+				const settings = await Settings.init({ cwd: projectDir, agentDir });
+				expect(settings.get("symbolPreset")).toBe("nerd");
+				expect(settings.get("composer.shape")).toBe("rule");
+				expect(settings.get("theme.dark")).toBe("titanium");
+				expect(settings.get("statusLine.preset")).toBe("bb-balanced");
+
+				settings.set("display.showTokenUsage", true);
+				await settings.flush();
+				const migrated = await readSettings();
+				expect(migrated.breadboard).toEqual({
+					harness: {
+						default: "daily_driver",
+						paletteHeader: false,
+						unsupportedCommands: "hide",
+					},
+				});
+			} finally {
+				if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
+				else process.env.BREADBOARD_PRODUCT = previousProduct;
+			}
+		});
 		it("preserves current ask timeout seconds in overrides and persisted config", async () => {
 			expect(Settings.isolated({ "ask.timeout": 2000 }).get("ask.timeout")).toBe(2000);
 

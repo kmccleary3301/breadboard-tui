@@ -2105,6 +2105,31 @@ export class Settings {
 
 	/** Apply schema migrations to raw settings */
 	#migrateRawSettings(raw: RawSettings, captureLegacyChangelogVersion = true): RawSettings {
+		// A R39 product profile selected the Python bridge explicitly and pointed
+		// at its workspace harness. The native daily driver owns those selections;
+		// carry the user's shared preferences while dropping only the obsolete
+		// bridge identity and selecting the built-in daily-driver harness.
+		if (process.env.BREADBOARD_PRODUCT === "1" && isRecord(raw.breadboard)) {
+			const breadboard = raw.breadboard;
+			const harness = isRecord(breadboard.harness) ? breadboard.harness : undefined;
+			const defaultHarness = harness?.default;
+			const isR39Harness =
+				typeof defaultHarness === "string" && /(?:^|[/\\])r39(?:[/\\])/.test(defaultHarness);
+			if (isR39Harness && breadboard.engineMode === "local-owned") {
+				for (const key of [
+					"engineMode",
+					"baseUrl",
+					"auth",
+					"tls",
+					"engineArtifact",
+					"ownerExitPolicy",
+					"sessionConfigPath",
+				]) {
+					delete breadboard[key];
+				}
+				harness.default = "daily_driver";
+			}
+		}
 		// queueMode -> steeringMode
 		if ("queueMode" in raw && !("steeringMode" in raw)) {
 			raw.steeringMode = raw.queueMode;

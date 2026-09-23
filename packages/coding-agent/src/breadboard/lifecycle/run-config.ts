@@ -554,24 +554,23 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 	);
 	const effectiveEndpoint = input.endpointOverride ?? endpointChoice.value;
 	const normalizedEndpoint = effectiveEndpoint === undefined ? undefined : normalizeEndpoint(effectiveEndpoint);
+	const envArtifact = environmentArtifact(environment);
+	const explicitArtifactSelection = envArtifact !== undefined || hasOwn(selected, "engineArtifact");
 
 	let modeChoice: { value: BreadboardEngineMode; source: ConfigSource; explicit: boolean };
 	if (cliMode !== undefined) modeChoice = { value: parseMode(cliMode), source: "cli", explicit: true };
 	else if (envMode !== undefined) modeChoice = { value: parseMode(envMode), source: "environment", explicit: true };
 	else if (selectedMode !== undefined)
 		modeChoice = { value: parseMode(selectedMode), source: "selected-config", explicit: true };
-	else if (
-		normalizedEndpoint === undefined ||
-		(environment.BREADBOARD_PRODUCT === "1" && !endpointChoice.explicit) ||
-		(input.endpointOverride !== undefined && !endpointChoice.explicit)
-	)
+	else if (explicitArtifactSelection || input.endpointOverride !== undefined)
 		modeChoice = { value: "local-owned", source: "derived-default", explicit: false };
-	else
+	else if (endpointChoice.explicit)
 		modeChoice = {
-			value: isLoopbackEndpoint(normalizedEndpoint) ? "local-external" : "remote",
+			value: normalizedEndpoint !== undefined && isLoopbackEndpoint(normalizedEndpoint) ? "local-external" : "remote",
 			source: "derived-default",
 			explicit: false,
 		};
+	else modeChoice = { value: "native", source: "derived-default", explicit: false };
 	let endpoint = normalizedEndpoint;
 	let tls: BreadboardTls | undefined;
 	const selectedAuth = hasOwn(selected, "auth") ? selected.auth : undefined;
@@ -593,7 +592,7 @@ export function resolveBreadboardRunConfig(input: ResolveBreadboardRunConfigInpu
 				? { value: parseTls(selectedTls), source: "selected-config" as const }
 				: { value: undefined, source: "derived-default" as const };
 
-	const envArtifact = environmentArtifact(environment);
+
 	const installedArtifact = modeChoice.value === "local-owned" ? input.installedEngineArtifact : undefined;
 	const artifactChoice =
 		envArtifact !== undefined

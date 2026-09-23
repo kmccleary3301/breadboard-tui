@@ -208,7 +208,20 @@ describe("resolveBreadboardRunConfig", () => {
 		).toBe("mode_endpoint_conflict");
 	});
 
-	test("infers only the three governed defaults and requires explicit local-external endpoint", () => {
+	test("defaults to native while explicit bridge mode beats that default", () => {
+		const defaulted = resolveBreadboardRunConfig(baseInput);
+		expect(defaulted.mode).toBe("native");
+		expect(defaulted.sources.mode).toBe("derived-default");
+
+		const explicitBridge = resolveBreadboardRunConfig({
+			...baseInput,
+			selectedConfig: { engineMode: "local-external", baseUrl: "http://127.0.0.1:9000" },
+		});
+		expect(explicitBridge.mode).toBe("local-external");
+		expect(explicitBridge.sources.mode).toBe("selected-config");
+	});
+
+	test("infers endpoint-selected bridge modes and requires explicit local-external endpoint", () => {
 		const localExternal = resolveBreadboardRunConfig({ ...baseInput, cli: { engineUrl: "http://127.0.0.2:9000" } });
 		expect(localExternal.mode).toBe("local-external");
 		const remote = resolveBreadboardRunConfig({
@@ -222,14 +235,16 @@ describe("resolveBreadboardRunConfig", () => {
 		).toBe("missing_endpoint");
 	});
 
-	test("uses an installed artifact with the BreadBoard endpoint default while preserving explicit endpoints", () => {
+	test("defaults product launches to native and preserves explicit bridge endpoints", () => {
 		const productEnvironment = { BREADBOARD_PRODUCT: "1" };
-		expect(
-			configError(() => resolveBreadboardRunConfig({ ...baseInput, environment: productEnvironment })).code,
-		).toBe("missing_engine_artifact");
+		const native = resolveBreadboardRunConfig({ ...baseInput, environment: productEnvironment });
+		expect(native.mode).toBe("native");
+		expect(native.endpoint).toBeUndefined();
+
 		const derived = resolveBreadboardRunConfig({
 			...baseInput,
 			environment: productEnvironment,
+			cli: { engineMode: "local-owned" },
 			installedEngineArtifact: artifact,
 		});
 		expect(derived.mode).toBe("local-owned");
@@ -266,7 +281,9 @@ describe("resolveBreadboardRunConfig", () => {
 	});
 
 	test("requires explicit typed artifact identity for local-owned", () => {
-		const missing = configError(() => resolveBreadboardRunConfig(baseInput));
+		const missing = configError(() =>
+			resolveBreadboardRunConfig({ ...baseInput, cli: { engineMode: "local-owned" } }),
+		);
 		expect(missing.code).toBe("missing_engine_artifact");
 		const config = resolveBreadboardRunConfig({ ...baseInput, selectedConfig: { engineArtifact: artifact } });
 		expect(config.mode).toBe("local-owned");
