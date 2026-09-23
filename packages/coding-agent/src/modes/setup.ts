@@ -1,14 +1,16 @@
 import type { WebSearchGrounding } from "@oh-my-pi/pi-catalog/types";
 import { runProviderSetupWizard as runProviderWizard } from "@oh-my-pi/pi-tui/setup/lazy";
-import type { SetupHost, SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
+import type { SetupHost, SetupProviderAuthPort, SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
 import {
 	ALL_SCENES,
 	CURRENT_SETUP_VERSION,
 	runSetupWizard as runWizard,
-	type RunSetupWizardOptions,
+	type RunSetupWizardOptions as TuiRunSetupWizardOptions,
 	selectSetupScenes as selectScenes,
 	type SetupSceneSelectionOptions,
 } from "@oh-my-pi/pi-tui/setup/wizard";
+import { authenticateProvider } from "../breadboard/provider-auth-login";
+import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
 import { formatModelString, resolveModelRoleValue, rolePriorityDefaults } from "../config/model-resolver";
 import { getRoleInfo } from "../config/model-roles";
 import type { Settings } from "../config/settings";
@@ -19,7 +21,6 @@ import { SEARCH_PROVIDER_OPTIONS, type SearchProviderId } from "../web/search/ty
 import { createModelBrowserSource } from "./model-browser-source";
 import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 import type { InteractiveModeContext } from "./types";
-
 export { ALL_SCENES, CURRENT_SETUP_VERSION };
 export type { SetupScene, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
 export { runStartupSplash } from "@oh-my-pi/pi-tui/setup/startup-splash";
@@ -56,8 +57,32 @@ function resolveWebSearchSelection(ctx: InteractiveModeContext, id: SearchProvid
 	return model ? { selector: formatModelString(model), model } : undefined;
 }
 
+function createProviderAuthAdapter(port: ProviderAuthPort): SetupProviderAuthPort {
+	return {
+		listProviders: () => port.listProviders(),
+		listCredentials: providerId => port.listCredentials(providerId),
+		listProvidersSync: port.listProvidersSync?.bind(port),
+		listCredentialsSync: port.listCredentialsSync?.bind(port),
+		authenticate: async (providerId, options) => {
+			const credential = await authenticateProvider(port, providerId, {
+				signal: options.signal,
+				selectAuthScheme: async (provider, schemes) =>
+					(await options.selectAuthScheme?.(provider, schemes)) ?? schemes[0] ?? "",
+				selectOAuthFlow: options.selectOAuthFlow
+					? provider => options.selectOAuthFlow?.(provider) ?? Promise.resolve(undefined)
+					: undefined,
+				showAuthorization: options.showAuthorization,
+				prompt: options.prompt,
+				showProgress: options.showProgress,
+			});
+			return { accountLabel: credential.accountLabel };
+		},
+	};
+}
+
 /** Bind application preferences and runtime effects to the setup presentation. */
-export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
+export function createSetupHost(ctx: InteractiveModeContext, providerAuthPort?: ProviderAuthPort): SetupHost {
+
 	const modelSource = createModelBrowserSource(ctx.settings);
 	return {
 		ui: ctx.ui,
@@ -101,6 +126,7 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		get authStorage() {
 			return ctx.session.modelRegistry.authStorage;
 		},
+		providerAuth: providerAuthPort ? createProviderAuthAdapter(providerAuthPort) : undefined,
 		modelSource,
 		getModels: () => ({
 			available: ctx.session.modelRegistry.getAvailable(),
@@ -169,13 +195,17 @@ export function selectSetupScenes(
 	return selectScenes(storedVersion, scenes, ctx ? createSetupHost(ctx) : undefined, options);
 }
 
+type SetupRunWizardOptions = Omit<TuiRunSetupWizardOptions, "providerAuthPort"> & {
+	providerAuthPort?: ProviderAuthPort;
+};
+
 /** Run setup with application-owned persistence and provider effects. */
 export function runSetupWizard(
 	ctx: InteractiveModeContext,
 	scenes: readonly SetupScene[] = ALL_SCENES,
-	options: RunSetupWizardOptions = {},
+	options: SetupRunWizardOptions = {},
 ): Promise<void> {
-	return runWizard(createSetupHost(ctx), scenes, options);
+	return runWizard(createSetupHost(ctx, options.providerAuthPort), scenes, options);
 }
 
 /** Open provider setup without advancing onboarding or replaying the welcome intro. */
