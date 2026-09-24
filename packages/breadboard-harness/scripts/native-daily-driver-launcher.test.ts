@@ -51,13 +51,14 @@ async function setupLauncher(withR39Profile = true): Promise<LauncherFixture> {
 		'if [[ "${1:-}" == "--version" ]]; then exit 0; fi',
 		'if [[ -n "${BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT:-}" ]]; then',
 		`  printf '{"schema":"test"}\\n' > "$BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT"`,
+		'  if [[ -n "${BREADBOARD_NATIVE_PROFILE_MIGRATION:-}" && -f "${PI_CODING_AGENT_DIR:-}/config.yml" ]]; then printf \'{"breadboard":{"harness":{"default":"daily_driver"}}}\\n\' > "${PI_CODING_AGENT_DIR}/config.yml"; fi',
 		"fi",
 		`count_file='${countFile}'`,
 		"count=0",
 		'[[ -f "$count_file" ]] && count="$(cat "$count_file")"',
 		"count=$((count + 1))",
 		"printf '%s' \"$count\" > \"$count_file\"",
-		'if [[ "$count" == 1 && -n "${BREADBOARD_NATIVE_PROFILE_MIGRATION:-}" ]]; then exit 1; fi',
+		`if [[ "$count" == 1 && -n "\${BREADBOARD_NATIVE_PROFILE_MIGRATION:-}" && "${withR39Profile ? "1" : "0"}" == 1 ]]; then exit 1; fi`,
 	].join("\n");
 	const launcher = join(root, "candidate");
 	await writeFile(fakeBinary, `${fakeScript}\n`);
@@ -93,6 +94,7 @@ function spawn(fixture: LauncherFixture, args: string[] = []) {
 	return Bun.spawnSync([fixture.launcher, ...args], {
 		cwd: fixture.workspace,
 		env: { ...process.env, HOME: fixture.root, FAKE_COUNT_FILE: fixture.countFile },
+		stderr: "ignore",
 	});
 }
 
@@ -135,6 +137,29 @@ describe("native daily-driver launcher", () => {
 		expect(config).toContain('"default":"daily_driver"');
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(true);
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.receipt.v1.json")).exists()).toBe(true);
+	});
+
+	test("migrates a markerless local-owned profile without an R39 source", async () => {
+		const fixture = await setupLauncher(false);
+
+		await mkdir(join(fixture.nativeProfile, "agent"), { recursive: true });
+		await writeFile(
+			join(fixture.nativeProfile, "agent", "config.yml"),
+			"breadboard:\n  engineMode: local-owned\n  harness:\n    default: .breadboard/bb-omp/r39/bb-omp.harness.yaml\n",
+		);
+		const result = spawn(fixture);
+		expect(result.exitCode).toBe(0);
+		const config = await Bun.file(join(fixture.nativeProfile, "agent", "config.yml")).text();
+		expect(config).toContain('"default":"daily_driver"');
+		expect(config).not.toContain("engineMode");
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
+	});
+	test("repairs a missing auth symlink on a valid fresh profile", async () => {
+		const fixture = await setupLauncher(false);
+		expect(spawn(fixture).exitCode).toBe(0);
+		await Bun.$`rm -f ${join(fixture.nativeProfile, "agent", "agent.db")}`;
+		expect(spawn(fixture).exitCode).toBe(0);
+		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
 	});
 
 	test("retries migration after a failed launch and truncated marker", async () => {

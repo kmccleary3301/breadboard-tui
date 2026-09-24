@@ -93,10 +93,13 @@ if [[ -f "$marker" && ! -L "$marker" ]] &&
 fi
 pending=$((1 - marker_valid))
 source_profile=0
+markerless_profile=0
 fresh_profile=0
 if [[ "$pending" == 1 ]]; then
   if [[ -d "$r39_root" && ! -L "$r39_root" ]]; then
     source_profile=1
+  elif [[ -e "$native_root" ]]; then
+    markerless_profile=1
   elif [[ -z ${freshProfileSettings} ]]; then
     printf 'R39 profile is missing and no fresh profile settings were provided for workspace key %s\n' "$workspace_key" >&2
     exit 1
@@ -140,6 +143,9 @@ if [[ "$pending" == 1 ]]; then
       printf '%s\n' ${freshProfileSettings} > "$config_tmp"
       chmod 600 "$config_tmp"
       mv "$config_tmp" "$seed_root/agent/config.yml"
+      agent_db_link="$seed_root/agent/.agent.db.$$"
+      ln -s ${shellQuote(authSource)}/agent.db "$agent_db_link"
+      mv -f "$agent_db_link" "$seed_root/agent/agent.db"
       receipt_tmp="$seed_root/.bb-native-profile-migration.receipt.v1.json.tmp.$$"
       printf '{"schema":"bb.native_profile_migration.receipt.v1"}\n' > "$receipt_tmp"
       chmod 600 "$receipt_tmp"
@@ -156,10 +162,6 @@ if [[ "$pending" == 1 ]]; then
       rm -rf "$seed_root"
     fi
   fi
-  rm -f "$native_root/agent"/agent.db* "$native_root/agent"/.agent.db.*
-  agent_db_link="$native_root/agent/.agent.db.$$"
-  ln -s ${shellQuote(authSource)}/agent.db "$agent_db_link"
-  mv -f "$agent_db_link" "$native_root/agent/agent.db"
   if [[ "$fresh_profile" == 1 ]]; then
     [[ -f "$native_root/agent/config.yml" ]] || exit 1
     if [[ ! -f "$receipt" ]]; then
@@ -185,6 +187,13 @@ for directory in "$native_root" "$native_root/agent" "$native_root/config" "$nat
   [[ ! -L "$directory" && ( ! -e "$directory" || -d "$directory" ) ]] || exit 1
   mkdir -p "$directory"
 done
+expected_agent_db="${shellQuote(authSource)}/agent.db"
+if [[ ! -L "$native_root/agent/agent.db" || "$(readlink "$native_root/agent/agent.db")" != "$expected_agent_db" ]]; then
+  rm -f "$native_root/agent"/agent.db* "$native_root/agent"/.agent.db.*
+  agent_db_link="$native_root/agent/.agent.db.$$"
+  ln -s "$expected_agent_db" "$agent_db_link"
+  mv -f "$agent_db_link" "$native_root/agent/agent.db"
+fi
 if [[ "$pending" == 1 ]]; then
   export BREADBOARD_NATIVE_PROFILE_MIGRATION=1
 fi
@@ -207,12 +216,32 @@ set +e
   ${shellQuote(binaryPath)} "$@"
 status=$?
 set -e
-if [[ "$pending" == 1 && "$source_profile" == 1 && "$status" == 0 && -f "$receipt" && ! -L "$receipt" && -f "$r39_root/agent/config.yml" && -f "$r39_root/agent/agent.db" ]]; then
-  source_config_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
-  source_agent_db_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/agent.db" | /usr/bin/cut -d ' ' -f 1)"
+if [[ "$pending" == 1 && "$status" == 0 && -f "$receipt" && ! -L "$receipt" && ( "$source_profile" == 1 || "$markerless_profile" == 1 ) ]]; then
+  marker_source="$r39_root"
+  marker_config="$r39_root/agent/config.yml"
+  marker_db="$r39_root/agent/agent.db"
+  if [[ "$source_profile" != 1 ]]; then
+    marker_source="fresh"
+    marker_config="$native_root/agent/config.yml"
+    marker_db=${shellQuote(authSource)}/agent.db
+  fi
+  if [[ ! -f "$marker_config" ]]; then
+    marker_config="$native_root/agent/config.yml"
+  fi
+  if [[ ! -f "$marker_db" ]]; then
+    marker_db=${shellQuote(authSource)}/agent.db
+  fi
+  source_config_sha=""
+  source_agent_db_sha=""
+  if [[ -f "$marker_config" ]]; then
+    source_config_sha="$(/usr/bin/shasum -a 256 "$marker_config" | /usr/bin/cut -d ' ' -f 1)"
+  fi
+  if [[ -f "$marker_db" ]]; then
+    source_agent_db_sha="$(/usr/bin/shasum -a 256 "$marker_db" | /usr/bin/cut -d ' ' -f 1)"
+  fi
   marker_tmp="$marker.tmp.$$"
   rm -f "$marker_tmp"
-  printf '{"schema":"bb.native_profile_migration.v1","source":"%s","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$r39_root" "$source_config_sha" "$source_agent_db_sha" > "$marker_tmp"
+  printf '{"schema":"bb.native_profile_migration.v1","source":"%s","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$marker_source" "$source_config_sha" "$source_agent_db_sha" > "$marker_tmp"
   chmod 600 "$marker_tmp"
   mv -f "$marker_tmp" "$marker"
 fi
