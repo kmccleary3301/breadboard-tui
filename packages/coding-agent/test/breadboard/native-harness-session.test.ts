@@ -34,7 +34,7 @@ beforeAll(async () => {
 	const authDir = fs.mkdtempSync(path.join(os.tmpdir(), `bb-native-session-auth-${Snowflake.next()}-`));
 	tempDirs.push(authDir);
 	modelRegistry = new ModelRegistry(await discoverAuthStorage(authDir));
-	modelRegistry.authStorage.setRuntimeApiKey("openai", "test-key");
+	modelRegistry.authStorage.keys.setRuntime("openai", "test-key");
 });
 
 afterEach(async () => {

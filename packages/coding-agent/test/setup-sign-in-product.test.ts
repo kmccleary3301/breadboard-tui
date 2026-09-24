@@ -227,9 +227,11 @@ describe("product-aware SignInTab", () => {
 				nativeCalls.push("login");
 				throw new Error("native AuthStorage login must not run in BreadBoard mode");
 			},
-			setRuntimeApiKey() {
-				nativeCalls.push("setRuntimeApiKey");
-				throw new Error("native AuthStorage mutation must not run in BreadBoard mode");
+			keys: {
+				setRuntime() {
+					nativeCalls.push("setRuntime");
+					throw new Error("native AuthStorage mutation must not run in BreadBoard mode");
+				},
 			},
 		} as unknown as AuthStorage;
 		const port: ProviderAuthPort = {

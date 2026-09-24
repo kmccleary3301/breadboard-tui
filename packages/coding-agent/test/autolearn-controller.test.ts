@@ -354,7 +354,7 @@ describe("isolated auto-learn capture", () => {
 			initialState: { model: captureMock, systemPrompt: ["Test"], tools: [manageSkillTool] },
 		});
 		const nativeAuth = createInMemoryAuthStorage();
-		nativeAuth.setRuntimeApiKey(captureMock.provider, "native-capture-key");
+		nativeAuth.keys.setRuntime(captureMock.provider, "native-capture-key");
 		let captureAgent: Agent | undefined;
 		const runCapture = createAutoLearnCaptureRunner({
 			sourceAgent,

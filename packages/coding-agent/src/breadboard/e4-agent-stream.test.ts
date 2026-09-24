@@ -2611,7 +2611,7 @@ describe("E4AgentStreamBridge", () => {
 	test("persists backend tool calls before results in AgentSession JSONL and native context", async () => {
 		using tempDir = TempDir.createSync("@breadboard-e4-agent-session-order-");
 		const authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.setRuntimeApiKey(model.provider, "test-key");
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
 		const sessionFile = sessionManager.getSessionFile();

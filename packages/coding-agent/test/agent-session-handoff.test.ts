@@ -64,7 +64,7 @@ describe("AgentSession handoff", () => {
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-handoff-shared-");
 		authStorage = await AuthStorage.create(path.join(sharedDir.path(), "testauth.db"));
-		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.keys.setRuntime("anthropic", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 
 		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -672,7 +672,7 @@ describe("AgentSession handoff", () => {
 	});
 	it("keeps pre-prompt context-full checks aligned with provider-anchored usage", async () => {
 		await session.dispose();
-		authStorage.setRuntimeApiKey("openai", "test-key");
+		authStorage.keys.setRuntime("openai", "test-key");
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		events = [];
 
@@ -785,7 +785,7 @@ describe("AgentSession handoff", () => {
 		// NOT encrypted reasoning. The provider reports a deflated 1k prompt tokens, yet
 		// the stored conversation is ~20k tokens — compaction MUST still fire.
 		await session.dispose();
-		authStorage.setRuntimeApiKey("openai", "test-key");
+		authStorage.keys.setRuntime("openai", "test-key");
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		events = [];
 
@@ -864,7 +864,7 @@ describe("AgentSession handoff", () => {
 	});
 	it("does not double-count unchanged non-message tokens in provider-anchored pre-prompt checks", async () => {
 		await session.dispose();
-		authStorage.setRuntimeApiKey("openai", "test-key");
+		authStorage.keys.setRuntime("openai", "test-key");
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		events = [];
 
@@ -1221,7 +1221,7 @@ describe("AgentSession handoff", () => {
 		expect(await Bun.file(originalSessionFile).text()).toBe(original.fileText);
 	});
 	it("completes threshold-triggered auto-handoff while the original prompt is still unwinding", async () => {
-		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.keys.setRuntime("anthropic", "test-key");
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected built-in anthropic model to exist");

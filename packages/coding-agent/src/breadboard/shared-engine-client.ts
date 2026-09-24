@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { createDaemonBrokerClient, DaemonBrokerRejectedError, type DaemonBrokerClient } from "../launch/client";
 import { daemonRuntimeDir } from "../launch/paths";
-import type { DaemonSpec } from "@oh-my-pi/pi-tui/tools/hub";
+import type { DaemonSpec } from "@oh-my-pi/pi-tui/tools/daemon";
 import { resolveWorkerSpawnCmd, workerEnvFromParent } from "../subprocess/worker-client";
 import { LocalAuthorityStore } from "./lifecycle/local-authority-store";
 import {

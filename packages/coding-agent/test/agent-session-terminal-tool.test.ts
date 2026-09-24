@@ -18,7 +18,7 @@ import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 const completeSchema = type({ ok: type("boolean") });
 
 const sharedAuthStorage = createInMemoryAuthStorage();
-sharedAuthStorage.setRuntimeApiKey("mock", "test-key");
+sharedAuthStorage.keys.setRuntime("mock", "test-key");
 const sharedModelRegistry = new ModelRegistry(sharedAuthStorage);
 const active: Array<{ session: AgentSession; tempDir: TempDir }> = [];
 

@@ -460,6 +460,8 @@ export class ExtensionRunner {
 	#getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	#compactFn: (instructionsOrOptions?: string | CompactOptions) => Promise<void> = async () => {};
 	#getSystemPromptFn: () => string[] = () => [];
+	#runEphemeralTurnFn?: ExtensionContextActions["runEphemeralTurn"];
+	#ephemeralTurnBlocker = new AsyncLocalStorage<string | undefined>();
 	#getAsyncJobSnapshotFn: () => AsyncJobSnapshot | null = () => null;
 	#newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
 	#branchHandler: BranchHandler = async () => ({ cancelled: false });
@@ -708,6 +710,7 @@ export class ExtensionRunner {
 		this.#getContextUsageFn = contextActions.getContextUsage;
 		this.#compactFn = contextActions.compact;
 		this.#getSystemPromptFn = contextActions.getSystemPrompt;
+		this.#runEphemeralTurnFn = contextActions.runEphemeralTurn;
 
 		// Command context actions (optional, only for interactive mode)
 		if (commandContextActions) {
@@ -1190,6 +1193,7 @@ export class ExtensionRunner {
 		},
 	): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
+		const runEphemeralTurn = this.#runEphemeralTurnFn;
 		return {
 			ui: this.#uiContext,
 			mode: this.#mode,
@@ -1210,6 +1214,33 @@ export class ExtensionRunner {
 			hasPendingMessages: () => this.#hasPendingMessagesFn(),
 			shutdown: () => this.#shutdownHandler(),
 			getSystemPrompt: () => this.#getSystemPromptFn(),
+			runEphemeralTurn: runEphemeralTurn
+				? async options => {
+						if (this.#ephemeralTurnBlocker.getStore()) {
+							throw new Error("runEphemeralTurn cannot be called recursively from an ephemeral turn hook");
+						}
+						// Resolve at call time so a running handler's cancellation is inherited.
+						// A saved context must not retain a completed handler's stale signal.
+						const registrationScope = this.#toolRegistrationScope.getStore();
+						const signals = [
+							options.signal,
+							delegation?.signal,
+							registrationScope && !registrationScope.closed ? registrationScope.signal : undefined,
+						].filter((signal): signal is AbortSignal => signal !== undefined);
+						// Only hooks reached inside the side-turn pipeline are blocked. The caller's own
+						// delivery callback runs outside the guard so work it starts (lazy subscriptions,
+						// timers) does not inherit a permanent block on later consultations.
+						const onTextDelta = options.onTextDelta;
+						const request = {
+							...options,
+							onTextDelta: onTextDelta
+								? (delta: string) => this.#ephemeralTurnBlocker.exit(() => onTextDelta(delta))
+								: undefined,
+							signal: signals.length ? AbortSignal.any(signals) : undefined,
+						};
+						return await this.#ephemeralTurnBlocker.run("ephemeral turn", () => runEphemeralTurn(request));
+					}
+				: undefined,
 			localProtocolOptions: this.localProtocolOptions,
 			memory: this.#getMemoryFn?.(),
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
@@ -1312,11 +1343,13 @@ export class ExtensionRunner {
 						registrationScope.signal = handlerSignal;
 						let result: R | undefined;
 						try {
+							const handlerContext = createHandlerContext(
+								ctx,
+								handlerSignal,
+								event.type === "tool_call" ? budget : undefined,
+							);
 							result = await this.#toolRegistrationScope.run(registrationScope, () =>
-								handler(
-									event,
-									createHandlerContext(ctx, handlerSignal, event.type === "tool_call" ? budget : undefined),
-								),
+								handler(event, handlerContext),
 							);
 						} catch (error) {
 							handlerFailure = { error };
@@ -1659,7 +1692,7 @@ export class ExtensionRunner {
 		return messages;
 	}
 
-	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
+	async emitContext(messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> {
 		const ctx = this.createContext();
 
 		// Check if any extensions actually have context handlers before cloning
@@ -1698,6 +1731,8 @@ export class ExtensionRunner {
 					ctx,
 					ext,
 					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
 				);
 
 				if (handlerResult && (handlerResult as ContextEventResult).messages) {
@@ -1727,7 +1762,9 @@ export class ExtensionRunner {
 			if (!unchanged) markPerCallContextMessage(message);
 		}
 		for (const message of messages) clearContextHistoryIndex(message);
-
+		// An aborted handler is skipped and its input kept unchanged. Never hand that
+		// untransformed (possibly unredacted) context back to a caller as if every hook ran.
+		signal?.throwIfAborted();
 		return currentMessages;
 	}
 	/** Runs turn preparation handlers immediately before every provider request. */
@@ -1754,7 +1791,11 @@ export class ExtensionRunner {
 	}
 
 	/** Runs request payload hooks with the model used for that provider request. */
-	async emitBeforeProviderRequest(payload: unknown, model?: Model): Promise<BeforeProviderRequestEventResult> {
+	async emitBeforeProviderRequest(
+		payload: unknown,
+		model?: Model,
+		signal?: AbortSignal,
+	): Promise<BeforeProviderRequestEventResult> {
 		const ctx = this.createContext(model);
 		let currentPayload = payload;
 
@@ -1773,6 +1814,8 @@ export class ExtensionRunner {
 					ctx,
 					ext,
 					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
 				);
 				if (handlerResult !== undefined) {
 					currentPayload = handlerResult;
@@ -1784,7 +1827,11 @@ export class ExtensionRunner {
 	}
 
 	/** Runs response hooks with the model that produced that provider response. */
-	async emitAfterProviderResponse(response: ProviderResponseMetadata, model?: Model): Promise<void> {
+	async emitAfterProviderResponse(
+		response: ProviderResponseMetadata,
+		model?: Model,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const ctx = this.createContext(model);
 
 		for (const ext of this.extensions) {
@@ -1799,7 +1846,7 @@ export class ExtensionRunner {
 					requestId: response.requestId,
 					metadata: response.metadata,
 				};
-				await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs);
+				await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs, undefined, signal);
 			}
 		}
 	}

@@ -171,6 +171,6 @@ describe("native profile migration", () => {
 			env: { ...process.env, BREADBOARD_PRODUCT: undefined },
 		});
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout.toString()).toMatch(/^bb\/0\.1\.0-rc\.7 omp\/18\.2\.11 /);
+		expect(result.stdout.toString()).toMatch(/^bb\/0\.1\.0-rc\.7 omp\/18\.3\.0 /);
 	});
 });

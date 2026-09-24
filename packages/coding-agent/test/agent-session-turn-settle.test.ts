@@ -18,7 +18,7 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const sharedAuthStorage = createInMemoryAuthStorage();
-sharedAuthStorage.setRuntimeApiKey("mock", "test-key");
+sharedAuthStorage.keys.setRuntime("mock", "test-key");
 const sharedModelRegistry = new ModelRegistry(sharedAuthStorage);
 const active: Array<{ session: AgentSession; tempDir: TempDir }> = [];
 

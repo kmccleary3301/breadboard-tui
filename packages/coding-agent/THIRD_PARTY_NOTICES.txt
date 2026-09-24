@@ -332,14 +332,14 @@ SOFTWARE.
 ===== END crates/pi-natives/LICENSE =====
 
 ===== BEGIN crates/pi-natives/data/LICENSE.ctok =====
-SHA-256: 9ef5a4394eb84d8182c7accd4289e67c6f024e57f0a2bde45ed4ce2844724452
+SHA-256: 96f05d6114e9882d2b8949efc3a1c21a3666527231ff6b0f347faa3995a9011a
 
 MIT License
 
 Copyright (c) 2026 Sander Land
   (measured tokenizer vocabulary data, reconstruction model, and reference
   implementation: https://github.com/sanderland/ctok)
-Copyright (c) 2026 Can Bölük and the Oh My Pi contributors
+Copyright (c) 2026 Can Bölük and the omp contributors
 Copyright (c) 2026 Stencil Labs, Inc.
   (Rust implementation and the compact binary vocabulary encoding in
   crates/pi-natives/src/utok/claude)
