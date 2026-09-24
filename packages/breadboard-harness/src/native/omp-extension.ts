@@ -277,7 +277,7 @@ function registerFunctionTools(
 	guard: CompletionGuard,
 ): void {
 	for (const tool of harness.registeredToolSurface.native) {
-		const binding = bindingForTool(tool);
+		const binding = nativeBindingForTool(tool);
 		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
 		api.registerTool({
 			name: tool.name,
