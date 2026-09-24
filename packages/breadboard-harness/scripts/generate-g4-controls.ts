@@ -33,7 +33,9 @@ function mutate(source: Json, mutation: string): Json {
 		const first = record(nativeTools[0]!, "tools[0]");
 		first.description = `${typeof first.description === "string" ? first.description : ""}\nCONTROL DESCRIPTION MUTATION`;
 	} else if (mutation === "type-deleted") {
-		delete record(nativeTools[0]!, "tools[0]").type;
+		const tool = record(nativeTools[0]!, "tools[0]");
+		if (Object.hasOwn(tool, "type")) delete tool.type;
+		else tool.type = "control";
 	} else if (mutation === "tools-swapped") {
 		[nativeTools[0], nativeTools[1]] = [nativeTools[1]!, nativeTools[0]!];
 	} else if (mutation === "strict-deleted") {
