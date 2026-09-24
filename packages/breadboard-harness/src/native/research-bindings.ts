@@ -14,6 +14,7 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	WebSearch: "web_search",
 	bash: "bash",
 	shell_command: "bash",
+	interactive_bash: "bash",
 	read: "read",
 	edit: "edit",
 	apply_patch: "apply_patch",
@@ -71,7 +72,6 @@ function declaredAlias(properties: ReadonlySet<string>, aliases: readonly string
 function identityMapping(properties: ReadonlySet<string>): ArgumentMapping {
 	return Object.fromEntries([...properties].map(name => [name, name]));
 }
-
 function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName | undefined): ArgumentMapping {
 	const properties = schemaProperties(tool);
 	if (tool.name === "apply_patch" || (delegateName === "edit" && properties.has("input"))) return { input: "input" };
@@ -105,9 +105,40 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 	if (delegateName === "bash") {
 		return Object.fromEntries(
 			[
-				["command", declaredAlias(properties, ["command"])],
-				["timeout", declaredAlias(properties, ["timeout"])],
+				["command", declaredAlias(properties, ["command", "tmux_command"])],
+				["timeout", declaredAlias(properties, ["timeout", "timeout_ms"])],
+				["cwd", declaredAlias(properties, ["cwd", "workdir", "working_directory"])],
 			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "task") {
+		return Object.fromEntries(
+			[
+				["name", declaredAlias(properties, ["name", "description"])],
+				["agent", declaredAlias(properties, ["agent", "subagent_type"])],
+				["task", declaredAlias(properties, ["task", "prompt"])],
+				["context", declaredAlias(properties, ["context"])],
+				["tasks", declaredAlias(properties, ["tasks"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "web_search") {
+		return Object.fromEntries(
+			[
+				["query", declaredAlias(properties, ["query", "url"])],
+				["recency", declaredAlias(properties, ["recency"])],
+				["limit", declaredAlias(properties, ["limit"])],
+				["max_tokens", declaredAlias(properties, ["max_tokens"])],
+				["temperature", declaredAlias(properties, ["temperature"])],
+				["num_search_results", declaredAlias(properties, ["num_search_results"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "eval") {
+		return Object.fromEntries(
+			["code", "language", "reset", "timeout", "title"]
+				.filter(name => properties.has(name))
+				.map(name => [name, name]),
 		);
 	}
 	if (delegateName === "grep") {

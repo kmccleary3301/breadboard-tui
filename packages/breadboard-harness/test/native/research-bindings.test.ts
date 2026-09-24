@@ -23,6 +23,7 @@ const directDelegates: Readonly<Record<string, string>> = {
 	WebSearch: "web_search",
 	bash: "bash",
 	shell_command: "bash",
+	interactive_bash: "bash",
 	read: "read",
 	edit: "edit",
 	apply_patch: "apply_patch",
@@ -106,6 +107,38 @@ describe("research native builtin bindings", () => {
 			for (const tool of tools) expect(researchDelegateForTool(tool)).toBe(expectedDelegate(tool));
 		}
 	});
+	test("maps every declared exec tool through one host binding call", async () => {
+		const definitions = await loadNativeToolDefinitionsByRegistryPath();
+		const expectedKeys = new Set(["command", "timeout", "cwd", "name", "agent", "task", "context", "tasks", "query", "recency", "limit", "max_tokens", "temperature", "num_search_results", "code", "language", "reset", "title"]);
+		for (const tools of definitions.values()) {
+			for (const tool of tools) {
+				if (!/^(?:Bash|bash|shell_command|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)) continue;
+				const delegate = researchDelegateForTool(tool);
+				expect(delegate, `${tool.name} must have an exec binding`).toBeDefined();
+				const properties = tool.parameters.properties;
+				const input = Object.fromEntries(
+					Object.keys(typeof properties === "object" && properties !== null && !Array.isArray(properties) ? properties : {}).map(name => [name, "probe"]),
+				);
+				let received: JsonObject | undefined;
+				await researchBindingForTool(tool).run({
+					input,
+					harness: {} as never,
+					context: {
+						invokeTool: async (params: JsonObject) => {
+							received = params;
+							return { content: [{ type: "text", text: "ok" }] };
+						},
+					} as never,
+					signal: undefined,
+					onUpdate: undefined,
+					todos: {} as never,
+					guard: {} as never,
+				});
+				expect(received, `${tool.name} did not invoke host binding`).toBeDefined();
+				for (const key of Object.keys(received ?? {})) expect(expectedKeys.has(key), `${tool.name} emitted unknown host key ${key}`).toBe(true);
+			}
+		}
+	});
 
 	test("does not let an agent-shaped task call bash", async () => {
 		const definitions = await loadNativeToolDefinitionsByRegistryPath();
@@ -113,8 +146,7 @@ describe("research native builtin bindings", () => {
 		if (!tool) throw new Error("missing OpenCode task definition");
 		expect(researchDelegateForTool(tool)).toBe("task");
 		expect(await delegatedInput(tool, { command: "printf should-not-run", prompt: "agent task" })).toEqual({
-			command: "printf should-not-run",
-			prompt: "agent task",
+			task: "agent task",
 		});
 	});
 
@@ -224,6 +256,33 @@ describe("research native builtin bindings", () => {
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true });
 			await fs.rm(outside, { recursive: true, force: true });
+		}
+	});
+	test("executes the Codex shell_command schema through real host bash", async () => {
+		const definitions = await loadNativeToolDefinitionsByRegistryPath();
+		const tool = definitions.get("implementations/tools/defs")?.find(candidate => candidate.name === "shell_command");
+		if (!tool) throw new Error("missing Codex shell_command definition");
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-shell-"));
+		try {
+			const nested = path.join(scratch, "nested");
+			await fs.mkdir(nested);
+			await Bun.write(path.join(nested, "fixture.txt"), "codex-shell-ok\n");
+			const hostBash = new (await import("@oh-my-pi/pi-coding-agent/tools/bash")).BashTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { command: "cat fixture.txt", workdir: nested, timeout_ms: 5000 },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostBash.execute("research-shell", params as never),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("codex-shell-ok");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
 		}
 	});
 });
