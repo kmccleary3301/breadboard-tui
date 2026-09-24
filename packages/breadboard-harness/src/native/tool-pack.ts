@@ -32,10 +32,12 @@ function schemaType(value: CanonicalJson | undefined): string {
 }
 
 /** Mirror pyref `provider/adapters.py:88-169,236-308` for one YAML parameter. */
-function parameterSchema(parameter: JsonRecord, label: string): JsonRecord {
+function parameterSchema(parameter: JsonRecord, label: string, provider: "anthropic" | "openai"): JsonRecord {
 	const explicit = parameter.schema;
+	const hasExplicitSchema = isRecord(explicit) && Object.keys(explicit).length > 0;
+	const hasSchemaShape = hasExplicitSchema || Object.keys(parameter).some(key => !NON_SCHEMA_PARAMETER_KEYS.has(key));
 	const schema: Record<string, CanonicalJson> = {};
-	if (isRecord(explicit) && Object.keys(explicit).length > 0) {
+	if (hasExplicitSchema) {
 		Object.assign(schema, explicit);
 	} else {
 		for (const [key, value] of Object.entries(parameter)) {
@@ -43,18 +45,18 @@ function parameterSchema(parameter: JsonRecord, label: string): JsonRecord {
 		}
 	}
 	if (Object.keys(schema).length === 0) schema.type = schemaType(parameter.type);
-	else if (!("type" in schema)) schema.type = schemaType(parameter.type);
+	else if (!("type" in schema) && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema)) schema.type = schemaType(parameter.type);
 	const description = parameter.description;
 	if (typeof description === "string" && description.length > 0 && !("description" in schema)) schema.description = description;
 	if (schema.type === "array" && !("items" in schema)) schema.items = { type: "string" };
 	if (schema.type === "object") {
-		if (!("properties" in schema)) schema.properties = {};
+		if (provider === "openai" || !hasSchemaShape) schema.properties ??= {};
 		if (!("additionalProperties" in schema)) schema.additionalProperties = true;
 	}
 	const fallback = parameter.default;
 	if (fallback !== undefined && fallback !== null && !("default" in schema)) schema.default = fallback;
-	if (typeof schema.type !== "string") throw new Error(`tool definition ${label}.type must be a string`);
-	return schema;
+	if (typeof schema.type !== "string" && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema)) throw new Error(`tool definition ${label}.type must be a string`);
+	return provider === "anthropic" ? Object.fromEntries(Object.entries(schema).sort(([left], [right]) => left.localeCompare(right))) : schema;
 }
 
 function providerForSource(path: string): "anthropic" | "openai" {
@@ -63,6 +65,7 @@ function providerForSource(path: string): "anthropic" | "openai" {
 
 function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefinition {
 	const provider = providerForSource(path);
+	const isGroupB = path.startsWith("defs_pi/") || path.startsWith("defs_oh_my_pi/");
 	const name = requiredString(source.name, `${path} name`);
 	const rawParameters = source.parameters ?? [];
 	if (!Array.isArray(rawParameters)) throw new Error(`tool definition ${name}.parameters must be a list`);
@@ -72,12 +75,13 @@ function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefini
 		if (!isRecord(rawParameter)) throw new Error(`tool definition ${name}.parameters[${index}] must be a mapping`);
 		const parameterName = rawParameter.name;
 		if (typeof parameterName !== "string" || parameterName.length === 0) continue;
-		properties[parameterName] = parameterSchema(rawParameter, `${name}.${parameterName}`);
+		properties[parameterName] = parameterSchema(rawParameter, `${name}.${parameterName}`, provider);
 		if (rawParameter.required === true) required.push(parameterName);
 	}
+	const orderedProperties = isGroupB ? Object.fromEntries(Object.entries(properties).sort(([left], [right]) => left.localeCompare(right))) : properties;
 	const routing = isRecord(source.provider_routing) ? source.provider_routing[provider] : undefined;
 	const routingRecord = isRecord(routing) ? routing : {};
-	const parameters: Record<string, CanonicalJson> = { type: "object", properties };
+	const parameters: Record<string, CanonicalJson> = { type: "object", properties: orderedProperties };
 	if (provider === "openai" || required.length > 0) parameters.required = required;
 	const additionalProps = routingRecord.additional_properties ?? routingRecord.additionalProperties;
 	if (typeof additionalProps === "boolean") parameters.additionalProperties = additionalProps;
@@ -87,13 +91,14 @@ function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefini
 	}
 	const execution = isRecord(source.execution) ? source.execution : {};
 	const maxPerTurn = execution.max_per_turn;
+	const strict = routingRecord.strict;
 	return Object.freeze({
 		id: requiredString(source.id, `${name}.id`),
 		sourcePath: path,
 		name,
 		description: typeof source.description === "string" ? source.description : "",
 		parameters: Object.freeze(parameters),
-		...(provider === "openai" && typeof routingRecord.strict === "boolean" ? { strict: routingRecord.strict } : {}),
+		...(provider === "openai" && typeof strict === "boolean" ? { strict } : {}),
 		nativePrimary: routingRecord.native_primary === true,
 		...(typeof maxPerTurn === "number" && Number.isInteger(maxPerTurn) && maxPerTurn > 0 ? { maxPerTurn } : {}),
 	});
@@ -175,12 +180,23 @@ function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): Reado
 		entries = entries.filter(([name]) => legacyEnabled[name] === true);
 	}
 
+	const claudeRegistry = registryPaths(lock).some(path => path.endsWith("/defs_cc"));
+	const todosEnabled = registryValue(lock, "features.todos.enabled");
+	if (claudeRegistry && todosEnabled !== true) {
+		// Anthropic runtime drops TodoWrite when features.todos.enabled is false
+		// (`provider/runtimes/anthropic.py:714-753`); Claude's canonical lock sets it
+		// false (`agent_configs/claude_code_2-1-63_e4_3-6-2026.yaml:288-292`).
+		entries = entries.map(([name, definition]) =>
+			name === "TodoWrite" ? [name, { ...definition, nativePrimary: false }] : [name, definition],
+		);
+	}
 	const multiAgent = registryValue(lock, "multi_agent.enabled");
 	const taskTool = registryValue(lock, "task_tool");
 	if (multiAgent !== undefined || taskTool !== undefined) {
 		const taskEnabled = multiAgent === true || (isRecord(taskTool) ? Object.keys(taskTool).length > 0 : taskTool === true);
 		if (!taskEnabled) entries = entries.filter(([name]) => name !== "task" && name !== "Task");
 	}
+
 	const rlmEnabled = registryValue(lock, "features.rlm.enabled");
 	if (rlmEnabled !== undefined && rlmEnabled !== true) {
 		const rlmNames = new Set(["blob.put", "blob.put_file_slice", "blob.get", "blob.search", "llm.query", "llm.batch_query"]);
@@ -191,19 +207,27 @@ function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): Reado
 async function vendoredToolDefinitionsForLock(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolDefinition>> {
 	return definitionsForLock(lock, await vendoredToolDefinitions());
 }
-
 function modeRecords(lock: JsonRecord): readonly JsonRecord[] {
 	const modes = nativeLockValue(lock, "modes");
 	return Array.isArray(modes) ? modes.filter(isRecord) : [];
 }
 
-function selectedToolNames(mode: JsonRecord, definitions: ReadonlyMap<string, NativeToolDefinition>): readonly string[] {
+function selectedToolNames(
+	mode: JsonRecord,
+	definitions: ReadonlyMap<string, NativeToolDefinition>,
+	preserveExplicitOrder: boolean,
+): readonly string[] {
 	const enabled = Array.isArray(mode.tools_enabled) ? mode.tools_enabled.filter((name): name is string => typeof name === "string") : [];
 	const disabled = new Set(
 		Array.isArray(mode.tools_disabled) ? mode.tools_disabled.filter((name): name is string => typeof name === "string") : [],
 	);
 	const enabledSet = new Set(enabled);
-	const selected = enabled.length === 0 || enabledSet.has("*") ? [...definitions.keys()] : [...definitions.keys()].filter(name => enabledSet.has(name));
+	const selected =
+		enabled.length === 0 || enabledSet.has("*")
+			? [...definitions.keys()]
+			: preserveExplicitOrder
+				? enabled.filter(name => definitions.has(name))
+				: [...definitions.keys()].filter(name => enabledSet.has(name));
 	const filtered = selected.filter(name => !disabled.has(name));
 	// Python falls back to the complete `tool_defs` input when exclusions remove every tool
 	// (`agent_llm_openai.py:3093-3111`).
@@ -215,20 +239,20 @@ async function loadNativeToolSurfacesWithDefinitions(
 	definitions: ReadonlyMap<string, NativeToolDefinition>,
 ): Promise<ReadonlyMap<string, NativeToolSurfacePack>> {
 	const surfaces = new Map<string, NativeToolSurfacePack>();
+	const preserveExplicitOrder = registryPaths(lock).some(path => RESEARCH_DEFINITION_PATH.test(`${path}/placeholder.yaml`));
 	for (const mode of modeRecords(lock)) {
 		const modeName = requiredString(mode.name, "modes[].name");
-		const enabled = selectedToolNames(mode, definitions).map(name => {
+		const enabled = selectedToolNames(mode, definitions, preserveExplicitOrder).map(name => {
 			const definition = definitions.get(name);
 			if (definition === undefined) throw new Error(`native harness tool ${name} has no vendored definition`);
 			return definition;
 		});
-		const ordered = enabled;
 		surfaces.set(
 			modeName,
 			Object.freeze({
 				mode: modeName,
-				native: Object.freeze(ordered.filter(tool => tool.nativePrimary)),
-				textInvoked: Object.freeze(ordered.filter(tool => !tool.nativePrimary)),
+				native: Object.freeze(enabled.filter(tool => tool.nativePrimary)),
+				textInvoked: Object.freeze(enabled.filter(tool => !tool.nativePrimary)),
 			}),
 		);
 	}
