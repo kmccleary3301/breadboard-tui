@@ -138,7 +138,7 @@ interface EnvironmentTreeNode {
 	children: EnvironmentTreeNode[];
 }
 
-async function opencodeEnvironmentTree(workspaceRoot: string, fileLimit: number): Promise<string> {
+async function environmentTree(workspaceRoot: string, fileLimit: number, ignoredDirectory: string): Promise<string> {
 	const files: string[] = [];
 	const visited = new Set<string>();
 	const walk = async (directory: string): Promise<void> => {
@@ -159,7 +159,7 @@ async function opencodeEnvironmentTree(workspaceRoot: string, fileLimit: number)
 		for (const entry of entries) {
 			const child = join(directory, entry.name);
 			const childRelative = relative(workspaceRoot, child);
-			if (childRelative.split("/").includes(".git") || childRelative.includes(".opencode")) continue;
+			if (childRelative.split("/").includes(".git") || (ignoredDirectory.length > 0 && childRelative.includes(ignoredDirectory))) continue;
 			let isDirectory = entry.isDirectory();
 			if (entry.isSymbolicLink()) {
 				try {
@@ -252,15 +252,17 @@ async function findGitRoot(workspaceRoot: string): Promise<boolean> {
 	}
 }
 
-async function appendOpenCodeEnvironment(lock: JsonRecord, system: string, workspaceRoot: string | undefined): Promise<string> {
-	if (nativeLockValue(lock, "prompts.environment.enabled") !== true || nativeLockValue(lock, "prompts.environment.format") !== "opencode" || workspaceRoot === undefined) {
+async function appendEnvironment(lock: JsonRecord, system: string, workspaceRoot: string | undefined): Promise<string> {
+	const environmentFormat = nativeLockValue(lock, "prompts.environment.format");
+	if (nativeLockValue(lock, "prompts.environment.enabled") !== true || environmentFormat !== "opencode" || workspaceRoot === undefined) {
 		return system;
 	}
 	const rawLimit = nativeLockValue(lock, "prompts.environment.file_limit");
 	const fileLimit = typeof rawLimit === "number" || typeof rawLimit === "string" ? Number(rawLimit) : 200;
 	const workspace = resolve(workspaceRoot);
 	const isGit = await findGitRoot(workspace);
-	const tree = isGit ? await opencodeEnvironmentTree(workspace, fileLimit) : "";
+	const ignoredDirectory = typeof environmentFormat === "string" ? `.${environmentFormat}` : "";
+	const tree = isGit ? await environmentTree(workspace, fileLimit, ignoredDirectory) : "";
 	const env = [
 		"Here is some useful information about the environment you are running in:",
 		"<env>",
@@ -354,7 +356,7 @@ export async function assembleNativePrompts(
 		}
 	}
 	const dedupe = nativeLockValue(lock, "prompts.dedupe") === true;
-	const assembledSystem = await appendOpenCodeEnvironment(lock, assemble(system, mode, dedupe), workspaceRoot);
+	const assembledSystem = await appendEnvironment(lock, assemble(system, mode, dedupe), workspaceRoot);
 	const toolPromptMode = nativeLockValue(lock, "prompts.tool_prompt_mode");
 	const perTurn =
 		toolPromptMode === "none"

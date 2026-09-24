@@ -4,9 +4,6 @@ import { loadEngineDataSnapshot } from "../engine-data";
 import { nativeLockValue } from "./lock-values";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
-const TOOL_DEFINITION_PREFIX = "implementations/tools/defs/";
-const BASE_REGISTRY_PATH = "implementations/tools/defs";
-const RESEARCH_DEFINITION_PATH = /^(?:implementations\/tools\/defs_(?:cc|oc|omo)|defs_(?:pi|oh_my_pi))\/.+\.ya?ml$/u;
 /** Keys `tool_yaml_loader._to_enhanced_params` strips before treating a parameter as its schema. */
 const NON_SCHEMA_PARAMETER_KEYS = new Set(["name", "description", "required", "default", "examples", "validation"]);
 
@@ -56,16 +53,17 @@ function parameterSchema(parameter: JsonRecord, label: string, provider: "anthro
 	const fallback = parameter.default;
 	if (fallback !== undefined && fallback !== null && !("default" in schema)) schema.default = fallback;
 	if (typeof schema.type !== "string" && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema)) throw new Error(`tool definition ${label}.type must be a string`);
-	return provider === "anthropic" ? Object.fromEntries(Object.entries(schema).sort(([left], [right]) => left.localeCompare(right))) : schema;
+	return schema;
 }
 
-function providerForSource(path: string): "anthropic" | "openai" {
-	return path.startsWith("implementations/tools/defs_cc/") ? "anthropic" : "openai";
+type ProviderDialect = "anthropic" | "openai";
+
+function providerForLock(lock: JsonRecord): ProviderDialect {
+	const model = nativeLockValue(lock, "providers.default_model");
+	return typeof model === "string" && model.startsWith("anthropic/") ? "anthropic" : "openai";
 }
 
-function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefinition {
-	const provider = providerForSource(path);
-	const isGroupB = path.startsWith("defs_pi/") || path.startsWith("defs_oh_my_pi/");
+function parseToolDefinition(source: JsonRecord, path: string, provider: ProviderDialect): NativeToolDefinition {
 	const name = requiredString(source.name, `${path} name`);
 	const rawParameters = source.parameters ?? [];
 	if (!Array.isArray(rawParameters)) throw new Error(`tool definition ${name}.parameters must be a list`);
@@ -78,10 +76,9 @@ function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefini
 		properties[parameterName] = parameterSchema(rawParameter, `${name}.${parameterName}`, provider);
 		if (rawParameter.required === true) required.push(parameterName);
 	}
-	const orderedProperties = isGroupB ? Object.fromEntries(Object.entries(properties).sort(([left], [right]) => left.localeCompare(right))) : properties;
 	const routing = isRecord(source.provider_routing) ? source.provider_routing[provider] : undefined;
 	const routingRecord = isRecord(routing) ? routing : {};
-	const parameters: Record<string, CanonicalJson> = { type: "object", properties: orderedProperties };
+	const parameters: Record<string, CanonicalJson> = { type: "object", properties };
 	if (provider === "openai" || required.length > 0) parameters.required = required;
 	const additionalProps = routingRecord.additional_properties ?? routingRecord.additionalProperties;
 	if (typeof additionalProps === "boolean") parameters.additionalProperties = additionalProps;
@@ -114,15 +111,26 @@ function compareSourcePath(left: NativeToolDefinition, right: NativeToolDefiniti
 }
 type DefinitionCatalog = ReadonlyMap<string, readonly NativeToolDefinition[]>;
 
-async function vendoredToolDefinitions(): Promise<DefinitionCatalog> {
+function looksLikeToolDefinition(source: JsonRecord): boolean {
+	return typeof source.id === "string" && typeof source.name === "string" && Array.isArray(source.parameters) && isRecord(source.provider_routing);
+}
+
+async function vendoredToolDefinitions(provider: ProviderDialect = "openai"): Promise<DefinitionCatalog> {
 	const snapshot = await loadEngineDataSnapshot();
 	const byRegistry = new Map<string, NativeToolDefinition[]>();
 	for (const file of snapshot.files) {
-		if ((!file.path.startsWith(TOOL_DEFINITION_PREFIX) && !RESEARCH_DEFINITION_PATH.test(file.path)) || !/\.ya?ml$/u.test(file.path)) continue;
+		if (!/\.ya?ml$/u.test(file.path)) continue;
+		let source: JsonRecord;
+		try {
+			source = parseHarnessYaml(file.content);
+		} catch {
+			continue;
+		}
+		if (!looksLikeToolDefinition(source)) continue;
 		const slash = file.path.lastIndexOf("/");
 		const registryPath = slash < 0 ? file.path : file.path.slice(0, slash);
 		const definitions = byRegistry.get(registryPath) ?? [];
-		definitions.push(parseToolDefinition(parseHarnessYaml(file.content), file.path));
+		definitions.push(parseToolDefinition(source, file.path, provider));
 		byRegistry.set(registryPath, definitions);
 	}
 	for (const definitions of byRegistry.values()) definitions.sort(compareSourcePath);
@@ -141,14 +149,16 @@ function registryInclude(lock: JsonRecord): readonly string[] {
 function registryValue(lock: JsonRecord, path: string): CanonicalJson | undefined {
 	return nativeLockValue(lock, path);
 }
+function baselineDefinitions(catalog: DefinitionCatalog): readonly NativeToolDefinition[] {
+	return [...catalog.values()].find(definitions => definitions.some(definition => definition.name === "run_shell")) ?? [];
+}
 
 function registryDefinitions(lock: JsonRecord, catalog: DefinitionCatalog): Array<[string, NativeToolDefinition]> {
-	const base = catalog.get(BASE_REGISTRY_PATH) ?? [];
-	const definitions = new Map(base.map(definition => [definition.name, definition] as [string, NativeToolDefinition]));
-	const order = base.map(definition => definition.name);
-	for (const path of registryPaths(lock)) {
-		const pathDefinitions = catalog.get(path) ?? [];
-		for (const definition of pathDefinitions) {
+	const definitions = new Map<string, NativeToolDefinition>();
+	const order: string[] = [];
+	const registries = [baselineDefinitions(catalog), ...registryPaths(lock).map(path => catalog.get(path) ?? [])];
+	for (const registry of registries) {
+		for (const definition of registry) {
 			if (!definitions.has(definition.name)) order.push(definition.name);
 			definitions.set(definition.name, definition);
 		}
@@ -180,12 +190,11 @@ function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): Reado
 		entries = entries.filter(([name]) => legacyEnabled[name] === true);
 	}
 
-	const claudeRegistry = registryPaths(lock).some(path => path.endsWith("/defs_cc"));
+	const provider = providerForLock(lock);
 	const todosEnabled = registryValue(lock, "features.todos.enabled");
-	if (claudeRegistry && todosEnabled !== true) {
-		// Anthropic runtime drops TodoWrite when features.todos.enabled is false
-		// (`provider/runtimes/anthropic.py:714-753`); Claude's canonical lock sets it
-		// false (`agent_configs/claude_code_2-1-63_e4_3-6-2026.yaml:288-292`).
+	if (provider === "anthropic" && todosEnabled !== true) {
+		// Anthropic runtime drops todo tools when features.todos.enabled is false
+		// (`provider/runtimes/anthropic.py:714-753`).
 		entries = entries.map(([name, definition]) =>
 			name === "TodoWrite" ? [name, { ...definition, nativePrimary: false }] : [name, definition],
 		);
@@ -205,7 +214,7 @@ function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): Reado
 	return new Map(entries);
 }
 async function vendoredToolDefinitionsForLock(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolDefinition>> {
-	return definitionsForLock(lock, await vendoredToolDefinitions());
+	return definitionsForLock(lock, await vendoredToolDefinitions(providerForLock(lock)));
 }
 function modeRecords(lock: JsonRecord): readonly JsonRecord[] {
 	const modes = nativeLockValue(lock, "modes");
@@ -239,7 +248,7 @@ async function loadNativeToolSurfacesWithDefinitions(
 	definitions: ReadonlyMap<string, NativeToolDefinition>,
 ): Promise<ReadonlyMap<string, NativeToolSurfacePack>> {
 	const surfaces = new Map<string, NativeToolSurfacePack>();
-	const preserveExplicitOrder = registryPaths(lock).some(path => RESEARCH_DEFINITION_PATH.test(`${path}/placeholder.yaml`));
+	const preserveExplicitOrder = false;
 	for (const mode of modeRecords(lock)) {
 		const modeName = requiredString(mode.name, "modes[].name");
 		const enabled = selectedToolNames(mode, definitions, preserveExplicitOrder).map(name => {

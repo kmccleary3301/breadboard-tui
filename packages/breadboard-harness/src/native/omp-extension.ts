@@ -209,11 +209,10 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	},
 };
 
-/** Research packs are identified by their snapshotted registry source, not a generated name list. */
+/** Resolve from the tool's declared name and schema, without depending on registry paths. */
 export function nativeBindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
-	const sourcePath = tool.sourcePath ?? "";
-	const research = /^(?:implementations\/tools\/defs(?:\/|_(?:cc|oc|omo)\/)|defs_(?:pi|oh_my_pi)\/)/u.test(sourcePath);
-	return research ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name];
+	if (Object.hasOwn(RESEARCH_NATIVE_BINDINGS, tool.name)) return researchBindingForTool(tool);
+	return NATIVE_BINDINGS[tool.name];
 }
 
 /** Built-ins the harness's function tools delegate to, keyed by harness tool name. */

@@ -79,7 +79,7 @@ function patchBlocks(text: string): string[] {
 }
 
 /** Mirrors `breadboard/opencode_patch.py:48-164`. */
-function parseOpenCodePatch(text: string): PatchOperation[] {
+function parseStructuredPatch(text: string): PatchOperation[] {
 	const operations: PatchOperation[] = [];
 	for (const block of patchBlocks(text)) {
 		const lines = splitLines(block);
@@ -174,7 +174,7 @@ export function patchTouchedPaths(patchText: string): string[] {
 	const normalized = normalizePatchBlock(patchText);
 	if (!normalized) return [];
 	try {
-		const operations = parseOpenCodePatch(normalized);
+		const operations = parseStructuredPatch(normalized);
 		if (operations.length > 0) {
 			return operations.flatMap(operation => [operation.filePath, ...(operation.moveTo ? [operation.moveTo] : [])]);
 		}
@@ -199,14 +199,14 @@ export function patchTouchedPaths(patchText: string): string[] {
 	return [...new Set(paths)];
 }
 
-function normalizeCodexLine(text: string): string {
+function normalizePatchLine(text: string): string {
 	return text.normalize("NFKD").replaceAll("—", "-").replaceAll("–", "-").replaceAll("−", "-").replace(/\s+$/u, "");
 }
 
-function seekSequenceCodex(lines: readonly string[], target: readonly string[], eof: boolean): number | undefined {
+function seekPatchSequence(lines: readonly string[], target: readonly string[], eof: boolean): number | undefined {
 	if (target.length === 0) return eof ? lines.length : 0;
-	const haystack = lines.map(normalizeCodexLine);
-	const needle = target.map(normalizeCodexLine);
+	const haystack = lines.map(normalizePatchLine);
+	const needle = target.map(normalizePatchLine);
 	if (eof) {
 		for (let index = haystack.length - needle.length; index >= 0; index--) {
 			if (haystack.slice(index, index + needle.length).every((line, offset) => line === needle[offset])) return index;
@@ -220,7 +220,7 @@ function seekSequenceCodex(lines: readonly string[], target: readonly string[], 
 }
 
 /** Mirrors `breadboard/opencode_patch.py:226-252`. */
-function applyUpdateHunksCodex(original: string, hunks: readonly PatchHunk[], fileLabel: string): string {
+function applyUpdateHunks(original: string, hunks: readonly PatchHunk[], fileLabel: string): string {
 	let lines = (original || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
 	for (const hunk of hunks) {
 		const before: string[] = [];
@@ -233,8 +233,8 @@ function applyUpdateHunksCodex(original: string, hunks: readonly PatchHunk[], fi
 			else if (change.kind === "add") after.push(change.content);
 			else throw new Error(`Unknown change kind in ${fileLabel}`);
 		}
-		const index = seekSequenceCodex(lines, before, hunk.isEndOfFile);
-		if (index === undefined) throw new Error(`Failed to apply Codex hunk in ${fileLabel}: context not found`);
+		const index = seekPatchSequence(lines, before, hunk.isEndOfFile);
+		if (index === undefined) throw new Error(`Failed to apply patch hunk in ${fileLabel}: context not found`);
 		lines = [...lines.slice(0, index), ...after, ...lines.slice(index + before.length)];
 	}
 	return lines.join("\n");
@@ -340,7 +340,7 @@ export async function applyPatchOperationsDirect(workspaceRoot: string, patchTex
 	};
 	let operations: PatchOperation[] = [];
 	try {
-		operations = parseOpenCodePatch(normalized);
+		operations = parseStructuredPatch(normalized);
 	} catch {
 		operations = [];
 	}
@@ -359,7 +359,7 @@ export async function applyPatchOperationsDirect(workspaceRoot: string, patchTex
 			const original = await fetchWorkspaceText(workspaceRoot, relativePath);
 			let updated: string;
 			try {
-				updated = applyUpdateHunksCodex(original, operation.hunks || [], relativePath);
+				updated = applyUpdateHunks(original, operation.hunks || [], relativePath);
 			} catch (error) {
 				return patchFailure(error instanceof Error ? error.message : String(error), relativePath);
 			}

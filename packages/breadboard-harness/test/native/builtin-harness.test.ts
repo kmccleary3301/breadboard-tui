@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderBuiltinHarnessLock } from "../../scripts/builtin-harness-locks";
@@ -40,7 +40,39 @@ loop:
     - mode: default
 `;
 
+const REGISTRY_LITERAL_EXCEPTIONS = [
+	{ file: "prompt-assembly.ts", literal: "opencode", lockField: "prompts.environment.format" },
+] as const;
+
+function stripComments(source: string): string {
+	return source.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/[^\n]*/gu, "");
+}
+
+function withoutAllowedLockEnums(file: string, source: string): string {
+	return REGISTRY_LITERAL_EXCEPTIONS.filter(exception => exception.file === file).reduce(
+		(result, exception) => result.replaceAll(`"${exception.literal}"`, ""),
+		source,
+	);
+}
+
+const FORBIDDEN_NATIVE_IDENTIFIERS = [
+	/defs_(?:cc|oc|omo|pi|oh_my_pi)/giu,
+	/(?:claude_code|codex|opencode|oh_my_opencode|oh_my_pi)/giu,
+	/(?<![A-Za-z0-9_$-])pi(?![A-Za-z0-9_$-])/gu,
+];
+
 describe("built-in native harnesses", () => {
+	test("native runtime has no registry or harness-id dispatch literals", async () => {
+		const sourceDirectory = join(import.meta.dir, "../../src/native");
+		const files = (await readdir(sourceDirectory)).filter(file => file.endsWith(".ts") && file !== "builtin-harnesses.ts");
+		for (const file of files) {
+			const source = withoutAllowedLockEnums(file, stripComments(await readFile(join(sourceDirectory, file), "utf8")));
+			for (const pattern of FORBIDDEN_NATIVE_IDENTIFIERS) {
+				pattern.lastIndex = 0;
+				expect(source.match(pattern), `${file} contains forbidden native dispatch literal ${pattern}`).toBeNull();
+			}
+		}
+	});
 	test("each checked-in lock and sidecar is what its spec compiles to", async () => {
 		for (const harness of builtinNativeHarnesses()) {
 			const expected = await renderBuiltinHarnessLock(harness);
