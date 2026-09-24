@@ -92,20 +92,26 @@ if [[ -f "$marker" && ! -L "$marker" ]] &&
   fi
 fi
 pending=$((1 - marker_valid))
+source_profile=0
 fresh_profile=0
 if [[ "$pending" == 1 ]]; then
-  source_profile=0
   if [[ -d "$r39_root" && ! -L "$r39_root" ]]; then
     source_profile=1
   elif [[ -z ${freshProfileSettings} ]]; then
     printf 'R39 profile is missing and no fresh profile settings were provided for workspace key %s\n' "$workspace_key" >&2
     exit 1
+  else
+    fresh_profile=1
   fi
   [[ ! -e "$native_root" ]] || { [[ -d "$native_root" && ! -L "$native_root" ]] || exit 1; }
   mkdir -p "$(dirname "$native_root")"
   for stale_seed in "$native_root".seed.*; do
     [[ -e "$stale_seed" ]] || continue
     [[ -d "$stale_seed" && ! -L "$stale_seed" ]] || exit 1
+    stale_pid="\${stale_seed##*.seed.}"
+    if [[ "$stale_pid" =~ ^[0-9]+$ ]] && kill -0 "$stale_pid" 2>/dev/null; then
+      continue
+    fi
     rm -rf "$stale_seed"
   done
   if [[ ! -e "$native_root" ]]; then
@@ -129,31 +135,50 @@ if [[ "$pending" == 1 ]]; then
       done
       shopt -u dotglob nullglob
     else
-      fresh_profile=1
       mkdir "$seed_root/agent"
       config_tmp="$seed_root/agent/config.yml.tmp"
       printf '%s\n' ${freshProfileSettings} > "$config_tmp"
       chmod 600 "$config_tmp"
       mv "$config_tmp" "$seed_root/agent/config.yml"
+      receipt_tmp="$seed_root/.bb-native-profile-migration.receipt.v1.json.tmp.$$"
+      printf '{"schema":"bb.native_profile_migration.receipt.v1"}\n' > "$receipt_tmp"
+      chmod 600 "$receipt_tmp"
+      mv -f "$receipt_tmp" "$seed_root/.bb-native-profile-migration.receipt.v1.json"
+      source_config_sha="$(/usr/bin/shasum -a 256 "$seed_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
+      source_agent_db_sha="$(/usr/bin/shasum -a 256 ${shellQuote(authSource)}/agent.db | /usr/bin/cut -d ' ' -f 1)"
+      marker_tmp="$seed_root/.bb-native-profile-migration.v1.json.tmp.$$"
+      printf '{"schema":"bb.native_profile_migration.v1","source":"fresh","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$source_config_sha" "$source_agent_db_sha" > "$marker_tmp"
+      chmod 600 "$marker_tmp"
+      mv -f "$marker_tmp" "$seed_root/.bb-native-profile-migration.v1.json"
     fi
-    mv "$seed_root" "$native_root"
+    if ! mv "$seed_root" "$native_root" 2>/dev/null; then
+      [[ -d "$native_root" && ! -L "$native_root" ]] || exit 1
+      rm -rf "$seed_root"
+    fi
   fi
-  [[ -d "$native_root/agent" && ! -L "$native_root/agent" ]] || exit 1
-  rm -f "$native_root/agent"/agent.db*
-  ln -s ${shellQuote(authSource)}/agent.db "$native_root/agent/agent.db"
-  rm -f "$receipt"
+  rm -f "$native_root/agent"/agent.db* "$native_root/agent"/.agent.db.*
+  agent_db_link="$native_root/agent/.agent.db.$$"
+  ln -s ${shellQuote(authSource)}/agent.db "$agent_db_link"
+  mv -f "$agent_db_link" "$native_root/agent/agent.db"
   if [[ "$fresh_profile" == 1 ]]; then
-    receipt_tmp="$receipt.tmp.$$"
-    printf '{"schema":"bb.native_profile_migration.receipt.v1"}\n' > "$receipt_tmp"
-    chmod 600 "$receipt_tmp"
-    mv -f "$receipt_tmp" "$receipt"
-    source_config_sha="$(/usr/bin/shasum -a 256 "$native_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
-    source_agent_db_sha="$(/usr/bin/shasum -a 256 ${shellQuote(authSource)}/agent.db | /usr/bin/cut -d ' ' -f 1)"
-    marker_tmp="$marker.tmp.$$"
-    printf '{"schema":"bb.native_profile_migration.v1","source":"fresh","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$source_config_sha" "$source_agent_db_sha" > "$marker_tmp"
-    chmod 600 "$marker_tmp"
-    mv -f "$marker_tmp" "$marker"
+    [[ -f "$native_root/agent/config.yml" ]] || exit 1
+    if [[ ! -f "$receipt" ]]; then
+      receipt_tmp="$receipt.tmp.$$"
+      printf '{"schema":"bb.native_profile_migration.receipt.v1"}\n' > "$receipt_tmp"
+      chmod 600 "$receipt_tmp"
+      mv -f "$receipt_tmp" "$receipt"
+    fi
+    if [[ ! -f "$marker" ]]; then
+      source_config_sha="$(/usr/bin/shasum -a 256 "$native_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
+      source_agent_db_sha="$(/usr/bin/shasum -a 256 ${shellQuote(authSource)}/agent.db | /usr/bin/cut -d ' ' -f 1)"
+      marker_tmp="$marker.tmp.$$"
+      printf '{"schema":"bb.native_profile_migration.v1","source":"fresh","sourceConfigSha256":"%s","sourceAgentDbSha256":"%s"}\n' "$source_config_sha" "$source_agent_db_sha" > "$marker_tmp"
+      chmod 600 "$marker_tmp"
+      mv -f "$marker_tmp" "$marker"
+    fi
     pending=0
+  else
+    rm -f "$receipt"
   fi
 fi
 for directory in "$native_root" "$native_root/agent" "$native_root/config" "$native_root/temp"; do
@@ -182,7 +207,7 @@ set +e
   ${shellQuote(binaryPath)} "$@"
 status=$?
 set -e
-if [[ "$pending" == 1 && "$status" == 0 && -f "$receipt" && ! -L "$receipt" ]]; then
+if [[ "$pending" == 1 && "$source_profile" == 1 && "$status" == 0 && -f "$receipt" && ! -L "$receipt" && -f "$r39_root/agent/config.yml" && -f "$r39_root/agent/agent.db" ]]; then
   source_config_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/config.yml" | /usr/bin/cut -d ' ' -f 1)"
   source_agent_db_sha="$(/usr/bin/shasum -a 256 "$r39_root/agent/agent.db" | /usr/bin/cut -d ' ' -f 1)"
   marker_tmp="$marker.tmp.$$"

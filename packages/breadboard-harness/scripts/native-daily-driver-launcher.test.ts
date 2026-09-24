@@ -96,6 +96,14 @@ function spawn(fixture: LauncherFixture, args: string[] = []) {
 	});
 }
 
+function spawnAsync(fixture: LauncherFixture, args: string[] = []) {
+	return Bun.spawn([fixture.launcher, ...args], {
+		cwd: fixture.workspace,
+		env: { ...process.env, HOME: fixture.root, FAKE_COUNT_FILE: fixture.countFile },
+		stderr: "ignore",
+	});
+}
+
 describe("native daily-driver launcher", () => {
 	test("removes stale seed directories while seeding an existing R39 profile", async () => {
 		const fixture = await setupLauncher();
@@ -139,5 +147,24 @@ describe("native daily-driver launcher", () => {
 		const second = spawn(fixture);
 		expect(second.exitCode).toBe(0);
 		expect(await Bun.file(marker).text()).toContain('"schema":"bb.native_profile_migration.v1"');
+	});
+
+	test("repairs a markerless existing fresh profile without an R39 source", async () => {
+		const fixture = await setupLauncher(false);
+		await mkdir(join(fixture.nativeProfile, "agent"), { recursive: true });
+		await writeFile(join(fixture.nativeProfile, "agent", "config.yml"), '{"breadboard":{"harness":{"default":"daily_driver"}}}\n');
+		const result = spawn(fixture);
+		expect(result.exitCode).toBe(0);
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
+		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
+	});
+
+	test("converges when two fresh launches start concurrently", async () => {
+		const fixture = await setupLauncher(false);
+		const children = [spawnAsync(fixture), spawnAsync(fixture)];
+		const exits = await Promise.all(children.map(child => child.exited));
+		expect(exits.sort()).toEqual([0, 0]);
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
+		expect(await Bun.file(join(fixture.nativeProfile, "agent", "config.yml")).exists()).toBe(true);
 	});
 });
