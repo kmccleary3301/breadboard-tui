@@ -114,16 +114,59 @@ function registryInclude(lock: JsonRecord): readonly string[] {
 	return Array.isArray(include) ? include.filter((name): name is string => typeof name === "string") : [];
 }
 
-function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
+function registryValue(lock: JsonRecord, path: string): CanonicalJson | undefined {
+	return nativeLockValue(lock, path);
+}
+
+function registryDefinitions(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): Array<[string, NativeToolDefinition]> {
 	const definitions = new Map(base);
+	const order = [...base.keys()];
 	for (const path of registryPaths(lock)) {
-		for (const definition of RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH[path] ?? []) definitions.set(definition.name, definition);
+		const pathDefinitions = [...(RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH[path] ?? [])].sort(compareSourcePath);
+		for (const definition of pathDefinitions) {
+			if (!definitions.has(definition.name)) order.push(definition.name);
+			definitions.set(definition.name, definition);
+		}
 	}
-	const sorted = [...definitions.entries()].sort(([, left], [, right]) => compareSourcePath(left, right));
+	return order.flatMap(name => {
+		const definition = definitions.get(name);
+		return definition === undefined ? [] : [[name, definition] as [string, NativeToolDefinition]];
+	});
+}
+
+function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
+	let entries = registryDefinitions(lock, base);
+	const legacyEnabled = registryValue(lock, "tools.enabled");
+	const exclude = registryValue(lock, "tools.registry.exclude");
+	const excludeSet = new Set(Array.isArray(exclude) ? exclude.filter((name): name is string => typeof name === "string") : []);
+	entries = entries.filter(([name]) => !excludeSet.has(name));
+
 	const include = registryInclude(lock);
-	if (include.length === 0 || include.includes("*") || include.includes("*.*") || include.includes("all")) return new Map(sorted);
-	const included = new Set(include);
-	return new Map(sorted.filter(([name]) => included.has(name)));
+	const wildcard = include.some(name => name === "*" || name === "*.*" || name === "all");
+	if (include.length > 0 && !wildcard) {
+		const included = new Set(include);
+		const byName = new Map(entries);
+		entries = include.flatMap(name => {
+			const definition = byName.get(name);
+			return definition === undefined ? [] : [[name, definition] as [string, NativeToolDefinition]];
+		});
+		entries.push(...[...byName.entries()].filter(([name]) => !included.has(name)));
+	} else if (include.length === 0 && isRecord(legacyEnabled)) {
+		entries = entries.filter(([name]) => legacyEnabled[name] === true);
+	}
+
+	const multiAgent = registryValue(lock, "multi_agent.enabled");
+	const taskTool = registryValue(lock, "task_tool");
+	if (multiAgent !== undefined || taskTool !== undefined) {
+		const taskEnabled = multiAgent === true || (isRecord(taskTool) ? Object.keys(taskTool).length > 0 : taskTool === true);
+		if (!taskEnabled) entries = entries.filter(([name]) => name !== "task" && name !== "Task");
+	}
+	const rlmEnabled = registryValue(lock, "features.rlm.enabled");
+	if (rlmEnabled !== undefined && rlmEnabled !== true) {
+		const rlmNames = new Set(["blob.put", "blob.put_file_slice", "blob.get", "blob.search", "llm.query", "llm.batch_query"]);
+		entries = entries.filter(([name]) => !rlmNames.has(name));
+	}
+	return new Map(entries);
 }
 async function vendoredToolDefinitionsForLock(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolDefinition>> {
 	return definitionsForLock(lock, await vendoredToolDefinitions());

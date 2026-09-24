@@ -62,18 +62,22 @@ describe("R39 tool surface", () => {
 		expect(serialize(renamedSurface)).toEqual(serialize(originalSurface));
 	});
 
-	test("include order only filters and never reorders source-ordered definitions", async () => {
+	test("include order follows Python's explicit reorder rule", async () => {
 		const lock = (await Bun.file(join(import.meta.dir, "../../harnesses/codex/research.harness.lock.json")).json()) as JsonRecord;
 		const permuted = structuredClone(lock);
-		const effective = permuted.effective_values;
-		if (!Array.isArray(effective)) throw new Error("codex lock has no effective values");
-		const include = effective.find(value => isJsonRecord(value) && value.path === "tools.registry.include");
-		if (!isJsonRecord(include) || !Array.isArray(include.value)) throw new Error("codex lock has no registry include");
-		include.value.reverse();
-		const original = await loadNativeToolSurfaces(lock);
-		const reordered = await loadNativeToolSurfaces(permuted);
-		const names = (surface: ReadonlyMap<string, NativeToolSurfacePack>) =>
-			[...surface.values()].map(value => [...value.native, ...value.textInvoked].map(tool => tool.name));
-		expect(names(reordered)).toEqual(names(original));
+		const wildcard = structuredClone(lock);
+		const setInclude = (value: JsonRecord, names: readonly string[]) => {
+			const effective = value.effective_values;
+			if (!Array.isArray(effective)) throw new Error("codex lock has no effective values");
+			const include = effective.find(entry => isJsonRecord(entry) && entry.path === "tools.registry.include");
+			if (!isJsonRecord(include) || !Array.isArray(include.value)) throw new Error("codex lock has no registry include");
+			include.value = [...names];
+		};
+		setInclude(permuted, ["update_plan", "apply_patch", "shell_command"]);
+		setInclude(wildcard, ["*"]);
+		const names = (surface: ReadonlyMap<string, NativeToolSurfacePack>) => [...surface.values()][0]?.native.map(tool => tool.name) ?? [];
+		expect(names(await loadNativeToolSurfaces(lock))).toEqual(["shell_command", "apply_patch", "update_plan"]);
+		expect(names(await loadNativeToolSurfaces(permuted))).toEqual(["update_plan", "apply_patch", "shell_command"]);
+		expect(names(await loadNativeToolSurfaces(wildcard))).toEqual(["apply_patch", "shell_command", "update_plan"]);
 	});
 });
