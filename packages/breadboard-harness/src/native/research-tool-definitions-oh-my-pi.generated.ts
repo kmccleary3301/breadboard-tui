@@ -656,14 +656,7 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"description": "respect gitignore"
 				},
 				"skip": {
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					],
+					"type": "number",
 					"description": "files to skip before collecting results — use to paginate when the prior call hit the file limit"
 				}
 			},
@@ -1285,14 +1278,7 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"description": "respect gitignore"
 				},
 				"skip": {
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					],
+					"type": "number",
 					"description": "files to skip before collecting results — use to paginate when the prior call hit the file limit"
 				}
 			},

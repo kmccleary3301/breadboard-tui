@@ -41,9 +41,7 @@ parameters:
     required: false
   - name: skip
     schema:
-      anyOf:
-        - type: number
-        - type: "null"
+      type: number
       description: files to skip before collecting results — use to paginate when the
         prior call hit the file limit
     required: false
