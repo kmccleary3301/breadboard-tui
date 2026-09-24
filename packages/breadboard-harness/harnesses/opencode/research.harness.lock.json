@@ -6,9 +6,6 @@
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
         {
-          "mode": "plan"
-        },
-        {
           "mode": "build"
         }
       ],
@@ -21,22 +18,39 @@
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
         {
-          "name": "plan",
-          "prompt": "@pack(base).plan",
-          "tools_enabled": [
-            "read",
-            "list"
-          ]
-        },
-        {
           "name": "build",
-          "prompt": "@pack(base).builder",
+          "prompt": "@pack(base).system",
           "tools_enabled": [
-            "*"
+            "bash",
+            "write"
           ]
         }
       ],
       "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.environment.enabled",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.environment.file_limit",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": 200,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.environment.format",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "opencode",
+      "value_kind": "string",
       "visibility": "model-visible"
     },
     {
@@ -61,6 +75,54 @@
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": "prompts/system.md",
       "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.tool_prompt_mode",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "none",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.api_variant",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "responses",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.responses_use_developer_role",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.suppress_prompts",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.tool_choice",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "auto",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.use_native",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
       "visibility": "model-visible"
     },
     {
@@ -94,6 +156,17 @@
     },
     {
       "env_gate_ids": [],
+      "path": "tools.registry.include",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "bash",
+        "write"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "tools.registry.paths",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
@@ -120,7 +193,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:01d2dfc9af430b8cfaec66e99d3710262d5fa9250416609489a7f5ad2f3b9dba",
+  "graph_hash": "sha256:34775cd652c0859a120caf405c842df279a70fb6ce2740dfa2bc34a5b89856e4",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -139,7 +212,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:a74b5dc0b12d7a739cc2b08cd2a98208586d2b450728befdbb9c74022087bf50",
+      "layer_hash": "sha256:81ad3da56b4aebde5e3f5574c9c3d21604cad28a4b4544e80cfd48c66e0cac8a",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -183,12 +256,22 @@
     "model_visible_paths": [
       "loop.sequence",
       "modes",
+      "prompts.environment.enabled",
+      "prompts.environment.file_limit",
+      "prompts.environment.format",
       "prompts.packs.base.builder",
       "prompts.packs.base.plan",
       "prompts.packs.base.system",
+      "prompts.tool_prompt_mode",
+      "provider_tools.api_variant",
+      "provider_tools.responses_use_developer_role",
+      "provider_tools.suppress_prompts",
+      "provider_tools.tool_choice",
+      "provider_tools.use_native",
       "providers.default_model",
       "providers.models",
       "schema_version",
+      "tools.registry.include",
       "tools.registry.paths",
       "version",
       "workspace.root"
