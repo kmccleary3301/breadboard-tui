@@ -468,6 +468,52 @@ function selectEmbeddedAddonFile(selectedVariant) {
 	return embeddedAddon.files.find(file => file.variant === "baseline") || null;
 }
 
+/**
+ * Verified product-install sibling for the embedded addon.
+ *
+ * A BreadBoard product archive ships the same addon bytes it embeds at
+ * `<install>/native/<filename>` (read-only, installer-verified by sha256).
+ * Loading it directly avoids gunzipping and writing ~160 MB into every
+ * per-workspace config dir on first launch. The file must match the embedded
+ * entry's recorded size; the version sentinel is still checked after dlopen,
+ * and any failure falls back to extraction.
+ *
+ * @param {{
+ *   env: Record<string, string | undefined>;
+ *   isCompiledBinary: boolean;
+ *   execDir: string;
+ *   file: { filename: string; size?: number } | null;
+ *   statSize?: (candidate: string) => number | null;
+ * }} input
+ * @returns {string | null}
+ */
+export function resolveProductInstallAddon({ env, isCompiledBinary, execDir, file, statSize = statFileSize }) {
+	if (env.BREADBOARD_PRODUCT !== "1" || !isCompiledBinary || !file) return null;
+	if (typeof file.size !== "number" || !isSafeEmbeddedAddonFilename(file.filename)) return null;
+	const candidate = path.join(execDir, "native", file.filename);
+	return statSize(candidate) === file.size ? candidate : null;
+}
+
+function statFileSize(candidate) {
+	try {
+		const stat = fs.statSync(candidate);
+		return stat.isFile() ? stat.size : null;
+	} catch {
+		return null;
+	}
+}
+
+function selectProductInstallAddon(ctx) {
+	if (!embeddedAddon) return null;
+	if (embeddedAddon.platformTag !== ctx.platformTag || embeddedAddon.version !== ctx.packageVersion) return null;
+	return resolveProductInstallAddon({
+		env: process.env,
+		isCompiledBinary: ctx.isCompiledBinary,
+		execDir: ctx.execDir,
+		file: selectEmbeddedAddonFile(ctx.selectedVariant),
+	});
+}
+
 function readTarString(buffer, offset, length) {
 	const end = Math.min(offset + length, buffer.length);
 	let stringEnd = offset;
@@ -977,6 +1023,7 @@ export function initLoaderContext(overrides = {}) {
 		versionSentinelExport,
 		isWorkspaceLoad,
 		nativesDir,
+		execDir,
 	};
 }
 
@@ -986,25 +1033,38 @@ export function loadNative() {
 	const require_ = createRequire(import.meta.url);
 
 	const errors = [];
-	const embeddedCandidate = maybeExtractEmbeddedAddon(ctx, errors);
-	const stagedCandidate = embeddedCandidate ? null : maybeStageNodeModulesAddon(ctx, errors);
-	const prepended = [embeddedCandidate, stagedCandidate].filter(c => typeof c === "string");
-	const runtimeCandidates = prepended.length > 0 ? [...prepended, ...ctx.candidates] : ctx.candidates;
-
-	for (const candidate of runtimeCandidates) {
+	const tryLoad = candidate => {
 		try {
 			startupMarker(`native:require:${path.basename(candidate)}`);
 			const bindings = require_(candidate);
 			validateLoadedBindings(ctx, bindings, candidate);
 			installNativeTokioRuntime(bindings);
 			loadedAddon = describeLoadedAddon(bindings, candidate, ctx);
-	        cleanupStaleNativeVersions({ nativesDir: ctx.nativesDir, currentVersion: ctx.packageVersion });
+			cleanupStaleNativeVersions({ nativesDir: ctx.nativesDir, currentVersion: ctx.packageVersion });
 			startupMarker("native:loadNative:done");
 			return bindings;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			errors.push(`${candidate}: ${message}`);
+			return null;
 		}
+	};
+
+	const installedCandidate = selectProductInstallAddon(ctx);
+	if (installedCandidate) {
+		const bindings = tryLoad(installedCandidate);
+		if (bindings) return bindings;
+	}
+
+	const embeddedCandidate = maybeExtractEmbeddedAddon(ctx, errors);
+	const stagedCandidate = embeddedCandidate ? null : maybeStageNodeModulesAddon(ctx, errors);
+	const prepended = [embeddedCandidate, stagedCandidate].filter(c => typeof c === "string");
+	const runtimeCandidates = prepended.length > 0 ? [...prepended, ...ctx.candidates] : ctx.candidates;
+
+	for (const candidate of runtimeCandidates) {
+		if (candidate === installedCandidate) continue;
+		const bindings = tryLoad(candidate);
+		if (bindings) return bindings;
 	}
 
 	if (!SUPPORTED_PLATFORMS.includes(ctx.platformTag)) {

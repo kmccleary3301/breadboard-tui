@@ -36,6 +36,7 @@ import {
 	getAddonFilenames,
 	resolveLoaderCandidates,
 	resolveNativesDir,
+	resolveProductInstallAddon,
 } from "../native/loader-state.js";
 
 describe("product-native cache isolation", () => {
@@ -61,6 +62,29 @@ describe("product-native cache isolation", () => {
 				pathExists: () => false,
 			}),
 		).toBe("/var/lib/breadboard/natives");
+	});
+});
+
+describe("product install addon", () => {
+	const file = { filename: "pi_natives.darwin-arm64.node", size: 1234 };
+	const installed = "/opt/bb/native/pi_natives.darwin-arm64.node";
+	const base = { env: { BREADBOARD_PRODUCT: "1" }, isCompiledBinary: true, execDir: "/opt/bb", file };
+
+	it("loads the installed sibling when it matches the embedded addon size", () => {
+		expect(resolveProductInstallAddon({ ...base, statSize: p => (p === installed ? 1234 : null) })).toBe(installed);
+	});
+
+	it("falls back to extraction when the sibling is missing or a different size", () => {
+		expect(resolveProductInstallAddon({ ...base, statSize: () => null })).toBeNull();
+		expect(resolveProductInstallAddon({ ...base, statSize: () => 1233 })).toBeNull();
+	});
+
+	it("never applies to stock OMP, uncompiled runs, or entries without a recorded size", () => {
+		const statSize = () => 1234;
+		expect(resolveProductInstallAddon({ ...base, env: {}, statSize })).toBeNull();
+		expect(resolveProductInstallAddon({ ...base, isCompiledBinary: false, statSize })).toBeNull();
+		expect(resolveProductInstallAddon({ ...base, file: { filename: file.filename }, statSize })).toBeNull();
+		expect(resolveProductInstallAddon({ ...base, file: { filename: "../x.node", size: 1234 }, statSize })).toBeNull();
 	});
 });
 

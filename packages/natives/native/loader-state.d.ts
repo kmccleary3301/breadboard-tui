@@ -26,6 +26,16 @@ export interface ResolveNativesDirOptions {
 
 export function resolveNativesDir(options?: ResolveNativesDirOptions): string;
 
+export interface ResolveProductInstallAddonInput {
+	env: Record<string, string | undefined>;
+	isCompiledBinary: boolean;
+	execDir: string;
+	file: Pick<EmbeddedAddonFile, "filename" | "size"> | null;
+	statSize?: (candidate: string) => number | null;
+}
+
+export function resolveProductInstallAddon(input: ResolveProductInstallAddonInput): string | null;
+
 export interface DetectCompiledBinaryInput {
 	embeddedAddon: EmbeddedAddon | null | undefined;
 	env: Record<string, string | undefined>;
