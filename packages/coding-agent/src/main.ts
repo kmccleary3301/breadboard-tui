@@ -657,7 +657,10 @@ async function runInteractiveMode(
 	},
 	/** Native mode: the harness hub, palette and status read the session's loaded lock. */
 	nativeHarnessPort?: HarnessPort,
+	/** Native mode with a shared credential vault: the store setup and /login sign in to. */
+	nativeVaultAuthStorage?: AuthStorage,
 ): Promise<void> {
+	const nativeAuthStorage = breadboard?.nativeAuthStorage ?? nativeVaultAuthStorage;
 	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
 	let mode: InteractiveMode;
 	try {
@@ -678,7 +681,7 @@ async function runInteractiveMode(
 			breadboard?.setSessionModel,
 			breadboard?.switchHarnessSession,
 			breadboard?.sessionId,
-			breadboard?.nativeAuthStorage,
+			nativeAuthStorage,
 			nativeHarnessPort,
 		);
 		breadboard?.bindPermissionActivity?.(pending => {
@@ -737,7 +740,7 @@ async function runInteractiveMode(
 		if (setupWizard && setupScenes.length > 0) {
 			await setupWizard.runSetupWizard(mode, setupScenes, {
 				providerAuthPort: breadboard?.providerAuth,
-				nativeAuthStorage: breadboard?.nativeAuthStorage,
+				nativeAuthStorage,
 			});
 		}
 
@@ -2792,6 +2795,9 @@ export async function runRootCommand(
 								}
 							: undefined,
 						nativeHarness ? createNativeHarnessPort(nativeHarness) : undefined,
+						// Product builds sign in only through a broker or an explicitly shared vault,
+						// never into the per-workspace private store.
+						!breadboardRuntime && ompAgentDir !== undefined ? authStorage : undefined,
 					);
 				} finally {
 					breadboardPermissionActivity = undefined;
