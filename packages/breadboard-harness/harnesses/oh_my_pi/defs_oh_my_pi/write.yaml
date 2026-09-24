@@ -33,15 +33,15 @@ description: >-
   </critical>
 type_id: python
 parameters:
-  - name: path
-    schema:
-      type: string
-      description: file path
-    required: true
   - name: content
     schema:
       type: string
       description: file content
+    required: true
+  - name: path
+    schema:
+      type: string
+      description: file path
     required: true
 provider_routing:
   openai:

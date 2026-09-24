@@ -97,6 +97,36 @@ description: >-
   </critical>
 type_id: python
 parameters:
+  - name: items
+    schema:
+      type: array
+      items:
+        type: string
+        description: task content
+      description: tasks for single-phase init or append
+    required: false
+  - name: list
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          items:
+            type: array
+            items:
+              type: string
+              description: task content
+            minItems: 1
+            description: tasks for this phase
+          phase:
+            type: string
+            description: phase name
+        required:
+          - items
+          - phase
+        additionalProperties: false
+      description: phased task list (init)
+    required: false
   - name: op
     schema:
       enum:
@@ -112,49 +142,20 @@ parameters:
       type: string
       description: operation to apply
     required: true
-  - name: list
-    schema:
-      type: array
-      items:
-        type: object
-        properties:
-          phase:
-            type: string
-            description: phase name
-          items:
-            type: array
-            items:
-              type: string
-              description: task content
-            minItems: 1
-            description: tasks for this phase
-        required:
-          - phase
-          - items
-      description: phased task list (init)
-    required: false
-  - name: task
-    schema:
-      type: string
-      description: task content
-    required: false
   - name: phase
     schema:
       type: string
       description: phase name
     required: false
-  - name: items
-    schema:
-      type: array
-      items:
-        type: string
-        description: task content
-      description: tasks for single-phase init or append
-    required: false
   - name: reason
     schema:
       type: string
       description: blocker note (block op)
+    required: false
+  - name: task
+    schema:
+      type: string
+      description: task content
     required: false
 provider_routing:
   openai:

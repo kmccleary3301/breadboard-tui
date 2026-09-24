@@ -59,42 +59,44 @@ parameters:
       items:
         type: object
         properties:
+          header:
+            type: string
+            description: optional short display chip for rich ask dialogs
           id:
             type: string
             description: question id
-          question:
-            type: string
-            description: question text
+          multi:
+            type: boolean
+            description: allow multiple selections
           options:
             type: array
             items:
               type: object
               properties:
-                label:
-                  type: string
-                  description: display label
                 description:
                   type: string
                   description: optional explanatory text displayed below the label
+                label:
+                  type: string
+                  description: display label
                 preview:
                   type: string
                   description: optional rich preview content for interactive ask dialogs
               required:
                 - label
+              additionalProperties: false
             description: available options
-          header:
+          question:
             type: string
-            description: optional short display chip for rich ask dialogs
-          multi:
-            type: boolean
-            description: allow multiple selections
+            description: question text
           recommended:
             type: number
             description: recommended option index
         required:
           - id
-          - question
           - options
+          - question
+        additionalProperties: false
       minItems: 1
       description: questions to ask
     required: true

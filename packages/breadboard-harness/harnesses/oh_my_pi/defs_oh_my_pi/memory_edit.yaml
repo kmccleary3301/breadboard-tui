@@ -28,6 +28,21 @@ description: >
   memory://<id>`; pass merged content in `content`.
 type_id: python
 parameters:
+  - name: content
+    schema:
+      type: string
+      description: replacement content for update
+    required: false
+  - name: id
+    schema:
+      type: string
+      description: memory id from recall output
+    required: true
+  - name: importance
+    schema:
+      type: number
+      description: replacement importance for update (0–1)
+    required: false
   - name: op
     schema:
       enum:
@@ -37,21 +52,6 @@ parameters:
       type: string
       description: memory edit operation
     required: true
-  - name: id
-    schema:
-      type: string
-      description: memory id from recall output
-    required: true
-  - name: content
-    schema:
-      type: string
-      description: replacement content for update
-    required: false
-  - name: importance
-    schema:
-      type: number
-      description: replacement importance for update (0–1)
-    required: false
   - name: replacement_id
     schema:
       type: string

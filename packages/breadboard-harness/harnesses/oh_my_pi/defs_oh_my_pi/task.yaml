@@ -192,10 +192,6 @@ parameters:
       items:
         type: object
         properties:
-          task:
-            type: string
-          name:
-            type: string
           agent:
             type: string
             default: task
@@ -205,9 +201,14 @@ parameters:
               - med
               - hi
             type: string
+          isolated:
+            type: boolean
+          name:
+            type: string
           outputSchema:
             anyOf:
               - type: object
+                additionalProperties: false
               - type: boolean
               - type: string
               - type: "null"
@@ -216,14 +217,15 @@ parameters:
               - permissive
               - strict
             type: string
+          task:
+            type: string
           tools:
             type: array
             items:
               type: string
-          isolated:
-            type: boolean
         required:
           - task
+        additionalProperties: false
     required: true
 provider_routing:
   openai:

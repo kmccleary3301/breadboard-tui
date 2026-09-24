@@ -47,6 +47,11 @@ description: >-
   </critical>
 type_id: python
 parameters:
+  - name: lang
+    schema:
+      type: string
+      description: language override, e.g. cpp for ambiguous .h files
+    required: false
   - name: pat
     schema:
       type: string
@@ -58,11 +63,6 @@ parameters:
       description: file, directory, glob, or internal URL to search; pass several as a
         semicolon-delimited list ("src; tests"). Omitted -> searches the
         workspace root (".")
-    required: false
-  - name: lang
-    schema:
-      type: string
-      description: language override, e.g. cpp for ambiguous .h files
     required: false
   - name: skip
     schema:

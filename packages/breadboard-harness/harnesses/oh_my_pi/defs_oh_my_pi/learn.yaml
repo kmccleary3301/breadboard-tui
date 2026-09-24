@@ -20,16 +20,16 @@ description: >
   ones.
 type_id: python
 parameters:
-  - name: memory
-    schema:
-      type: string
-      description: the durable, self-contained lesson to remember (what, when, why)
-    required: true
   - name: context
     schema:
       type: string
       description: optional source context for the lesson
     required: false
+  - name: memory
+    schema:
+      type: string
+      description: the durable, self-contained lesson to remember (what, when, why)
+    required: true
   - name: skill
     schema:
       type: object
@@ -39,21 +39,22 @@ parameters:
             - create
             - update
           type: string
-        name:
-          type: string
-          description: kebab-case skill name
-        description:
-          type: string
-          description: one-line description of when to use the skill
         body:
           type: string
           description: the SKILL.md body in markdown (no frontmatter)
+        description:
+          type: string
+          description: one-line description of when to use the skill
+        name:
+          type: string
+          description: kebab-case skill name
       required:
         - action
-        - name
-        - description
         - body
+        - description
+        - name
       description: also create or enhance a managed skill in the same call
+      additionalProperties: false
     required: false
 provider_routing:
   openai:

@@ -37,27 +37,27 @@ description: >-
   </avoid>
 type_id: python
 parameters:
-  - name: path
+  - name: gitignore
     schema:
-      type: string
-      description: glob, file, or directory to search — a single path or a
-        semicolon-delimited list ("src/**/*.ts; test/**/*.ts"). Omitted ->
-        searches the workspace root (".")
+      type: boolean
+      description: respect gitignore
     required: false
   - name: hidden
     schema:
       type: boolean
       description: include hidden files
     required: false
-  - name: gitignore
-    schema:
-      type: boolean
-      description: respect gitignore
-    required: false
   - name: limit
     schema:
       type: number
       description: max results
+    required: false
+  - name: path
+    schema:
+      type: string
+      description: glob, file, or directory to search — a single path or a
+        semicolon-delimited list ("src/**/*.ts; test/**/*.ts"). Omitted ->
+        searches the workspace root (".")
     required: false
 provider_routing:
   openai:

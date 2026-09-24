@@ -27,12 +27,12 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"async": {
+					"type": "boolean",
+					"description": "run in background"
+				},
 				"command": {
 					"type": "string"
-				},
-				"timeout": {
-					"type": "number",
-					"description": "timeout in seconds; 0 disables the command deadline; nonzero values are clamped to 1-3600"
 				},
 				"cwd": {
 					"type": "string"
@@ -40,9 +40,9 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 				"pty": {
 					"type": "boolean"
 				},
-				"async": {
-					"type": "boolean",
-					"description": "run in background"
+				"timeout": {
+					"type": "number",
+					"description": "timeout in seconds; 0 disables the command deadline; nonzero values are clamped to 1-3600"
 				}
 			},
 			"required": [
@@ -77,6 +77,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"lang": {
+					"type": "string",
+					"description": "language override, e.g. cpp for ambiguous .h files"
+				},
 				"pat": {
 					"type": "string",
 					"description": "ast pattern"
@@ -84,10 +88,6 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 				"path": {
 					"type": "string",
 					"description": "file, directory, glob, or internal URL to search; pass several as a semicolon-delimited list (\"src; tests\"). Omitted -> searches the workspace root (\".\")"
-				},
-				"lang": {
-					"type": "string",
-					"description": "language override, e.g. cpp for ambiguous .h files"
 				},
 				"skip": {
 					"type": "number",
@@ -113,19 +113,20 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"items": {
 						"type": "object",
 						"properties": {
-							"pat": {
-								"type": "string",
-								"description": "ast pattern"
-							},
 							"out": {
 								"type": "string",
 								"description": "replacement template"
+							},
+							"pat": {
+								"type": "string",
+								"description": "ast pattern"
 							}
 						},
 						"required": [
-							"pat",
-							"out"
-						]
+							"out",
+							"pat"
+						],
+						"additionalProperties": false
 					},
 					"minItems": 1,
 					"description": "rewrite ops"
@@ -160,26 +161,30 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"items": {
 						"type": "object",
 						"properties": {
+							"header": {
+								"type": "string",
+								"description": "optional short display chip for rich ask dialogs"
+							},
 							"id": {
 								"type": "string",
 								"description": "question id"
 							},
-							"question": {
-								"type": "string",
-								"description": "question text"
+							"multi": {
+								"type": "boolean",
+								"description": "allow multiple selections"
 							},
 							"options": {
 								"type": "array",
 								"items": {
 									"type": "object",
 									"properties": {
-										"label": {
-											"type": "string",
-											"description": "display label"
-										},
 										"description": {
 											"type": "string",
 											"description": "optional explanatory text displayed below the label"
+										},
+										"label": {
+											"type": "string",
+											"description": "display label"
 										},
 										"preview": {
 											"type": "string",
@@ -188,17 +193,14 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 									},
 									"required": [
 										"label"
-									]
+									],
+									"additionalProperties": false
 								},
 								"description": "available options"
 							},
-							"header": {
+							"question": {
 								"type": "string",
-								"description": "optional short display chip for rich ask dialogs"
-							},
-							"multi": {
-								"type": "boolean",
-								"description": "allow multiple selections"
+								"description": "question text"
 							},
 							"recommended": {
 								"type": "number",
@@ -207,9 +209,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 						},
 						"required": [
 							"id",
-							"question",
-							"options"
-						]
+							"options",
+							"question"
+						],
+						"additionalProperties": false
 					},
 					"minItems": 1,
 					"description": "questions to ask"
@@ -229,6 +232,14 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"access_type": {
+					"enum": [
+						"read",
+						"write",
+						"readWrite"
+					],
+					"type": "string"
+				},
 				"action": {
 					"enum": [
 						"launch",
@@ -262,9 +273,12 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					],
 					"type": "string"
 				},
-				"program": {
+				"adapter": {
 					"type": "string",
-					"description": "debug target path; Delve accepts Go package directories"
+					"description": "configured adapter id (gdb, lldb-dap, debugpy, dlv, rdbg, or dap.json entry)"
+				},
+				"allow_partial": {
+					"type": "boolean"
 				},
 				"args": {
 					"type": "array",
@@ -273,87 +287,30 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					},
 					"description": "program arguments"
 				},
-				"adapter": {
+				"arguments": {
+					"type": "object",
+					"properties": {},
+					"additionalProperties": false,
+					"description": "custom request arguments"
+				},
+				"command": {
 					"type": "string",
-					"description": "configured adapter id (gdb, lldb-dap, debugpy, dlv, rdbg, or dap.json entry)"
-				},
-				"cwd": {
-					"type": "string"
-				},
-				"file": {
-					"type": "string",
-					"description": "source file"
-				},
-				"line": {
-					"type": "number",
-					"description": "source line"
-				},
-				"function": {
-					"type": "string",
-					"description": "function name"
-				},
-				"name": {
-					"type": "string",
-					"description": "variable or data name"
+					"description": "custom dap request command"
 				},
 				"condition": {
 					"type": "string",
 					"description": "breakpoint condition"
 				},
-				"hit_condition": {
-					"type": "string"
-				},
-				"expression": {
-					"type": "string",
-					"description": "expression to evaluate"
-				},
 				"context": {
 					"type": "string",
 					"description": "evaluate context: watch | repl | hover | variables | clipboard"
 				},
-				"frame_id": {
-					"type": "number"
-				},
-				"scope_id": {
-					"type": "number",
-					"description": "scope variables reference"
-				},
-				"variable_ref": {
-					"type": "number",
-					"description": "variable reference"
-				},
-				"pid": {
-					"type": "number",
-					"description": "process id for attach"
-				},
-				"port": {
-					"type": "number",
-					"description": "remote attach port"
-				},
-				"host": {
-					"type": "string",
-					"description": "remote attach host"
-				},
-				"levels": {
-					"type": "number",
-					"description": "max stack frames"
-				},
-				"memory_reference": {
-					"type": "string",
-					"description": "memory reference or address"
-				},
-				"instruction_reference": {
-					"type": "string"
-				},
-				"instruction_count": {
-					"type": "number"
-				},
-				"instruction_offset": {
-					"type": "number"
-				},
 				"count": {
 					"type": "number",
 					"description": "bytes to read"
+				},
+				"cwd": {
+					"type": "string"
 				},
 				"data": {
 					"type": "string",
@@ -363,42 +320,88 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"type": "string",
 					"description": "data breakpoint id"
 				},
-				"access_type": {
-					"enum": [
-						"read",
-						"write",
-						"readWrite"
-					],
+				"expression": {
+					"type": "string",
+					"description": "expression to evaluate"
+				},
+				"file": {
+					"type": "string",
+					"description": "source file"
+				},
+				"frame_id": {
+					"type": "number"
+				},
+				"function": {
+					"type": "string",
+					"description": "function name"
+				},
+				"hit_condition": {
 					"type": "string"
 				},
-				"command": {
+				"host": {
 					"type": "string",
-					"description": "custom dap request command"
+					"description": "remote attach host"
 				},
-				"arguments": {
-					"type": "object",
-					"properties": {},
-					"additionalProperties": {},
-					"description": "custom request arguments"
+				"instruction_count": {
+					"type": "number"
+				},
+				"instruction_offset": {
+					"type": "number"
+				},
+				"instruction_reference": {
+					"type": "string"
+				},
+				"levels": {
+					"type": "number",
+					"description": "max stack frames"
+				},
+				"line": {
+					"type": "number",
+					"description": "source line"
+				},
+				"memory_reference": {
+					"type": "string",
+					"description": "memory reference or address"
+				},
+				"module_count": {
+					"type": "number"
+				},
+				"name": {
+					"type": "string",
+					"description": "variable or data name"
 				},
 				"offset": {
 					"type": "number"
 				},
+				"pid": {
+					"type": "number",
+					"description": "process id for attach"
+				},
+				"port": {
+					"type": "number",
+					"description": "remote attach port"
+				},
+				"program": {
+					"type": "string",
+					"description": "debug target path; Delve accepts Go package directories"
+				},
 				"resolve_symbols": {
 					"type": "boolean"
 				},
-				"allow_partial": {
-					"type": "boolean"
+				"scope_id": {
+					"type": "number",
+					"description": "scope variables reference"
 				},
 				"start_module": {
-					"type": "number"
-				},
-				"module_count": {
 					"type": "number"
 				},
 				"timeout": {
 					"type": "number",
 					"description": "per-request timeout seconds"
+				},
+				"variable_ref": {
+					"type": "number",
+					"description": "variable reference"
 				}
 			},
 			"required": [
@@ -415,6 +418,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"code": {
+					"type": "string",
+					"description": "code or a standalone % command to run in this eval call. Top-level await works."
+				},
 				"language": {
 					"enum": [
 						"py",
@@ -423,26 +430,22 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"type": "string",
 					"description": "runtime: \"py\" for the IPython kernel, \"js\" for the persistent JS VM"
 				},
-				"code": {
-					"type": "string",
-					"description": "code or a standalone % command to run in this eval call. Top-level await works."
-				},
-				"title": {
-					"type": "string",
-					"description": "short label shown in transcript (e.g. \"imports\", \"load config\")"
+				"reset": {
+					"type": "boolean",
+					"description": "wipe this language's kernel before running. Other languages are untouched."
 				},
 				"timeout": {
 					"type": "number",
 					"description": "timeout for this eval call in seconds; 0 disables the cell timeout"
 				},
-				"reset": {
-					"type": "boolean",
-					"description": "wipe this language's kernel before running. Other languages are untouched."
+				"title": {
+					"type": "string",
+					"description": "short label shown in transcript (e.g. \"imports\", \"load config\")"
 				}
 			},
 			"required": [
-				"language",
-				"code"
+				"code",
+				"language"
 			]
 		},
 		"strict": true,
@@ -467,6 +470,64 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"assignee": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "assignees"
+				},
+				"base": {
+					"type": "string",
+					"description": "pr base branch"
+				},
+				"body": {
+					"type": "string",
+					"description": "pr body markdown"
+				},
+				"branch": {
+					"type": "string",
+					"description": "branch"
+				},
+				"dateField": {
+					"enum": [
+						"created",
+						"updated"
+					],
+					"type": "string",
+					"description": "date field"
+				},
+				"draft": {
+					"type": "boolean",
+					"description": "open pr as draft"
+				},
+				"fill": {
+					"type": "boolean",
+					"description": "auto-fill pr title/body from commits"
+				},
+				"force": {
+					"type": "boolean",
+					"description": "reset existing local branch"
+				},
+				"forceWithLease": {
+					"type": "boolean",
+					"description": "force-with-lease push"
+				},
+				"head": {
+					"type": "string",
+					"description": "pr head branch"
+				},
+				"label": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "labels"
+				},
+				"limit": {
+					"type": "number",
+					"description": "max results"
+				},
 				"op": {
 					"enum": [
 						"repo_view",
@@ -483,14 +544,6 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					],
 					"type": "string",
 					"description": "github operation"
-				},
-				"repo": {
-					"type": "string",
-					"description": "owner/repo"
-				},
-				"branch": {
-					"type": "string",
-					"description": "branch"
 				},
 				"path": {
 					"type": "string",
@@ -510,37 +563,13 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					],
 					"description": "pr number, url, or branch"
 				},
-				"force": {
-					"type": "boolean",
-					"description": "reset existing local branch"
-				},
-				"forceWithLease": {
-					"type": "boolean",
-					"description": "force-with-lease push"
-				},
-				"title": {
+				"query": {
 					"type": "string",
-					"description": "pr title"
+					"description": "search query"
 				},
-				"body": {
+				"repo": {
 					"type": "string",
-					"description": "pr body markdown"
-				},
-				"base": {
-					"type": "string",
-					"description": "pr base branch"
-				},
-				"head": {
-					"type": "string",
-					"description": "pr head branch"
-				},
-				"draft": {
-					"type": "boolean",
-					"description": "open pr as draft"
-				},
-				"fill": {
-					"type": "boolean",
-					"description": "auto-fill pr title/body from commits"
+					"description": "owner/repo"
 				},
 				"reviewer": {
 					"type": "array",
@@ -549,51 +578,25 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					},
 					"description": "reviewers"
 				},
-				"assignee": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"description": "assignees"
-				},
-				"label": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"description": "labels"
-				},
-				"query": {
+				"run": {
 					"type": "string",
-					"description": "search query"
+					"description": "actions run id or url"
 				},
 				"since": {
 					"type": "string",
 					"description": "lower-bound date filter"
 				},
-				"until": {
-					"type": "string",
-					"description": "upper-bound date filter"
-				},
-				"dateField": {
-					"enum": [
-						"created",
-						"updated"
-					],
-					"type": "string",
-					"description": "date field"
-				},
-				"limit": {
-					"type": "number",
-					"description": "max results"
-				},
-				"run": {
-					"type": "string",
-					"description": "actions run id or url"
-				},
 				"tail": {
 					"type": "number",
 					"description": "log lines per failed job"
+				},
+				"title": {
+					"type": "string",
+					"description": "pr title"
+				},
+				"until": {
+					"type": "string",
+					"description": "upper-bound date filter"
 				}
 			},
 			"required": [
@@ -610,21 +613,21 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"path": {
-					"type": "string",
-					"description": "glob, file, or directory to search — a single path or a semicolon-delimited list (\"src/**/*.ts; test/**/*.ts\"). Omitted -> searches the workspace root (\".\")"
+				"gitignore": {
+					"type": "boolean",
+					"description": "respect gitignore"
 				},
 				"hidden": {
 					"type": "boolean",
 					"description": "include hidden files"
 				},
-				"gitignore": {
-					"type": "boolean",
-					"description": "respect gitignore"
-				},
 				"limit": {
 					"type": "number",
 					"description": "max results"
+				},
+				"path": {
+					"type": "string",
+					"description": "glob, file, or directory to search — a single path or a semicolon-delimited list (\"src/**/*.ts; test/**/*.ts\"). Omitted -> searches the workspace root (\".\")"
 				}
 			},
 			"required": []
@@ -639,14 +642,6 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"pattern": {
-					"type": "string",
-					"description": "regex pattern"
-				},
-				"path": {
-					"type": "string",
-					"description": "file, directory, glob, internal URL, or \"<file>:<lines>\" selector to search; pass several as a semicolon-delimited list (\"src; tests\"). Omitted -> searches the workspace root (\".\")"
-				},
 				"case": {
 					"type": "boolean",
 					"description": "case-sensitive search"
@@ -654,6 +649,14 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 				"gitignore": {
 					"type": "boolean",
 					"description": "respect gitignore"
+				},
+				"path": {
+					"type": "string",
+					"description": "file, directory, glob, internal URL, or \"<file>:<lines>\" selector to search; pass several as a semicolon-delimited list (\"src; tests\"). Omitted -> searches the workspace root (\".\")"
+				},
+				"pattern": {
+					"type": "string",
+					"description": "regex pattern"
 				},
 				"skip": {
 					"type": "number",
@@ -693,32 +696,32 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					],
 					"type": "string"
 				},
+				"apply": {
+					"type": "boolean"
+				},
 				"file": {
 					"type": "string"
 				},
 				"line": {
 					"type": "number"
 				},
-				"symbol": {
+				"new_name": {
+					"type": "string"
+				},
+				"payload": {
 					"type": "string"
 				},
 				"query": {
 					"type": "string"
 				},
-				"new_name": {
+				"symbol": {
 					"type": "string"
-				},
-				"apply": {
-					"type": "boolean"
 				},
 				"timeout": {
 					"type": "number",
 					"minimum": 5,
 					"maximum": 300,
 					"description": "Timeout in seconds (default 20; range 5–300)."
-				},
-				"payload": {
-					"type": "string"
 				}
 			},
 			"required": [
@@ -805,12 +808,6 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"items": {
 						"type": "object",
 						"properties": {
-							"task": {
-								"type": "string"
-							},
-							"name": {
-								"type": "string"
-							},
 							"agent": {
 								"type": "string",
 								"default": "task"
@@ -823,10 +820,17 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 								],
 								"type": "string"
 							},
+							"isolated": {
+								"type": "boolean"
+							},
+							"name": {
+								"type": "string"
+							},
 							"outputSchema": {
 								"anyOf": [
 									{
-										"type": "object"
+										"type": "object",
+										"additionalProperties": false
 									},
 									{
 										"type": "boolean"
@@ -846,19 +850,20 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 								],
 								"type": "string"
 							},
+							"task": {
+								"type": "string"
+							},
 							"tools": {
 								"type": "array",
 								"items": {
 									"type": "string"
 								}
-							},
-							"isolated": {
-								"type": "boolean"
 							}
 						},
 						"required": [
 							"task"
-						]
+						],
+						"additionalProperties": false
 					}
 				}
 			},
@@ -901,6 +906,41 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"items": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"description": "task content"
+					},
+					"description": "tasks for single-phase init or append"
+				},
+				"list": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"items": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"description": "task content"
+								},
+								"minItems": 1,
+								"description": "tasks for this phase"
+							},
+							"phase": {
+								"type": "string",
+								"description": "phase name"
+							}
+						},
+						"required": [
+							"items",
+							"phase"
+						],
+						"additionalProperties": false
+					},
+					"description": "phased task list (init)"
+				},
 				"op": {
 					"enum": [
 						"init",
@@ -916,51 +956,17 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"type": "string",
 					"description": "operation to apply"
 				},
-				"list": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"phase": {
-								"type": "string",
-								"description": "phase name"
-							},
-							"items": {
-								"type": "array",
-								"items": {
-									"type": "string",
-									"description": "task content"
-								},
-								"minItems": 1,
-								"description": "tasks for this phase"
-							}
-						},
-						"required": [
-							"phase",
-							"items"
-						]
-					},
-					"description": "phased task list (init)"
-				},
-				"task": {
-					"type": "string",
-					"description": "task content"
-				},
 				"phase": {
 					"type": "string",
 					"description": "phase name"
 				},
-				"items": {
-					"type": "array",
-					"items": {
-						"type": "string",
-						"description": "task content"
-					},
-					"description": "tasks for single-phase init or append"
-				},
 				"reason": {
 					"type": "string",
 					"description": "blocker note (block op)"
+				},
+				"task": {
+					"type": "string",
+					"description": "task content"
 				}
 			},
 			"required": [
@@ -977,6 +983,15 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"limit": {
+					"type": "number"
+				},
+				"max_tokens": {
+					"type": "number"
+				},
+				"num_search_results": {
+					"type": "number"
+				},
 				"query": {
 					"type": "string"
 				},
@@ -989,16 +1004,7 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					],
 					"type": "string"
 				},
-				"limit": {
-					"type": "number"
-				},
-				"max_tokens": {
-					"type": "number"
-				},
 				"temperature": {
-					"type": "number"
-				},
-				"num_search_results": {
 					"type": "number"
 				}
 			},
@@ -1028,18 +1034,18 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"path": {
-					"type": "string",
-					"description": "file path"
-				},
 				"content": {
 					"type": "string",
 					"description": "file content"
+				},
+				"path": {
+					"type": "string",
+					"description": "file path"
 				}
 			},
 			"required": [
-				"path",
-				"content"
+				"content",
+				"path"
 			]
 		},
 		"strict": true,
@@ -1052,6 +1058,18 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
+				"content": {
+					"type": "string",
+					"description": "replacement content for update"
+				},
+				"id": {
+					"type": "string",
+					"description": "memory id from recall output"
+				},
+				"importance": {
+					"type": "number",
+					"description": "replacement importance for update (0–1)"
+				},
 				"op": {
 					"enum": [
 						"update",
@@ -1061,26 +1079,14 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"type": "string",
 					"description": "memory edit operation"
 				},
-				"id": {
-					"type": "string",
-					"description": "memory id from recall output"
-				},
-				"content": {
-					"type": "string",
-					"description": "replacement content for update"
-				},
-				"importance": {
-					"type": "number",
-					"description": "replacement importance for update (0–1)"
-				},
 				"replacement_id": {
 					"type": "string",
 					"description": "replacement memory id for invalidate"
 				}
 			},
 			"required": [
-				"op",
-				"id"
+				"id",
+				"op"
 			]
 		},
 		"strict": true,
@@ -1109,7 +1115,8 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 						},
 						"required": [
 							"content"
-						]
+						],
+						"additionalProperties": false
 					},
 					"minItems": 1,
 					"description": "memories to retain"
@@ -1148,13 +1155,13 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"query": {
-					"type": "string",
-					"description": "question to answer"
-				},
 				"context": {
 					"type": "string",
 					"description": "optional context"
+				},
+				"query": {
+					"type": "string",
+					"description": "question to answer"
 				}
 			},
 			"required": [
@@ -1171,13 +1178,13 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"memory": {
-					"type": "string",
-					"description": "the durable, self-contained lesson to remember (what, when, why)"
-				},
 				"context": {
 					"type": "string",
 					"description": "optional source context for the lesson"
+				},
+				"memory": {
+					"type": "string",
+					"description": "the durable, self-contained lesson to remember (what, when, why)"
 				},
 				"skill": {
 					"type": "object",
@@ -1189,26 +1196,27 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 							],
 							"type": "string"
 						},
-						"name": {
+						"body": {
 							"type": "string",
-							"description": "kebab-case skill name"
+							"description": "the SKILL.md body in markdown (no frontmatter)"
 						},
 						"description": {
 							"type": "string",
 							"description": "one-line description of when to use the skill"
 						},
-						"body": {
+						"name": {
 							"type": "string",
-							"description": "the SKILL.md body in markdown (no frontmatter)"
+							"description": "kebab-case skill name"
 						}
 					},
 					"required": [
 						"action",
-						"name",
+						"body",
 						"description",
-						"body"
+						"name"
 					],
-					"description": "also create or enhance a managed skill in the same call"
+					"description": "also create or enhance a managed skill in the same call",
+					"additionalProperties": false
 				}
 			},
 			"required": [
@@ -1233,17 +1241,17 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					],
 					"type": "string"
 				},
-				"name": {
+				"body": {
 					"type": "string",
-					"description": "kebab-case skill name"
+					"description": "the SKILL.md body in markdown, no frontmatter (required for create/update)"
 				},
 				"description": {
 					"type": "string",
 					"description": "one-line description of when to use the skill (required for create/update)"
 				},
-				"body": {
+				"name": {
 					"type": "string",
-					"description": "the SKILL.md body in markdown, no frontmatter (required for create/update)"
+					"description": "kebab-case skill name"
 				}
 			},
 			"required": [
@@ -1261,14 +1269,6 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"pattern": {
-					"type": "string",
-					"description": "regex pattern"
-				},
-				"path": {
-					"type": "string",
-					"description": "file, directory, glob, internal URL, or \"<file>:<lines>\" selector to search; pass several as a semicolon-delimited list (\"src; tests\"). Omitted -> searches the workspace root (\".\")"
-				},
 				"case": {
 					"type": "boolean",
 					"description": "case-sensitive search"
@@ -1276,6 +1276,14 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 				"gitignore": {
 					"type": "boolean",
 					"description": "respect gitignore"
+				},
+				"path": {
+					"type": "string",
+					"description": "file, directory, glob, internal URL, or \"<file>:<lines>\" selector to search; pass several as a semicolon-delimited list (\"src; tests\"). Omitted -> searches the workspace root (\".\")"
+				},
+				"pattern": {
+					"type": "string",
+					"description": "regex pattern"
 				},
 				"skip": {
 					"type": "number",
@@ -1296,21 +1304,21 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {
-				"path": {
-					"type": "string",
-					"description": "glob, file, or directory to search — a single path or a semicolon-delimited list (\"src/**/*.ts; test/**/*.ts\"). Omitted -> searches the workspace root (\".\")"
+				"gitignore": {
+					"type": "boolean",
+					"description": "respect gitignore"
 				},
 				"hidden": {
 					"type": "boolean",
 					"description": "include hidden files"
 				},
-				"gitignore": {
-					"type": "boolean",
-					"description": "respect gitignore"
-				},
 				"limit": {
 					"type": "number",
 					"description": "max results"
+				},
+				"path": {
+					"type": "string",
+					"description": "glob, file, or directory to search — a single path or a semicolon-delimited list (\"src/**/*.ts; test/**/*.ts\"). Omitted -> searches the workspace root (\".\")"
 				}
 			},
 			"required": []

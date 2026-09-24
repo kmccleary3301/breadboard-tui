@@ -27,6 +27,7 @@ parameters:
             description: source context
         required:
           - content
+        additionalProperties: false
       minItems: 1
       description: memories to retain
     required: true

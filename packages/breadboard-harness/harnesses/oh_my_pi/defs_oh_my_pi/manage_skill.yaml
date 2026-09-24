@@ -33,23 +33,23 @@ parameters:
         - delete
       type: string
     required: true
-  - name: name
-    schema:
-      type: string
-      description: kebab-case skill name
-    required: true
-  - name: description
-    schema:
-      type: string
-      description: one-line description of when to use the skill (required for
-        create/update)
-    required: false
   - name: body
     schema:
       type: string
       description: the SKILL.md body in markdown, no frontmatter (required for
         create/update)
     required: false
+  - name: description
+    schema:
+      type: string
+      description: one-line description of when to use the skill (required for
+        create/update)
+    required: false
+  - name: name
+    schema:
+      type: string
+      description: kebab-case skill name
+    required: true
 provider_routing:
   openai:
     native_primary: true

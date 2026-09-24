@@ -58,16 +58,15 @@ description: >-
   extending foreground waiting.
 type_id: python
 parameters:
+  - name: async
+    schema:
+      type: boolean
+      description: run in background
+    required: false
   - name: command
     schema:
       type: string
     required: true
-  - name: timeout
-    schema:
-      type: number
-      description: timeout in seconds; 0 disables the command deadline; nonzero values
-        are clamped to 1-3600
-    required: false
   - name: cwd
     schema:
       type: string
@@ -76,10 +75,11 @@ parameters:
     schema:
       type: boolean
     required: false
-  - name: async
+  - name: timeout
     schema:
-      type: boolean
-      description: run in background
+      type: number
+      description: timeout in seconds; 0 disables the command deadline; nonzero values
+        are clamped to 1-3600
     required: false
 provider_routing:
   openai:

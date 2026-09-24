@@ -35,15 +35,16 @@ parameters:
       items:
         type: object
         properties:
-          pat:
-            type: string
-            description: ast pattern
           out:
             type: string
             description: replacement template
+          pat:
+            type: string
+            description: ast pattern
         required:
-          - pat
           - out
+          - pat
+        additionalProperties: false
       minItems: 1
       description: rewrite ops
     required: true

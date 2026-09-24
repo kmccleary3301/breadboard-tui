@@ -61,6 +61,73 @@ description: >-
   </critical>
 type_id: python
 parameters:
+  - name: assignee
+    schema:
+      type: array
+      items:
+        type: string
+      description: assignees
+    required: false
+  - name: base
+    schema:
+      type: string
+      description: pr base branch
+    required: false
+  - name: body
+    schema:
+      type: string
+      description: pr body markdown
+    required: false
+  - name: branch
+    schema:
+      type: string
+      description: branch
+    required: false
+  - name: dateField
+    schema:
+      enum:
+        - created
+        - updated
+      type: string
+      description: date field
+    required: false
+  - name: draft
+    schema:
+      type: boolean
+      description: open pr as draft
+    required: false
+  - name: fill
+    schema:
+      type: boolean
+      description: auto-fill pr title/body from commits
+    required: false
+  - name: force
+    schema:
+      type: boolean
+      description: reset existing local branch
+    required: false
+  - name: forceWithLease
+    schema:
+      type: boolean
+      description: force-with-lease push
+    required: false
+  - name: head
+    schema:
+      type: string
+      description: pr head branch
+    required: false
+  - name: label
+    schema:
+      type: array
+      items:
+        type: string
+      description: labels
+    required: false
+  - name: limit
+    schema:
+      type: number
+      description: max results
+    required: false
   - name: op
     schema:
       enum:
@@ -78,16 +145,6 @@ parameters:
       type: string
       description: github operation
     required: true
-  - name: repo
-    schema:
-      type: string
-      description: owner/repo
-    required: false
-  - name: branch
-    schema:
-      type: string
-      description: branch
-    required: false
   - name: path
     schema:
       type: string
@@ -102,45 +159,15 @@ parameters:
             type: string
       description: pr number, url, or branch
     required: false
-  - name: force
-    schema:
-      type: boolean
-      description: reset existing local branch
-    required: false
-  - name: forceWithLease
-    schema:
-      type: boolean
-      description: force-with-lease push
-    required: false
-  - name: title
+  - name: query
     schema:
       type: string
-      description: pr title
+      description: search query
     required: false
-  - name: body
+  - name: repo
     schema:
       type: string
-      description: pr body markdown
-    required: false
-  - name: base
-    schema:
-      type: string
-      description: pr base branch
-    required: false
-  - name: head
-    schema:
-      type: string
-      description: pr head branch
-    required: false
-  - name: draft
-    schema:
-      type: boolean
-      description: open pr as draft
-    required: false
-  - name: fill
-    schema:
-      type: boolean
-      description: auto-fill pr title/body from commits
+      description: owner/repo
     required: false
   - name: reviewer
     schema:
@@ -149,57 +176,30 @@ parameters:
         type: string
       description: reviewers
     required: false
-  - name: assignee
-    schema:
-      type: array
-      items:
-        type: string
-      description: assignees
-    required: false
-  - name: label
-    schema:
-      type: array
-      items:
-        type: string
-      description: labels
-    required: false
-  - name: query
+  - name: run
     schema:
       type: string
-      description: search query
+      description: actions run id or url
     required: false
   - name: since
     schema:
       type: string
       description: lower-bound date filter
     required: false
-  - name: until
-    schema:
-      type: string
-      description: upper-bound date filter
-    required: false
-  - name: dateField
-    schema:
-      enum:
-        - created
-        - updated
-      type: string
-      description: date field
-    required: false
-  - name: limit
-    schema:
-      type: number
-      description: max results
-    required: false
-  - name: run
-    schema:
-      type: string
-      description: actions run id or url
-    required: false
   - name: tail
     schema:
       type: number
       description: log lines per failed job
+    required: false
+  - name: title
+    schema:
+      type: string
+      description: pr title
+    required: false
+  - name: until
+    schema:
+      type: string
+      description: upper-bound date filter
     required: false
 provider_routing:
   openai:

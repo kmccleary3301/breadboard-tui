@@ -13,16 +13,16 @@ description: >
   `context` optional; focuses synthesis on a specific angle or sub-topic.
 type_id: python
 parameters:
-  - name: query
-    schema:
-      type: string
-      description: question to answer
-    required: true
   - name: context
     schema:
       type: string
       description: optional context
     required: false
+  - name: query
+    schema:
+      type: string
+      description: question to answer
+    required: true
 provider_routing:
   openai:
     native_primary: true

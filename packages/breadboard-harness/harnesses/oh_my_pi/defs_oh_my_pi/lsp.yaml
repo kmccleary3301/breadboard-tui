@@ -67,6 +67,10 @@ parameters:
         - request
       type: string
     required: true
+  - name: apply
+    schema:
+      type: boolean
+    required: false
   - name: file
     schema:
       type: string
@@ -75,7 +79,11 @@ parameters:
     schema:
       type: number
     required: false
-  - name: symbol
+  - name: new_name
+    schema:
+      type: string
+    required: false
+  - name: payload
     schema:
       type: string
     required: false
@@ -83,13 +91,9 @@ parameters:
     schema:
       type: string
     required: false
-  - name: new_name
+  - name: symbol
     schema:
       type: string
-    required: false
-  - name: apply
-    schema:
-      type: boolean
     required: false
   - name: timeout
     schema:
@@ -97,10 +101,6 @@ parameters:
       minimum: 5
       maximum: 300
       description: Timeout in seconds (default 20; range 5–300).
-    required: false
-  - name: payload
-    schema:
-      type: string
     required: false
 provider_routing:
   openai:

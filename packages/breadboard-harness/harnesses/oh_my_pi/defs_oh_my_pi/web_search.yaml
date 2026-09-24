@@ -24,6 +24,18 @@ description: >-
   </instruction>
 type_id: python
 parameters:
+  - name: limit
+    schema:
+      type: number
+    required: false
+  - name: max_tokens
+    schema:
+      type: number
+    required: false
+  - name: num_search_results
+    schema:
+      type: number
+    required: false
   - name: query
     schema:
       type: string
@@ -37,19 +49,7 @@ parameters:
         - year
       type: string
     required: false
-  - name: limit
-    schema:
-      type: number
-    required: false
-  - name: max_tokens
-    schema:
-      type: number
-    required: false
   - name: temperature
-    schema:
-      type: number
-    required: false
-  - name: num_search_results
     schema:
       type: number
     required: false

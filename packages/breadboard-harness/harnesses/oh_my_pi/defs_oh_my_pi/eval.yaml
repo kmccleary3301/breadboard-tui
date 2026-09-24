@@ -146,6 +146,12 @@ description: >-
   extending foreground waiting.
 type_id: python
 parameters:
+  - name: code
+    schema:
+      type: string
+      description: code or a standalone % command to run in this eval call. Top-level
+        await works.
+    required: true
   - name: language
     schema:
       enum:
@@ -154,27 +160,21 @@ parameters:
       type: string
       description: 'runtime: "py" for the IPython kernel, "js" for the persistent JS VM'
     required: true
-  - name: code
+  - name: reset
     schema:
-      type: string
-      description: code or a standalone % command to run in this eval call. Top-level
-        await works.
-    required: true
-  - name: title
-    schema:
-      type: string
-      description: short label shown in transcript (e.g. "imports", "load config")
+      type: boolean
+      description: wipe this language's kernel before running. Other languages are
+        untouched.
     required: false
   - name: timeout
     schema:
       type: number
       description: timeout for this eval call in seconds; 0 disables the cell timeout
     required: false
-  - name: reset
+  - name: title
     schema:
-      type: boolean
-      description: wipe this language's kernel before running. Other languages are
-        untouched.
+      type: string
+      description: short label shown in transcript (e.g. "imports", "load config")
     required: false
 provider_routing:
   openai:
