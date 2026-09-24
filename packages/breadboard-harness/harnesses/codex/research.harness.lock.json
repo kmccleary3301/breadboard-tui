@@ -101,6 +101,18 @@
     },
     {
       "env_gate_ids": [],
+      "path": "tools.registry.include",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "shell_command",
+        "apply_patch",
+        "update_plan"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "tools.registry.paths",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
@@ -127,7 +139,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:179cccd3580fb45ef822e93bdec77072bd08866c7e46d262b79dc61a23b6a536",
+  "graph_hash": "sha256:aa2ad8360aa4cd7ff7a79a6fced65a289799941801a1d3e4fe6cc65924a9ced2",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -146,7 +158,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:a93dfde2cd7a19b9c0f9b1b82ed9ef5ff74f8326def399cc0bce896a1e9eb488",
+      "layer_hash": "sha256:af7531b490efbaa1059e9f8ad82542646f92176df53fc9517f09fae96b4232ba",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -177,6 +189,7 @@
       "providers.default_model",
       "providers.models",
       "schema_version",
+      "tools.registry.include",
       "tools.registry.paths",
       "version",
       "workspace.root"
