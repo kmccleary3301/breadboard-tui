@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { migrateNativeProfile } from "@oh-my-pi/pi-coding-agent/breadboard/native-profile-migration";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
@@ -152,5 +153,24 @@ describe("native profile migration", () => {
 			if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
 			else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
 		}
+	});
+	it("recognizes already migrated profiles through the BreadBoard migration module", () => {
+		const previousProduct = process.env.BREADBOARD_PRODUCT;
+		process.env.BREADBOARD_PRODUCT = "1";
+		try {
+			expect(migrateNativeProfile({ breadboard: { harness: { default: "daily_driver" } } })).toBe(true);
+		} finally {
+			if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
+			else process.env.BREADBOARD_PRODUCT = previousProduct;
+		}
+	});
+	it("keeps product startup identity independent of shared pi-utils initialization", () => {
+		const codingAgentRoot = path.resolve(import.meta.dir, "../..");
+		const result = Bun.spawnSync([process.execPath, path.join(codingAgentRoot, "src/bb.ts"), "--version"], {
+			cwd: codingAgentRoot,
+			env: { ...process.env, BREADBOARD_PRODUCT: undefined },
+		});
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toMatch(/^bb\/0\.1\.0-rc\.7 omp\/18\.2\.11 /);
 	});
 });
