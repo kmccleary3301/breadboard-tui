@@ -23,8 +23,7 @@ parameters:
       type: string
       description: optional context
     required: false
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

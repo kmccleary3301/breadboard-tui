@@ -23,8 +23,7 @@ parameters:
       type: string
       description: natural language search query
     required: true
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

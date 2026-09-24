@@ -38,8 +38,7 @@ parameters:
       type: string
       description: investigation goal
     required: true
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

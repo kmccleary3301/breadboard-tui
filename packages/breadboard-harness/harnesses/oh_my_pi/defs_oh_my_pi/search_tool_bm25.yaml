@@ -3,8 +3,7 @@ name: search_tool_bm25
 description: Tool 'search_tool_bm25' is not available in the native host.
 type_id: python
 parameters: []
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

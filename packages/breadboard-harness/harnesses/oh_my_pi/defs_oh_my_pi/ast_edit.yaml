@@ -56,8 +56,7 @@ parameters:
       minItems: 1
       description: files, directories, globs, or internal URLs to rewrite
     required: true
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

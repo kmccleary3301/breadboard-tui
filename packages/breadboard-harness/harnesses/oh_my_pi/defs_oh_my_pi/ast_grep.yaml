@@ -69,8 +69,7 @@ parameters:
       type: number
       description: matches to skip
     required: false
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

@@ -225,8 +225,7 @@ parameters:
         required:
           - task
     required: true
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

@@ -86,8 +86,7 @@ parameters:
       description: Local path, internal URI (e.g. memory://), or URL. Inline selectors
         are supported.
     required: true
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

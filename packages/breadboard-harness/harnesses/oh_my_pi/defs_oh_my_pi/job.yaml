@@ -3,8 +3,7 @@ name: job
 description: Tool 'job' is not available in the native host.
 type_id: python
 parameters: []
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

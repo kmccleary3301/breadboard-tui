@@ -98,8 +98,7 @@ parameters:
       minItems: 1
       description: questions to ask
     required: true
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

@@ -50,8 +50,7 @@ parameters:
       description: the SKILL.md body in markdown, no frontmatter (required for
         create/update)
     required: false
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

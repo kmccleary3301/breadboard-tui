@@ -57,8 +57,7 @@ parameters:
       type: string
       description: replacement memory id for invalidate
     required: false
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

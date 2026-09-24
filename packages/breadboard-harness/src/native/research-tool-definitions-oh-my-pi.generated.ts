@@ -455,9 +455,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {},
-			"additionalProperties": true
+			"required": []
 		},
-		"nativePrimary": true
+		"nativePrimary": true,
+		"strict": true
 	},
 	{
 		"id": "github",
@@ -625,7 +626,8 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"type": "number",
 					"description": "max results"
 				}
-			}
+			},
+			"required": []
 		},
 		"strict": true,
 		"nativePrimary": true
@@ -740,9 +742,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {},
-			"additionalProperties": true
+			"required": []
 		},
-		"nativePrimary": true
+		"nativePrimary": true,
+		"strict": true
 	},
 	{
 		"id": "browser",
@@ -751,9 +754,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {},
-			"additionalProperties": true
+			"required": []
 		},
-		"nativePrimary": true
+		"nativePrimary": true,
+		"strict": true
 	},
 	{
 		"id": "checkpoint",
@@ -870,7 +874,7 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 				"tasks"
 			]
 		},
-		"strict": false,
+		"strict": true,
 		"nativePrimary": true
 	},
 	{
@@ -880,9 +884,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {},
-			"additionalProperties": true
+			"required": []
 		},
-		"nativePrimary": true
+		"nativePrimary": true,
+		"strict": true
 	},
 	{
 		"id": "irc",
@@ -891,9 +896,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {},
-			"additionalProperties": true
+			"required": []
 		},
-		"nativePrimary": true
+		"nativePrimary": true,
+		"strict": true
 	},
 	{
 		"id": "todo",
@@ -966,8 +972,7 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 			},
 			"required": [
 				"op"
-			],
-			"description": "apply a single todo operation"
+			]
 		},
 		"strict": true,
 		"nativePrimary": true
@@ -1018,9 +1023,10 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 		"parameters": {
 			"type": "object",
 			"properties": {},
-			"additionalProperties": true
+			"required": []
 		},
-		"nativePrimary": true
+		"nativePrimary": true,
+		"strict": true
 	},
 	{
 		"id": "write",
@@ -1320,7 +1326,8 @@ export const OH_MY_PI_TOOL_DEFINITIONS: readonly NativeToolDefinition[] = [
 					"type": "number",
 					"description": "max results"
 				}
-			}
+			},
+			"required": []
 		},
 		"strict": true,
 		"nativePrimary": true

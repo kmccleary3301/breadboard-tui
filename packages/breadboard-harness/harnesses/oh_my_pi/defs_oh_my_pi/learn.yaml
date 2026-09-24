@@ -55,8 +55,7 @@ parameters:
         - body
       description: also create or enhance a managed skill in the same call
     required: false
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true

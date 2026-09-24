@@ -47,8 +47,7 @@ parameters:
       description: files to skip before collecting results — use to paginate when the
         prior call hit the file limit
     required: false
-execution:
-  blocking: true
 provider_routing:
   openai:
     native_primary: true
+    strict: true
