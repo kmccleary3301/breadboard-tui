@@ -7,7 +7,7 @@
  * the frozen per-pack shape data captured in research-tool-definitions.ts.
  */
 import { readdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { loadEngineDataSnapshot } from "../src/engine-data";
 import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "../src/native/research-tool-definitions";
 
@@ -20,7 +20,10 @@ async function vendoredSourcePaths(): Promise<Set<string>> {
 	const paths = new Set(snapshot.files.map(file => file.path));
 	for (const directory of GROUP_B_DIRS) {
 		for (const name of await readdir(directory)) {
-			if (/\.ya?ml$/u.test(name)) paths.add(name);
+			if (!/\.ya?ml$/u.test(name)) continue;
+			const contents = await readFile(join(directory, name), "utf8");
+			if (contents.length === 0) throw new Error(`empty vendored definition: ${name}`);
+			paths.add(name);
 		}
 	}
 	return paths;
