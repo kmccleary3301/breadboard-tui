@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { renderBuiltinHarnessLock } from "../../scripts/builtin-harness-locks";
 import { builtinNativeHarnesses, DEFAULT_NATIVE_HARNESS_ID } from "../../src/native/builtin-harnesses";
 import { loadNativeHarness } from "../../src/native/load-native-harness";
-import { NATIVE_BINDINGS } from "../../src/native/omp-extension";
+import { NATIVE_BINDINGS, nativeBindingForTool, nativeToolDelegates } from "../../src/native/omp-extension";
 const scratch: string[] = [];
 afterEach(async () => {
 	await Promise.all(scratch.splice(0).map(path => rm(path, { recursive: true, force: true })));
@@ -62,6 +62,39 @@ describe("built-in native harnesses", () => {
 				expect(NATIVE_BINDINGS[tool.name]).toBeDefined();
 			}
 		}
+	});
+	test("resolves declared exec bindings from every research registry", async () => {
+		for (const harness of builtinNativeHarnesses().filter(item => item.id !== DEFAULT_NATIVE_HARNESS_ID)) {
+			const loaded = await loadNativeHarness({ specPath: harness.id, workspaceRoot: await workspace() });
+			const delegates = nativeToolDelegates(loaded);
+			for (const tool of loaded.registeredToolSurface.native) {
+				if (!/^(?:Bash|bash|shell_command|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)) continue;
+				expect(delegates[tool.name], `${harness.id}/${tool.name} has no runtime delegate`).toBeDefined();
+			}
+		}
+	});
+	test("uses the declared Codex shell schema when resolving its runtime binding", async () => {
+		const loaded = await loadNativeHarness({ specPath: "codex", workspaceRoot: await workspace() });
+		const tool = loaded.registeredToolSurface.native.find(candidate => candidate.name === "shell_command");
+		if (!tool) throw new Error("missing Codex shell_command tool");
+		const binding = nativeBindingForTool(tool);
+		if (!binding) throw new Error("missing Codex shell_command binding");
+		let received: Record<string, unknown> | undefined;
+		await binding.run({
+			input: { command: "cat fixture.txt", workdir: ".", timeout_ms: 5000 },
+			harness: {} as never,
+			context: {
+				invokeTool: async (params: Record<string, unknown>) => {
+					received = params;
+					return { content: [{ type: "text", text: "codex-shell-ok" }] };
+				},
+			} as never,
+			signal: undefined,
+			onUpdate: undefined,
+			todos: {} as never,
+			guard: {} as never,
+		});
+		expect(received).toEqual({ command: "cat fixture.txt", timeout: 5000, cwd: "." });
 	});
 
 	test("bb-omp.native runs on the host surface and contributes only the identity pack", async () => {

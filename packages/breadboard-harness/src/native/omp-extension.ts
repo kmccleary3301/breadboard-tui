@@ -210,9 +210,9 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 };
 
 /** Research packs are identified by their snapshotted registry source, not a generated name list. */
-function bindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
+export function nativeBindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
 	const sourcePath = tool.sourcePath ?? "";
-	const research = /^(?:implementations\/tools\/defs_(?:cc|oc|omo)|defs_(?:pi|oh_my_pi))\//u.test(sourcePath);
+	const research = /^(?:implementations\/tools\/defs(?:\/|_(?:cc|oc|omo)\/)|defs_(?:pi|oh_my_pi)\/)/u.test(sourcePath);
 	return research ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name];
 }
 
@@ -220,7 +220,7 @@ function bindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
 export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, string> {
 	const delegates: Record<string, string> = {};
 	for (const tool of harness.toolSurface.native) {
-		const delegate = bindingForTool(tool)?.delegate;
+		const delegate = nativeBindingForTool(tool)?.delegate;
 		if (delegate !== undefined) delegates[tool.name] = delegate;
 	}
 	return delegates;
