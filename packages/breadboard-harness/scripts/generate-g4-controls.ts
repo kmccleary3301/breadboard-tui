@@ -37,7 +37,9 @@ function mutate(source: Json, mutation: string): Json {
 	} else if (mutation === "tools-swapped") {
 		[nativeTools[0], nativeTools[1]] = [nativeTools[1]!, nativeTools[0]!];
 	} else if (mutation === "strict-deleted") {
-		delete record(nativeTools[0]!, "tools[0]").strict;
+		const tool = record(nativeTools[0]!, "tools[0]");
+		if (Object.hasOwn(tool, "strict")) delete tool.strict;
+		else tool.strict = true;
 	} else if (mutation === "message-extra") {
 		const key = Array.isArray(body.input) ? "input" : Array.isArray(body.messages) ? "messages" : undefined;
 		if (!key) throw new Error("native raw request has no message array");
