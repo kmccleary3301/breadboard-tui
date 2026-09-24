@@ -10,7 +10,6 @@ providers:
 tools:
   registry:
     paths: [implementations/tools/defs_cc]
-    include: [TaskOutput, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, TodoWrite, WebSearch, KillShell, AskUserQuestion, Skill, SlashCommand, EnterPlanMode]
 prompts:
   packs:
     base:

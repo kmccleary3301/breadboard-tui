@@ -160,32 +160,6 @@
     },
     {
       "env_gate_ids": [],
-      "path": "tools.registry.include",
-      "source_layer_id": "agent-config:0000:research.harness.yaml",
-      "value": [
-        "TaskOutput",
-        "Bash",
-        "Glob",
-        "Grep",
-        "ExitPlanMode",
-        "Read",
-        "Edit",
-        "Write",
-        "NotebookEdit",
-        "WebFetch",
-        "TodoWrite",
-        "WebSearch",
-        "KillShell",
-        "AskUserQuestion",
-        "Skill",
-        "SlashCommand",
-        "EnterPlanMode"
-      ],
-      "value_kind": "array",
-      "visibility": "model-visible"
-    },
-    {
-      "env_gate_ids": [],
       "path": "tools.registry.paths",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
@@ -212,7 +186,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:41c3ca61932f0e8904ce2590f38ec5545d8290d42b306a897ac6daebf8545f7a",
+  "graph_hash": "sha256:d29f32d27afefe864ca92848bd40601308b1188cff1e7c18566e1b78900cd818",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -231,7 +205,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:c147df8e37250a1a50a42dce0b1c97e71f1689716674d13d279f5545dd3b7a28",
+      "layer_hash": "sha256:13c148ffb686981408cf752d96890fceafaedf5c2979cb578791b9cea3c49cb5",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -265,7 +239,6 @@
       "providers.default_model",
       "providers.models",
       "schema_version",
-      "tools.registry.include",
       "tools.registry.paths",
       "version",
       "workspace.root"

@@ -61,4 +61,19 @@ describe("R39 tool surface", () => {
 			[...surface.entries()].map(([mode, tools]) => [mode, tools.native.map(nativeFunctionTool), tools.textInvoked.map(nativeFunctionTool)]);
 		expect(serialize(renamedSurface)).toEqual(serialize(originalSurface));
 	});
+
+	test("include order only filters and never reorders source-ordered definitions", async () => {
+		const lock = (await Bun.file(join(import.meta.dir, "../../harnesses/codex/research.harness.lock.json")).json()) as JsonRecord;
+		const permuted = structuredClone(lock);
+		const effective = permuted.effective_values;
+		if (!Array.isArray(effective)) throw new Error("codex lock has no effective values");
+		const include = effective.find(value => isJsonRecord(value) && value.path === "tools.registry.include");
+		if (!isJsonRecord(include) || !Array.isArray(include.value)) throw new Error("codex lock has no registry include");
+		include.value.reverse();
+		const original = await loadNativeToolSurfaces(lock);
+		const reordered = await loadNativeToolSurfaces(permuted);
+		const names = (surface: ReadonlyMap<string, NativeToolSurfacePack>) =>
+			[...surface.values()].map(value => [...value.native, ...value.textInvoked].map(tool => tool.name));
+		expect(names(reordered)).toEqual(names(original));
+	});
 });
