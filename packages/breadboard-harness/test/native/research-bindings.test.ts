@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "../../src/native/research-tool-definitions";
+import { loadNativeToolDefinitionsByRegistryPath } from "../../src/native/tool-pack";
 import { researchBindingForTool, researchDelegateForTool } from "../../src/native/research-bindings";
 import type { JsonRecord } from "../../src/canonical-json";
 import type { NativeToolDefinition } from "../../src/native/types";
@@ -100,14 +100,16 @@ function patchSession(cwd: string): ToolSession {
 
 
 describe("research native builtin bindings", () => {
-	test("binds every pack definition from its declared schema", () => {
-		for (const definitions of Object.values(RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH)) {
-			for (const tool of definitions) expect(researchDelegateForTool(tool)).toBe(expectedDelegate(tool));
+	test("binds every pack definition from its declared YAML", async () => {
+		const definitions = await loadNativeToolDefinitionsByRegistryPath();
+		for (const tools of definitions.values()) {
+			for (const tool of tools) expect(researchDelegateForTool(tool)).toBe(expectedDelegate(tool));
 		}
 	});
 
 	test("does not let an agent-shaped task call bash", async () => {
-		const tool = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH["implementations/tools/defs_oc"]?.find(candidate => candidate.name === "task");
+		const definitions = await loadNativeToolDefinitionsByRegistryPath();
+		const tool = definitions.get("implementations/tools/defs_oc")?.find(candidate => candidate.name === "task");
 		if (!tool) throw new Error("missing OpenCode task definition");
 		expect(researchDelegateForTool(tool)).toBe("task");
 		expect(await delegatedInput(tool, { command: "printf should-not-run", prompt: "agent task" })).toEqual({
@@ -117,9 +119,10 @@ describe("research native builtin bindings", () => {
 	});
 
 	test("maps the Pi and OMO-Pi path/text aliases to host builtins", async () => {
-		const piRead = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_pi?.find(tool => tool.name === "read");
-		const piEdit = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_pi?.find(tool => tool.name === "edit");
-		const omoEdit = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_oh_my_pi?.find(tool => tool.name === "edit");
+		const definitions = await loadNativeToolDefinitionsByRegistryPath();
+		const piRead = definitions.get("defs_pi")?.find(tool => tool.name === "read");
+		const piEdit = definitions.get("defs_pi")?.find(tool => tool.name === "edit");
+		const omoEdit = definitions.get("defs_oh_my_pi")?.find(tool => tool.name === "edit");
 		if (!piRead || !piEdit || !omoEdit) throw new Error("missing Group B definition");
 		expect(await delegatedInput(piRead, { path: "fixture.txt", offset: 1, limit: 20 })).toEqual({
 			path: "fixture.txt",
@@ -136,7 +139,8 @@ describe("research native builtin bindings", () => {
 		});
 	});
 	test("prefers a declared path over an undeclared alias", async () => {
-		const piRead = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_pi?.find(tool => tool.name === "read");
+		const definitions = await loadNativeToolDefinitionsByRegistryPath();
+		const piRead = definitions.get("defs_pi")?.find(tool => tool.name === "read");
 		if (!piRead) throw new Error("missing Pi read definition");
 		expect(await delegatedInput(piRead, { path: "declared.txt", filePath: "alias.txt" })).toEqual({
 			path: "declared.txt",

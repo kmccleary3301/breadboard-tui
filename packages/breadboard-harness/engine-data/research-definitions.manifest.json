@@ -1,0 +1,566 @@
+{
+  "pyrefCommit": "d363cdc90ace43f91e2b900573933329adcb5eab",
+  "pyrefTree": "9c3d7d41892398f4a945d768fdfec51e0bc11058",
+  "files": [
+    {
+      "path": "defs_oh_my_pi/ask.yaml",
+      "sha256": "c136e8e0d5f9288e9067a78fca6fc910928d80d2b2ded34f3cf877726d8790b2",
+      "bytes": 2822
+    },
+    {
+      "path": "defs_oh_my_pi/ast_edit.yaml",
+      "sha256": "c4c16f5690b64b297100ed1c5ca9e455011e942b42c0a17c487d6c89825d7eff",
+      "bytes": 1996
+    },
+    {
+      "path": "defs_oh_my_pi/ast_grep.yaml",
+      "sha256": "8c510482de268df5ff4170e5a763fc4f934b801358f3c4f38d9354dfc83c16f0",
+      "bytes": 2198
+    },
+    {
+      "path": "defs_oh_my_pi/bash.yaml",
+      "sha256": "ca7e86598ff40bf4fd464839f7df53b130abc3533428868e26c3a1106e1a92ce",
+      "bytes": 2347
+    },
+    {
+      "path": "defs_oh_my_pi/browser.yaml",
+      "sha256": "9e98d7e15d84638241ad06ced86ca7646a8616830338e33be361a5fc9f5d76e9",
+      "bytes": 192
+    },
+    {
+      "path": "defs_oh_my_pi/checkpoint.yaml",
+      "sha256": "9b9acff993c6457e75900b2b58af7d8ecd41fd3d2670ddc8245e42f487c944a0",
+      "bytes": 1021
+    },
+    {
+      "path": "defs_oh_my_pi/debug.yaml",
+      "sha256": "f590fe835d06e1fe887a7d0d85a21b45cd54a13450baffc710c21aeb4a7aaae7",
+      "bytes": 4783
+    },
+    {
+      "path": "defs_oh_my_pi/edit.yaml",
+      "sha256": "3c57f88166ee59dd3e03dfba5ad7b6ee57a721efc702cbfffb8cb58237ffc00c",
+      "bytes": 5891
+    },
+    {
+      "path": "defs_oh_my_pi/eval.yaml",
+      "sha256": "1a9a920b66e0de1386e54eeb4418161a68fa28c886f8c7c397f32eb62c647e91",
+      "bytes": 8658
+    },
+    {
+      "path": "defs_oh_my_pi/find.yaml",
+      "sha256": "a36e70b17138b9d012be00a87f0ea418410e14406747cdb18093a675a5a0b767",
+      "bytes": 1467
+    },
+    {
+      "path": "defs_oh_my_pi/github.yaml",
+      "sha256": "02fbeaaf80a673985bcff5de739d853a30df0f3a00bc103b995372f78aee5a21",
+      "bytes": 4832
+    },
+    {
+      "path": "defs_oh_my_pi/glob.yaml",
+      "sha256": "9b763255ac269f17c662683226962a9b3ce147a1a2dc195ccce458cdb3b572bc",
+      "bytes": 1467
+    },
+    {
+      "path": "defs_oh_my_pi/grep.yaml",
+      "sha256": "e6cea904e244ecedc95cb3b1fc61697188979aee1f673bed2db92d215904d943",
+      "bytes": 1450
+    },
+    {
+      "path": "defs_oh_my_pi/inspect_image.yaml",
+      "sha256": "de2f5616fe9bab2492df519f2d110b0fb93f81f33cba5fc04417ea9e3e95194c",
+      "bytes": 210
+    },
+    {
+      "path": "defs_oh_my_pi/irc.yaml",
+      "sha256": "d18d0541091e482fc7f5a61010867e8cdd2384266863dbe09c18569252f5df97",
+      "bytes": 180
+    },
+    {
+      "path": "defs_oh_my_pi/job.yaml",
+      "sha256": "ee3d3ad2c3acec5425e53b69c1d7c508e16fb2f469e2f98e935437b5cb20ecc5",
+      "bytes": 180
+    },
+    {
+      "path": "defs_oh_my_pi/learn.yaml",
+      "sha256": "d5e194881be156d09cbc1117d8da7793b24c57d80f1ec23302c80355844d4218",
+      "bytes": 1716
+    },
+    {
+      "path": "defs_oh_my_pi/lsp.yaml",
+      "sha256": "b1dcd2ffa0450c4d51295aa39d3b30cf807c82dce8eab9a63026831981973edd",
+      "bytes": 2617
+    },
+    {
+      "path": "defs_oh_my_pi/manage_skill.yaml",
+      "sha256": "1643a3445a28ad4b71409779d52cf718eb983dea77f2250ca03f5c14cdd1ff65",
+      "bytes": 1367
+    },
+    {
+      "path": "defs_oh_my_pi/memory_edit.yaml",
+      "sha256": "d8f4352f053d2ad0b9e5783a09f9c467bdbe9ac11805e1092b3e18ddd0d67234",
+      "bytes": 1657
+    },
+    {
+      "path": "defs_oh_my_pi/read.yaml",
+      "sha256": "b138f67ff304c950d9a6af14f06858debb8e7f8640c48173a4af12efa8f87efa",
+      "bytes": 3312
+    },
+    {
+      "path": "defs_oh_my_pi/recall.yaml",
+      "sha256": "b0a90da287e3a3cfa216f619d731e44f791a309db9315b77166ba93e3dd7dd9f",
+      "bytes": 790
+    },
+    {
+      "path": "defs_oh_my_pi/reflect.yaml",
+      "sha256": "e88d35de7fbdc82082ca1e0715096e578561062fc3eff4796930c1fd64566293",
+      "bytes": 702
+    },
+    {
+      "path": "defs_oh_my_pi/retain.yaml",
+      "sha256": "6e9540d12f0fb5e375d007e952414d2f4230d57ca9d4a24d4fba55c98f56c26d",
+      "bytes": 920
+    },
+    {
+      "path": "defs_oh_my_pi/rewind.yaml",
+      "sha256": "8f3aa1c8584f5c6f63ca7cdc481180d16a38afa6e07720f98fcb1135f6416b8d",
+      "bytes": 348
+    },
+    {
+      "path": "defs_oh_my_pi/search.yaml",
+      "sha256": "c38b4b201b7abeaeaf99ffe693147b6d28ea71e0d2c85dc7de8fb7cc82397d4f",
+      "bytes": 1454
+    },
+    {
+      "path": "defs_oh_my_pi/search_tool_bm25.yaml",
+      "sha256": "e9bcbf01865dbf74ea4ee9506471cc73944795e8c4064c3d334e5d890f52ac3a",
+      "bytes": 219
+    },
+    {
+      "path": "defs_oh_my_pi/ssh.yaml",
+      "sha256": "373ae9e033aebba6bdb6599f7d8e9ca7a54ad13c35cee6e905b44222e4cbc5a6",
+      "bytes": 180
+    },
+    {
+      "path": "defs_oh_my_pi/task.yaml",
+      "sha256": "fdbbfe3d5bbe0602bcba9499a689be448f86f1ee9cd72c9b5c792e3e832a2e60",
+      "bytes": 7879
+    },
+    {
+      "path": "defs_oh_my_pi/todo.yaml",
+      "sha256": "ca4dbc1cc4742f376e30f2da9090f49b5fc5a0add273561c564837ddd985ec66",
+      "bytes": 4162
+    },
+    {
+      "path": "defs_oh_my_pi/web_search.yaml",
+      "sha256": "7b3f402aea567d05ba0198f29eee8a47e5332e062a7e00abfb7ca2c68c171cb3",
+      "bytes": 1416
+    },
+    {
+      "path": "defs_oh_my_pi/write.yaml",
+      "sha256": "6254d965c127466338f089de6bd63c756ab3cdc693219f4996bcd600528eb4f3",
+      "bytes": 1142
+    },
+    {
+      "path": "defs_pi/bash.yaml",
+      "sha256": "c738a7b3b5a7e43f72e8e54eeebc1cd915c013a46cdaf7de583f599ce33d0b0f",
+      "bytes": 610
+    },
+    {
+      "path": "defs_pi/edit.yaml",
+      "sha256": "73453f5cb2bd8b48dcc020d396c89ff5fe3c7d0c80fb29e9fdefbc9c589ca006",
+      "bytes": 624
+    },
+    {
+      "path": "defs_pi/find.yaml",
+      "sha256": "2502ca9024219ebf7156afdc0a9d1acd91d93d18c68ea54721ad86f3516c7b02",
+      "bytes": 720
+    },
+    {
+      "path": "defs_pi/grep.yaml",
+      "sha256": "92e1eb4a5c032f85361c8d232606e96267aca2a75df93774e05ed857b3582d5c",
+      "bytes": 1285
+    },
+    {
+      "path": "defs_pi/ls.yaml",
+      "sha256": "30b14513673946488af6cd4f9bfa20eaba2ae8c2fde1b636f42551aca355ec0e",
+      "bytes": 564
+    },
+    {
+      "path": "defs_pi/read.yaml",
+      "sha256": "66ac4ab1afe027e088149c4628e6588aab0e1bd6e9401f09241a2ddf87a6e7f8",
+      "bytes": 784
+    },
+    {
+      "path": "defs_pi/write.yaml",
+      "sha256": "bc1f54b1853df4317be18544a065fc8008c05723194ba5c2dfbd002339b08136",
+      "bytes": 487
+    },
+    {
+      "path": "implementations/tools/defs_cc/001_Task.yaml",
+      "sha256": "ebb63cb8139443f19c788aff85acf28bd760e2ee14828926ecd5f549f3880051",
+      "bytes": 6669
+    },
+    {
+      "path": "implementations/tools/defs_cc/002_TaskOutput.yaml",
+      "sha256": "c9103c8eaa313ae866ba828c2443dd52953d65f2531e7de42d747eb5974cd87e",
+      "bytes": 1150
+    },
+    {
+      "path": "implementations/tools/defs_cc/003_Bash.yaml",
+      "sha256": "f683b684d0c522cbb575a16a4bc72fa2d4d23d661ab4d69eb444dda45f5b2ad0",
+      "bytes": 12386
+    },
+    {
+      "path": "implementations/tools/defs_cc/004_Glob.yaml",
+      "sha256": "da686d44535c4278ef47b6c0e94f0084374f28605df05f1ff308b59cfcc103bd",
+      "bytes": 1330
+    },
+    {
+      "path": "implementations/tools/defs_cc/005_Grep.yaml",
+      "sha256": "5bee5f9cb4dee2d1426be1f594fe4139f12c20b0d7e49ffdf2b0581043d4730e",
+      "bytes": 3709
+    },
+    {
+      "path": "implementations/tools/defs_cc/006_ExitPlanMode.yaml",
+      "sha256": "735fe3a210b5be0d8cb477ce1b6f4a7ce0276cc31dd5c939ffac54a0b74570bd",
+      "bytes": 2581
+    },
+    {
+      "path": "implementations/tools/defs_cc/007_Read.yaml",
+      "sha256": "bc581ea2f88520459dcf0df05de8bc66627223106d597315de6d58a5262ebaa8",
+      "bytes": 2550
+    },
+    {
+      "path": "implementations/tools/defs_cc/008_Edit.yaml",
+      "sha256": "eaf2730aee335e2f01a068b7f67feef8c2e3dc2bc4418a795a32cbcad588235e",
+      "bytes": 1961
+    },
+    {
+      "path": "implementations/tools/defs_cc/009_Write.yaml",
+      "sha256": "06cf63af8b3fd5afb88dadc6dada6c43f0095e7dd94dbfa14fad566e927ebb8b",
+      "bytes": 1218
+    },
+    {
+      "path": "implementations/tools/defs_cc/010_NotebookEdit.yaml",
+      "sha256": "a9960e246bdec6047af7b516eeb6ca7b40296c03aa24637cc3ddac01d4c8e8d4",
+      "bytes": 1767
+    },
+    {
+      "path": "implementations/tools/defs_cc/011_WebFetch.yaml",
+      "sha256": "2709cdca73d94d2248c508f152f051ae4e634d36e9a5f9ed635ee06cd1376471",
+      "bytes": 1723
+    },
+    {
+      "path": "implementations/tools/defs_cc/012_TodoWrite.yaml",
+      "sha256": "7fb0508ee801900603a8ea1eae3ba85dc9b92b23ccb58d645b544e99835c42c9",
+      "bytes": 11079
+    },
+    {
+      "path": "implementations/tools/defs_cc/013_WebSearch.yaml",
+      "sha256": "bfc2424663fbb6da79ee2ccd12e6d555e0202ee093c60db3b0ae1f277d4f1b40",
+      "bytes": 2162
+    },
+    {
+      "path": "implementations/tools/defs_cc/014_KillShell.yaml",
+      "sha256": "2b0eeb47d33ff4c44f737450db7dda7fafce3fa28e1a6072bb039b35297dc620",
+      "bytes": 729
+    },
+    {
+      "path": "implementations/tools/defs_cc/015_AskUserQuestion.yaml",
+      "sha256": "94821757761f04ecac9b5df0d272d1ae4ebab3998da3f5ebd6637f8e401f96e9",
+      "bytes": 3030
+    },
+    {
+      "path": "implementations/tools/defs_cc/016_Skill.yaml",
+      "sha256": "cd2e85cd51189086f4d52f7c90d8750473a87acc0e640ef3b581522340644f40",
+      "bytes": 1574
+    },
+    {
+      "path": "implementations/tools/defs_cc/017_SlashCommand.yaml",
+      "sha256": "f77cdf7ac9074974598b0c45400826f2371999e2755d98884acc8088562f6193",
+      "bytes": 1880
+    },
+    {
+      "path": "implementations/tools/defs_cc/018_EnterPlanMode.yaml",
+      "sha256": "7be3550da635b493a331c4609de69835c45d0649cee93527c2dfa9b4f1786bfa",
+      "bytes": 4669
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_background_cancel.yaml",
+      "sha256": "9d4afce40720053e6412f08f4ea191267cef1bd8d9eedf5e9b931e91b3c9211b",
+      "bytes": 628
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_background_output.yaml",
+      "sha256": "bc8cc79602e9db7fa6d68b8ce4aeba7f25709dec144554defe26e1bd462ffb1f",
+      "bytes": 756
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_background_task.yaml",
+      "sha256": "40f775b10a2dc27ad67fa3d15eb795b2f85ad63ea76ec63da58380ed6b24ee8e",
+      "bytes": 1319
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_bash.yaml",
+      "sha256": "45465842c01d155fdfc36bdd4041e06f2dc15e76eb2db81a82d798a98b7cad72",
+      "bytes": 13403
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_call_omo_agent.yaml",
+      "sha256": "ab9e9e1bbdcc2476593ec370610a434d2073cf02d8ab45d4bd0b42c41527868c",
+      "bytes": 1320
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_edit.yaml",
+      "sha256": "f77afe48d5d02cdfd654d8d49edd7ae9ecd207bf51e9707755f090fd6c569346",
+      "bytes": 2577
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_glob.yaml",
+      "sha256": "80014df210af2d20afbbf30557a912bff458b05ebe1f790eb51d8cc754eb9084",
+      "bytes": 1780
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_grep.yaml",
+      "sha256": "681d52b0f1837d5f9dd7775367a7f8cd555e9d1980bc5d1864fcba970fdb6110",
+      "bytes": 1758
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_invalid.yaml",
+      "sha256": "6ac967ef5e8b35df96283c699c38e12b83f47f9b4b00e13dd609e59cf9e1b151",
+      "bytes": 503
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_list.yaml",
+      "sha256": "f19cfd954e34841d8f13f65a40f57aa53d8fedb3eeea9cb87e6ef30df4677d2e",
+      "bytes": 1130
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_ls_diagnostics.yaml",
+      "sha256": "6b8e846425666c61a3906d21413e5e4fe2ea930f7594c6a500ad4ca85ce943e7",
+      "bytes": 344
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_patch.yaml",
+      "sha256": "3d6b810b03d77cbd5322e8024e1ed0a0f7cb637f04cc95f5a332b20288dab74c",
+      "bytes": 542
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_read.yaml",
+      "sha256": "75a61d78ae0c54dcfa8c12f6fb76750f14d8d5c8bde8a1386b36f902c4aea8cf",
+      "bytes": 2048
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_skill.yaml",
+      "sha256": "b55af04527e8b84fd22ddb9baeb59b41deeabd8a013f2e8e203855b9f9f69ff2",
+      "bytes": 802
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_task.yaml",
+      "sha256": "c503edcc4df078f6a8c4c7bf73da0abf90ad1a2af0877361986b4cb2814f361b",
+      "bytes": 7150
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_todoread.yaml",
+      "sha256": "9f7ed55f2c8173fac7f7b7cd8458a193eeccb58d0e28c773408b6c8ed8c268cd",
+      "bytes": 380
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_todowrite.yaml",
+      "sha256": "72519bfc230e8d6c314ea4fef1ee7fec8394a79e6b2fcc1a1b061a93d1979380",
+      "bytes": 10655
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_webfetch.yaml",
+      "sha256": "c2fb68dbdaccd60a5a212af2312e864b71a63a40cbb7a1871c5fb0d3e9504769",
+      "bytes": 1769
+    },
+    {
+      "path": "implementations/tools/defs_oc/opencode_write.yaml",
+      "sha256": "7fa032885ed830a830438d096c560745fb6e45fbb8798e1203b3f6ce4eab7a49",
+      "bytes": 1425
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_ast_grep_replace.yaml",
+      "sha256": "1df0fab797f37b33a2d4bda90170751d6f6350834bad713084298a633926b254",
+      "bytes": 1491
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_ast_grep_search.yaml",
+      "sha256": "129b21306efcc5dd4460603479dfd5144c2aba1b367763f2370ea7bc9c5f26a2",
+      "bytes": 1604
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_background_cancel.yaml",
+      "sha256": "dd40613d124c458299771abf3c1a9bac2d161746abc5fcc88adcb3dcc2b438fd",
+      "bytes": 629
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_background_output.yaml",
+      "sha256": "f61e1afdcab2a6952fc14435daf928e3210489cb96554a579ed4b0c89e832421",
+      "bytes": 735
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_background_task.yaml",
+      "sha256": "906e6b4ce94c0cbf68e3a105e7fdf9549b007ab8be07358ed2b75c1d0c1f311e",
+      "bytes": 1397
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_bash.yaml",
+      "sha256": "eeac0f9af2966b98427a7df152d56f90ba348148f4c00679fa1779be3da10a5b",
+      "bytes": 13487
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_call_omo_agent.yaml",
+      "sha256": "5483301bfd11e91a88b1b21edc9852fca8c18f062f44879a5e9c0574af8dbc1b",
+      "bytes": 1175
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_context7_get-library-docs.yaml",
+      "sha256": "ad03be3cf1bc30228b5d62995ef32fe0ad1c73866ae79b2de18e6aa0360d4d0c",
+      "bytes": 2648
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_context7_resolve-library-id.yaml",
+      "sha256": "59caf98313e86774e753102f7dbdf4b7768fc562a9bba7ac828a309b1d30dff0",
+      "bytes": 1927
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_edit.yaml",
+      "sha256": "81677e8876bd39cfba7da318360a72ba1502b0b71a99ad8c06a3e3544b4b8412",
+      "bytes": 2568
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_glob.yaml",
+      "sha256": "465824995664588dd4687fb57475fdf92800fbd968524c6e97f02291a83e4a42",
+      "bytes": 778
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_grep.yaml",
+      "sha256": "d748e8955d2d8e581571906da5fd333f0031b8d5b09712a81d1ebd7f3a3ce4d8",
+      "bytes": 952
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_grep_app_searchGitHub.yaml",
+      "sha256": "4cf90ea42d0ce4133b4718b32f26b4f222096852763c4075f24755d05ec565ac",
+      "bytes": 4646
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_interactive_bash.yaml",
+      "sha256": "3113401343037458ead5e9aaac937e7444f2a3158227468aa4e20395be691f1d",
+      "bytes": 597
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_list.yaml",
+      "sha256": "2dc519dbad775deaa6b3b026745d4fae48d86adaa943accb2ebfbdcf5dd1543c",
+      "bytes": 1121
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_look_at.yaml",
+      "sha256": "9f3641c4ee04f66586caff30866bade6cb5f1e30bb9372907e2be131dc3bc031",
+      "bytes": 640
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_code_action_resolve.yaml",
+      "sha256": "43b6504d61948004d4ce1c6b7e40b9d524d367899de23282a13daf768f5788a5",
+      "bytes": 616
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_code_actions.yaml",
+      "sha256": "eb07601e10d8a1d9132c711f883c941d422c1c30da1b398c240e4d472b80bc93",
+      "bytes": 1249
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_diagnostics.yaml",
+      "sha256": "95df1cbad6b16732cd5cf7c1178cba12b3bb09864b1ea8750887104c0a105146",
+      "bytes": 690
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_document_symbols.yaml",
+      "sha256": "69064b93050572786b13dd4391e4f9bc3ac4eaf9d7d51836ed199657631c29d2",
+      "bytes": 510
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_find_references.yaml",
+      "sha256": "efc2d8ddb5f90dd27bb5a5be20d9000d12c083af235f7ab2ac1b974b600f4f01",
+      "bytes": 847
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_goto_definition.yaml",
+      "sha256": "f857fa3d3c121e68b98a150236746e48894cf97e745b8f1f0cce93219518e01a",
+      "bytes": 732
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_hover.yaml",
+      "sha256": "4ec664cbee7d15c30ec8cad4f49b264e348e3a319fe31aa5655846fadeac230a",
+      "bytes": 713
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_prepare_rename.yaml",
+      "sha256": "ce0f7d14441e8bb53d2eab000a6d5f30eccf906aa933019cbef95cb8a744687f",
+      "bytes": 719
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_rename.yaml",
+      "sha256": "272e2e0e7b511124f4e414e35c6e7e7918a049e0d3144ebdf6f6ad3b0f52a89f",
+      "bytes": 816
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_servers.yaml",
+      "sha256": "d2c26d61ea6e03b54a283bad2244f4776e1e34a0ee1eb533f1921468a5158470",
+      "bytes": 402
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_lsp_workspace_symbols.yaml",
+      "sha256": "7b0da993a59c9e45bfcfad9dfc15f07096278d88592c749c2be75701f4bf0e3b",
+      "bytes": 692
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_read.yaml",
+      "sha256": "51ac2364877354dc0025e62d69b425e64ebf61bd664624affab9c9cf008e9343",
+      "bytes": 2039
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_skill.yaml",
+      "sha256": "b55af04527e8b84fd22ddb9baeb59b41deeabd8a013f2e8e203855b9f9f69ff2",
+      "bytes": 802
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_slashcommand.yaml",
+      "sha256": "993e0cc57f50faf3d183402aa49561978a690992b6f38fe124163568a9acef77",
+      "bytes": 1894
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_task.yaml",
+      "sha256": "ee6db2af6f12b75b27d88bf6ee56b2c4d663fdff4b94fb585f7cc0b72b80d1c7",
+      "bytes": 8048
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_todoread.yaml",
+      "sha256": "c21bd137689da98930d7d5e4f68921bdc90fbba570efb1320da8ec360033b799",
+      "bytes": 381
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_todowrite.yaml",
+      "sha256": "2f87fe60ca76f099cd5686e478ae2586d537991ca5cb2d88776a972734454b83",
+      "bytes": 10656
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_webfetch.yaml",
+      "sha256": "1d99630453f5535c47bb1b2d7972d3d67e77b94fe7a339db6f641fe220921c1e",
+      "bytes": 1769
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_websearch_exa_web_search_exa.yaml",
+      "sha256": "28a9797a51d7cc4d2bd956b43c92b003aa5e793e27eaca47c937e9dab1cd14ff",
+      "bytes": 2065
+    },
+    {
+      "path": "implementations/tools/defs_omo/opencode_write.yaml",
+      "sha256": "782a3adfaa7068506dfe573e9fc4c711715f6c2dd6d8962d30a3bae94ee749a8",
+      "bytes": 1416
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
 import { TodoWriteState, todoCompletionGuardReason } from "./todo-write";
 import { registerSessionTranscriptExport } from "./session-transcript";
 import { NativeTurnPolicy } from "./turn-policy";
-import { type NativeToolResult } from "./types";
+import type { NativeToolDefinition, NativeToolResult } from "./types";
 import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type {
 	ExtensionAPI,
@@ -209,11 +209,18 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	},
 };
 
+/** Research packs are identified by their snapshotted registry source, not a generated name list. */
+function bindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
+	const sourcePath = tool.sourcePath ?? "";
+	const research = /^(?:implementations\/tools\/defs_(?:cc|oc|omo)|defs_(?:pi|oh_my_pi))\//u.test(sourcePath);
+	return research ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name];
+}
+
 /** Built-ins the harness's function tools delegate to, keyed by harness tool name. */
 export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, string> {
 	const delegates: Record<string, string> = {};
 	for (const tool of harness.toolSurface.native) {
-		const delegate = (RESEARCH_NATIVE_BINDINGS[tool.name] ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name])?.delegate;
+		const delegate = bindingForTool(tool)?.delegate;
 		if (delegate !== undefined) delegates[tool.name] = delegate;
 	}
 	return delegates;
@@ -270,7 +277,8 @@ function registerFunctionTools(
 	guard: CompletionGuard,
 ): void {
 	for (const tool of harness.registeredToolSurface.native) {
-		const binding = RESEARCH_NATIVE_BINDINGS[tool.name] ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name];
+		const binding = bindingForTool(tool);
+		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
 		api.registerTool({
 			name: tool.name,
 			label: tool.name,

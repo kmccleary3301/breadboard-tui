@@ -2,16 +2,11 @@ import { type CanonicalJson, isJsonRecord as isRecord, type JsonRecord } from ".
 import { parseHarnessYaml } from "../compiler";
 import { loadEngineDataSnapshot } from "../engine-data";
 import { nativeLockValue } from "./lock-values";
-import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "./research-tool-definitions";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
 const TOOL_DEFINITION_PREFIX = "implementations/tools/defs/";
-/**
- * The product engine reaches models through the TUI gateway, and the Python reference routes every
- * gateway request through its OpenAI adapter (`provider/adapters.py:362-375`), so R39 tool routing
- * always reads `provider_routing.openai`.
- */
-const GATEWAY_ROUTING_PROVIDER = "openai";
+const BASE_REGISTRY_PATH = "implementations/tools/defs";
+const RESEARCH_DEFINITION_PATH = /^(?:implementations\/tools\/defs_(?:cc|oc|omo)|defs_(?:pi|oh_my_pi))\/.+\.ya?ml$/u;
 /** Keys `tool_yaml_loader._to_enhanced_params` strips before treating a parameter as its schema. */
 const NON_SCHEMA_PARAMETER_KEYS = new Set(["name", "description", "required", "default", "examples", "validation"]);
 
@@ -19,28 +14,38 @@ function requiredString(value: CanonicalJson | undefined, label: string): string
 	if (typeof value !== "string" || value.length === 0) throw new Error(`tool definition ${label} must be a non-empty string`);
 	return value;
 }
+const TYPE_MAP: Readonly<Record<string, string>> = {
+	int: "integer",
+	integer: "integer",
+	float: "number",
+	number: "number",
+	bool: "boolean",
+	boolean: "boolean",
+	str: "string",
+	string: "string",
+	array: "array",
+	object: "object",
+};
 
-/** Mirror `OpenAIAdapter.translate_tool_to_native_schema` for one YAML parameter. */
+function schemaType(value: CanonicalJson | undefined): string {
+	return typeof value === "string" ? (TYPE_MAP[value] ?? value) : "string";
+}
+
+/** Mirror pyref `provider/adapters.py:88-169,236-308` for one YAML parameter. */
 function parameterSchema(parameter: JsonRecord, label: string): JsonRecord {
 	const explicit = parameter.schema;
 	const schema: Record<string, CanonicalJson> = {};
-	if (isRecord(explicit)) {
+	if (isRecord(explicit) && Object.keys(explicit).length > 0) {
 		Object.assign(schema, explicit);
 	} else {
 		for (const [key, value] of Object.entries(parameter)) {
 			if (!NON_SCHEMA_PARAMETER_KEYS.has(key)) schema[key] = value;
 		}
 	}
-	if (Object.keys(schema).length === 0) {
-		// Python's minimal-schema fallback.
-		schema.type = parameter.type ?? "string";
-	} else if (!("type" in schema)) {
-		schema.type = parameter.type ?? "string";
-	}
+	if (Object.keys(schema).length === 0) schema.type = schemaType(parameter.type);
+	else if (!("type" in schema)) schema.type = schemaType(parameter.type);
 	const description = parameter.description;
-	if (typeof description === "string" && description.length > 0 && !("description" in schema)) {
-		schema.description = description;
-	}
+	if (typeof description === "string" && description.length > 0 && !("description" in schema)) schema.description = description;
 	if (schema.type === "array" && !("items" in schema)) schema.items = { type: "string" };
 	if (schema.type === "object") {
 		if (!("properties" in schema)) schema.properties = {};
@@ -52,7 +57,12 @@ function parameterSchema(parameter: JsonRecord, label: string): JsonRecord {
 	return schema;
 }
 
+function providerForSource(path: string): "anthropic" | "openai" {
+	return path.startsWith("implementations/tools/defs_cc/") ? "anthropic" : "openai";
+}
+
 function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefinition {
+	const provider = providerForSource(path);
 	const name = requiredString(source.name, `${path} name`);
 	const rawParameters = source.parameters ?? [];
 	if (!Array.isArray(rawParameters)) throw new Error(`tool definition ${name}.parameters must be a list`);
@@ -61,16 +71,19 @@ function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefini
 	for (const [index, rawParameter] of rawParameters.entries()) {
 		if (!isRecord(rawParameter)) throw new Error(`tool definition ${name}.parameters[${index}] must be a mapping`);
 		const parameterName = rawParameter.name;
-		// Python skips unnamed parameters.
 		if (typeof parameterName !== "string" || parameterName.length === 0) continue;
 		properties[parameterName] = parameterSchema(rawParameter, `${name}.${parameterName}`);
 		if (rawParameter.required === true) required.push(parameterName);
 	}
-	const routing = isRecord(source.provider_routing) ? source.provider_routing[GATEWAY_ROUTING_PROVIDER] : undefined;
+	const routing = isRecord(source.provider_routing) ? source.provider_routing[provider] : undefined;
 	const routingRecord = isRecord(routing) ? routing : {};
-	const parameters: Record<string, CanonicalJson> = { type: "object", properties, required };
-	if (typeof routingRecord.additional_properties === "boolean") {
-		parameters.additionalProperties = routingRecord.additional_properties;
+	const parameters: Record<string, CanonicalJson> = { type: "object", properties };
+	if (provider === "openai" || required.length > 0) parameters.required = required;
+	const additionalProps = routingRecord.additional_properties ?? routingRecord.additionalProperties;
+	if (typeof additionalProps === "boolean") parameters.additionalProperties = additionalProps;
+	if (provider === "anthropic") {
+		const schemaUri = routingRecord.schema_uri ?? routingRecord.$schema;
+		if (typeof schemaUri === "string" && schemaUri.length > 0) parameters.$schema = schemaUri;
 	}
 	const execution = isRecord(source.execution) ? source.execution : {};
 	const maxPerTurn = execution.max_per_turn;
@@ -80,11 +93,12 @@ function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefini
 		name,
 		description: typeof source.description === "string" ? source.description : "",
 		parameters: Object.freeze(parameters),
-		...(typeof routingRecord.strict === "boolean" ? { strict: routingRecord.strict } : {}),
+		...(provider === "openai" && typeof routingRecord.strict === "boolean" ? { strict: routingRecord.strict } : {}),
 		nativePrimary: routingRecord.native_primary === true,
 		...(typeof maxPerTurn === "number" && Number.isInteger(maxPerTurn) && maxPerTurn > 0 ? { maxPerTurn } : {}),
 	});
 }
+
 
 function definitionSourcePath(definition: NativeToolDefinition): string {
 	return definition.sourcePath ?? definition.name;
@@ -93,16 +107,21 @@ function definitionSourcePath(definition: NativeToolDefinition): string {
 function compareSourcePath(left: NativeToolDefinition, right: NativeToolDefinition): number {
 	return definitionSourcePath(left) < definitionSourcePath(right) ? -1 : definitionSourcePath(left) > definitionSourcePath(right) ? 1 : 0;
 }
+type DefinitionCatalog = ReadonlyMap<string, readonly NativeToolDefinition[]>;
 
-async function vendoredToolDefinitions(): Promise<ReadonlyMap<string, NativeToolDefinition>> {
+async function vendoredToolDefinitions(): Promise<DefinitionCatalog> {
 	const snapshot = await loadEngineDataSnapshot();
-	const definitions: NativeToolDefinition[] = [];
+	const byRegistry = new Map<string, NativeToolDefinition[]>();
 	for (const file of snapshot.files) {
-		if (!file.path.startsWith(TOOL_DEFINITION_PREFIX) || !/\.ya?ml$/u.test(file.path)) continue;
+		if ((!file.path.startsWith(TOOL_DEFINITION_PREFIX) && !RESEARCH_DEFINITION_PATH.test(file.path)) || !/\.ya?ml$/u.test(file.path)) continue;
+		const slash = file.path.lastIndexOf("/");
+		const registryPath = slash < 0 ? file.path : file.path.slice(0, slash);
+		const definitions = byRegistry.get(registryPath) ?? [];
 		definitions.push(parseToolDefinition(parseHarnessYaml(file.content), file.path));
+		byRegistry.set(registryPath, definitions);
 	}
-	definitions.sort(compareSourcePath);
-	return new Map(definitions.map(definition => [definition.name, definition]));
+	for (const definitions of byRegistry.values()) definitions.sort(compareSourcePath);
+	return byRegistry;
 }
 
 function registryPaths(lock: JsonRecord): readonly string[] {
@@ -118,11 +137,12 @@ function registryValue(lock: JsonRecord, path: string): CanonicalJson | undefine
 	return nativeLockValue(lock, path);
 }
 
-function registryDefinitions(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): Array<[string, NativeToolDefinition]> {
-	const definitions = new Map(base);
-	const order = [...base.keys()];
+function registryDefinitions(lock: JsonRecord, catalog: DefinitionCatalog): Array<[string, NativeToolDefinition]> {
+	const base = catalog.get(BASE_REGISTRY_PATH) ?? [];
+	const definitions = new Map(base.map(definition => [definition.name, definition] as [string, NativeToolDefinition]));
+	const order = base.map(definition => definition.name);
 	for (const path of registryPaths(lock)) {
-		const pathDefinitions = [...(RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH[path] ?? [])].sort(compareSourcePath);
+		const pathDefinitions = catalog.get(path) ?? [];
 		for (const definition of pathDefinitions) {
 			if (!definitions.has(definition.name)) order.push(definition.name);
 			definitions.set(definition.name, definition);
@@ -134,8 +154,8 @@ function registryDefinitions(lock: JsonRecord, base: ReadonlyMap<string, NativeT
 	});
 }
 
-function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
-	let entries = registryDefinitions(lock, base);
+function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): ReadonlyMap<string, NativeToolDefinition> {
+	let entries = registryDefinitions(lock, catalog);
 	const legacyEnabled = registryValue(lock, "tools.enabled");
 	const exclude = registryValue(lock, "tools.registry.exclude");
 	const excludeSet = new Set(Array.isArray(exclude) ? exclude.filter((name): name is string => typeof name === "string") : []);
@@ -237,4 +257,10 @@ export function nativeFunctionTool(tool: NativeToolDefinition): JsonRecord {
 	const fn: Record<string, CanonicalJson> = { name: tool.name, description: tool.description, parameters: tool.parameters };
 	if (tool.strict !== undefined) fn.strict = tool.strict;
 	return { type: "function", function: fn };
+}
+
+
+/** Load every snapshotted research registry from its source YAML. */
+export async function loadNativeToolDefinitionsByRegistryPath(): Promise<DefinitionCatalog> {
+	return vendoredToolDefinitions();
 }

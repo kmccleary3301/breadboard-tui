@@ -1,6 +1,5 @@
 import type { JsonRecord } from "../canonical-json";
 import { applyUnifiedPatchAdapter } from "./adapters";
-import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "./research-tool-definitions";
 import type { NativeBinding, NativeCall } from "./omp-extension";
 import type { NativeToolDefinition, NativeToolResult } from "./types";
 
@@ -232,12 +231,8 @@ export function researchBindingForTool(tool: NativeToolDefinition): NativeBindin
 	return bindingFor(tool);
 }
 
-const allDefinitions = Object.values(RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH).flat();
-const names = [...new Set([...allDefinitions.map(definition => definition.name), ...MISSING_PACK_TOOL_NAMES])];
+const names = [...new Set([...Object.keys(DIRECT_DELEGATES), ...MISSING_PACK_TOOL_NAMES])];
 
 export const RESEARCH_NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = Object.fromEntries(
-	names.map(name => {
-		const definition = allDefinitions.find(tool => tool.name === name);
-		return [name, definition === undefined ? bindingFor({ id: name, name, description: "", parameters: {}, nativePrimary: true }) : bindingFor(definition)];
-	}),
+	names.map(name => [name, bindingFor({ id: name, name, description: "", parameters: {}, nativePrimary: true })]),
 );
