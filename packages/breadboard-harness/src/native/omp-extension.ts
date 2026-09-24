@@ -307,6 +307,44 @@ function developerRolePayload(payload: unknown): unknown {
 	return { ...record, input };
 }
 
+function instructionsPayload(payload: unknown): unknown {
+	if (!isJsonRecord(payload as never) || !Array.isArray((payload as JsonRecord).input)) return payload;
+	const record = payload as JsonRecord;
+	let instructions = typeof record.instructions === "string" ? record.instructions : undefined;
+	const input: unknown[] = [];
+	for (const item of record.input as unknown[]) {
+		if (!isJsonRecord(item as never) || (item as JsonRecord).role !== "developer") {
+			input.push(item);
+			continue;
+		}
+		const content = (item as JsonRecord).content;
+		const text =
+			typeof content === "string"
+				? content
+				: Array.isArray(content)
+					? content
+							.filter((part): part is JsonRecord => isJsonRecord(part) && part.type === "input_text" && typeof part.text === "string")
+							.map(part => part.text as string)
+							.join("")
+					: "";
+		if (text) instructions = instructions === undefined ? text : `${instructions}\n\n${text}`;
+	}
+	return {
+		...record,
+		input,
+		...(instructions === undefined ? {} : { instructions }),
+	};
+}
+
+function usesResponsesDialect(lock: JsonRecord): boolean {
+	if (nativeLockValue(lock, "provider_tools.api_variant") === "responses") return true;
+	const models = nativeLockValue(lock, "providers.models");
+	return (
+		Array.isArray(models) &&
+		models.some(model => isJsonRecord(model as never) && model.adapter === "openai_responses")
+	);
+}
+
 /**
  * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
  * transitions between continuation requests. On a host surface it leaves OMP's tools and turns
@@ -330,8 +368,10 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			});
 		};
 		api.on("before_provider_request", event => {
-			if (nativeLockValue(activeHarness.lock, "provider_tools.responses_use_developer_role") !== true) return undefined;
-			return developerRolePayload(event.payload);
+			if (!usesResponsesDialect(activeHarness.lock)) return undefined;
+			return nativeLockValue(activeHarness.lock, "provider_tools.responses_use_developer_role") === true
+				? developerRolePayload(event.payload)
+				: instructionsPayload(event.payload);
 		});
 		const applyStage = async (): Promise<void> => {
 			const stage = stageMachine.current;
