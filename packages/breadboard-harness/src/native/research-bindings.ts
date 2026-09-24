@@ -1,5 +1,5 @@
 import type { JsonRecord } from "../canonical-json";
-import { applyPatchOperationsDirect } from "./patch";
+import { applyUnifiedPatchAdapter } from "./adapters";
 import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "./research-tool-definitions";
 import type { NativeBinding, NativeCall } from "./omp-extension";
 import type { NativeToolDefinition, NativeToolResult } from "./types";
@@ -194,9 +194,12 @@ async function delegate(
 	if (plan.delegateName === "apply_patch") {
 		const patchText = input.input;
 		if (typeof patchText !== "string") return { text: "Tool 'apply_patch' requires its declared input string.", isError: true };
-		const result = await applyPatchOperationsDirect(call.harness.workspaceRoot, patchText);
-		if (result === null) return { text: "Tool 'apply_patch' received an empty patch.", isError: true };
-		return { text: JSON.stringify(result), ...(result.ok === false ? { isError: true } : {}) };
+		const result = await applyUnifiedPatchAdapter(call.harness.workspaceRoot, patchText);
+		return {
+			text: result.text,
+			...(result.details === undefined ? {} : { details: result.details as JsonRecord }),
+			...(result.isError === true ? { isError: true } : {}),
+		};
 	}
 	if (plan.delegateName === undefined || call.context.invokeTool === undefined) {
 		return { text: `Tool '${toolName}' is not available in the native host.`, isError: true };

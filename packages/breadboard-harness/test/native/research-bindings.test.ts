@@ -189,4 +189,37 @@ describe("research native builtin bindings", () => {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
 	});
+	test("refuses apply_patch paths outside the workspace, including symlink escapes", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-escape-"));
+		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-outside-"));
+		try {
+			await Bun.write(path.join(outside, "target.txt"), "before\n");
+			await fs.symlink(outside, path.join(scratch, "alias"), "dir");
+			const tool: NativeToolDefinition = {
+				id: "apply_patch",
+				name: "apply_patch",
+				description: "",
+				parameters: { type: "object", properties: { input: { type: "string" } }, required: ["input"] },
+				nativePrimary: true,
+			};
+			const run = (file: string) =>
+				researchBindingForTool(tool).run({
+					input: {
+						input: `*** Begin Patch\n*** Update File: ${file}\n@@\n-before\n+after\n*** End Patch\n`,
+					},
+					harness: { workspaceRoot: scratch } as never,
+					context: { invokeTool: async () => { throw new Error("unexpected invokeTool"); } } as never,
+					signal: undefined,
+					onUpdate: undefined,
+					todos: {} as never,
+					guard: {} as never,
+				});
+			expect((await run("../outside.txt")).isError).toBe(true);
+			expect((await run("alias/target.txt")).isError).toBe(true);
+			expect(await Bun.file(path.join(outside, "target.txt")).text()).toBe("before\n");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+			await fs.rm(outside, { recursive: true, force: true });
+		}
+	});
 });
