@@ -3,8 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
-import { RESEARCH_TOOL_DEFINITIONS } from "../../src/native/research-tool-definitions";
+import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "../../src/native/research-tool-definitions";
 import { researchBindingForTool, researchDelegateForTool } from "../../src/native/research-bindings";
 import type { JsonRecord } from "../../src/canonical-json";
 import type { NativeToolDefinition } from "../../src/native/types";
@@ -26,7 +25,7 @@ const directDelegates: Readonly<Record<string, string>> = {
 	shell_command: "bash",
 	read: "read",
 	edit: "edit",
-	apply_patch: "edit",
+	apply_patch: "apply_patch",
 	write: "write",
 	glob: "glob",
 	grep: "grep",
@@ -95,20 +94,20 @@ function patchSession(cwd: string): ToolSession {
 		getArtifactsDir: () => null,
 		getSessionId: () => null,
 		getPlanModeState: () => undefined,
-		settings: Settings.isolated({}),
+		settings: Settings.isolated({ "edit.mode": "replace" }),
 	} as unknown as ToolSession;
 }
 
 
 describe("research native builtin bindings", () => {
 	test("binds every pack definition from its declared schema", () => {
-		for (const definitions of Object.values(RESEARCH_TOOL_DEFINITIONS)) {
+		for (const definitions of Object.values(RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH)) {
 			for (const tool of definitions) expect(researchDelegateForTool(tool)).toBe(expectedDelegate(tool));
 		}
 	});
 
 	test("does not let an agent-shaped task call bash", async () => {
-		const tool = RESEARCH_TOOL_DEFINITIONS.opencode.find(candidate => candidate.name === "task");
+		const tool = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH["implementations/tools/defs_oc"]?.find(candidate => candidate.name === "task");
 		if (!tool) throw new Error("missing OpenCode task definition");
 		expect(researchDelegateForTool(tool)).toBe("task");
 		expect(await delegatedInput(tool, { command: "printf should-not-run", prompt: "agent task" })).toEqual({
@@ -118,9 +117,9 @@ describe("research native builtin bindings", () => {
 	});
 
 	test("maps the Pi and OMO-Pi path/text aliases to host builtins", async () => {
-		const piRead = RESEARCH_TOOL_DEFINITIONS.pi.find(tool => tool.name === "read");
-		const piEdit = RESEARCH_TOOL_DEFINITIONS.pi.find(tool => tool.name === "edit");
-		const omoEdit = RESEARCH_TOOL_DEFINITIONS.oh_my_pi.find(tool => tool.name === "edit");
+		const piRead = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_pi?.find(tool => tool.name === "read");
+		const piEdit = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_pi?.find(tool => tool.name === "edit");
+		const omoEdit = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_oh_my_pi?.find(tool => tool.name === "edit");
 		if (!piRead || !piEdit || !omoEdit) throw new Error("missing Group B definition");
 		expect(await delegatedInput(piRead, { path: "fixture.txt", offset: 1, limit: 20 })).toEqual({
 			path: "fixture.txt",
@@ -137,17 +136,19 @@ describe("research native builtin bindings", () => {
 		});
 	});
 	test("prefers a declared path over an undeclared alias", async () => {
-		const piRead = RESEARCH_TOOL_DEFINITIONS.pi.find(tool => tool.name === "read");
+		const piRead = RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH.defs_pi?.find(tool => tool.name === "read");
 		if (!piRead) throw new Error("missing Pi read definition");
 		expect(await delegatedInput(piRead, { path: "declared.txt", filePath: "alias.txt" })).toEqual({
 			path: "declared.txt",
 		});
 	});
 
-	test("passes apply_patch input unchanged to the real host edit tool", async () => {
+	test("applies apply_patch through the host patch path regardless of edit mode", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-patch-"));
 		try {
 			const target = path.join(scratch, "target.txt");
+			const hostSession = patchSession(scratch);
+			expect(hostSession.settings.get("edit.mode")).toBe("replace");
 			await Bun.write(target, "before\n");
 			const input = [
 				"*** Begin Patch",
@@ -171,10 +172,11 @@ describe("research native builtin bindings", () => {
 			};
 			const result = await researchBindingForTool(tool).run({
 				input: { input },
-				harness: {} as never,
+				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) =>
-						new EditTool(patchSession(scratch), "apply_patch").execute("binding-patch", params as never),
+					invokeTool: async () => {
+						throw new Error("apply_patch must not depend on the session edit mode");
+					},
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,

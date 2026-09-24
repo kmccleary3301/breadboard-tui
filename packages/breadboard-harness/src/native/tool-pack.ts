@@ -2,7 +2,7 @@ import { type CanonicalJson, isJsonRecord as isRecord, type JsonRecord } from ".
 import { parseHarnessYaml } from "../compiler";
 import { loadEngineDataSnapshot } from "../engine-data";
 import { nativeLockValue } from "./lock-values";
-import { RESEARCH_TOOL_DEFINITIONS, type ResearchToolFamily } from "./research-tool-definitions";
+import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "./research-tool-definitions";
 import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 
 const TOOL_DEFINITION_PREFIX = "implementations/tools/defs/";
@@ -87,96 +87,26 @@ function parseToolDefinition(source: JsonRecord, path: string): NativeToolDefini
 
 async function vendoredToolDefinitions(): Promise<ReadonlyMap<string, NativeToolDefinition>> {
 	const snapshot = await loadEngineDataSnapshot();
-	const byName = new Map<string, NativeToolDefinition>();
+	const definitions: NativeToolDefinition[] = [];
 	for (const file of snapshot.files) {
 		if (!file.path.startsWith(TOOL_DEFINITION_PREFIX) || !/\.ya?ml$/u.test(file.path)) continue;
-		const definition = parseToolDefinition(parseHarnessYaml(file.content), file.path);
-		if (byName.has(definition.name)) throw new Error(`vendored tool name ${definition.name} is defined twice`);
-		byName.set(definition.name, definition);
+		definitions.push(parseToolDefinition(parseHarnessYaml(file.content), file.path));
 	}
-	return byName;
+	definitions.sort((left, right) => left.name.localeCompare(right.name));
+	return new Map(definitions.map(definition => [definition.name, definition]));
 }
 
-function researchToolFamily(lock: JsonRecord): ResearchToolFamily | undefined {
+function registryPaths(lock: JsonRecord): readonly string[] {
 	const paths = nativeLockValue(lock, "tools.registry.paths");
-	if (!Array.isArray(paths) || paths.length !== 1 || typeof paths[0] !== "string") return undefined;
-	switch (paths[0]) {
-		case "implementations/tools/defs_cc": return "claude_code";
-		case "implementations/tools/defs": return "codex";
-		case "implementations/tools/defs_oc": return "opencode";
-		case "implementations/tools/defs_omo": return "oh_my_opencode";
-		case "defs_pi": return "pi";
-		case "defs_oh_my_pi": return "oh_my_pi";
-		default: return undefined;
-	}
+	return Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string") : [];
 }
-const CLAUDE_SCHEMA_URI = "http://json-schema.org/draft-07/schema#";
-
-function claudeCodeDefinition(definition: NativeToolDefinition): NativeToolDefinition {
-	const parameters: JsonRecord = {
-		...definition.parameters,
-		"$schema": CLAUDE_SCHEMA_URI,
-		required: Array.isArray(definition.parameters.required) ? definition.parameters.required : [],
-	};
-	const propertiesValue = parameters.properties;
-	if (isRecord(propertiesValue)) {
-		const properties: JsonRecord = { ...propertiesValue };
-		const patchProperty = (name: string, patch: JsonRecord): void => {
-			const current = properties[name];
-			if (isRecord(current)) properties[name] = { ...current, ...patch };
-		};
-		switch (definition.name) {
-			case "Grep":
-				patchProperty("output_mode", { enum: ["content", "files_with_matches", "count"] });
-				break;
-			case "NotebookEdit":
-				patchProperty("cell_type", { enum: ["code", "markdown"] });
-				patchProperty("edit_mode", { enum: ["replace", "insert", "delete"] });
-				break;
-			case "TaskOutput":
-				patchProperty("timeout", { maximum: 600000, minimum: 0 });
-				break;
-			case "WebFetch":
-				patchProperty("url", { format: "uri" });
-				break;
-			case "WebSearch":
-				patchProperty("query", { minLength: 2 });
-				break;
-		}
-		parameters.properties = properties;
-	}
-	return { ...definition, parameters };
-}
-function openAiResearchDefinition(definition: NativeToolDefinition): NativeToolDefinition {
-	const parameters = isRecord(definition.parameters) ? definition.parameters : {};
-	const properties = isRecord(parameters.properties)
-		? Object.fromEntries(Object.entries(parameters.properties).sort(([left], [right]) => left.localeCompare(right)))
-		: {};
-	const required = Array.isArray(parameters.required)
-		? parameters.required.filter((name): name is string => typeof name === "string").sort((left, right) => left.localeCompare(right))
-		: [];
-	return {
-		...definition,
-		strict: true,
-		parameters: { ...parameters, additionalProperties: false, properties, required },
-	};
-}
-
 
 function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
-	const family = researchToolFamily(lock);
-	if (family === undefined) return base;
 	const definitions = new Map(base);
-	const additions = family === "codex" ? RESEARCH_TOOL_DEFINITIONS.opencode : RESEARCH_TOOL_DEFINITIONS[family];
-	for (const definition of additions) {
-		const selected = family === "claude_code"
-			? claudeCodeDefinition(definition)
-			: family === "pi" || family === "oh_my_pi"
-				? openAiResearchDefinition(definition)
-				: definition;
-		definitions.set(selected.name, selected);
+	for (const path of registryPaths(lock)) {
+		for (const definition of RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH[path] ?? []) definitions.set(definition.name, definition);
 	}
-	return definitions;
+	return new Map([...definitions.entries()].sort(([, left], [, right]) => left.name.localeCompare(right.name)));
 }
 
 async function vendoredToolDefinitionsForLock(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolDefinition>> {
@@ -193,7 +123,8 @@ function selectedToolNames(mode: JsonRecord, definitions: ReadonlyMap<string, Na
 	const disabled = new Set(
 		Array.isArray(mode.tools_disabled) ? mode.tools_disabled.filter((name): name is string => typeof name === "string") : [],
 	);
-	const selected = enabled.length === 0 || enabled.includes("*") ? [...definitions.keys()] : enabled;
+	const enabledSet = new Set(enabled);
+	const selected = enabled.length === 0 || enabledSet.has("*") ? [...definitions.keys()] : [...definitions.keys()].filter(name => enabledSet.has(name));
 	const filtered = selected.filter(name => !disabled.has(name));
 	// Python falls back to the complete `tool_defs` input when exclusions remove every tool
 	// (`agent_llm_openai.py:3093-3111`).
@@ -212,7 +143,7 @@ async function loadNativeToolSurfacesWithDefinitions(
 			if (definition === undefined) throw new Error(`native harness tool ${name} has no vendored definition`);
 			return definition;
 		});
-		const ordered = researchToolFamily(lock) === undefined ? [...enabled].sort(caseInsensitiveOrder) : enabled;
+		const ordered = enabled;
 		surfaces.set(
 			modeName,
 			Object.freeze({
@@ -226,11 +157,6 @@ async function loadNativeToolSurfacesWithDefinitions(
 }
 
 
-function caseInsensitiveOrder(left: NativeToolDefinition, right: NativeToolDefinition): number {
-	const a = left.name.toLowerCase();
-	const b = right.name.toLowerCase();
-	return a < b ? -1 : a > b ? 1 : 0;
-}
 /**
  * Build the locked mode tool surfaces from vendored definitions. Disabled names are removed after
  * inclusion, matching `agent_llm_openai.py:3093-3111`.

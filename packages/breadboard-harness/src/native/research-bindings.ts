@@ -1,5 +1,6 @@
 import type { JsonRecord } from "../canonical-json";
-import { RESEARCH_TOOL_DEFINITIONS } from "./research-tool-definitions";
+import { applyPatchOperationsDirect } from "./patch";
+import { RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH } from "./research-tool-definitions";
 import type { NativeBinding, NativeCall } from "./omp-extension";
 import type { NativeToolDefinition, NativeToolResult } from "./types";
 
@@ -16,7 +17,7 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	shell_command: "bash",
 	read: "read",
 	edit: "edit",
-	apply_patch: "edit",
+	apply_patch: "apply_patch",
 	write: "write",
 	glob: "glob",
 	grep: "grep",
@@ -190,6 +191,13 @@ async function delegate(
 	plan: BindingPlan,
 	input: Record<string, unknown>,
 ): Promise<NativeToolResult> {
+	if (plan.delegateName === "apply_patch") {
+		const patchText = input.input;
+		if (typeof patchText !== "string") return { text: "Tool 'apply_patch' requires its declared input string.", isError: true };
+		const result = await applyPatchOperationsDirect(call.harness.workspaceRoot, patchText);
+		if (result === null) return { text: "Tool 'apply_patch' received an empty patch.", isError: true };
+		return { text: JSON.stringify(result), ...(result.ok === false ? { isError: true } : {}) };
+	}
 	if (plan.delegateName === undefined || call.context.invokeTool === undefined) {
 		return { text: `Tool '${toolName}' is not available in the native host.`, isError: true };
 	}
@@ -221,7 +229,7 @@ export function researchBindingForTool(tool: NativeToolDefinition): NativeBindin
 	return bindingFor(tool);
 }
 
-const allDefinitions = Object.values(RESEARCH_TOOL_DEFINITIONS).flat();
+const allDefinitions = Object.values(RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH).flat();
 const names = [...new Set([...allDefinitions.map(definition => definition.name), ...MISSING_PACK_TOOL_NAMES])];
 
 export const RESEARCH_NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = Object.fromEntries(
