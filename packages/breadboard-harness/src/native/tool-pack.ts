@@ -99,21 +99,16 @@ async function vendoredToolDefinitions(): Promise<ReadonlyMap<string, NativeTool
 
 function researchToolFamily(lock: JsonRecord): ResearchToolFamily | undefined {
 	const paths = nativeLockValue(lock, "tools.registry.paths");
-	const sourceRefs = Array.isArray(lock.source_layers)
-		? lock.source_layers
-				.filter(isRecord)
-				.map(layer => layer.source_ref)
-				.filter((ref): ref is string => typeof ref === "string")
-				.join(" ")
-		: "";
-	const joined = `${sourceRefs} ${Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").join(" ") : ""}`;
-	if (joined.includes("claude_code") || joined.includes("defs_cc")) return "claude_code";
-	if (joined.includes("oh_my_opencode") || joined.includes("defs_omo")) return "oh_my_opencode";
-	if (joined.includes("opencode") || joined.includes("defs_oc")) return "opencode";
-	if (joined.includes("codex")) return "codex";
-	if (joined.includes("e4_targets/pi/") || joined.includes("defs_pi")) return "pi";
-	if (joined.includes("defs_oh_my_pi") || joined.includes("oh_my_pi")) return "oh_my_pi";
-	return undefined;
+	if (!Array.isArray(paths) || paths.length !== 1 || typeof paths[0] !== "string") return undefined;
+	switch (paths[0]) {
+		case "implementations/tools/defs_cc": return "claude_code";
+		case "implementations/tools/defs": return "codex";
+		case "implementations/tools/defs_oc": return "opencode";
+		case "implementations/tools/defs_omo": return "oh_my_opencode";
+		case "defs_pi": return "pi";
+		case "defs_oh_my_pi": return "oh_my_pi";
+		default: return undefined;
+	}
 }
 const CLAUDE_SCHEMA_URI = "http://json-schema.org/draft-07/schema#";
 

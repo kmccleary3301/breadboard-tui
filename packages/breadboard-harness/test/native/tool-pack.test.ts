@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { canonicalJson, isJsonRecord, parseCanonicalJson, type JsonRecord } from "../../src/canonical-json";
 import { loadNativeHarness } from "../../src/native/load-native-harness";
 import { loadNativeToolSurfaces, nativeFunctionTool } from "../../src/native/tool-pack";
+import type { NativeToolSurfacePack } from "../../src/native/types";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 const R39_WORKSPACE = join(FIXTURES, "r39-workspace");
@@ -45,5 +46,19 @@ describe("R39 tool surface", () => {
 		expect(surfaces.get("fallback")?.textInvoked.map(tool => tool.name)).toEqual(
 			surfaces.get("complete")?.textInvoked.map(tool => tool.name),
 		);
+	});
+
+	test("does not infer the pack from a renamed source path token", async () => {
+		const lock = (await Bun.file(join(import.meta.dir, "../../harnesses/codex/research.harness.lock.json")).json()) as JsonRecord;
+		const renamed = structuredClone(lock);
+		if (!Array.isArray(renamed.source_layers)) throw new Error("codex lock has no source layers");
+		for (const layer of renamed.source_layers) {
+			if (isJsonRecord(layer) && typeof layer.source_ref === "string") layer.source_ref = layer.source_ref.replaceAll("codex", "claude_code");
+		}
+		const originalSurface = await loadNativeToolSurfaces(lock);
+		const renamedSurface = await loadNativeToolSurfaces(renamed);
+		const serialize = (surface: ReadonlyMap<string, NativeToolSurfacePack>) =>
+			[...surface.entries()].map(([mode, tools]) => [mode, tools.native.map(nativeFunctionTool), tools.textInvoked.map(nativeFunctionTool)]);
+		expect(serialize(renamedSurface)).toEqual(serialize(originalSurface));
 	});
 });

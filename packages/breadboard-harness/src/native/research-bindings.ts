@@ -46,11 +46,11 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 
 type DelegateName = string;
 
-function firstString(input: Record<string, unknown>, ...keys: string[]): string | undefined {
-	for (const key of keys) {
-		if (typeof input[key] === "string") return input[key] as string;
-	}
-	return undefined;
+type ArgumentMapping = Readonly<Record<string, string>>;
+
+interface BindingPlan {
+	readonly delegateName: DelegateName | undefined;
+	readonly argumentMapping: ArgumentMapping;
 }
 
 function schemaProperties(tool: NativeToolDefinition): ReadonlySet<string> {
@@ -58,9 +58,85 @@ function schemaProperties(tool: NativeToolDefinition): ReadonlySet<string> {
 	if (typeof properties !== "object" || properties === null || Array.isArray(properties)) return new Set();
 	return new Set(Object.keys(properties));
 }
+
 function requiredProperties(tool: NativeToolDefinition): ReadonlySet<string> {
 	const required = tool.parameters.required;
 	return new Set(Array.isArray(required) ? required.filter((value): value is string => typeof value === "string") : []);
+}
+
+function declaredAlias(properties: ReadonlySet<string>, aliases: readonly string[]): string | undefined {
+	return aliases.find(alias => properties.has(alias));
+}
+
+function identityMapping(properties: ReadonlySet<string>): ArgumentMapping {
+	return Object.fromEntries([...properties].map(name => [name, name]));
+}
+
+function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName | undefined): ArgumentMapping {
+	const properties = schemaProperties(tool);
+	if (tool.name === "apply_patch" || (delegateName === "edit" && properties.has("input"))) return { input: "input" };
+	if (delegateName === "read") {
+		return Object.fromEntries(
+			[
+				["path", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
+				["offset", declaredAlias(properties, ["offset"])],
+				["limit", declaredAlias(properties, ["limit"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "write") {
+		return Object.fromEntries(
+			[
+				["filePath", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
+				["content", declaredAlias(properties, ["content", "text"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "edit") {
+		return Object.fromEntries(
+			[
+				["filePath", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
+				["oldString", declaredAlias(properties, ["oldString", "old_string", "oldText", "search"])],
+				["newString", declaredAlias(properties, ["newString", "new_string", "newText", "replace"])],
+				["replaceAll", declaredAlias(properties, ["replaceAll", "replace_all"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "bash") {
+		return Object.fromEntries(
+			[
+				["command", declaredAlias(properties, ["command"])],
+				["timeout", declaredAlias(properties, ["timeout"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "grep") {
+		return Object.fromEntries(
+			[
+				["pattern", declaredAlias(properties, ["pattern"])],
+				["path", declaredAlias(properties, ["path"])],
+				["include", declaredAlias(properties, ["include", "glob"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "glob") {
+		return Object.fromEntries(
+			[
+				["path", declaredAlias(properties, ["path"])],
+				["pattern", declaredAlias(properties, ["pattern"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	if (delegateName === "find") {
+		return Object.fromEntries(
+			[
+				["path", declaredAlias(properties, ["path"])],
+				["pattern", declaredAlias(properties, ["pattern"])],
+				["limit", declaredAlias(properties, ["limit"])],
+			].filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+	}
+	return identityMapping(properties);
 }
 
 /** Selects one host builtin from the vendored definition, before any model call runs. */
@@ -74,40 +150,13 @@ export function researchDelegateForTool(tool: NativeToolDefinition): DelegateNam
 	return direct;
 }
 
-function mappedInput(delegateName: DelegateName, input: Record<string, unknown>): Record<string, unknown> {
-	if (delegateName === "bash") return { command: input.command ?? "", timeout: input.timeout };
-	if (delegateName === "read")
-		return {
-			path: firstString(input, "filePath", "file_path", "path", "file_name") ?? "",
-			offset: input.offset,
-			limit: input.limit,
-		};
-	if (delegateName === "write")
-		return {
-			filePath: firstString(input, "filePath", "file_path", "path", "file_name"),
-			content: input.content ?? "",
-		};
-	if (delegateName === "edit")
-		return {
-			filePath: firstString(input, "filePath", "file_path", "path", "file_name"),
-			oldString: firstString(input, "oldString", "old_string", "oldText", "search"),
-			newString: firstString(input, "newString", "new_string", "newText", "replace"),
-			replaceAll: input.replaceAll ?? input.replace_all,
-		};
-	if (delegateName === "grep")
-		return {
-			pattern: input.pattern ?? "",
-			path: input.path,
-			include: input.include ?? input.glob,
-		};
-	if (delegateName === "glob")
-		return {
-			path: input.path,
-			pattern: input.pattern ?? "**/*",
-		};
-	if (delegateName === "find")
-		return { path: input.path, pattern: input.pattern ?? "*", limit: input.limit };
-	return input;
+function bindingPlanForTool(tool: NativeToolDefinition): BindingPlan {
+	const delegateName = researchDelegateForTool(tool);
+	return { delegateName, argumentMapping: mappingForTool(tool, delegateName) };
+}
+
+function mappedInput(plan: BindingPlan, input: Record<string, unknown>): Record<string, unknown> {
+	return Object.fromEntries(Object.entries(plan.argumentMapping).map(([target, source]) => [target, input[source]]));
 }
 
 const MISSING_PACK_TOOL_NAMES = [
@@ -138,13 +187,13 @@ const MISSING_PACK_TOOL_NAMES = [
 async function delegate(
 	call: NativeCall,
 	toolName: string,
-	delegateName: DelegateName | undefined,
+	plan: BindingPlan,
 	input: Record<string, unknown>,
 ): Promise<NativeToolResult> {
-	if (delegateName === undefined || call.context.invokeTool === undefined) {
+	if (plan.delegateName === undefined || call.context.invokeTool === undefined) {
 		return { text: `Tool '${toolName}' is not available in the native host.`, isError: true };
 	}
-	const result = await call.context.invokeTool(mappedInput(delegateName, input), {
+	const result = await call.context.invokeTool(mappedInput(plan, input), {
 		signal: call.signal,
 		onUpdate: call.onUpdate,
 	});
@@ -157,15 +206,16 @@ async function delegate(
 }
 
 function bindingFor(tool: NativeToolDefinition): NativeBinding {
-	const delegateName = researchDelegateForTool(tool);
+	const plan = bindingPlanForTool(tool);
 	return {
 		approval: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
 			? "exec"
 			: "read",
-		...(delegateName === undefined ? {} : { delegate: delegateName }),
-		run: (call: NativeCall) => delegate(call, tool.name, delegateName, call.input),
+		...(plan.delegateName === undefined ? {} : { delegate: plan.delegateName }),
+		run: (call: NativeCall) => delegate(call, tool.name, plan, call.input),
 	};
 }
+
 
 export function researchBindingForTool(tool: NativeToolDefinition): NativeBinding {
 	return bindingFor(tool);

@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import { RESEARCH_TOOL_DEFINITIONS } from "../../src/native/research-tool-definitions";
 import { researchBindingForTool, researchDelegateForTool } from "../../src/native/research-bindings";
 import type { JsonRecord } from "../../src/canonical-json";
 import type { NativeToolDefinition } from "../../src/native/types";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 
 type JsonObject = JsonRecord;
 
@@ -72,12 +78,27 @@ async function delegatedInput(tool: NativeToolDefinition, input: JsonObject): Pr
 		} as never,
 		signal: undefined,
 		onUpdate: undefined,
+
 		todos: {} as never,
 		guard: {} as never,
 	});
 	if (received === undefined) throw new Error(`${tool.name} did not invoke a builtin`);
 	return received;
 }
+function patchSession(cwd: string): ToolSession {
+	return {
+		cwd,
+		hasUI: false,
+		enableLsp: false,
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+		getArtifactsDir: () => null,
+		getSessionId: () => null,
+		getPlanModeState: () => undefined,
+		settings: Settings.isolated({}),
+	} as unknown as ToolSession;
+}
+
 
 describe("research native builtin bindings", () => {
 	test("binds every pack definition from its declared schema", () => {
@@ -111,10 +132,59 @@ describe("research native builtin bindings", () => {
 			oldString: "a",
 			newString: "b",
 		});
-		expect(await delegatedInput(omoEdit, { file_name: "fixture.txt", search: "a", replace: "b" })).toEqual({
-			filePath: "fixture.txt",
-			oldString: "a",
-			newString: "b",
+		expect(await delegatedInput(omoEdit, { input: "patch payload", file_name: "alias.txt", search: "a", replace: "b" })).toEqual({
+			input: "patch payload",
 		});
+	});
+	test("prefers a declared path over an undeclared alias", async () => {
+		const piRead = RESEARCH_TOOL_DEFINITIONS.pi.find(tool => tool.name === "read");
+		if (!piRead) throw new Error("missing Pi read definition");
+		expect(await delegatedInput(piRead, { path: "declared.txt", filePath: "alias.txt" })).toEqual({
+			path: "declared.txt",
+		});
+	});
+
+	test("passes apply_patch input unchanged to the real host edit tool", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-patch-"));
+		try {
+			const target = path.join(scratch, "target.txt");
+			await Bun.write(target, "before\n");
+			const input = [
+				"*** Begin Patch",
+				"*** Update File: target.txt",
+				"@@",
+				"-before",
+				"+after",
+				"*** End Patch",
+				"",
+			].join("\n");
+			const tool: NativeToolDefinition = {
+				id: "apply_patch",
+				name: "apply_patch",
+				description: "",
+				parameters: {
+					type: "object",
+					properties: { input: { type: "string" } },
+					required: ["input"],
+				},
+				nativePrimary: true,
+			};
+			const result = await researchBindingForTool(tool).run({
+				input: { input },
+				harness: {} as never,
+				context: {
+					invokeTool: async (params: JsonObject) =>
+						new EditTool(patchSession(scratch), "apply_patch").execute("binding-patch", params as never),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(await Bun.file(target).text()).toBe("after\n");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
 	});
 });
