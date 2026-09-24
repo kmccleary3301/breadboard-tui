@@ -100,15 +100,22 @@ function registryPaths(lock: JsonRecord): readonly string[] {
 	const paths = nativeLockValue(lock, "tools.registry.paths");
 	return Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string") : [];
 }
+function registryInclude(lock: JsonRecord): readonly string[] {
+	const include = nativeLockValue(lock, "tools.registry.include");
+	return Array.isArray(include) ? include.filter((name): name is string => typeof name === "string") : [];
+}
 
 function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
 	const definitions = new Map(base);
 	for (const path of registryPaths(lock)) {
 		for (const definition of RESEARCH_TOOL_DEFINITIONS_BY_REGISTRY_PATH[path] ?? []) definitions.set(definition.name, definition);
 	}
-	return new Map([...definitions.entries()].sort(([, left], [, right]) => left.name.localeCompare(right.name)));
+	const sorted = [...definitions.entries()].sort(([, left], [, right]) => left.name.localeCompare(right.name));
+	const include = registryInclude(lock);
+	if (include.length === 0 || include.includes("*") || include.includes("*.*") || include.includes("all")) return new Map(sorted);
+	const order = new Map(include.map((name, index) => [name, index]));
+	return new Map(sorted.sort(([left], [right]) => (order.get(left) ?? include.length) - (order.get(right) ?? include.length)));
 }
-
 async function vendoredToolDefinitionsForLock(lock: JsonRecord): Promise<ReadonlyMap<string, NativeToolDefinition>> {
 	return definitionsForLock(lock, await vendoredToolDefinitions());
 }
