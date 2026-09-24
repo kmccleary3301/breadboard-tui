@@ -10,6 +10,7 @@ providers:
 tools:
   registry:
     paths: [implementations/tools/defs_cc]
+    include: ["*"]
 prompts:
   packs:
     base:
