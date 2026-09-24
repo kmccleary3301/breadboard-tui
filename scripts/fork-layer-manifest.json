@@ -2,9 +2,9 @@
 	"schemaVersion": "bb-omp.delta-manifest.v2",
 	"policySchemaVersion": "bb-omp.delta-policy.v1",
 	"upstream": {
-		"tag": "v18.2.11",
-		"commit": "e4151593ace2781d1dc2f06d760301f88af3e9dc",
-		"tree": "4c5b360e80dbb0d3212efb3565eb16d73d0544e2"
+		"tag": "v18.3.0",
+		"commit": "62bc57be1b03ef0802a33cf7f5f530e534527531",
+		"tree": "b36226cce6a225a4c0d2c2162da223d61d7123da"
 	},
 	"paths": [
 		{

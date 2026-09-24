@@ -386,7 +386,6 @@ describe("createSessionManager — missing session (#2084)", () => {
 			readonly parsed: Pick<Args, "engineMode" | "engineUrl">;
 			readonly settings: Settings;
 		}> = [
-			{ parsed: {}, settings: stubSettings },
 			{ parsed: { engineMode: "local-owned" }, settings: stubSettings },
 			{ parsed: {}, settings: selectedLocalOwned },
 		];
@@ -401,6 +400,11 @@ describe("createSessionManager — missing session (#2084)", () => {
 			expect(thrown).toBeInstanceOf(BreadboardSessionTransitionError);
 			expect(thrown).toMatchObject({ code: "unsupported_resume_transition" });
 		}
+	});
+
+	it("allows default product native mode startup fork", () => {
+		const policy = createBreadboardStartupForkPolicy({}, stubSettings, os.tmpdir(), true, true);
+		expect(policy).not.toThrow();
 	});
 });
 
