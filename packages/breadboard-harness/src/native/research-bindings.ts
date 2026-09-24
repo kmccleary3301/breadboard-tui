@@ -22,6 +22,7 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	grep: "grep",
 	list: "find",
 	find: "find",
+	ls: "find",
 	task: "task",
 	background_task: "task",
 	webfetch: "web_search",
@@ -42,6 +43,55 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	reflect: "reflect",
 	learn: "learn",
 };
+
+function firstString(input: Record<string, unknown>, ...keys: string[]): string | undefined {
+	for (const key of keys) {
+		if (typeof input[key] === "string") return input[key] as string;
+	}
+	return undefined;
+}
+
+function mappedInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
+	if (name === "shell_command" || name === "Bash") return { command: input.command ?? "", timeout: input.timeout };
+	if (name === "Read") return { path: input.file_path ?? "", offset: input.offset, limit: input.limit };
+	if (name === "Write")
+		return { filePath: input.file_path, content: input.content ?? "" };
+	if (name === "Edit")
+		return {
+			filePath: input.file_path,
+			oldString: input.old_string,
+			newString: input.new_string,
+			replaceAll: input.replace_all,
+		};
+	if (name === "Glob") return { path: input.path, pattern: input.pattern };
+	if (name === "Grep") return { pattern: input.pattern, path: input.path, include: input.glob };
+	if (name === "read") return { path: firstString(input, "filePath", "path") ?? "", offset: input.offset, limit: input.limit };
+	if (name === "write")
+		return {
+			filePath: firstString(input, "filePath", "path", "file_name"),
+			content: input.content ?? "",
+		};
+	if (name === "edit")
+		return {
+			filePath: firstString(input, "filePath", "path", "file_name"),
+			oldString: firstString(input, "oldString", "oldText", "search"),
+			newString: firstString(input, "newString", "newText", "replace"),
+			replaceAll: input.replaceAll,
+		};
+	if (name === "grep") {
+		if (typeof input.pattern !== "string") return { path: input.path, offset: input.offset, limit: input.limit };
+		return { pattern: input.pattern, path: input.path, include: input.include ?? input.glob };
+	}
+	if (name === "glob")
+		return {
+			path: input.path,
+			pattern: input.pattern ?? "**/*",
+		};
+	if (name === "list") return { path: input.path, pattern: input.pattern ?? "*", limit: input.limit };
+	if (name === "find" || name === "ls") return { path: input.path, pattern: input.pattern ?? "*", limit: input.limit };
+	if (name === "task" && typeof input.command === "string") return { command: input.command, timeout: input.timeout };
+	return input;
+}
 
 const MISSING_PACK_TOOL_NAMES = [
 	"apply_patch",
@@ -68,35 +118,15 @@ const MISSING_PACK_TOOL_NAMES = [
 	"update_plan",
 ] as const;
 
-function mappedInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
-	if (name === "shell_command") return { command: input.command ?? "", timeout: input.timeout };
-	if (name === "Bash") return { command: input.command ?? "", timeout: input.timeout };
-	if (name === "Read") return { path: input.file_path ?? "", offset: input.offset, limit: input.limit };
-	if (name === "Write") return { filePath: input.file_path, content: input.content ?? "" };
-	if (name === "Edit")
-		return {
-			filePath: input.file_path,
-			oldString: input.old_string,
-			newString: input.new_string,
-			replaceAll: input.replace_all,
-		};
-	if (name === "Glob") return { path: input.path, pattern: input.pattern };
-	if (name === "Grep") return { pattern: input.pattern, path: input.path, include: input.glob };
-	if (name === "read") return { path: input.filePath ?? "", offset: input.offset, limit: input.limit };
-	if (name === "write") return { filePath: input.filePath, content: input.content ?? "" };
-	if (name === "edit")
-		return {
-			filePath: input.filePath,
-			oldString: input.oldString,
-			newString: input.newString,
-			replaceAll: input.replaceAll,
-		};
-	if (name === "list") return { path: input.path };
-	return input;
-}
-
 async function delegate(call: NativeCall, toolName: string, input: Record<string, unknown>): Promise<NativeToolResult> {
-	const delegateName = DIRECT_DELEGATES[toolName];
+	const delegateName =
+		toolName === "task" && typeof input.command === "string"
+			? "bash"
+			: toolName === "web_search" && typeof input.command === "string"
+				? "bash"
+				: toolName === "grep" && typeof input.pattern !== "string"
+					? "read"
+					: DIRECT_DELEGATES[toolName];
 	if (delegateName === undefined || call.context.invokeTool === undefined) {
 		return { text: `Tool '${toolName}' is not available in the native host.`, isError: true };
 	}
