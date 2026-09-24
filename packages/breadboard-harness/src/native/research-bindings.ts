@@ -1,7 +1,7 @@
 import type { JsonRecord } from "../canonical-json";
 import { RESEARCH_TOOL_DEFINITIONS } from "./research-tool-definitions";
 import type { NativeBinding, NativeCall } from "./omp-extension";
-import type { NativeToolResult } from "./types";
+import type { NativeToolDefinition, NativeToolResult } from "./types";
 
 const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	Bash: "bash",
@@ -44,6 +44,8 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	learn: "learn",
 };
 
+type DelegateName = string;
+
 function firstString(input: Record<string, unknown>, ...keys: string[]): string | undefined {
 	for (const key of keys) {
 		if (typeof input[key] === "string") return input[key] as string;
@@ -51,45 +53,60 @@ function firstString(input: Record<string, unknown>, ...keys: string[]): string 
 	return undefined;
 }
 
-function mappedInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
-	if (name === "shell_command" || name === "Bash") return { command: input.command ?? "", timeout: input.timeout };
-	if (name === "Read") return { path: input.file_path ?? "", offset: input.offset, limit: input.limit };
-	if (name === "Write")
-		return { filePath: input.file_path, content: input.content ?? "" };
-	if (name === "Edit")
+function schemaProperties(tool: NativeToolDefinition): ReadonlySet<string> {
+	const properties = tool.parameters.properties;
+	if (typeof properties !== "object" || properties === null || Array.isArray(properties)) return new Set();
+	return new Set(Object.keys(properties));
+}
+function requiredProperties(tool: NativeToolDefinition): ReadonlySet<string> {
+	const required = tool.parameters.required;
+	return new Set(Array.isArray(required) ? required.filter((value): value is string => typeof value === "string") : []);
+}
+
+/** Selects one host builtin from the vendored definition, before any model call runs. */
+export function researchDelegateForTool(tool: NativeToolDefinition): DelegateName | undefined {
+	const direct = DIRECT_DELEGATES[tool.name];
+	if (direct === undefined) return undefined;
+	const properties = schemaProperties(tool);
+	const required = requiredProperties(tool);
+	if (tool.name === "grep" && !properties.has("pattern") && properties.has("path")) return "read";
+	if ((tool.name === "task" || tool.name === "web_search") && required.has("command")) return "bash";
+	return direct;
+}
+
+function mappedInput(delegateName: DelegateName, input: Record<string, unknown>): Record<string, unknown> {
+	if (delegateName === "bash") return { command: input.command ?? "", timeout: input.timeout };
+	if (delegateName === "read")
 		return {
-			filePath: input.file_path,
-			oldString: input.old_string,
-			newString: input.new_string,
-			replaceAll: input.replace_all,
+			path: firstString(input, "filePath", "file_path", "path", "file_name") ?? "",
+			offset: input.offset,
+			limit: input.limit,
 		};
-	if (name === "Glob") return { path: input.path, pattern: input.pattern };
-	if (name === "Grep") return { pattern: input.pattern, path: input.path, include: input.glob };
-	if (name === "read") return { path: firstString(input, "filePath", "path") ?? "", offset: input.offset, limit: input.limit };
-	if (name === "write")
+	if (delegateName === "write")
 		return {
-			filePath: firstString(input, "filePath", "path", "file_name"),
+			filePath: firstString(input, "filePath", "file_path", "path", "file_name"),
 			content: input.content ?? "",
 		};
-	if (name === "edit")
+	if (delegateName === "edit")
 		return {
-			filePath: firstString(input, "filePath", "path", "file_name"),
-			oldString: firstString(input, "oldString", "oldText", "search"),
-			newString: firstString(input, "newString", "newText", "replace"),
-			replaceAll: input.replaceAll,
+			filePath: firstString(input, "filePath", "file_path", "path", "file_name"),
+			oldString: firstString(input, "oldString", "old_string", "oldText", "search"),
+			newString: firstString(input, "newString", "new_string", "newText", "replace"),
+			replaceAll: input.replaceAll ?? input.replace_all,
 		};
-	if (name === "grep") {
-		if (typeof input.pattern !== "string") return { path: input.path, offset: input.offset, limit: input.limit };
-		return { pattern: input.pattern, path: input.path, include: input.include ?? input.glob };
-	}
-	if (name === "glob")
+	if (delegateName === "grep")
+		return {
+			pattern: input.pattern ?? "",
+			path: input.path,
+			include: input.include ?? input.glob,
+		};
+	if (delegateName === "glob")
 		return {
 			path: input.path,
 			pattern: input.pattern ?? "**/*",
 		};
-	if (name === "list") return { path: input.path, pattern: input.pattern ?? "*", limit: input.limit };
-	if (name === "find" || name === "ls") return { path: input.path, pattern: input.pattern ?? "*", limit: input.limit };
-	if (name === "task" && typeof input.command === "string") return { command: input.command, timeout: input.timeout };
+	if (delegateName === "find")
+		return { path: input.path, pattern: input.pattern ?? "*", limit: input.limit };
 	return input;
 }
 
@@ -118,44 +135,48 @@ const MISSING_PACK_TOOL_NAMES = [
 	"update_plan",
 ] as const;
 
-async function delegate(call: NativeCall, toolName: string, input: Record<string, unknown>): Promise<NativeToolResult> {
-	const delegateName =
-		toolName === "task" && typeof input.command === "string"
-			? "bash"
-			: toolName === "web_search" && typeof input.command === "string"
-				? "bash"
-				: toolName === "grep" && typeof input.pattern !== "string"
-					? "read"
-					: DIRECT_DELEGATES[toolName];
+async function delegate(
+	call: NativeCall,
+	toolName: string,
+	delegateName: DelegateName | undefined,
+	input: Record<string, unknown>,
+): Promise<NativeToolResult> {
 	if (delegateName === undefined || call.context.invokeTool === undefined) {
 		return { text: `Tool '${toolName}' is not available in the native host.`, isError: true };
 	}
-	const result = await call.context.invokeTool(mappedInput(toolName, input), {
+	const result = await call.context.invokeTool(mappedInput(delegateName, input), {
 		signal: call.signal,
 		onUpdate: call.onUpdate,
 	});
 	const text = result.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("");
 	return {
 		text,
-		...(typeof result.details === "object" && result.details !== null
-			? { details: result.details as JsonRecord }
-			: {}),
+		...(typeof result.details === "object" && result.details !== null ? { details: result.details as JsonRecord } : {}),
 		...(result.isError === true ? { isError: true } : {}),
 	};
 }
 
-const names = [
-	...Object.values(RESEARCH_TOOL_DEFINITIONS).flatMap(definitions => definitions.map(definition => definition.name)),
-	...MISSING_PACK_TOOL_NAMES,
-];
+function bindingFor(tool: NativeToolDefinition): NativeBinding {
+	const delegateName = researchDelegateForTool(tool);
+	return {
+		approval: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
+			? "exec"
+			: "read",
+		...(delegateName === undefined ? {} : { delegate: delegateName }),
+		run: (call: NativeCall) => delegate(call, tool.name, delegateName, call.input),
+	};
+}
+
+export function researchBindingForTool(tool: NativeToolDefinition): NativeBinding {
+	return bindingFor(tool);
+}
+
+const allDefinitions = Object.values(RESEARCH_TOOL_DEFINITIONS).flat();
+const names = [...new Set([...allDefinitions.map(definition => definition.name), ...MISSING_PACK_TOOL_NAMES])];
 
 export const RESEARCH_NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = Object.fromEntries(
-	[...new Set(names)].map(name => [
-		name,
-		{
-			approval: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(name) ? "exec" : "read",
-			...(DIRECT_DELEGATES[name] === undefined ? {} : { delegate: DIRECT_DELEGATES[name] }),
-			run: (call: NativeCall) => delegate(call, name, call.input),
-		},
-	]),
+	names.map(name => {
+		const definition = allDefinitions.find(tool => tool.name === name);
+		return [name, definition === undefined ? bindingFor({ id: name, name, description: "", parameters: {}, nativePrimary: true }) : bindingFor(definition)];
+	}),
 );

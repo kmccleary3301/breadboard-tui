@@ -1,8 +1,28 @@
 id: reflect
 name: reflect
-description: OMP reflect tool
+description: >
+  `reflect`: synthesizes a coherent response from relevant long-term memories;
+  unlike `recall`, blends them.
+
+
+  Use for open-ended questions spanning many stored facts: "What do you know
+  about this user?", "Summarize project decisions.", "What are my preferences
+  for X?"
+
+
+  `context` optional; focuses synthesis on a specific angle or sub-topic.
 type_id: python
-parameters: []
+parameters:
+  - name: query
+    schema:
+      type: string
+      description: question to answer
+    required: true
+  - name: context
+    schema:
+      type: string
+      description: optional context
+    required: false
 execution:
   blocking: true
 provider_routing:

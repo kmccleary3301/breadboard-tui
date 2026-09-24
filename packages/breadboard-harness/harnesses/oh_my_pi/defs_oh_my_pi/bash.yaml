@@ -1,18 +1,85 @@
 id: bash
 name: bash
-description: Execute a shell command in the project workspace
+description: >-
+  Runs commands in a persistent shell.
+
+
+  Use ONLY for one binary or a short pipeline that computes a fact (`wc -l`,
+  `sort | uniq -c`, `diff`).
+
+  Inline scripts, heredocs, `$(…)`, complex control flow/quoting, and
+  non-trivial pipelines → `eval`.
+
+
+  <instruction>
+
+  - Set `cwd` instead of `cd`.
+
+  - `pty: true` only for terminal interaction (`sudo`, `ssh`).
+
+  - Order-dependent commands use `&&` in one call; independent calls may run
+  concurrently.
+
+  - Internal URIs auto-resolve to paths.
+
+  - aux utils available: mkdir, wc, sort, comm, diff, uniq, base64, cmp, md5sum,
+  sha*sum, b2sum, basename, dirname, readlink, realpath, touch, stat, date,
+  mktemp, seq, yes, printenv, truncate, tac, nproc, uname, whoami, hostname,
+  which, ps, pgrep, pkill, pidwait, top, cut, tee, tr, paste, sed, xargs, jq,
+  rm, mv, ln, ts, sponge, ifne, isutf8, combine, errno
+
+  - `async: true` defers a finite command's result; it does not extend
+  `timeout`.
+
+  </instruction>
+
+
+  <critical>
+
+  - NEVER use shell `grep`/`rg`; use built-in `grep`.
+
+  - List directories with `read` and find paths with `glob`; NEVER use
+  `ls`/`find`.
+
+  - Avoid `head`, `tail`, and redirection: output is captured, truncated, and
+  linked as `artifact://<id>`.
+
+  - Services, watchers, debuggers, and REPLs MUST use `hub` (`op:"start"`).
+
+  </critical>
+
+
+  Long foreground calls may auto-background by the configured threshold; the
+  result is injected as a follow-up when the job finishes. NEVER poll a
+  backgrounded job (`sleep`/`ps`/`pgrep`/`top`) — do other work or end your
+  reply and you will be woken with its output.
+
+  `timeout: 0` disables the job deadline; otherwise `timeout` sets it without
+  extending foreground waiting.
 type_id: python
 parameters:
   - name: command
     schema:
       type: string
-      description: The shell command to run
     required: true
   - name: timeout
     schema:
-      type: integer
-      description: Timeout in seconds
-      default: 60
+      type: number
+      description: timeout in seconds; 0 disables the command deadline; nonzero values
+        are clamped to 1-3600
+    required: false
+  - name: cwd
+    schema:
+      type: string
+    required: false
+  - name: pty
+    schema:
+      type: boolean
+    required: false
+  - name: async
+    schema:
+      type: boolean
+      description: run in background
     required: false
 execution:
   blocking: true

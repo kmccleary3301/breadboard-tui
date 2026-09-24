@@ -1,5 +1,5 @@
-id: glob
-name: glob
+id: find
+name: find
 description: >-
   Globs files, directories, and path-backed internal URLs with fast pattern
   matching.

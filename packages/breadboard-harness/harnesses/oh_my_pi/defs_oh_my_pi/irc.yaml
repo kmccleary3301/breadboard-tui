@@ -1,6 +1,6 @@
 id: irc
 name: irc
-description: OMP irc tool
+description: Tool 'irc' is not available in the native host.
 type_id: python
 parameters: []
 execution:

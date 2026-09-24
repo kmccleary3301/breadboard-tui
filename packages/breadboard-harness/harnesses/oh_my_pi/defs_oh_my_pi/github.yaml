@@ -1,8 +1,206 @@
 id: github
 name: github
-description: OMP github tool
+description: >-
+  `gh` op wrapper: repos/files, PRs, search, checkout, push, Actions watch. Read
+  issue/PR: `issue://<N>`/`pr://<N>`. PR diffs: `pr://<N>/diff` (files);
+  `pr://<N>/diff/<i>` (file slice, 1-indexed); `pr://<N>/diff/all` (full).
+
+
+  <instruction>
+
+  Select via `op`.
+
+  - `repo`: `[host/]owner/repo`; qualify the host for a repo outside the
+  checkout's own GitHub instance.
+
+  - `repo_view`: omit `repo` → current checkout.
+
+  - `file_read`: read `path` from `repo`; omit `repo` → current checkout,
+  `branch` → default branch.
+
+  - `pr_create`: `head` defaults current branch.
+
+  - `pr_checkout`: PR(s) → dedicated git worktrees, never working tree; array
+  `pr` batches multiple in one call.
+
+  - `pr_push`: requires prior `op: pr_checkout`.
+
+  - `search_issues`/`search_prs`/`search_commits`/`search_repos`: `query`
+  optional with `since`/`until`; omit for date-only filter. `search_code`:
+  `query` required; rejects `since`/`until`.
+
+  - `search_*`: `repo` defaults current checkout's `owner/repo`; search
+  elsewhere with `repo:`/`org:`/`user:` in `query`. `search_repos`: ignores
+  `repo`; scope via `org:`/`language:` in `query`.
+
+  - Boolean `AND`/`OR`/`NOT` combine text terms, not qualifiers; never place
+  them between qualifiers.
+
+  - `since`/`until`: relative `<n>` + `m`/`h`/`d`/`w`/`mo`/`y` (e.g. `3d`,
+  `2w`), ISO date `YYYY-MM-DD`, or ISO datetime. `dateField: "updated"`: update
+  time (issues/PRs), push time (repos), never creation.
+
+  - `run_watch`: omit `run` → every run for current HEAD; `branch` defaults
+  current. Fast-fails first job failure.
+
+  </instruction>
+
+
+  <output>
+
+  Concise summary per op. `run_watch` failures save full logs to a session
+  artifact.
+
+  </output>
+
+
+  <critical>
+
+  GitHub-hosted repository file: MUST use `file_read`; NEVER `curl`/`wget`.
+
+  </critical>
 type_id: python
-parameters: []
+parameters:
+  - name: op
+    schema:
+      enum:
+        - repo_view
+        - file_read
+        - pr_create
+        - pr_checkout
+        - pr_push
+        - search_issues
+        - search_prs
+        - search_code
+        - search_commits
+        - search_repos
+        - run_watch
+      type: string
+      description: github operation
+    required: true
+  - name: repo
+    schema:
+      type: string
+      description: owner/repo
+    required: false
+  - name: branch
+    schema:
+      type: string
+      description: branch
+    required: false
+  - name: path
+    schema:
+      type: string
+      description: repository-relative file path
+    required: false
+  - name: pr
+    schema:
+      anyOf:
+        - type: string
+        - type: array
+          items:
+            type: string
+      description: pr number, url, or branch
+    required: false
+  - name: force
+    schema:
+      type: boolean
+      description: reset existing local branch
+    required: false
+  - name: forceWithLease
+    schema:
+      type: boolean
+      description: force-with-lease push
+    required: false
+  - name: title
+    schema:
+      type: string
+      description: pr title
+    required: false
+  - name: body
+    schema:
+      type: string
+      description: pr body markdown
+    required: false
+  - name: base
+    schema:
+      type: string
+      description: pr base branch
+    required: false
+  - name: head
+    schema:
+      type: string
+      description: pr head branch
+    required: false
+  - name: draft
+    schema:
+      type: boolean
+      description: open pr as draft
+    required: false
+  - name: fill
+    schema:
+      type: boolean
+      description: auto-fill pr title/body from commits
+    required: false
+  - name: reviewer
+    schema:
+      type: array
+      items:
+        type: string
+      description: reviewers
+    required: false
+  - name: assignee
+    schema:
+      type: array
+      items:
+        type: string
+      description: assignees
+    required: false
+  - name: label
+    schema:
+      type: array
+      items:
+        type: string
+      description: labels
+    required: false
+  - name: query
+    schema:
+      type: string
+      description: search query
+    required: false
+  - name: since
+    schema:
+      type: string
+      description: lower-bound date filter
+    required: false
+  - name: until
+    schema:
+      type: string
+      description: upper-bound date filter
+    required: false
+  - name: dateField
+    schema:
+      enum:
+        - created
+        - updated
+      type: string
+      description: date field
+    required: false
+  - name: limit
+    schema:
+      type: number
+      description: max results
+    required: false
+  - name: run
+    schema:
+      type: string
+      description: actions run id or url
+    required: false
+  - name: tail
+    schema:
+      type: number
+      description: log lines per failed job
+    required: false
 execution:
   blocking: true
 provider_routing:

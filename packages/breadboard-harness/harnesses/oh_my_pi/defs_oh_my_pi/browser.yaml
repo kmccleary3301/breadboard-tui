@@ -1,6 +1,6 @@
 id: browser
 name: browser
-description: OMP browser tool
+description: Tool 'browser' is not available in the native host.
 type_id: python
 parameters: []
 execution:

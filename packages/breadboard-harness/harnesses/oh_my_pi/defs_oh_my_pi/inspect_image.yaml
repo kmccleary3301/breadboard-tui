@@ -1,6 +1,6 @@
 id: inspect_image
 name: inspect_image
-description: OMP inspect_image tool
+description: Tool 'inspect_image' is not available in the native host.
 type_id: python
 parameters: []
 execution:

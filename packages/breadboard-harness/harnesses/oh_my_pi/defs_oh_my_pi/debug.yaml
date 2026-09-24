@@ -1,8 +1,220 @@
 id: debug
 name: debug
-description: OMP debug tool
+description: >-
+  Debugger access. Prefer over bash for program state, breakpoints, stepping, or
+  thread inspection.
+
+  Only one active session at a time. `program` is a target path, not a shell
+  command.
+
+  Directories need a directory-capable adapter (e.g. `dlv`).
 type_id: python
-parameters: []
+parameters:
+  - name: action
+    schema:
+      enum:
+        - launch
+        - attach
+        - set_breakpoint
+        - remove_breakpoint
+        - set_instruction_breakpoint
+        - remove_instruction_breakpoint
+        - data_breakpoint_info
+        - set_data_breakpoint
+        - remove_data_breakpoint
+        - continue
+        - step_over
+        - step_in
+        - step_out
+        - pause
+        - evaluate
+        - stack_trace
+        - threads
+        - scopes
+        - variables
+        - disassemble
+        - read_memory
+        - write_memory
+        - modules
+        - loaded_sources
+        - custom_request
+        - output
+        - terminate
+        - sessions
+      type: string
+    required: true
+  - name: program
+    schema:
+      type: string
+      description: debug target path; Delve accepts Go package directories
+    required: false
+  - name: args
+    schema:
+      type: array
+      items:
+        type: string
+      description: program arguments
+    required: false
+  - name: adapter
+    schema:
+      type: string
+      description: configured adapter id (gdb, lldb-dap, debugpy, dlv, rdbg, or
+        dap.json entry)
+    required: false
+  - name: cwd
+    schema:
+      type: string
+    required: false
+  - name: file
+    schema:
+      type: string
+      description: source file
+    required: false
+  - name: line
+    schema:
+      type: number
+      description: source line
+    required: false
+  - name: function
+    schema:
+      type: string
+      description: function name
+    required: false
+  - name: name
+    schema:
+      type: string
+      description: variable or data name
+    required: false
+  - name: condition
+    schema:
+      type: string
+      description: breakpoint condition
+    required: false
+  - name: hit_condition
+    schema:
+      type: string
+    required: false
+  - name: expression
+    schema:
+      type: string
+      description: expression to evaluate
+    required: false
+  - name: context
+    schema:
+      type: string
+      description: "evaluate context: watch | repl | hover | variables | clipboard"
+    required: false
+  - name: frame_id
+    schema:
+      type: number
+    required: false
+  - name: scope_id
+    schema:
+      type: number
+      description: scope variables reference
+    required: false
+  - name: variable_ref
+    schema:
+      type: number
+      description: variable reference
+    required: false
+  - name: pid
+    schema:
+      type: number
+      description: process id for attach
+    required: false
+  - name: port
+    schema:
+      type: number
+      description: remote attach port
+    required: false
+  - name: host
+    schema:
+      type: string
+      description: remote attach host
+    required: false
+  - name: levels
+    schema:
+      type: number
+      description: max stack frames
+    required: false
+  - name: memory_reference
+    schema:
+      type: string
+      description: memory reference or address
+    required: false
+  - name: instruction_reference
+    schema:
+      type: string
+    required: false
+  - name: instruction_count
+    schema:
+      type: number
+    required: false
+  - name: instruction_offset
+    schema:
+      type: number
+    required: false
+  - name: count
+    schema:
+      type: number
+      description: bytes to read
+    required: false
+  - name: data
+    schema:
+      type: string
+      description: base64 memory payload
+    required: false
+  - name: data_id
+    schema:
+      type: string
+      description: data breakpoint id
+    required: false
+  - name: access_type
+    schema:
+      enum:
+        - read
+        - write
+        - readWrite
+      type: string
+    required: false
+  - name: command
+    schema:
+      type: string
+      description: custom dap request command
+    required: false
+  - name: arguments
+    schema:
+      type: object
+      properties: {}
+      additionalProperties: {}
+      description: custom request arguments
+    required: false
+  - name: offset
+    schema:
+      type: number
+    required: false
+  - name: resolve_symbols
+    schema:
+      type: boolean
+    required: false
+  - name: allow_partial
+    schema:
+      type: boolean
+    required: false
+  - name: start_module
+    schema:
+      type: number
+    required: false
+  - name: module_count
+    schema:
+      type: number
+    required: false
+  - name: timeout
+    schema:
+      type: number
+      description: per-request timeout seconds
+    required: false
 execution:
   blocking: true
 provider_routing:

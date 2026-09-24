@@ -1,5 +1,5 @@
-id: grep
-name: grep
+id: search
+name: search
 description: |-
   Searches files/internal URLs: Rust regex, PCRE2 fallback.
 

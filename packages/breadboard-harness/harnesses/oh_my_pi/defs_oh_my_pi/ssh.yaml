@@ -1,6 +1,6 @@
 id: ssh
 name: ssh
-description: OMP ssh tool
+description: Tool 'ssh' is not available in the native host.
 type_id: python
 parameters: []
 execution:

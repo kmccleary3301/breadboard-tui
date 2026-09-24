@@ -1,6 +1,6 @@
 id: job
 name: job
-description: OMP job tool
+description: Tool 'job' is not available in the native host.
 type_id: python
 parameters: []
 execution:

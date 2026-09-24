@@ -1,6 +1,6 @@
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
-import { RESEARCH_NATIVE_BINDINGS } from "./research-bindings";
+import { RESEARCH_NATIVE_BINDINGS, researchBindingForTool } from "./research-bindings";
 import { type LoadedNativeHarness } from "./load-native-harness";
 import { nativeLockValue } from "./lock-values";
 import { frameNativeUserContent } from "./prompt-assembly";
@@ -213,7 +213,7 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, string> {
 	const delegates: Record<string, string> = {};
 	for (const tool of harness.toolSurface.native) {
-		const delegate = NATIVE_BINDINGS[tool.name]?.delegate;
+		const delegate = (RESEARCH_NATIVE_BINDINGS[tool.name] ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name])?.delegate;
 		if (delegate !== undefined) delegates[tool.name] = delegate;
 	}
 	return delegates;
@@ -270,8 +270,7 @@ function registerFunctionTools(
 	guard: CompletionGuard,
 ): void {
 	for (const tool of harness.registeredToolSurface.native) {
-		const binding = NATIVE_BINDINGS[tool.name];
-		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
+		const binding = RESEARCH_NATIVE_BINDINGS[tool.name] ? researchBindingForTool(tool) : NATIVE_BINDINGS[tool.name];
 		api.registerTool({
 			name: tool.name,
 			label: tool.name,

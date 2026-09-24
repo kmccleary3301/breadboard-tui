@@ -1,8 +1,35 @@
 id: retain
 name: retain
-description: OMP retain tool
+description: >
+  Store ≥1 fact in long-term memory for future sessions.
+
+
+  Use: durable, reusable knowledge—user preferences, project decisions,
+  architectural choices; anything improving future responses. No ephemeral task
+  state.
+
+
+  Each item MUST be specific, self-contained: who, what, when, why. Batch
+  related facts per call; deduplicated and consolidated.
 type_id: python
-parameters: []
+parameters:
+  - name: items
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          content:
+            type: string
+            description: information to remember
+          context:
+            type: string
+            description: source context
+        required:
+          - content
+      minItems: 1
+      description: memories to retain
+    required: true
 execution:
   blocking: true
 provider_routing:

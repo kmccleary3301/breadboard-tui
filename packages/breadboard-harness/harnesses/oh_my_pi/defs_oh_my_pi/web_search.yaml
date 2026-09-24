@@ -1,18 +1,57 @@
 id: web_search
 name: web_search
-description: Execute a shell command in the project workspace
+description: >-
+  Web search: current information beyond knowledge cutoff.
+
+
+  <instruction>
+
+  - SHOULD prefer primary sources (papers, official docs); corroborate key
+  claims with multiple sources.
+
+  - MUST link cited sources in final response.
+
+  - NEVER use for programmatically accessible content or known URLs (GitHub
+  repos/issues, known arXiv papers, Wikipedia pages, official docs) — `read` URL
+  directly.
+
+  - `query`: every provider supports Google-style `site:`/`-site:`,
+  `after:`/`before:` (`YYYY-MM-DD`), `inurl:`, `intitle:`, `filetype:`, `"exact
+  phrase"`, `-term`, `OR`. Map constraints to native filters when available;
+  otherwise filter results leniently. If a constraint matches nothing, relax and
+  report it; do not return zero results.
+
+  </instruction>
 type_id: python
 parameters:
-  - name: command
+  - name: query
     schema:
       type: string
-      description: The shell command to run
     required: true
-  - name: timeout
+  - name: recency
     schema:
-      type: integer
-      description: Timeout in seconds
-      default: 60
+      enum:
+        - day
+        - week
+        - month
+        - year
+      type: string
+    required: false
+  - name: limit
+    schema:
+      type: number
+    required: false
+  - name: max_tokens
+    schema:
+      type: number
+    required: false
+  - name: temperature
+    schema:
+      type: number
+    required: false
+  - name: num_search_results
+    schema:
+      type: number
     required: false
 execution:
   blocking: true

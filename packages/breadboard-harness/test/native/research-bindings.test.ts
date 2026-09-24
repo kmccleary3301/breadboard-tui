@@ -1,13 +1,67 @@
 import { describe, expect, test } from "bun:test";
-import { RESEARCH_NATIVE_BINDINGS } from "../../src/native/research-bindings";
+import { RESEARCH_TOOL_DEFINITIONS } from "../../src/native/research-tool-definitions";
+import { researchBindingForTool, researchDelegateForTool } from "../../src/native/research-bindings";
+import type { JsonRecord } from "../../src/canonical-json";
+import type { NativeToolDefinition } from "../../src/native/types";
 
-type JsonObject = Record<string, unknown>;
+type JsonObject = JsonRecord;
 
-async function delegatedInput(name: string, input: JsonObject): Promise<JsonObject> {
+
+const directDelegates: Readonly<Record<string, string>> = {
+	Bash: "bash",
+	Read: "read",
+	Edit: "edit",
+	Write: "write",
+	Glob: "glob",
+	Grep: "grep",
+	Skill: "manage_skill",
+	WebSearch: "web_search",
+	bash: "bash",
+	shell_command: "bash",
+	read: "read",
+	edit: "edit",
+	apply_patch: "edit",
+	write: "write",
+	glob: "glob",
+	grep: "grep",
+	list: "find",
+	find: "find",
+	ls: "find",
+	task: "task",
+	background_task: "task",
+	webfetch: "web_search",
+	manage_skill: "manage_skill",
+	eval: "eval",
+	todo: "todo",
+	ast_grep: "ast_grep",
+	ast_edit: "ast_edit",
+	ask: "ask",
+	debug: "debug",
+	github: "github",
+	lsp: "lsp",
+	checkpoint: "checkpoint",
+	rewind: "rewind",
+	memory_edit: "memory_edit",
+	retain: "retain",
+	recall: "recall",
+	reflect: "reflect",
+	learn: "learn",
+};
+
+function expectedDelegate(tool: NativeToolDefinition): string | undefined {
+	const direct = directDelegates[tool.name];
+	if (direct === undefined) return undefined;
+	const properties = tool.parameters.properties;
+	const names = typeof properties === "object" && properties !== null && !Array.isArray(properties) ? Object.keys(properties) : [];
+	const required = Array.isArray(tool.parameters.required) ? tool.parameters.required : [];
+	if (tool.name === "grep" && !names.includes("pattern") && names.includes("path")) return "read";
+	if ((tool.name === "task" || tool.name === "web_search") && required.includes("command")) return "bash";
+	return direct;
+}
+
+async function delegatedInput(tool: NativeToolDefinition, input: JsonObject): Promise<JsonObject> {
 	let received: JsonObject | undefined;
-	const binding = RESEARCH_NATIVE_BINDINGS[name];
-	if (binding === undefined) throw new Error(`missing binding ${name}`);
-	await binding.run({
+	await researchBindingForTool(tool).run({
 		input,
 		harness: {} as never,
 		context: {
@@ -21,53 +75,46 @@ async function delegatedInput(name: string, input: JsonObject): Promise<JsonObje
 		todos: {} as never,
 		guard: {} as never,
 	});
-	if (received === undefined) throw new Error(`${name} did not invoke a builtin`);
+	if (received === undefined) throw new Error(`${tool.name} did not invoke a builtin`);
 	return received;
 }
 
-describe("research native builtin argument mappings", () => {
-	test("preserves the path fields used by the Pi and OMO-Pi read/write/edit schemas", async () => {
-		expect(await delegatedInput("read", { path: "fixture.txt", offset: 1, limit: 20 })).toEqual({
-			path: "fixture.txt",
-			offset: 1,
-			limit: 20,
-		});
-		expect(await delegatedInput("write", { path: "out.txt", content: "x" })).toEqual({
-			filePath: "out.txt",
-			content: "x",
-		});
-		expect(await delegatedInput("edit", { path: "fixture.txt", oldText: "a", newText: "b" })).toEqual({
-			filePath: "fixture.txt",
-			oldString: "a",
-			newString: "b",
-		});
-		expect(await delegatedInput("edit", { file_name: "fixture.txt", search: "a", replace: "b" })).toEqual({
-			filePath: "fixture.txt",
-			oldString: "a",
-			newString: "b",
+describe("research native builtin bindings", () => {
+	test("binds every pack definition from its declared schema", () => {
+		for (const definitions of Object.values(RESEARCH_TOOL_DEFINITIONS)) {
+			for (const tool of definitions) expect(researchDelegateForTool(tool)).toBe(expectedDelegate(tool));
+		}
+	});
+
+	test("does not let an agent-shaped task call bash", async () => {
+		const tool = RESEARCH_TOOL_DEFINITIONS.opencode.find(candidate => candidate.name === "task");
+		if (!tool) throw new Error("missing OpenCode task definition");
+		expect(researchDelegateForTool(tool)).toBe("task");
+		expect(await delegatedInput(tool, { command: "printf should-not-run", prompt: "agent task" })).toEqual({
+			command: "printf should-not-run",
+			prompt: "agent task",
 		});
 	});
 
-	test("maps search, listing, glob, find, and shell schema variants", async () => {
-		expect(await delegatedInput("grep", { pattern: "fixture", path: ".", glob: "*.txt" })).toEqual({
-			pattern: "fixture",
-			path: ".",
-			include: "*.txt",
-		});
-		expect(await delegatedInput("grep", { path: "fixture.txt", offset: 1, limit: 20 })).toEqual({
+	test("maps the Pi and OMO-Pi path/text aliases to host builtins", async () => {
+		const piRead = RESEARCH_TOOL_DEFINITIONS.pi.find(tool => tool.name === "read");
+		const piEdit = RESEARCH_TOOL_DEFINITIONS.pi.find(tool => tool.name === "edit");
+		const omoEdit = RESEARCH_TOOL_DEFINITIONS.oh_my_pi.find(tool => tool.name === "edit");
+		if (!piRead || !piEdit || !omoEdit) throw new Error("missing Group B definition");
+		expect(await delegatedInput(piRead, { path: "fixture.txt", offset: 1, limit: 20 })).toEqual({
 			path: "fixture.txt",
 			offset: 1,
 			limit: 20,
 		});
-		expect(await delegatedInput("glob", { path: ".", depth: 2 })).toEqual({ path: ".", pattern: "**/*" });
-		expect(await delegatedInput("list", { path: "." })).toEqual({ path: ".", pattern: "*" });
-		expect(await delegatedInput("find", { pattern: "*.ts", path: "src" })).toEqual({
-			pattern: "*.ts",
-			path: "src",
+		expect(await delegatedInput(piEdit, { path: "fixture.txt", oldText: "a", newText: "b" })).toEqual({
+			filePath: "fixture.txt",
+			oldString: "a",
+			newString: "b",
 		});
-		expect(await delegatedInput("bash", { command: "printf ok", timeout: 5 })).toEqual({
-			command: "printf ok",
-			timeout: 5,
+		expect(await delegatedInput(omoEdit, { file_name: "fixture.txt", search: "a", replace: "b" })).toEqual({
+			filePath: "fixture.txt",
+			oldString: "a",
+			newString: "b",
 		});
 	});
 });

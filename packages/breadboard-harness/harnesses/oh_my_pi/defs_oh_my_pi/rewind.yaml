@@ -1,8 +1,14 @@
 id: rewind
 name: rewind
-description: OMP rewind tool
+description: End the active checkpoint; rewind context to it, replacing
+  intermediate exploration with your report.
 type_id: python
-parameters: []
+parameters:
+  - name: report
+    schema:
+      type: string
+      description: investigation findings
+    required: true
 execution:
   blocking: true
 provider_routing:

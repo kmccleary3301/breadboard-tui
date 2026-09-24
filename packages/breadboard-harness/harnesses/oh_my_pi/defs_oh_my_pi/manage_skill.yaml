@@ -1,18 +1,54 @@
 id: manage_skill
 name: manage_skill
-description: Execute a shell command in the project workspace
+description: >
+  Managed skill: `SKILL.md` in isolated `~/.omp/agent/managed-skills`; surfaced
+  as a normal skill in future sessions.
+
+
+  Use: repeatable procedures worth codifying — setup sequence, debugging recipe,
+  project-specific workflow.
+
+  User-authored skills separate; tool NEVER edits them.
+
+
+  - `action: "create"` — fails if skill exists.
+
+  - `action: "update"` — overwrites body; fails if skill absent.
+
+  - `action: "delete"` — fails if skill absent.
+
+
+  `name`: kebab-case (lowercase letters, digits, hyphens).
+
+  `description`: specific; drives discovery.
+
+  No frontmatter in `body`; generated from `name` and `description`.
 type_id: python
 parameters:
-  - name: command
+  - name: action
+    schema:
+      enum:
+        - create
+        - update
+        - delete
+      type: string
+    required: true
+  - name: name
     schema:
       type: string
-      description: The shell command to run
+      description: kebab-case skill name
     required: true
-  - name: timeout
+  - name: description
     schema:
-      type: integer
-      description: Timeout in seconds
-      default: 60
+      type: string
+      description: one-line description of when to use the skill (required for
+        create/update)
+    required: false
+  - name: body
+    schema:
+      type: string
+      description: the SKILL.md body in markdown, no frontmatter (required for
+        create/update)
     required: false
 execution:
   blocking: true
