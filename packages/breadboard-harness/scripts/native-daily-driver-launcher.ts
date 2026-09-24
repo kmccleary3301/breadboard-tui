@@ -187,7 +187,7 @@ for directory in "$native_root" "$native_root/agent" "$native_root/config" "$nat
   [[ ! -L "$directory" && ( ! -e "$directory" || -d "$directory" ) ]] || exit 1
   mkdir -p "$directory"
 done
-expected_agent_db="${shellQuote(authSource)}/agent.db"
+expected_agent_db=${shellQuote(authSource)}/agent.db
 if [[ ! -L "$native_root/agent/agent.db" || "$(readlink "$native_root/agent/agent.db")" != "$expected_agent_db" ]]; then
   rm -f "$native_root/agent"/agent.db* "$native_root/agent"/.agent.db.*
   agent_db_link="$native_root/agent/.agent.db.$$"
