@@ -197,6 +197,23 @@ describe("native daily-driver launcher", () => {
 		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
 	});
 
+	test("keeps a valid marker in any JSON spelling and re-migrates a foreign source", async () => {
+		const fixture = await setupLauncher(false);
+		expect(spawn(fixture).exitCode).toBe(0);
+		const marker = join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json");
+		const config = join(fixture.nativeProfile, "agent", "config.yml");
+		const written = JSON.parse(await Bun.file(marker).text()) as Record<string, string>;
+		const { schema, source, sourceConfigSha256, sourceAgentDbSha256 } = written;
+		await writeFile(marker, `${JSON.stringify({ sourceAgentDbSha256, sourceConfigSha256, source, schema }, null, 2)}\n`);
+		await writeFile(config, "kept: true\n");
+		expect(spawn(fixture).exitCode).toBe(0);
+		expect(await Bun.file(config).text()).toBe("kept: true\n");
+		await writeFile(marker, `${JSON.stringify({ schema, source: join(fixture.root, "elsewhere"), sourceConfigSha256, sourceAgentDbSha256 })}\n`);
+		expect(spawn(fixture).exitCode).toBe(0);
+		expect(await Bun.file(config).text()).toContain('"default":"daily_driver"');
+		expect(await Bun.file(marker).text()).toContain('"source":"fresh"');
+	});
+
 	test("converges when two fresh launches start concurrently", async () => {
 		const fixture = await setupLauncher(false);
 		const children = [spawnAsync(fixture), spawnAsync(fixture)];

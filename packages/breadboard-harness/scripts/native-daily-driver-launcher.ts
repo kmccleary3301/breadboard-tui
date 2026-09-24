@@ -59,7 +59,9 @@ export function renderNativeDailyDriverLauncher(options: {
 set -euo pipefail
 umask 077
 workspace="$(pwd -P)"
-workspace_key="$(printf '%s' "$workspace" | /usr/bin/shasum -a 256 | /usr/bin/cut -d ' ' -f 1)"
+workspace_digest="$(printf '%s' "$workspace" | /usr/bin/openssl dgst -sha256 -r)"
+workspace_key="\${workspace_digest%% *}"
+[[ "$workspace_key" =~ ^[0-9a-f]{64}$ ]] || { printf 'Could not hash workspace path: %s\\n' "$workspace" >&2; exit 1; }
 native_root=${shellQuote(nativeProfileRoot)}/user/projects/$workspace_key
 r39_root=${shellQuote(r39ProfileRoot)}/$workspace_key
 marker="$native_root/.bb-native-profile-migration.v1.json"
@@ -80,16 +82,30 @@ case "\${1:-}" in
     ;;
 esac
 marker_valid=0
-if [[ -f "$marker" && ! -L "$marker" ]] &&
-  [[ "$(/usr/bin/plutil -extract schema raw -o - "$marker" 2>/dev/null)" == "bb.native_profile_migration.v1" ]]; then
-  marker_source="$(/usr/bin/plutil -extract source raw -o - "$marker" 2>/dev/null || true)"
-  if [[ "$marker_source" == "$r39_root" || "$marker_source" == "fresh" ]]; then
-    marker_config_sha="$(/usr/bin/plutil -extract sourceConfigSha256 raw -o - "$marker" 2>/dev/null || true)"
-    marker_agent_db_sha="$(/usr/bin/plutil -extract sourceAgentDbSha256 raw -o - "$marker" 2>/dev/null || true)"
-    if [[ "$marker_config_sha" =~ ^[0-9a-f]{64}$ && "$marker_agent_db_sha" =~ ^[0-9a-f]{64}$ ]]; then
-      marker_valid=1
+# The launcher writes the marker in one fixed shape; parse that shape without a subprocess.
+# Any other content falls back to plutil, which accepts every JSON spelling.
+marker_shape='^\\{"schema":"bb\\.native_profile_migration\\.v1","source":"([^"\\\\]*)","sourceConfigSha256":"([0-9a-f]{64})","sourceAgentDbSha256":"([0-9a-f]{64})"\\}$'
+marker_schema=""
+if [[ -f "$marker" && ! -L "$marker" ]]; then
+  marker_text="$(<"$marker")"
+  if [[ "$marker_text" =~ $marker_shape ]]; then
+    marker_schema="bb.native_profile_migration.v1"
+    marker_source="\${BASH_REMATCH[1]}"
+    marker_config_sha="\${BASH_REMATCH[2]}"
+    marker_agent_db_sha="\${BASH_REMATCH[3]}"
+  else
+    marker_schema="$(/usr/bin/plutil -extract schema raw -o - "$marker" 2>/dev/null || true)"
+    if [[ "$marker_schema" == "bb.native_profile_migration.v1" ]]; then
+      marker_source="$(/usr/bin/plutil -extract source raw -o - "$marker" 2>/dev/null || true)"
+      marker_config_sha="$(/usr/bin/plutil -extract sourceConfigSha256 raw -o - "$marker" 2>/dev/null || true)"
+      marker_agent_db_sha="$(/usr/bin/plutil -extract sourceAgentDbSha256 raw -o - "$marker" 2>/dev/null || true)"
     fi
   fi
+fi
+if [[ "$marker_schema" == "bb.native_profile_migration.v1" ]] &&
+  [[ "$marker_source" == "$r39_root" || "$marker_source" == "fresh" ]] &&
+  [[ "$marker_config_sha" =~ ^[0-9a-f]{64}$ && "$marker_agent_db_sha" =~ ^[0-9a-f]{64}$ ]]; then
+  marker_valid=1
 fi
 pending=$((1 - marker_valid))
 source_profile=0
@@ -185,7 +201,7 @@ if [[ "$pending" == 1 ]]; then
 fi
 for directory in "$native_root" "$native_root/agent" "$native_root/config" "$native_root/temp"; do
   [[ ! -L "$directory" && ( ! -e "$directory" || -d "$directory" ) ]] || exit 1
-  mkdir -p "$directory"
+  [[ -d "$directory" ]] || mkdir -p "$directory"
 done
 expected_agent_db=${shellQuote(authSource)}/agent.db
 if [[ ! -L "$native_root/agent/agent.db" || "$(readlink "$native_root/agent/agent.db")" != "$expected_agent_db" ]]; then
