@@ -84,7 +84,8 @@ function messageSpend(session: AgentSession, message: AssistantMessage): number 
 			? active
 			: session.modelRegistry.find(message.provider, message.model);
 	if (!model || model.provider === "openai-codex" || isBreadboardProviderFreeModel(model)) return null;
-	if (session.modelRegistry.authStorage.getCredentialOrigin(model.provider)?.kind === "oauth") return null;
+	const origin = session.modelRegistry.authStorage.keys.source(model.provider);
+	if (origin?.kind === "oauth") return null;
 	const usage = message.usage;
 	if (
 		![usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.totalTokens].every(finiteNonNegative) ||

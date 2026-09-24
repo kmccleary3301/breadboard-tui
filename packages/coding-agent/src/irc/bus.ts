@@ -17,35 +17,10 @@ import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { CustomMessage } from "../session/messages";
 
-export interface IrcMessage {
-	id: string;
-	/** Sender agent id. */
-	from: string;
-	/** Recipient agent id (resolved; "all" is expanded by the tool, not stored). */
-	to: string;
-	body: string;
-	ts: number;
-	/** Message id being answered. */
-	replyTo?: string;
-	/** Shared id across every concrete leg of one `to: all` broadcast. */
-	broadcastId?: string;
-	/**
-	 * Automated wake-turn relay of a woken subagent's stop output (task executor
-	 * `relayWakeTurnOutput`). Relays are answers, never wake sources: the
-	 * recipient's own wake-turn relay must skip them or two idle peers
-	 * ping-pong forever.
-	 */
-	wakeRelay?: boolean;
-}
+export type { IrcDeliveryReceipt, IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 export type { IrcHistoryRecord, IrcReadCursor } from "./types";
 
 type TerminalReceipt = IrcDeliveryReceipt;
-
-export interface IrcDeliveryReceipt {
-	to: string;
-	outcome: "injected" | "woken" | "revived" | "failed";
-	error?: string;
-}
 interface IrcWaiter {
 	from?: string;
 	resolve: (msg: IrcMessage) => void;

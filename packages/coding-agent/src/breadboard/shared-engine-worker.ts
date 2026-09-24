@@ -303,7 +303,7 @@ export async function startSharedBreadboardEngineFromEnvironment(): Promise<void
 			},
 			closeEngine: () => owner.close({ consumerClosed: true, preserveOnDrainConflict: true }),
 			refreshAuth: async () => {
-				await authStorage?.revalidateCredentials();
+				await authStorage?.credentials.reload();
 				await registry?.refresh("online-if-uncached");
 			},
 		});
