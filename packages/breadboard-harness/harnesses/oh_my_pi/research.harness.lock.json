@@ -21,11 +21,48 @@
           "name": "build",
           "prompt": "@pack(base).system",
           "tools_enabled": [
-            "*"
+            "read",
+            "bash",
+            "edit",
+            "ast_grep",
+            "ast_edit",
+            "ask",
+            "debug",
+            "eval",
+            "ssh",
+            "github",
+            "glob",
+            "grep",
+            "lsp",
+            "inspect_image",
+            "browser",
+            "checkpoint",
+            "rewind",
+            "task",
+            "job",
+            "irc",
+            "todo",
+            "web_search",
+            "search_tool_bm25",
+            "write",
+            "memory_edit",
+            "retain",
+            "recall",
+            "reflect",
+            "learn",
+            "manage_skill"
           ]
         }
       ],
       "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "multi_agent.enabled",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
       "visibility": "model-visible"
     },
     {
@@ -38,9 +75,57 @@
     },
     {
       "env_gate_ids": [],
+      "path": "prompts.tool_prompt_mode",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "system_compiled_and_persistent_per_turn",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.api_variant",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "responses",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.responses_use_developer_role",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.suppress_prompts",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.tool_choice",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "auto",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.use_native",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "providers.default_model",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
-      "value": "openai-codex/gpt-5.6-luna",
+      "value": "openai/gpt-5.1-codex-mini",
       "value_kind": "string",
       "visibility": "model-visible"
     },
@@ -51,7 +136,7 @@
       "value": [
         {
           "adapter": "openai_responses",
-          "id": "openai-codex/gpt-5.6-luna"
+          "id": "openai/gpt-5.1-codex-mini"
         }
       ],
       "value_kind": "array",
@@ -67,10 +152,49 @@
     },
     {
       "env_gate_ids": [],
+      "path": "tools.registry.include",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "read",
+        "bash",
+        "edit",
+        "ast_grep",
+        "ast_edit",
+        "ask",
+        "debug",
+        "eval",
+        "ssh",
+        "github",
+        "glob",
+        "grep",
+        "lsp",
+        "inspect_image",
+        "browser",
+        "checkpoint",
+        "rewind",
+        "task",
+        "job",
+        "irc",
+        "todo",
+        "web_search",
+        "search_tool_bm25",
+        "write",
+        "memory_edit",
+        "retain",
+        "recall",
+        "reflect",
+        "learn",
+        "manage_skill"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "tools.registry.paths",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
-        "config/e4_targets/oh_my_pi/16.2.13"
+        "defs_oh_my_pi"
       ],
       "value_kind": "array",
       "visibility": "model-visible"
@@ -93,7 +217,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:4a5adb674de6c41aabdf1428cbd67fed99b4a176867cf3d78545bee2ad39acea",
+  "graph_hash": "sha256:86ba4a1500b73df8665f69459f9decaa37d2e25e008190dc53095296295d080f",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -112,7 +236,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:d0097d70a69457acb281a01d956a04153edafc4908310732f6397b957892e138",
+      "layer_hash": "sha256:7ecff038f2dab10ebf945cad00afd5203816a65db1d44644ab442b8d19fd01ef",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -136,10 +260,18 @@
     "model_visible_paths": [
       "loop.sequence",
       "modes",
+      "multi_agent.enabled",
       "prompts.packs.base.system",
+      "prompts.tool_prompt_mode",
+      "provider_tools.api_variant",
+      "provider_tools.responses_use_developer_role",
+      "provider_tools.suppress_prompts",
+      "provider_tools.tool_choice",
+      "provider_tools.use_native",
       "providers.default_model",
       "providers.models",
       "schema_version",
+      "tools.registry.include",
       "tools.registry.paths",
       "version",
       "workspace.root"

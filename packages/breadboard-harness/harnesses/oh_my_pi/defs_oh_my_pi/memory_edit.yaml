@@ -1,0 +1,10 @@
+id: memory_edit
+name: memory_edit
+description: OMP memory_edit tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

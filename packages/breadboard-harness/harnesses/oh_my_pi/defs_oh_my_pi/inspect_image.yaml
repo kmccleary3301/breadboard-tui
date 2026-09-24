@@ -1,0 +1,10 @@
+id: inspect_image
+name: inspect_image
+description: OMP inspect_image tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

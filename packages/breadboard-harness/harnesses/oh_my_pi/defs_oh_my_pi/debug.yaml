@@ -1,0 +1,10 @@
+id: debug
+name: debug
+description: OMP debug tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

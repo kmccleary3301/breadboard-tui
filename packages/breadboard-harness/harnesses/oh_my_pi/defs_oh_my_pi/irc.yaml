@@ -1,0 +1,10 @@
+id: irc
+name: irc
+description: OMP irc tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

@@ -21,7 +21,13 @@
           "name": "build",
           "prompt": "@pack(base).system",
           "tools_enabled": [
-            "*"
+            "read",
+            "bash",
+            "edit",
+            "write",
+            "grep",
+            "find",
+            "ls"
           ]
         }
       ],
@@ -38,9 +44,49 @@
     },
     {
       "env_gate_ids": [],
+      "path": "prompts.tool_prompt_mode",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "system_compiled_and_persistent_per_turn",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.api_variant",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "responses",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.responses_use_developer_role",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.tool_choice",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "auto",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.use_native",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "providers.default_model",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
-      "value": "openai-codex/gpt-5.6-luna",
+      "value": "openai/gpt-5.1-codex-mini",
       "value_kind": "string",
       "visibility": "model-visible"
     },
@@ -51,7 +97,7 @@
       "value": [
         {
           "adapter": "openai_responses",
-          "id": "openai-codex/gpt-5.6-luna"
+          "id": "openai/gpt-5.1-codex-mini"
         }
       ],
       "value_kind": "array",
@@ -67,10 +113,26 @@
     },
     {
       "env_gate_ids": [],
+      "path": "tools.registry.include",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "tools.registry.paths",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": [
-        "config/e4_targets/pi/0.57.1"
+        "defs_pi"
       ],
       "value_kind": "array",
       "visibility": "model-visible"
@@ -93,7 +155,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:e1806fdd85646dc962a671d15f86f4c01cae0d8ca3133e620cdac082497828e5",
+  "graph_hash": "sha256:ae240e095bfa424d6f9f8d3628a009df855b71667fd7e8855eae4e47f0217876",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -112,7 +174,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:1dfce74a207343639b6e4f458ab093bf92b25f5686cf08bbc77b52dcd234aa9a",
+      "layer_hash": "sha256:47e46eaf86ac83ef3a5e35f90ecd64520d4ce629996cff62a776a0cd5ce98374",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -137,9 +199,15 @@
       "loop.sequence",
       "modes",
       "prompts.packs.base.system",
+      "prompts.tool_prompt_mode",
+      "provider_tools.api_variant",
+      "provider_tools.responses_use_developer_role",
+      "provider_tools.tool_choice",
+      "provider_tools.use_native",
       "providers.default_model",
       "providers.models",
       "schema_version",
+      "tools.registry.include",
       "tools.registry.paths",
       "version",
       "workspace.root"

@@ -1,0 +1,21 @@
+id: ls
+name: ls
+description: List directory contents. Returns entries sorted alphabetically, with
+  '/' suffix for directories. Includes dotfiles. Output is truncated to 500 entries
+  or 50KB (whichever is hit first).
+provider_routing:
+  openai:
+    native_primary: true
+parameters:
+- name: path
+  schema:
+    type: string
+    description: 'Directory to list (default: current directory)'
+  required: false
+- name: limit
+  schema:
+    type: number
+    description: 'Maximum number of entries to return (default: 500)'
+  required: false
+execution:
+  blocking: true

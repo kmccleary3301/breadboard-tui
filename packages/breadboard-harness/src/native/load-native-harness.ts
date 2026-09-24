@@ -213,6 +213,7 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 					systemPrompt: prompts.system,
 					perTurnPrompt: prompts.perTurn,
 					toolPromptMode: stringValue(lock, "prompts.tool_prompt_mode"),
+					suppressPrompts: nativeLockValue(lock, "provider_tools.suppress_prompts") === true,
 					toolSurface,
 				}),
 			);
@@ -227,6 +228,7 @@ async function compileNativeHarness(input: HarnessSource): Promise<LoadedNativeH
 				systemPrompt: prompts.system,
 				perTurnPrompt: "",
 				toolPromptMode: stringValue(lock, "prompts.tool_prompt_mode"),
+				suppressPrompts: nativeLockValue(lock, "provider_tools.suppress_prompts") === true,
 				toolSurface,
 			}),
 		);

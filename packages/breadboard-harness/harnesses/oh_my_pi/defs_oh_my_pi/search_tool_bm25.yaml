@@ -1,0 +1,10 @@
+id: search_tool_bm25
+name: search_tool_bm25
+description: OMP search_tool_bm25 tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

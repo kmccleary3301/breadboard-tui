@@ -1,0 +1,41 @@
+id: eval
+name: eval
+description: Execute Python with IPython or JavaScript in a persistent,
+  session-local kernel in the project workspace. Bindings survive cells and
+  turns while the engine session remains live. Top-level await is supported.
+  Shell tools share the workspace but not kernel variables. Engine restart loses
+  kernel state. A timeout or cancellation may reset the selected kernel; inspect
+  the result. This tool does not provide the native OMP tool, agent, or workpool
+  prelude.
+type_id: python
+parameters:
+  - name: language
+    schema:
+      type: string
+      description: Kernel language, py for IPython or js for JavaScript
+    required: true
+  - name: code
+    schema:
+      type: string
+      description: Code to execute in the selected persistent kernel
+    required: true
+  - name: title
+    schema:
+      type: string
+      description: Short label for the cell
+    required: false
+  - name: timeout
+    schema:
+      type: number
+      description: Cell deadline in seconds; defaults to 30, and 0 disables the deadline
+    required: false
+  - name: reset
+    schema:
+      type: boolean
+      description: Clear only the selected language's state before executing this cell
+    required: false
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

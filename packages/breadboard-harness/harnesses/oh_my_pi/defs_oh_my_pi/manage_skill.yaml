@@ -1,0 +1,21 @@
+id: manage_skill
+name: manage_skill
+description: Execute a shell command in the project workspace
+type_id: python
+parameters:
+  - name: command
+    schema:
+      type: string
+      description: The shell command to run
+    required: true
+  - name: timeout
+    schema:
+      type: integer
+      description: Timeout in seconds
+      default: 60
+    required: false
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

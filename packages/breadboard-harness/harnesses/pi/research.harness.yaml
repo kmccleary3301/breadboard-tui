@@ -3,21 +3,29 @@ version: 1
 workspace:
   root: .
 providers:
-  default_model: openai-codex/gpt-5.6-luna
+  default_model: openai/gpt-5.1-codex-mini
   models:
-    - id: openai-codex/gpt-5.6-luna
+    - id: openai/gpt-5.1-codex-mini
       adapter: openai_responses
+provider_tools:
+  use_native: true
+  api_variant: responses
+  responses_use_developer_role: true
+  tool_choice: auto
+
 tools:
   registry:
-    paths: [config/e4_targets/pi/0.57.1]
+    paths: [defs_pi]
+    include: [read, bash, edit, write, grep, find, ls]
 prompts:
   packs:
     base:
       system: prompts/system.md
+  tool_prompt_mode: system_compiled_and_persistent_per_turn
 modes:
   - name: build
     prompt: '@pack(base).system'
-    tools_enabled: ['*']
+    tools_enabled: [read, bash, edit, write, grep, find, ls]
 loop:
   sequence:
     - mode: build

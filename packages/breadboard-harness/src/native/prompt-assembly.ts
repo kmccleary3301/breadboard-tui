@@ -371,9 +371,9 @@ export type NativeUserTextBlock = { readonly type: "text"; readonly text: string
  * Frame user content with the same block structure as Python's persistent per-turn mode:
  * the compiled system is inside BREADBOARD_INTERNAL, followed by a separate tool-catalog text block.
  */
-export function frameNativeUserContent(userText: string, stage: { readonly perTurnPrompt: string; readonly toolPromptMode?: string; readonly toolSurface: NativeToolSurfacePack }): string | NativeUserTextBlock[] {
+export function frameNativeUserContent(userText: string, stage: { readonly perTurnPrompt: string; readonly toolPromptMode?: string; readonly suppressPrompts?: boolean; readonly toolSurface: NativeToolSurfacePack }): string | NativeUserTextBlock[] {
 	const framed = frameNativeUserMessage(userText, stage.perTurnPrompt);
-	if (stage.toolPromptMode !== "system_compiled_and_persistent_per_turn") return framed;
+	if (stage.toolPromptMode !== "system_compiled_and_persistent_per_turn" || stage.suppressPrompts === true) return framed;
 	return [{ type: "text", text: framed }, { type: "text", text: perTurnCatalog(stage.toolSurface, true) }];
 }
 

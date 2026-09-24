@@ -1,0 +1,10 @@
+id: rewind
+name: rewind
+description: OMP rewind tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

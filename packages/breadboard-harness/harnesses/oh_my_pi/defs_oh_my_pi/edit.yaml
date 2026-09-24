@@ -1,0 +1,25 @@
+id: edit
+name: edit
+description: Edit a file by replacing exact text blocks (Aider SEARCH/REPLACE style)
+type_id: python
+parameters:
+  - name: file_name
+    schema:
+      type: string
+      description: Target file path to edit
+    required: true
+  - name: search
+    schema:
+      type: string
+      description: Exact text to replace (anchor)
+    required: true
+  - name: replace
+    schema:
+      type: string
+      description: Replacement text
+    required: true
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

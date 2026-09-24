@@ -1,0 +1,25 @@
+id: edit
+name: edit
+description: Edit a file by replacing exact text. The oldText must match exactly (including
+  whitespace). Use this for precise, surgical edits.
+provider_routing:
+  openai:
+    native_primary: true
+parameters:
+- name: path
+  schema:
+    type: string
+    description: Path to the file to edit (relative or absolute)
+  required: true
+- name: oldText
+  schema:
+    type: string
+    description: Exact text to find and replace (must match exactly)
+  required: true
+- name: newText
+  schema:
+    type: string
+    description: New text to replace the old text with
+  required: true
+execution:
+  blocking: true

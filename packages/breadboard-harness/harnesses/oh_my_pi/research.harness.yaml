@@ -3,21 +3,33 @@ version: 1
 workspace:
   root: .
 providers:
-  default_model: openai-codex/gpt-5.6-luna
+  default_model: openai/gpt-5.1-codex-mini
   models:
-    - id: openai-codex/gpt-5.6-luna
+    - id: openai/gpt-5.1-codex-mini
       adapter: openai_responses
+provider_tools:
+  use_native: true
+  suppress_prompts: true
+  api_variant: responses
+  responses_use_developer_role: true
+  tool_choice: auto
+multi_agent:
+  enabled: true
+
+
 tools:
   registry:
-    paths: [config/e4_targets/oh_my_pi/16.2.13]
+    paths: [defs_oh_my_pi]
+    include: [read, bash, edit, ast_grep, ast_edit, ask, debug, eval, ssh, github, glob, grep, lsp, inspect_image, browser, checkpoint, rewind, task, job, irc, todo, web_search, search_tool_bm25, write, memory_edit, retain, recall, reflect, learn, manage_skill]
 prompts:
   packs:
     base:
       system: prompts/system.md
+  tool_prompt_mode: system_compiled_and_persistent_per_turn
 modes:
   - name: build
     prompt: '@pack(base).system'
-    tools_enabled: ['*']
+    tools_enabled: [read, bash, edit, ast_grep, ast_edit, ask, debug, eval, ssh, github, glob, grep, lsp, inspect_image, browser, checkpoint, rewind, task, job, irc, todo, web_search, search_tool_bm25, write, memory_edit, retain, recall, reflect, learn, manage_skill]
 loop:
   sequence:
     - mode: build

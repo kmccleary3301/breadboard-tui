@@ -1,0 +1,10 @@
+id: retain
+name: retain
+description: OMP retain tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

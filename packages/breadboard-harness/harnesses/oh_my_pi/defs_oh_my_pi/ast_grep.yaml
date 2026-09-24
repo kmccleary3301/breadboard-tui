@@ -1,0 +1,10 @@
+id: ast_grep
+name: ast_grep
+description: OMP ast_grep tool
+type_id: python
+parameters: []
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

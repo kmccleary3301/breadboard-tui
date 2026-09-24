@@ -1,0 +1,21 @@
+id: glob
+name: glob
+description: List files in a directory; supports optional depth for tree view
+type_id: python
+parameters:
+  - name: path
+    schema:
+      type: string
+      description: Directory path
+    required: true
+  - name: depth
+    schema:
+      type: integer
+      description: Optional tree depth (1-5)
+      default: 1
+    required: false
+execution:
+  blocking: true
+provider_routing:
+  openai:
+    native_primary: true

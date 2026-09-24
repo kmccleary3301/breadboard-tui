@@ -111,8 +111,8 @@ function researchToolFamily(lock: JsonRecord): ResearchToolFamily | undefined {
 	if (joined.includes("oh_my_opencode") || joined.includes("defs_omo")) return "oh_my_opencode";
 	if (joined.includes("opencode") || joined.includes("defs_oc")) return "opencode";
 	if (joined.includes("codex")) return "codex";
-	if (joined.includes("e4_targets/pi/")) return "pi";
-	if (joined.includes("oh_my_pi")) return "oh_my_pi";
+	if (joined.includes("e4_targets/pi/") || joined.includes("defs_pi")) return "pi";
+	if (joined.includes("defs_oh_my_pi") || joined.includes("oh_my_pi")) return "oh_my_pi";
 	return undefined;
 }
 const CLAUDE_SCHEMA_URI = "http://json-schema.org/draft-07/schema#";
@@ -152,6 +152,21 @@ function claudeCodeDefinition(definition: NativeToolDefinition): NativeToolDefin
 	}
 	return { ...definition, parameters };
 }
+function openAiResearchDefinition(definition: NativeToolDefinition): NativeToolDefinition {
+	const parameters = isRecord(definition.parameters) ? definition.parameters : {};
+	const properties = isRecord(parameters.properties)
+		? Object.fromEntries(Object.entries(parameters.properties).sort(([left], [right]) => left.localeCompare(right)))
+		: {};
+	const required = Array.isArray(parameters.required)
+		? parameters.required.filter((name): name is string => typeof name === "string").sort((left, right) => left.localeCompare(right))
+		: [];
+	return {
+		...definition,
+		strict: true,
+		parameters: { ...parameters, additionalProperties: false, properties, required },
+	};
+}
+
 
 function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeToolDefinition>): ReadonlyMap<string, NativeToolDefinition> {
 	const family = researchToolFamily(lock);
@@ -159,7 +174,11 @@ function definitionsForLock(lock: JsonRecord, base: ReadonlyMap<string, NativeTo
 	const definitions = new Map(base);
 	const additions = family === "codex" ? RESEARCH_TOOL_DEFINITIONS.opencode : RESEARCH_TOOL_DEFINITIONS[family];
 	for (const definition of additions) {
-		const selected = family === "claude_code" ? claudeCodeDefinition(definition) : definition;
+		const selected = family === "claude_code"
+			? claudeCodeDefinition(definition)
+			: family === "pi" || family === "oh_my_pi"
+				? openAiResearchDefinition(definition)
+				: definition;
 		definitions.set(selected.name, selected);
 	}
 	return definitions;

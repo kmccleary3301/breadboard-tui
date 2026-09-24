@@ -1,0 +1,22 @@
+id: bash
+name: bash
+description: Execute a bash command in the current working directory. Returns stdout
+  and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first).
+  If truncated, full output is saved to a temp file. Optionally provide a timeout
+  in seconds.
+provider_routing:
+  openai:
+    native_primary: true
+parameters:
+- name: command
+  schema:
+    type: string
+    description: Bash command to execute
+  required: true
+- name: timeout
+  schema:
+    type: number
+    description: Timeout in seconds (optional, no default timeout)
+  required: false
+execution:
+  blocking: true

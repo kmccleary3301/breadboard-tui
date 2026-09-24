@@ -7,6 +7,7 @@ export interface NativeHarnessStage {
 	readonly systemPrompt: string;
 	readonly perTurnPrompt: string;
 	readonly toolPromptMode?: string;
+	readonly suppressPrompts?: boolean;
 	readonly toolSurface: NativeToolSurfacePack;
 }
 
