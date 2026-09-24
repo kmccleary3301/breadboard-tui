@@ -1,5 +1,5 @@
 import { chmod, mkdir, mkdtemp, readdir, realpath, writeFile } from "node:fs/promises";
-import { lstatSync } from "node:fs";
+import { lstatSync, readlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -10,6 +10,7 @@ interface LauncherFixture {
 	workspace: string;
 	launcher: string;
 	nativeProfile: string;
+	authSource: string;
 	countFile: string;
 }
 
@@ -86,6 +87,7 @@ async function setupLauncher(withR39Profile = true): Promise<LauncherFixture> {
 		workspace,
 		launcher,
 		nativeProfile: join(nativeProfileRoot, "user", "projects", await workspaceKey(workspace)),
+		authSource,
 		countFile: join(root, "count"),
 	};
 }
@@ -115,6 +117,7 @@ describe("native daily-driver launcher", () => {
 		const first = spawn(fixture);
 		expect(first.exitCode).toBe(1);
 		expect((await readdir(dirname(fixture.nativeProfile))).filter(name => name.includes(".seed."))).toEqual([]);
+		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(false);
 		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
 		const databaseFiles = (await readdir(join(fixture.nativeProfile, "agent"))).filter(name => name.startsWith("agent.db"));
@@ -135,6 +138,7 @@ describe("native daily-driver launcher", () => {
 		const config = await Bun.file(join(fixture.nativeProfile, "agent", "config.yml")).text();
 		expect(config).toContain('"symbolPreset":"nerd"');
 		expect(config).toContain('"default":"daily_driver"');
+		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(true);
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.receipt.v1.json")).exists()).toBe(true);
 	});
@@ -151,15 +155,23 @@ describe("native daily-driver launcher", () => {
 		expect(result.exitCode).toBe(0);
 		const config = await Bun.file(join(fixture.nativeProfile, "agent", "config.yml")).text();
 		expect(config).toContain('"default":"daily_driver"');
+		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(config).not.toContain("engineMode");
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
 	});
 	test("repairs a missing auth symlink on a valid fresh profile", async () => {
 		const fixture = await setupLauncher(false);
 		expect(spawn(fixture).exitCode).toBe(0);
-		await Bun.$`rm -f ${join(fixture.nativeProfile, "agent", "agent.db")}`;
+		const linkPath = join(fixture.nativeProfile, "agent", "agent.db");
+		const originalInode = lstatSync(linkPath).ino;
+		expect(readlinkSync(linkPath)).toBe(join(fixture.authSource, "agent.db"));
 		expect(spawn(fixture).exitCode).toBe(0);
-		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
+		expect(readlinkSync(linkPath)).toBe(join(fixture.authSource, "agent.db"));
+		expect(lstatSync(linkPath).ino).toBe(originalInode);
+		await Bun.$`rm -f ${linkPath}`;
+		expect(spawn(fixture).exitCode).toBe(0);
+		expect(readlinkSync(linkPath)).toBe(join(fixture.authSource, "agent.db"));
+		expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
 	});
 
 	test("retries migration after a failed launch and truncated marker", async () => {
@@ -180,6 +192,7 @@ describe("native daily-driver launcher", () => {
 		await writeFile(join(fixture.nativeProfile, "agent", "config.yml"), '{"breadboard":{"harness":{"default":"daily_driver"}}}\n');
 		const result = spawn(fixture);
 		expect(result.exitCode).toBe(0);
+		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
 		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
 	});
