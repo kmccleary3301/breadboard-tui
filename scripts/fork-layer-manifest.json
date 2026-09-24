@@ -212,6 +212,16 @@
 			"rule": "breadboard-harness-package"
 		},
 		{
+			"path": "packages/breadboard-harness/scripts/native-daily-driver-launcher.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
+			"path": "packages/breadboard-harness/scripts/native-daily-driver-launcher.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-harness-package"
+		},
+		{
 			"path": "packages/breadboard-harness/scripts/snapshot-engine-data.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-harness-package"
@@ -572,6 +582,11 @@
 		},
 		{
 			"path": "packages/coding-agent/src/breadboard/native-launch-policy.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/native-profile-migration.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1101,6 +1116,11 @@
 		},
 		{
 			"path": "packages/coding-agent/test/breadboard/installed_product_journey_geometry_test.py",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/test/breadboard/native-profile-migration.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
