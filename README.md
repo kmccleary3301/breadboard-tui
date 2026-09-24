@@ -38,7 +38,8 @@ bun packages/breadboard-harness/scripts/native-daily-driver-launcher.ts \
   /path/to/native-profile-root \
   /path/to/r39/user/projects \
   ~/.omp/agent \
-  ~/.local/bin/bb-omp
+  /tmp/bb-omp.candidate \
+  /path/to/r39/launch
 ```
 
 Rollback by installing the retained R39 launcher byte-for-byte:
