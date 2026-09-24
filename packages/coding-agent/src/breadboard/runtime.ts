@@ -74,7 +74,6 @@ export class BreadboardProductApiKeyError extends Error {
 export function applyCliApiKeyOverride(
 	authStorage: {
 		keys?: { setRuntime(provider: string, apiKey: string): void };
-		setRuntimeApiKey?: (provider: string, apiKey: string) => void;
 	},
 	input: {
 		readonly apiKey: string;
@@ -84,11 +83,7 @@ export function applyCliApiKeyOverride(
 ): void {
 	if (input.breadboardProductModeSelected) throw new BreadboardProductApiKeyError();
 	if (input.provider) {
-		if (authStorage.keys?.setRuntime) {
-			authStorage.keys.setRuntime(input.provider, input.apiKey);
-		} else if (authStorage.setRuntimeApiKey) {
-			authStorage.setRuntimeApiKey(input.provider, input.apiKey);
-		}
+		authStorage.keys?.setRuntime(input.provider, input.apiKey);
 	}
 }
 

@@ -142,7 +142,7 @@ describe("session exit diagnostics", () => {
 	it("persists an externally projected tool result to the JSONL branch and clears pending diagnostics", async () => {
 		tempDir = TempDir.createSync("@pi-session-exit-completed-tool-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.keys.setRuntime("anthropic", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected built-in anthropic model to exist");

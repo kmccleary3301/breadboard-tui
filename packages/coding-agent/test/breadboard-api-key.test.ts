@@ -6,8 +6,10 @@ describe("BreadBoard CLI API-key isolation", () => {
 		const secretCanary = "sk-product-cli-canary";
 		const mutations: unknown[] = [];
 		const authStorage = {
-			setRuntimeApiKey(provider: string, apiKey: string) {
-				mutations.push({ provider, apiKey });
+			keys: {
+				setRuntime(provider: string, apiKey: string) {
+					mutations.push({ provider, apiKey });
+				},
 			},
 		};
 
@@ -30,8 +32,10 @@ describe("BreadBoard CLI API-key isolation", () => {
 	test("retains the native runtime override outside BreadBoard mode", () => {
 		const mutations: unknown[] = [];
 		const authStorage = {
-			setRuntimeApiKey(provider: string, apiKey: string) {
-				mutations.push({ provider, apiKey });
+			keys: {
+				setRuntime(provider: string, apiKey: string) {
+					mutations.push({ provider, apiKey });
+				},
 			},
 		};
 

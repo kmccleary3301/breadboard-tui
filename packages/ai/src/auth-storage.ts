@@ -180,10 +180,7 @@ export class AuthStorage {
 	getApiKey(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<string | undefined> {
 		return this.keys.get(provider, sessionId, options);
 	}
-	/** Legacy flat API compatibility alias for keys.setRuntime. */
-	setRuntimeApiKey(provider: string, apiKey: string): void {
-		this.keys.setRuntime(provider, apiKey);
-	}
+
 	/**
 	 * Legacy redirect for callers of the pre-namespace flat API (e.g. repo scripts).
 	 * @deprecated Use {@link AuthStorage.credentials}`.reload`.
