@@ -368,7 +368,7 @@ export class SignInTab implements SetupTab {
 					const { displayName } = this.#host.ctx.identity ?? getProductIdentity();
 					throw new Error(`${displayName} provider setup is unavailable`);
 				}
-				const identity = await authStorage.login(providerId as OAuthProvider, {
+				const identity = await authStorage.oauth.login(providerId as OAuthProvider, {
 					signal: this.#loginAbort.signal,
 					onBrowserSession: (request, signal) => this.#host.ctx.captureBrowserSession(request, signal),
 					onAuth: info => {

@@ -30,6 +30,7 @@ export function createStatusLineHost(
 			segmentOptions: settings.getGroup("statusLine").segmentOptions,
 			sessionAccent: settings.get("statusLine.sessionAccent"),
 			transparent: settings.get("statusLine.transparent"),
+			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 			contextLine: settings.get("statusLine.contextLine"),
 			breadboard: settings.get("statusLine.breadboard"),
 		}),
@@ -40,7 +41,7 @@ export function createStatusLineHost(
 		getSessionSettingsRevision: session => session.settings?.revision ?? 0,
 		goalStatusInFooter: session => (session.settings ?? settings).get("goal.statusInFooter"),
 		activeAccount: (session, provider) =>
-			session.modelRegistry?.authStorage?.getOAuthAccountIdentity(provider, session.sessionId),
+			session.modelRegistry?.authStorage?.oauth.identity(provider, session.sessionId),
 		canFetchUsageReports: session => typeof session.fetchUsageReports === "function",
 		fetchUsageReports: (session, signal) => session.fetchUsageReports?.(signal) ?? Promise.resolve(null),
 		resolveActiveRepo: resolveActiveRepoContextSync,

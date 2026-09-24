@@ -593,7 +593,7 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 			preloadedExtensions: trustedExtensions,
 		});
 		if (args.parsedArgs.apiKey && !args.baseOptions.model && nextSession.model) {
-			args.authStorage.setRuntimeApiKey(nextSession.model.provider, args.parsedArgs.apiKey);
+			args.authStorage.keys.setRuntime(nextSession.model.provider, args.parsedArgs.apiKey);
 		}
 		const runner = nextSession.extensionRunner;
 		const reparsedArgs = applyExtensionFlags(
@@ -1868,20 +1868,21 @@ export async function runRootCommand(
 		if (!isInteractive) {
 			stopPendingStartupComposer();
 		}
-		// Auth and settings are independent; start both before awaiting either.
-		// A configured-but-unreachable auth broker still receives the actionable
-		// startup error below, while its cache/config I/O overlaps settings I/O.
+		// Account routing must use the effective settings, including `--config` and
+		// `PI_CONFIG_FILES` overlays, rather than independently re-reading only the
+		// main config file during auth discovery.
 		const ompAgentDir = resolveBreadboardOmpAgentDir(process.env.BREADBOARD_OMP_AGENT_DIR);
 		if (ompAgentDir !== undefined && !isInteractive) {
 			throw new Error("BREADBOARD_OMP_AGENT_DIR requires interactive BreadBoard execution");
 		}
-		const discoverAuth = deps.discoverAuthStorage ?? discoverAuthStorage;
-		const authStoragePromise = logger.time("discoverAuthStorage", () => discoverAuth(ompAgentDir));
-		authStoragePromise.catch(() => {});
 		const settingsPromise = deps.settings
 			? Promise.resolve(deps.settings)
 			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
 		settingsPromise.catch(() => {});
+		const authStoragePromise = logger.time("discoverAuthStorage", async () =>
+			(deps.discoverAuthStorage ?? discoverAuthStorage)(ompAgentDir, { settings: await settingsPromise }),
+		);
+		authStoragePromise.catch(() => {});
 		let authStorage: AuthStorage;
 		try {
 			authStorage = await authStoragePromise;
@@ -2413,6 +2414,7 @@ export async function runRootCommand(
 				);
 				process.exit(1);
 			}
+
 		}
 
 		const createAgentSessionImpl = deps.createAgentSession ?? createAgentSession;
@@ -2808,6 +2810,7 @@ export async function runRootCommand(
 					initialImages,
 					printThoughts: initialArgs.printThoughts,
 					planYolo: parsedArgs.planYolo,
+					mcpManager,
 				});
 				if ($env.PI_TIMING) {
 					logger.printTimings();

@@ -975,11 +975,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/tools/hub/messaging.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/src/utils/command-usage.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"

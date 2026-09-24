@@ -159,6 +159,11 @@ const ALL_COMMANDS: CommandEntry[] = [
 		help: commandHelp.joinHelp,
 	},
 	{
+		name: "login",
+		load: () => import("./commands/login").then(m => m.default),
+		help: commandHelp.loginHelp,
+	},
+	{
 		name: "models",
 		load: () => import("./commands/models").then(m => m.default),
 		help: commandHelp.modelsHelp,
@@ -254,6 +259,11 @@ const ALL_COMMANDS: CommandEntry[] = [
 		name: "token",
 		load: () => import("./commands/token").then(m => m.default),
 		help: commandHelp.tokenHelp,
+	},
+	{
+		name: "toks",
+		load: () => import("./commands/toks").then(m => m.default),
+		help: commandHelp.toksHelp,
 	},
 	{
 		name: "ttsr",
