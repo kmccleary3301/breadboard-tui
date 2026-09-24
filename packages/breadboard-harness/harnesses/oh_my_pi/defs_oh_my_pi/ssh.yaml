@@ -1,0 +1,9 @@
+id: ssh
+name: ssh
+description: Tool 'ssh' is not available in the native host.
+type_id: python
+parameters: []
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

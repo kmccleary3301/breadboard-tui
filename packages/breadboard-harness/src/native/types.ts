@@ -3,6 +3,8 @@ import type { CanonicalJson, JsonRecord } from "../canonical-json";
 /** One vendored tool definition, rendered the way the Python reference offers it to a provider. */
 export interface NativeToolDefinition {
 	readonly id: string;
+	/** Source definition file path used for Python's codepoint registry ordering. */
+	readonly sourcePath?: string;
 	readonly name: string;
 	readonly description: string;
 	/** JSON Schema object for the provider's function `parameters`. */

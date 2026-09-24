@@ -65,7 +65,7 @@ describe("applyUnifiedPatchAdapter direct fallback", () => {
 		await withWorkspace({ "a.txt": "one\ntwo\n" }, async (root) => {
 			const patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n one\n-WRONG\n+TWO\n*** End Patch\n";
 			const result = await applyUnifiedPatchAdapter(root, patch);
-			const reason = "Failed to apply Codex hunk in a.txt: context not found";
+			const reason = "Failed to apply patch hunk in a.txt: context not found";
 			const expected = {
 				ok: false,
 				action: "apply_patch",

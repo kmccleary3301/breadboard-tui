@@ -1,0 +1,9 @@
+id: inspect_image
+name: inspect_image
+description: Tool 'inspect_image' is not available in the native host.
+type_id: python
+parameters: []
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

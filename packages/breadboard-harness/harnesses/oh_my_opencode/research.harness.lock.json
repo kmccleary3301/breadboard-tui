@@ -1,0 +1,327 @@
+{
+  "effective_values": [
+    {
+      "env_gate_ids": [],
+      "path": "loop.sequence",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "mode": "build"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "modes",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "name": "build",
+          "tools_enabled": [
+            "bash",
+            "read",
+            "glob",
+            "grep",
+            "list",
+            "task",
+            "webfetch",
+            "todowrite",
+            "todoread",
+            "skill",
+            "lsp_hover",
+            "lsp_goto_definition",
+            "lsp_find_references",
+            "lsp_document_symbols",
+            "lsp_workspace_symbols",
+            "lsp_diagnostics",
+            "lsp_servers",
+            "lsp_prepare_rename",
+            "lsp_rename",
+            "lsp_code_actions",
+            "lsp_code_action_resolve",
+            "ast_grep_search",
+            "ast_grep_replace",
+            "slashcommand",
+            "background_task",
+            "background_output",
+            "background_cancel",
+            "call_omo_agent",
+            "look_at",
+            "interactive_bash",
+            "context7_resolve-library-id",
+            "context7_get-library-docs",
+            "websearch_exa_web_search_exa",
+            "grep_app_searchGitHub"
+          ]
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.environment.enabled",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.environment.file_limit",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": 200,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.environment.format",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "opencode",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.builder",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "prompts/builder.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.packs.base.system",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "prompts/system.md",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "prompts.tool_prompt_mode",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "none",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.api_variant",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "responses",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.responses_use_developer_role",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.suppress_prompts",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.tool_choice",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "auto",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.use_native",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.default_model",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "openai/gpt-5.1-codex-mini",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "providers.models",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        {
+          "adapter": "openai_responses",
+          "id": "openai/gpt-5.1-codex-mini"
+        }
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "schema_version",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "bb.harness_definition.v1",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.registry.include",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "bash",
+        "read",
+        "glob",
+        "grep",
+        "list",
+        "edit",
+        "write",
+        "task",
+        "webfetch",
+        "todowrite",
+        "todoread",
+        "skill",
+        "lsp_hover",
+        "lsp_goto_definition",
+        "lsp_find_references",
+        "lsp_document_symbols",
+        "lsp_workspace_symbols",
+        "lsp_diagnostics",
+        "lsp_servers",
+        "lsp_prepare_rename",
+        "lsp_rename",
+        "lsp_code_actions",
+        "lsp_code_action_resolve",
+        "ast_grep_search",
+        "ast_grep_replace",
+        "slashcommand",
+        "background_task",
+        "background_output",
+        "background_cancel",
+        "call_omo_agent",
+        "look_at",
+        "interactive_bash",
+        "context7_resolve-library-id",
+        "context7_get-library-docs",
+        "websearch_exa_web_search_exa",
+        "grep_app_searchGitHub"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "tools.registry.paths",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": [
+        "implementations/tools/defs_omo"
+      ],
+      "value_kind": "array",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "version",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": 1,
+      "value_kind": "number",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "workspace.root",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": ".",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    }
+  ],
+  "env_gates": [],
+  "graph_hash": "sha256:0056de08c5ac61016b8ffeb5df486eb3ea0fc46531f4114fe156925b406314ba",
+  "graph_id": "agent_config:research.harness",
+  "merge_policy": {
+    "conflict_resolution": "highest-precedence",
+    "policy_id": "precedence_order_deep_merge",
+    "strategy": "deep-merge"
+  },
+  "migrations": [
+    {
+      "applied": true,
+      "from_version": "agent-config-yaml",
+      "migration_id": "agent-config-yaml-to-effective-config-graph-v1",
+      "to_version": "bb.effective_config_graph.v1"
+    }
+  ],
+  "schema_version": "bb.effective_config_graph.v1",
+  "source_layers": [
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:d7505ceda44bdaadf5b11f310c22df8ca0b204ae842c3d92ac9fc316f182bc49",
+      "layer_id": "agent-config:0000:research.harness.yaml",
+      "model_visible": true,
+      "precedence": 0,
+      "scope": "agent",
+      "source_kind": "project",
+      "source_ref": "oh_my_opencode/research.harness.yaml"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:a490d69d73777a07b8162d5e767bcbdb619078fbd213c500016777b88a02c867",
+      "layer_id": "harness-resource:0000",
+      "model_visible": true,
+      "precedence": 10,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": "oh_my_opencode/research.harness.yaml::prompts/builder.md"
+    },
+    {
+      "host_visible": true,
+      "layer_hash": "sha256:e7d42403d3f4342c30f972f01d25fd3c77cd8fcf87c5f0b7f1d8c02549ceb00b",
+      "layer_id": "harness-resource:0001",
+      "model_visible": true,
+      "precedence": 20,
+      "scope": "resource",
+      "source_kind": "project",
+      "source_ref": "oh_my_opencode/research.harness.yaml::prompts/system.md"
+    }
+  ],
+  "visibility": {
+    "host_only_paths": [],
+    "model_visible_paths": [
+      "loop.sequence",
+      "modes",
+      "prompts.environment.enabled",
+      "prompts.environment.file_limit",
+      "prompts.environment.format",
+      "prompts.packs.base.builder",
+      "prompts.packs.base.system",
+      "prompts.tool_prompt_mode",
+      "provider_tools.api_variant",
+      "provider_tools.responses_use_developer_role",
+      "provider_tools.suppress_prompts",
+      "provider_tools.tool_choice",
+      "provider_tools.use_native",
+      "providers.default_model",
+      "providers.models",
+      "schema_version",
+      "tools.registry.include",
+      "tools.registry.paths",
+      "version",
+      "workspace.root"
+    ],
+    "redacted_paths": []
+  }
+}

@@ -1,0 +1,59 @@
+id: web_search
+name: web_search
+description: >-
+  Web search: current information beyond knowledge cutoff.
+
+
+  <instruction>
+
+  - SHOULD prefer primary sources (papers, official docs); corroborate key
+  claims with multiple sources.
+
+  - MUST link cited sources in final response.
+
+  - NEVER use for programmatically accessible content or known URLs (GitHub
+  repos/issues, known arXiv papers, Wikipedia pages, official docs) — `read` URL
+  directly.
+
+  - `query`: every provider supports Google-style `site:`/`-site:`,
+  `after:`/`before:` (`YYYY-MM-DD`), `inurl:`, `intitle:`, `filetype:`, `"exact
+  phrase"`, `-term`, `OR`. Map constraints to native filters when available;
+  otherwise filter results leniently. If a constraint matches nothing, relax and
+  report it; do not return zero results.
+
+  </instruction>
+type_id: python
+parameters:
+  - name: limit
+    schema:
+      type: number
+    required: false
+  - name: max_tokens
+    schema:
+      type: number
+    required: false
+  - name: num_search_results
+    schema:
+      type: number
+    required: false
+  - name: query
+    schema:
+      type: string
+    required: true
+  - name: recency
+    schema:
+      enum:
+        - day
+        - week
+        - month
+        - year
+      type: string
+    required: false
+  - name: temperature
+    schema:
+      type: number
+    required: false
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

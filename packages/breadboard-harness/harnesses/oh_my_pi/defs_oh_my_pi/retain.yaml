@@ -1,0 +1,37 @@
+id: retain
+name: retain
+description: >
+  Store ≥1 fact in long-term memory for future sessions.
+
+
+  Use: durable, reusable knowledge—user preferences, project decisions,
+  architectural choices; anything improving future responses. No ephemeral task
+  state.
+
+
+  Each item MUST be specific, self-contained: who, what, when, why. Batch
+  related facts per call; deduplicated and consolidated.
+type_id: python
+parameters:
+  - name: items
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          content:
+            type: string
+            description: information to remember
+          context:
+            type: string
+            description: source context
+        required:
+          - content
+        additionalProperties: false
+      minItems: 1
+      description: memories to retain
+    required: true
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

@@ -1,0 +1,15 @@
+id: rewind
+name: rewind
+description: End the active checkpoint; rewind context to it, replacing
+  intermediate exploration with your report.
+type_id: python
+parameters:
+  - name: report
+    schema:
+      type: string
+      description: investigation findings
+    required: true
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

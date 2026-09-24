@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, posix, resolve } from "node:path";
 
 const SNAPSHOT_NAME = "snapshot.json";
@@ -9,6 +9,9 @@ const SNAPSHOT_SCHEMA_VERSION = "bb.harness_engine_data_snapshot.v1" as const;
 const DEFAULT_DATA_DIR = resolve(import.meta.dir, "..", "engine-data");
 const TRACKED_PREFIXES = [
 	"implementations/tools/defs",
+	"implementations/tools/defs_cc",
+	"implementations/tools/defs_oc",
+	"implementations/tools/defs_omo",
 	"implementations/system_prompts",
 	"implementations/prompts/todos",
 	"agent_configs",
@@ -42,6 +45,10 @@ const DERIVED_REQUEST_SCHEMAS = [
 const GENERATED_TYPE_PATHS = [
 	"sdk/ts-kernel-contracts/src/generated/types/bb.effective_config_graph.v1.ts",
 	"sdk/ts-kernel-contracts/src/generated/types/bb.session_transcript.v2.ts",
+] as const;
+const LOCAL_VENDOR_DIRS = [
+	{ prefix: "defs_pi", directory: resolve(import.meta.dir, "../harnesses/pi/defs_pi") },
+	{ prefix: "defs_oh_my_pi", directory: resolve(import.meta.dir, "../harnesses/oh_my_pi/defs_oh_my_pi") },
 ] as const;
 const REQUIRED_PATHS = [...CONTRACT_SCHEMA_PATHS, ...GENERATED_TYPE_PATHS] as const;
 
@@ -127,6 +134,19 @@ function readGitUtf8(engine: string, commit: string, sourcePath: string): { byte
 	return { bytes, content };
 }
 
+function localVendorFiles(): SnapshotFile[] {
+	const files: SnapshotFile[] = [];
+	for (const { prefix, directory } of LOCAL_VENDOR_DIRS) {
+		for (const name of readdirSync(directory).sort()) {
+			if (!/\.ya?ml$/u.test(name)) continue;
+			const bytes = readFileSync(join(directory, name));
+			const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+			files.push({ path: `${prefix}/${name}`, sha256: sha256(bytes), bytes: bytes.byteLength, content });
+		}
+	}
+	return files;
+}
+
 /** Resolve a schema `$ref` to a repository path; `undefined` for same-document refs. */
 function refTarget(schemaPath: string, ref: string): string | undefined {
 	const documentRef = ref.split("#", 1)[0]!;
@@ -196,6 +216,7 @@ function createSnapshot(engine: string): Snapshot {
 		files.push({ path: sourcePath, sha256: sha256(bytes), bytes: bytes.byteLength, content });
 	}
 	files.push(...derivedRequestSchemas(engine, commit));
+	files.push(...localVendorFiles());
 	files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 	assertSchemaRefClosure(files);
 	return { schemaVersion: SNAPSHOT_SCHEMA_VERSION, engineCommit: commit, engineTree: tree, files };

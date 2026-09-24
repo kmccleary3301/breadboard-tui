@@ -1,0 +1,56 @@
+id: manage_skill
+name: manage_skill
+description: >
+  Managed skill: `SKILL.md` in isolated `~/.omp/agent/managed-skills`; surfaced
+  as a normal skill in future sessions.
+
+
+  Use: repeatable procedures worth codifying — setup sequence, debugging recipe,
+  project-specific workflow.
+
+  User-authored skills separate; tool NEVER edits them.
+
+
+  - `action: "create"` — fails if skill exists.
+
+  - `action: "update"` — overwrites body; fails if skill absent.
+
+  - `action: "delete"` — fails if skill absent.
+
+
+  `name`: kebab-case (lowercase letters, digits, hyphens).
+
+  `description`: specific; drives discovery.
+
+  No frontmatter in `body`; generated from `name` and `description`.
+type_id: python
+parameters:
+  - name: action
+    schema:
+      enum:
+        - create
+        - update
+        - delete
+      type: string
+    required: true
+  - name: body
+    schema:
+      type: string
+      description: the SKILL.md body in markdown, no frontmatter (required for
+        create/update)
+    required: false
+  - name: description
+    schema:
+      type: string
+      description: one-line description of when to use the skill (required for
+        create/update)
+    required: false
+  - name: name
+    schema:
+      type: string
+      description: kebab-case skill name
+    required: true
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

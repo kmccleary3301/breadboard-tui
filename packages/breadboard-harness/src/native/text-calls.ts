@@ -6,12 +6,10 @@ type ParseValue = { readonly ok: true; readonly value: CanonicalJson } | { reado
 type ToolShape = { readonly definition: NativeToolDefinition; readonly parameters: readonly string[] };
 
 const ALIASES: Readonly<Record<string, string>> = {
-	opencodeaddfile: "Write",
 	generalbashcommands: "Bash",
 	aidersearchreplace: "apply_search_replace",
 	unifieddiffgitlike: "apply_unified_patch",
 	bashcommands: "Bash",
-	opencode: "Write",
 };
 
 function normalizeName(rawName: string, tools: readonly ToolShape[]): string | undefined {

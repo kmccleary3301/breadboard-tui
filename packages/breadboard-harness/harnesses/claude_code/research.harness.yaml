@@ -1,0 +1,36 @@
+schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: anthropic/claude-haiku-4-5-20251001
+  models:
+    - id: anthropic/claude-haiku-4-5-20251001
+      adapter: anthropic
+tools:
+  registry:
+    paths: [implementations/tools/defs_cc]
+    include: ["*"]
+prompts:
+  packs:
+    base:
+      system: prompts/system.md
+      plan: prompts/system.md
+      builder: prompts/system.md
+      compact: prompts/system.md
+  tool_prompt_mode: system_compiled_and_persistent_per_turn
+modes:
+  - name: plan
+    prompt: '@pack(base).plan'
+    tools_enabled: [TaskOutput, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, TodoWrite, WebSearch, KillShell, AskUserQuestion, Skill, SlashCommand, EnterPlanMode]
+  - name: build
+    prompt: '@pack(base).builder'
+    tools_enabled: [TaskOutput, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, TodoWrite, WebSearch, KillShell, AskUserQuestion, Skill, SlashCommand, EnterPlanMode]
+loop:
+  sequence:
+    - if: features.plan
+      then: {mode: plan}
+    - mode: build
+  plan_turn_limit: 1
+features:
+  plan: true

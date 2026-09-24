@@ -1,0 +1,38 @@
+schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: openai/gpt-5.1-codex-mini
+  models:
+    - id: openai/gpt-5.1-codex-mini
+      adapter: openai_responses
+provider_tools:
+  use_native: true
+  suppress_prompts: true
+  api_variant: responses
+  responses_use_developer_role: true
+  tool_choice: auto
+
+tools:
+  registry:
+    paths: [implementations/tools/defs_oc]
+    include: [bash, write]
+prompts:
+  packs:
+    base:
+      system: prompts/system.md
+      plan: prompts/plan.md
+      builder: prompts/builder.md
+  environment:
+    enabled: true
+    format: opencode
+    file_limit: 200
+  tool_prompt_mode: none
+modes:
+  - name: build
+    prompt: '@pack(base).system'
+    tools_enabled: [bash, write]
+loop:
+  sequence:
+    - mode: build

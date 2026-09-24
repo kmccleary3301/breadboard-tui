@@ -1,0 +1,20 @@
+id: write
+name: write
+description: Write content to a file. Creates the file if it doesn't exist, overwrites
+  if it does. Automatically creates parent directories.
+provider_routing:
+  openai:
+    native_primary: true
+parameters:
+- name: path
+  schema:
+    type: string
+    description: Path to the file to write (relative or absolute)
+  required: true
+- name: content
+  schema:
+    type: string
+    description: Content to write to the file
+  required: true
+execution:
+  blocking: true

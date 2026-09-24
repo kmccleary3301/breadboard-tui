@@ -1,0 +1,65 @@
+id: find
+name: find
+description: >-
+  Globs files, directories, and path-backed internal URLs with fast pattern
+  matching.
+
+
+  <instruction>
+
+  - `path`: glob, file, directory, or path-backed internal URL; separate targets
+  with `;` (`src/**/*.ts; test/**/*.ts`).
+
+  - `memory://` glob patterns are supported. `ssh://` has no local path; use
+  `read`. Other internal URLs accept exact paths only.
+
+  - `gitignore` defaults `true`. Set `false` for ignored files such as `.env*`,
+  logs, or build output.
+
+  - `hidden` defaults `true`; pair it with `gitignore: false` for ignored
+  dotfiles.
+
+  </instruction>
+
+
+  <output>
+
+  Matches are newest-first and grouped by directory; directories end in `/`.
+
+  </output>
+
+
+  <avoid>
+
+
+  Open-ended multi-round discovery → Task + scout.
+
+  </avoid>
+type_id: python
+parameters:
+  - name: gitignore
+    schema:
+      type: boolean
+      description: respect gitignore
+    required: false
+  - name: hidden
+    schema:
+      type: boolean
+      description: include hidden files
+    required: false
+  - name: limit
+    schema:
+      type: number
+      description: max results
+    required: false
+  - name: path
+    schema:
+      type: string
+      description: glob, file, or directory to search — a single path or a
+        semicolon-delimited list ("src/**/*.ts; test/**/*.ts"). Omitted ->
+        searches the workspace root (".")
+    required: false
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

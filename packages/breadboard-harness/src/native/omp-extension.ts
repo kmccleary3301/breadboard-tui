@@ -2,15 +2,17 @@ import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
 import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
+import { RESEARCH_NATIVE_BINDINGS, researchBindingForTool } from "./research-bindings";
 import { NativeHarnessReloadError, type LoadedNativeHarness, type NativeHarnessLiveState } from "./load-native-harness";
-import { frameNativeUserMessage } from "./prompt-assembly";
+import { nativeLockValue } from "./lock-values";
+import { frameNativeUserContent } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
 import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
 import { TodoWriteState, todoCompletionGuardReason } from "./todo-write";
 import { registerSessionTranscriptExport } from "./session-transcript";
 import { NativeTurnPolicy } from "./turn-policy";
-import { type NativeToolResult } from "./types";
+import type { NativeToolDefinition, NativeToolResult } from "./types";
 import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type {
 	ExtensionAPI,
@@ -139,6 +141,7 @@ async function invokeBuiltin(call: NativeCall, params: Record<string, unknown>):
  * tool definitions; execution is OMP's (`bash`, `eval`) or an adapter tested against Python fixtures.
  */
 export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
+	...RESEARCH_NATIVE_BINDINGS,
 	read_file: {
 		approval: "read",
 		run: call =>
@@ -208,11 +211,17 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	},
 };
 
+/** Resolve from the tool's declared name and schema, without depending on registry paths. */
+export function nativeBindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
+	if (Object.hasOwn(RESEARCH_NATIVE_BINDINGS, tool.name)) return researchBindingForTool(tool);
+	return NATIVE_BINDINGS[tool.name];
+}
+
 /** Built-ins the harness's function tools delegate to, keyed by harness tool name. */
 export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, string> {
 	const delegates: Record<string, string> = {};
 	for (const tool of harness.toolSurface.native) {
-		const delegate = NATIVE_BINDINGS[tool.name]?.delegate;
+		const delegate = nativeBindingForTool(tool)?.delegate;
 		if (delegate !== undefined) delegates[tool.name] = delegate;
 	}
 	return delegates;
@@ -276,7 +285,7 @@ function registerFunctionTools(
 ): void {
 	assertNativeHarnessBindings(harness);
 	for (const tool of harness.registeredToolSurface.native) {
-		const binding = NATIVE_BINDINGS[tool.name];
+		const binding = nativeBindingForTool(tool);
 		if (binding === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
 		api.registerTool({
 			name: tool.name,
@@ -457,6 +466,57 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 	return { ready, dispose };
 }
 
+function developerRolePayload(payload: unknown): unknown {
+	if (!isJsonRecord(payload as never)) return payload;
+	const record = payload as JsonRecord;
+	if (!Array.isArray(record.input)) return payload;
+	const input = (record.input as unknown[]).map((item: unknown) => {
+		if (!isJsonRecord(item as never)) return item;
+		const itemRecord = item as JsonRecord;
+		if (itemRecord.role !== "developer" || typeof itemRecord.content !== "string") return item;
+		return { ...itemRecord, content: [{ type: "input_text", text: itemRecord.content }] };
+	});
+	return { ...record, input };
+}
+
+function instructionsPayload(payload: unknown): unknown {
+	if (!isJsonRecord(payload as never) || !Array.isArray((payload as JsonRecord).input)) return payload;
+	const record = payload as JsonRecord;
+	let instructions = typeof record.instructions === "string" ? record.instructions : undefined;
+	const input: unknown[] = [];
+	for (const item of record.input as unknown[]) {
+		if (!isJsonRecord(item as never) || (item as JsonRecord).role !== "developer") {
+			input.push(item);
+			continue;
+		}
+		const content = (item as JsonRecord).content;
+		const text =
+			typeof content === "string"
+				? content
+				: Array.isArray(content)
+					? content
+							.filter((part): part is JsonRecord => isJsonRecord(part) && part.type === "input_text" && typeof part.text === "string")
+							.map(part => part.text as string)
+							.join("")
+					: "";
+		if (text) instructions = instructions === undefined ? text : `${instructions}\n\n${text}`;
+	}
+	return {
+		...record,
+		input,
+		...(instructions === undefined ? {} : { instructions }),
+	};
+}
+
+function usesResponsesDialect(lock: JsonRecord): boolean {
+	if (nativeLockValue(lock, "provider_tools.api_variant") === "responses") return true;
+	const models = nativeLockValue(lock, "providers.models");
+	return (
+		Array.isArray(models) &&
+		models.some(model => isJsonRecord(model as never) && model.adapter === "openai_responses")
+	);
+}
+
 /**
  * The extension that makes an OMP session run a compiled BreadBoard harness, including stage
  * transitions between continuation requests. On a host surface it leaves OMP's tools and turns
@@ -480,6 +540,12 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				graph_hash: current.graphHash,
 			});
 		};
+		api.on("before_provider_request", event => {
+			if (!usesResponsesDialect(activeHarness.lock)) return undefined;
+			return nativeLockValue(activeHarness.lock, "provider_tools.responses_use_developer_role") === true
+				? developerRolePayload(event.payload)
+				: instructionsPayload(event.payload);
+		});
 		const applyStage = async (): Promise<void> => {
 			const stage = stageMachine.current;
 			promptOverride.splice(0, promptOverride.length, stage.systemPrompt);
@@ -578,18 +644,22 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				}
 				if (message.role !== "user" || message.attribution === "agent") return message;
 				if (typeof message.content === "string") {
-					return { ...message, content: frameNativeUserMessage(message.content, stageMachine.current.perTurnPrompt) };
+					return { ...message, content: frameNativeUserContent(message.content, stageMachine.current) };
 				}
 				const first = message.content.findIndex(block => block.type === "text");
 				if (first < 0) return message;
-				return {
-					...message,
-					content: message.content.map((block, index) =>
-						index === first && block.type === "text"
-							? { ...block, text: frameNativeUserMessage(block.text, stageMachine.current.perTurnPrompt) }
-							: block,
-					),
-				};
+				const block = message.content[first];
+				if (block.type !== "text") return message;
+				const framed = frameNativeUserContent(block.text, stageMachine.current);
+				if (typeof framed === "string") {
+					return {
+						...message,
+						content: message.content.map((candidate, index) =>
+							index === first && candidate.type === "text" ? { ...candidate, text: framed } : candidate,
+						),
+					};
+				}
+				return { ...message, content: [...message.content.slice(0, first), ...framed, ...message.content.slice(first + 1)] };
 			}),
 		}));
 	};

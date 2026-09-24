@@ -1,0 +1,51 @@
+id: search
+name: search
+description: |-
+  Searches files/internal URLs: Rust regex, PCRE2 fallback.
+
+  <instruction>
+  - `path`: known files, directories, globs, internal URLs; roots `;`-separated.
+  - Broad searches may time out → narrow scope or use `glob` first.
+  - One-file line selector: `src/foo.ts:50-100`; never selects search root.
+  - Literal `\n` or `\\n` enables cross-line patterns.
+  </instruction>
+
+  <critical>
+  - MUST use instead of shell `grep`/`rg`.
+
+  - Open-ended multi-round search MUST use Task + scout, not chained calls.
+  </critical>
+type_id: python
+parameters:
+  - name: case
+    schema:
+      type: boolean
+      description: case-sensitive search
+    required: false
+  - name: gitignore
+    schema:
+      type: boolean
+      description: respect gitignore
+    required: false
+  - name: path
+    schema:
+      type: string
+      description: file, directory, glob, internal URL, or "<file>:<lines>" selector
+        to search; pass several as a semicolon-delimited list ("src; tests").
+        Omitted -> searches the workspace root (".")
+    required: false
+  - name: pattern
+    schema:
+      type: string
+      description: regex pattern
+    required: true
+  - name: skip
+    schema:
+      type: number
+      description: files to skip before collecting results — use to paginate when the
+        prior call hit the file limit
+    required: false
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true

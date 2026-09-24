@@ -1,0 +1,6 @@
+{
+  "graph_hash": "sha256:d9abdd66bbd193534944e56288952ab6779627bdbd43844e87a91eb776896ede",
+  "schema_version": "bb.harness_lock_metadata.v1",
+  "source_ref": "claude_code/research.harness.yaml",
+  "source_sha256": "sha256:eaa91bc2837f021fe5db3de9019a0e2af2b4717fb4758c885d7c8db766f2479c"
+}

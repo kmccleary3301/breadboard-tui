@@ -1,0 +1,62 @@
+id: learn
+name: learn
+description: >
+  Capture reusable lessons in long-term memory; optionally mint/enhance a
+  managed skill in the same call.
+
+
+  Use after solving insight likely to pay off again: a non-obvious fix,
+  discovered project convention, or workflow that worked.
+
+
+  `skill` optional; provide only for a repeatable procedure worth codifying as
+  `SKILL.md`, not a fact. Managed skills: isolated
+  `~/.omp/agent/managed-skills`; surfaced as normal skills next session; NEVER
+  touch user-authored skills. Frontmatter: generated from `name` and
+  `description`.
+
+
+  Capture sparingly, specifically: one strong reusable lesson > several vague
+  ones.
+type_id: python
+parameters:
+  - name: context
+    schema:
+      type: string
+      description: optional source context for the lesson
+    required: false
+  - name: memory
+    schema:
+      type: string
+      description: the durable, self-contained lesson to remember (what, when, why)
+    required: true
+  - name: skill
+    schema:
+      type: object
+      properties:
+        action:
+          enum:
+            - create
+            - update
+          type: string
+        body:
+          type: string
+          description: the SKILL.md body in markdown (no frontmatter)
+        description:
+          type: string
+          description: one-line description of when to use the skill
+        name:
+          type: string
+          description: kebab-case skill name
+      required:
+        - action
+        - body
+        - description
+        - name
+      description: also create or enhance a managed skill in the same call
+      additionalProperties: false
+    required: false
+provider_routing:
+  openai:
+    native_primary: true
+    strict: true
