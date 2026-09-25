@@ -2104,11 +2104,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Create built-in tools (already wrapped with meta notice formatting). Delegate targets are
 		// created with an explicit tool list so `ctx.invokeTool` can reach them; the active set below
 		// still comes from `options.toolNames` alone.
-		const delegateTargets = Object.values(options.toolDelegates ?? {}).filter(
-			(delegate): delegate is string => typeof delegate === "string",
-		);
+		const delegateTargets = options.toolDelegates
+			? Object.values(options.toolDelegates).filter((delegate): delegate is string => typeof delegate === "string")
+			: undefined;
 		const createdToolNames =
-			options.toolNames && delegateTargets.length > 0
+			options.toolNames && delegateTargets?.length
 				? [...new Set([...options.toolNames, ...delegateTargets])]
 				: options.toolNames;
 		await logger.time("createAllTools", createTools, toolSession, createdToolNames);
