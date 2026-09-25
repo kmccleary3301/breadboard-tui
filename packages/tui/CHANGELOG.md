@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Fixed a stale `/skill:` completion consuming Enter instead of submitting the command currently typed in the composer.
 - Invalidated prepared-line caches when the runtime image protocol changes and excluded oversized strings from cache retention.
 - Started the BreadBoard cached composer before loading product setting defaults, while retaining those defaults before the shared CLI.
 ## [18.3.0] - 2026-09-24

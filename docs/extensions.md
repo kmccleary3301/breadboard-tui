@@ -460,6 +460,25 @@ gets a `ctx.invokeTool` that runs the native `bash`, and `bash` is created witho
 tool set unless `toolNames` names it. Only the host sets this map, so an extension still cannot
 choose its own target.
 
+A host can also supply a factory when the delegate needs a fixed execution
+mode. The factory receives the session's real `ToolSession` and runs once per
+mapped extension tool. It may return the tool directly or through a promise:
+
+```ts
+import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
+import type { NativeToolDelegate } from "@oh-my-pi/pi-coding-agent/sdk";
+
+const toolDelegates = {
+  replace_file: session => new EditTool(session, "replace"),
+} satisfies Record<string, NativeToolDelegate>;
+```
+
+Pass this map to `createAgentSession` alongside the extension that registers
+`replace_file`. The delegate uses normal session state without changing
+session-wide edit settings. It does not become a separate active tool.
+The extension must declare the correct approval tier and translate its
+arguments to the delegate's schema; delegation inherits that approval.
+
 Template:
 
 ```ts

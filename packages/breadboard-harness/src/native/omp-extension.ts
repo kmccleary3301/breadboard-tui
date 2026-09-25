@@ -19,6 +19,7 @@ import type {
 	ExtensionContext,
 	ExtensionFactory,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import type { NativeToolDelegate } from "@oh-my-pi/pi-coding-agent/sdk";
 
 /** Custom message type carrying text-dialect tool results; the model receives it as a user message. */
 export const NATIVE_TEXT_RESULTS_MESSAGE_TYPE = "breadboard-native-text-results";
@@ -88,8 +89,8 @@ export interface NativeCall {
 export interface NativeBinding {
 	/** OMP approval tier. `always-ask` prompts for `write` and `exec`, as Python's prompt mode asks for edit and shell. */
 	readonly approval: "read" | "write" | "exec";
-	/** Built-in whose implementation this tool's `ctx.invokeTool` runs. */
-	readonly delegate?: string;
+	/** Native implementation this tool's `ctx.invokeTool` runs. */
+	readonly delegate?: NativeToolDelegate;
 	run(call: NativeCall): Promise<NativeToolResult>;
 }
 
@@ -218,8 +219,8 @@ export function nativeBindingForTool(tool: NativeToolDefinition): NativeBinding 
 }
 
 /** Built-ins the harness's function tools delegate to, keyed by harness tool name. */
-export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, string> {
-	const delegates: Record<string, string> = {};
+export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, NativeToolDelegate> {
+	const delegates: Record<string, NativeToolDelegate> = {};
 	for (const tool of harness.toolSurface.native) {
 		const delegate = nativeBindingForTool(tool)?.delegate;
 		if (delegate !== undefined) delegates[tool.name] = delegate;

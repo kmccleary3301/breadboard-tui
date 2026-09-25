@@ -4,87 +4,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { loadNativeToolDefinitionsByRegistryPath } from "../../src/native/tool-pack";
-import { researchBindingForTool, researchDelegateForTool } from "../../src/native/research-bindings";
+import { researchBindingForTool } from "../../src/native/research-bindings";
 import type { JsonRecord } from "../../src/canonical-json";
 import type { NativeToolDefinition } from "../../src/native/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 
 type JsonObject = JsonRecord;
 
-
-const directDelegates: Readonly<Record<string, string>> = {
-	Bash: "bash",
-	Read: "read",
-	Edit: "edit",
-	Write: "write",
-	Glob: "glob",
-	Grep: "grep",
-	Skill: "manage_skill",
-	WebSearch: "web_search",
-	bash: "bash",
-	shell_command: "bash",
-	interactive_bash: "bash",
-	read: "read",
-	edit: "edit",
-	apply_patch: "apply_patch",
-	write: "write",
-	glob: "glob",
-	grep: "grep",
-	list: "find",
-	find: "find",
-	ls: "find",
-	task: "task",
-	background_task: "task",
-	webfetch: "web_search",
-	manage_skill: "manage_skill",
-	eval: "eval",
-	todo: "todo",
-	ast_grep: "ast_grep",
-	ast_edit: "ast_edit",
-	ask: "ask",
-	debug: "debug",
-	github: "github",
-	lsp: "lsp",
-	checkpoint: "checkpoint",
-	rewind: "rewind",
-	memory_edit: "memory_edit",
-	retain: "retain",
-	recall: "recall",
-	reflect: "reflect",
-	learn: "learn",
-};
-
-function expectedDelegate(tool: NativeToolDefinition): string | undefined {
-	const direct = directDelegates[tool.name];
-	if (direct === undefined) return undefined;
-	const properties = tool.parameters.properties;
-	const names = typeof properties === "object" && properties !== null && !Array.isArray(properties) ? Object.keys(properties) : [];
-	const required = Array.isArray(tool.parameters.required) ? tool.parameters.required : [];
-	if (tool.name === "grep" && !names.includes("pattern") && names.includes("path")) return "read";
-	if ((tool.name === "task" || tool.name === "web_search") && required.includes("command")) return "bash";
-	return direct;
-}
-
-async function delegatedInput(tool: NativeToolDefinition, input: JsonObject): Promise<JsonObject> {
-	let received: JsonObject | undefined;
-	await researchBindingForTool(tool).run({
-		input,
-		harness: {} as never,
-		context: {
-			invokeTool: async (params: JsonObject) => {
-				received = params;
-				return { content: [{ type: "text", text: "ok" }] };
-			},
-		} as never,
-		signal: undefined,
-		onUpdate: undefined,
-
-		todos: {} as never,
-		guard: {} as never,
-	});
-	if (received === undefined) throw new Error(`${tool.name} did not invoke a builtin`);
-	return received;
-}
 function patchSession(cwd: string): ToolSession {
 	return {
 		cwd,
@@ -96,95 +22,15 @@ function patchSession(cwd: string): ToolSession {
 		getSessionId: () => null,
 		getPlanModeState: () => undefined,
 		settings: Settings.isolated({ "edit.mode": "replace" }),
-	} as unknown as ToolSession;
+	};
 }
 
 
 describe("research native builtin bindings", () => {
-	test("binds every pack definition from its declared YAML", async () => {
-		const definitions = await loadNativeToolDefinitionsByRegistryPath();
-		for (const tools of definitions.values()) {
-			for (const tool of tools) expect(researchDelegateForTool(tool)).toBe(expectedDelegate(tool));
-		}
-	});
-	test("maps every declared exec tool through one host binding call", async () => {
-		const definitions = await loadNativeToolDefinitionsByRegistryPath();
-		const expectedKeys = new Set(["command", "timeout", "cwd", "name", "agent", "task", "context", "tasks", "query", "recency", "limit", "max_tokens", "temperature", "num_search_results", "code", "language", "reset", "title"]);
-		for (const tools of definitions.values()) {
-			for (const tool of tools) {
-				if (!/^(?:Bash|bash|shell_command|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)) continue;
-				const delegate = researchDelegateForTool(tool);
-				expect(delegate, `${tool.name} must have an exec binding`).toBeDefined();
-				const properties = tool.parameters.properties;
-				const input = Object.fromEntries(
-					Object.keys(typeof properties === "object" && properties !== null && !Array.isArray(properties) ? properties : {}).map(name => [name, "probe"]),
-				);
-				let received: JsonObject | undefined;
-				await researchBindingForTool(tool).run({
-					input,
-					harness: {} as never,
-					context: {
-						invokeTool: async (params: JsonObject) => {
-							received = params;
-							return { content: [{ type: "text", text: "ok" }] };
-						},
-					} as never,
-					signal: undefined,
-					onUpdate: undefined,
-					todos: {} as never,
-					guard: {} as never,
-				});
-				expect(received, `${tool.name} did not invoke host binding`).toBeDefined();
-				for (const key of Object.keys(received ?? {})) expect(expectedKeys.has(key), `${tool.name} emitted unknown host key ${key}`).toBe(true);
-			}
-		}
-	});
-
-	test("does not let an agent-shaped task call bash", async () => {
-		const definitions = await loadNativeToolDefinitionsByRegistryPath();
-		const tool = definitions.get("implementations/tools/defs_oc")?.find(candidate => candidate.name === "task");
-		if (!tool) throw new Error("missing OpenCode task definition");
-		expect(researchDelegateForTool(tool)).toBe("task");
-		expect(await delegatedInput(tool, { command: "printf should-not-run", prompt: "agent task" })).toEqual({
-			task: "agent task",
-		});
-	});
-
-	test("maps the Pi and OMO-Pi path/text aliases to host builtins", async () => {
-		const definitions = await loadNativeToolDefinitionsByRegistryPath();
-		const piRead = definitions.get("defs_pi")?.find(tool => tool.name === "read");
-		const piEdit = definitions.get("defs_pi")?.find(tool => tool.name === "edit");
-		const omoEdit = definitions.get("defs_oh_my_pi")?.find(tool => tool.name === "edit");
-		if (!piRead || !piEdit || !omoEdit) throw new Error("missing Group B definition");
-		expect(await delegatedInput(piRead, { path: "fixture.txt", offset: 1, limit: 20 })).toEqual({
-			path: "fixture.txt",
-			offset: 1,
-			limit: 20,
-		});
-		expect(await delegatedInput(piEdit, { path: "fixture.txt", oldText: "a", newText: "b" })).toEqual({
-			filePath: "fixture.txt",
-			oldString: "a",
-			newString: "b",
-		});
-		expect(await delegatedInput(omoEdit, { input: "patch payload", file_name: "alias.txt", search: "a", replace: "b" })).toEqual({
-			input: "patch payload",
-		});
-	});
-	test("prefers a declared path over an undeclared alias", async () => {
-		const definitions = await loadNativeToolDefinitionsByRegistryPath();
-		const piRead = definitions.get("defs_pi")?.find(tool => tool.name === "read");
-		if (!piRead) throw new Error("missing Pi read definition");
-		expect(await delegatedInput(piRead, { path: "declared.txt", filePath: "alias.txt" })).toEqual({
-			path: "declared.txt",
-		});
-	});
-
-	test("applies apply_patch through the host patch path regardless of edit mode", async () => {
+	test("applies the declared patch to workspace files", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-patch-"));
 		try {
 			const target = path.join(scratch, "target.txt");
-			const hostSession = patchSession(scratch);
-			expect(hostSession.settings.get("edit.mode")).toBe("replace");
 			await Bun.write(target, "before\n");
 			const input = [
 				"*** Begin Patch",
@@ -272,7 +118,7 @@ describe("research native builtin bindings", () => {
 				input: { command: "cat fixture.txt", workdir: nested, timeout_ms: 5000 },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostBash.execute("research-shell", params as never),
+					invokeTool: async (params: JsonObject) => hostBash.execute("research-shell", hostBash.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,

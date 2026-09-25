@@ -47,14 +47,15 @@ afterAll(() => {
 
 async function nativeSession(
 	responses: MockResponse[],
-	options: { autoApprove?: boolean; extensions?: ExtensionFactory[] } = {},
+	options: { autoApprove?: boolean; extensions?: ExtensionFactory[]; specPath?: string; editMode?: "hashline" | "replace" } = {},
 	configureHarness?: (harness: LoadedNativeHarness) => LoadedNativeHarness,
 ): Promise<{ session: AgentSession; harness: LoadedNativeHarness; calls: ReturnType<typeof createMockModel>["calls"] }> {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), `bb-native-session-${Snowflake.next()}-`));
 	tempDirs.push(root);
 	const cwd = fs.realpathSync(root);
-	fs.cpSync(R39_FIXTURE, cwd, { recursive: true });
-	const loadedHarness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: cwd });
+	const specPath = options.specPath ?? R39_SPEC;
+	if (specPath === R39_SPEC) fs.cpSync(R39_FIXTURE, cwd, { recursive: true });
+	const loadedHarness = await loadNativeHarness({ specPath, workspaceRoot: cwd });
 	const harness = configureHarness?.(loadedHarness) ?? loadedHarness;
 	const settings = Settings.isolated({
 		"async.enabled": false,
@@ -63,6 +64,7 @@ async function nativeSession(
 		"compaction.enabled": false,
 		"retry.enabled": false,
 	});
+	if (options.editMode !== undefined) settings.override("edit.mode", options.editMode);
 	const sessionOptions: CreateAgentSessionOptions = {
 		cwd,
 		agentDir: cwd,
@@ -436,5 +438,61 @@ describe("bb-omp.native session", () => {
 			expect({ control, error: String(await attempt(native)) }).toEqual({ control, error: "undefined" });
 			expect({ control, error: String(await attempt(bridge)) }).toEqual({ control, error: expect.stringMatching(/BreadBoard/) });
 		}
+	});
+});
+
+describe("research pack file tools", () => {
+	it("writes the opencode filePath through the host write tool", async () => {
+		const { session, harness } = await nativeSession([], { specPath: "opencode", autoApprove: true });
+		const tool = session.getToolByName("write");
+		if (!tool) throw new Error("opencode must expose write");
+		const result = await tool.execute("research-write", {
+			filePath: "created.txt",
+			content: "exact requested bytes\n",
+		});
+		expect(result.isError).not.toBe(true);
+		expect(await Bun.file(path.join(harness.workspaceRoot, "created.txt")).text()).toBe("exact requested bytes\n");
+	});
+
+	it("preserves Pi replacement semantics when the host uses hashline edits", async () => {
+		const { session, harness } = await nativeSession([], {
+			specPath: "pi",
+			autoApprove: true,
+			editMode: "hashline",
+		});
+		const target = path.join(harness.workspaceRoot, "existing.txt");
+		await Bun.write(target, "target=old\nmirror=old\n");
+		const tool = session.getToolByName("edit");
+		if (!tool) throw new Error("pi must expose edit");
+		const result = await tool.execute("research-edit", {
+			path: "existing.txt",
+			oldText: "target=old",
+			newText: "target=new",
+		});
+		expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+		expect(await Bun.file(target).text()).toBe("target=new\nmirror=old\n");
+
+		const missing = await tool.execute("research-edit-missing", {
+			path: "existing.txt",
+			oldText: "absent text",
+			newText: "unwanted replacement",
+		});
+		expect(missing.isError).toBe(true);
+		expect(await Bun.file(target).text()).toBe("target=new\nmirror=old\n");
+	});
+
+	it("denies research file writes without approval in prompt mode", async () => {
+		const { session, harness } = await nativeSession(
+			[
+				toolCall("write-denied", "write", { filePath: "unapproved.txt", content: "must not be written\n" }),
+				{ content: [{ type: "text", text: "finished" }], stopReason: "stop" },
+			],
+			{ specPath: "opencode" },
+			harness => ({ ...harness, permissions: { ...harness.permissions, mode: "prompt" } }),
+		);
+		await session.prompt("Write the requested file.");
+		await session.waitForIdle();
+		expect(toolResult(session, "write-denied")?.isError).toBe(true);
+		expect(fs.existsSync(path.join(harness.workspaceRoot, "unapproved.txt"))).toBe(false);
 	});
 });

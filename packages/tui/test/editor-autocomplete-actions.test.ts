@@ -804,21 +804,20 @@ describe("Editor Enter handler sync slash completion", () => {
 		expect(editor.isShowingAutocomplete()).toBeFalse();
 	});
 
-	it("cancels a stale skill namespace selection without submitting it", async () => {
+	it("submits the typed command when a stale skill namespace is selected", async () => {
 		const editor = createSkillEditor();
-		let submitted: string | undefined;
+		const submissions: string[] = [];
 		editor.onSubmit = text => {
-			submitted = text;
+			submissions.push(text);
 		};
 
 		editor.handleInput("/");
 		await untilAutocompleteShown(editor);
-		editor.handleInput("z");
-		editor.handleInput("z");
+		for (const character of "model") editor.handleInput(character);
 		editor.handleInput("\r");
 
-		expect(submitted).toBeUndefined();
-		expect(editor.getText()).toBe("/zz");
+		expect(submissions).toEqual(["/model"]);
+		expect(editor.getText()).toBe("");
 		expect(editor.isShowingAutocomplete()).toBeFalse();
 	});
 

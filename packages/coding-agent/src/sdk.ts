@@ -381,6 +381,8 @@ function applyMCPEnvironment(result: { exaApiKeys: string[] }): void {
 }
 
 // Types
+export type NativeToolDelegate = string | ((session: ToolSession) => Tool | Promise<Tool>);
+
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: getProjectDir() */
 	cwd?: string;
@@ -602,12 +604,11 @@ export interface CreateAgentSessionOptions {
 	/** Tool names explicitly requested (enables disabled-by-default tools) */
 	toolNames?: string[];
 	/**
-	 * Extension tool name → built-in tool whose native implementation that tool's `ctx.invokeTool`
-	 * runs. Lets an extension present a built-in under another model-facing name and schema. Each
-	 * target is created with the session's other built-ins but stays inactive unless named in
-	 * {@link toolNames}.
+	 * Extension tool name → built-in name or a session-scoped native tool factory for `ctx.invokeTool`.
+	 * A factory can bind a built-in's explicit execution mode without changing session-wide settings.
+	 * Delegation does not activate the target or bypass the extension's approval.
 	 */
-	toolDelegates?: Readonly<Record<string, string>>;
+	toolDelegates?: Readonly<Record<string, NativeToolDelegate>>;
 	/** Limit the session to explicitly supplied tool names, without discovered extras. */
 	restrictToolNames?: boolean;
 	/**
@@ -2103,7 +2104,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Create built-in tools (already wrapped with meta notice formatting). Delegate targets are
 		// created with an explicit tool list so `ctx.invokeTool` can reach them; the active set below
 		// still comes from `options.toolNames` alone.
-		const delegateTargets = Object.values(options.toolDelegates ?? {});
+		const delegateTargets = Object.values(options.toolDelegates ?? {}).filter(
+			(delegate): delegate is string => typeof delegate === "string",
+		);
 		const createdToolNames =
 			options.toolNames && delegateTargets.length > 0
 				? [...new Set([...options.toolNames, ...delegateTargets])]
@@ -3069,11 +3072,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			toolRegistry.set(tool.name, tool);
 			builtInRegistryToolNames.delete(tool.name);
 		}
+		let configuredDelegates: Map<string, Tool> | undefined;
+		if (options.toolDelegates !== undefined) {
+			for (const [name, delegate] of Object.entries(options.toolDelegates)) {
+				if (typeof delegate === "string") continue;
+				configuredDelegates ??= new Map();
+				configuredDelegates.set(name, wrapToolWithMetaNotice(await delegate(toolSession)));
+			}
+		}
 		// Expose the native built-ins to same-tool `ctx.invokeTool` on re-registered tools. Set after
 		// the override loop so the map holds the natives, not the extension replacements. The context
 		// factory is the loop's own tool context, so a delegated native call sees ordinary session state.
 		extensionRunner.setNativeToolResolver(name => {
-			const tool = nativeToolsByName.get(options.toolDelegates?.[name] ?? name);
+			const delegate = options.toolDelegates?.[name] ?? name;
+			const tool = typeof delegate === "string" ? nativeToolsByName.get(delegate) : configuredDelegates?.get(name);
 			return tool ? { tool, makeContext: () => toolContextStore.getContext() } : undefined;
 		});
 		if (deferMCPDiscoveryForUI && mcpManager) {

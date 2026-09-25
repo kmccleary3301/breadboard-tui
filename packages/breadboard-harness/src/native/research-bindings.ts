@@ -1,3 +1,5 @@
+import type { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { JsonRecord } from "../canonical-json";
 import { applyUnifiedPatchAdapter } from "./adapters";
 import type { NativeBinding, NativeCall } from "./omp-extension";
@@ -87,7 +89,7 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 	if (delegateName === "write") {
 		return Object.fromEntries(
 			[
-				["filePath", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
+				["path", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
 				["content", declaredAlias(properties, ["content", "text"])],
 			].filter((entry): entry is [string, string] => entry[1] !== undefined),
 		);
@@ -95,10 +97,10 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 	if (delegateName === "edit") {
 		return Object.fromEntries(
 			[
-				["filePath", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
-				["oldString", declaredAlias(properties, ["oldString", "old_string", "oldText", "search"])],
-				["newString", declaredAlias(properties, ["newString", "new_string", "newText", "replace"])],
-				["replaceAll", declaredAlias(properties, ["replaceAll", "replace_all"])],
+				["path", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
+				["old_string", declaredAlias(properties, ["oldString", "old_string", "oldText", "search"])],
+				["new_string", declaredAlias(properties, ["newString", "new_string", "newText", "replace"])],
+				["replace_all", declaredAlias(properties, ["replaceAll", "replace_all"])],
 			].filter((entry): entry is [string, string] => entry[1] !== undefined),
 		);
 	}
@@ -287,13 +289,25 @@ async function delegate(
 	};
 }
 
+async function replacementEditDelegate(session: ToolSession): Promise<EditTool> {
+	const { EditTool } = await import("@oh-my-pi/pi-coding-agent/edit");
+	return new EditTool(session, "replace");
+}
+
 function bindingFor(tool: NativeToolDefinition): NativeBinding {
 	const plan = bindingPlanForTool(tool);
+	const hostDelegate =
+		plan.delegateName === "edit" && plan.argumentMapping.old_string !== undefined
+			? replacementEditDelegate
+			: plan.delegateName;
 	return {
-		approval: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
-			? "exec"
-			: "read",
-		...(plan.delegateName === undefined ? {} : { delegate: plan.delegateName }),
+		approval:
+			plan.delegateName === "write" || plan.delegateName === "edit"
+				? "write"
+				: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
+					? "exec"
+					: "read",
+		...(hostDelegate === undefined ? {} : { delegate: hostDelegate }),
 		run: (call: NativeCall) => delegate(call, tool.name, plan, call.input),
 	};
 }

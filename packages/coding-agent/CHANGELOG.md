@@ -28,6 +28,7 @@
 
 ### Fixed
 
+- Research packs now use OMP's write and replacement-edit schemas, preserve replacement mode independently of host settings, and require write approval for file mutations.
 - Idle BreadBoard sessions no longer inherit Bun's five-minute event-stream timeout, which permanently disabled inference with `HTTP request failed (0)`.
 - Successful tool receipts no longer force an ongoing BreadBoard task to finish. Requested follow-up writes, shell calls, and repeated observations continue until the model completes the turn.
 - Prompt text requesting one tool "exactly once" no longer imposes a global one-tool limit on the turn.

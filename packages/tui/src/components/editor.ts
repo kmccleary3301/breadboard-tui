@@ -1780,11 +1780,8 @@ export class Editor implements Component, Focusable {
 					const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
 					const currentTextBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
 					if (!this.#autocompletePrefixMatchesCursorText(currentTextBeforeCursor, selected)) {
-						// Autocomplete is stale - cancel and fall through, except a stale
-						// namespace selection must not submit the namespace.
-						const staleNamespace = this.#selectedCompletionIsSkillNamespace();
+						// Discard stale completion state and submit the current draft.
 						this.#cancelAutocomplete();
-						if (staleNamespace) return;
 					} else {
 						if (selected && this.#autocompleteProvider) {
 							const shouldChainSlashCommandAutocomplete = this.#isSlashCommandNameAutocompleteSelection();
