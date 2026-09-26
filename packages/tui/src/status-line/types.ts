@@ -117,6 +117,8 @@ export interface SegmentContext {
 	/** Engine-owned turns must not expose native reasoning, billing, or compaction state. */
 	breadboardOwned?: boolean;
 	breadboardActivity?: BreadboardComposerActivity | null;
+	/** Running background jobs while the open turn is not streaming (pending async wake). */
+	breadboardBackgroundWait?: number;
 	options: StatusLineSegmentOptions;
 	/** Render the model segment's thinking level as a compact leading glyph. */
 	compactThinkingLevel: boolean;

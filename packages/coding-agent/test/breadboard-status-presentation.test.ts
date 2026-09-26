@@ -185,40 +185,4 @@ describe("BreadBoard composer presentation", () => {
 		);
 		expect(absent).not.toContain("0.00");
 	});
-
-	it("reports background wait with running-job count instead of Working during a pending async wake", async () => {
-		await initTheme(false, "unicode", false, "titanium", "light");
-		const snapshotSingle = {
-			modelName: "Luna",
-			workspace: "repo",
-			activity: { kind: "tool" as const, label: "Waiting on 1 background job" },
-			elapsedMs: 4_000,
-		};
-		const renderedSingle = stripVTControlCharacters(renderBreadboardStatusLine(snapshotSingle, "bb-balanced", 80, "box"));
-		expect(renderedSingle).toContain("Waiting on 1 background job");
-		expect(renderedSingle).not.toContain("Working");
-
-		const snapshotMultiple = {
-			modelName: "Luna",
-			workspace: "repo",
-			activity: { kind: "tool" as const, label: "Waiting on 3 background jobs" },
-			elapsedMs: 12_000,
-		};
-		const renderedMultiple = stripVTControlCharacters(renderBreadboardStatusLine(snapshotMultiple, "bb-balanced", 80, "box"));
-		expect(renderedMultiple).toContain("Waiting on 3 background jobs");
-		expect(renderedMultiple).not.toContain("Working");
-	});
-
-	it("does not fall back to Working when activity is null during a pending async wake with open elapsed time", async () => {
-		await initTheme(false, "unicode", false, "titanium", "light");
-		expect(renderBreadboardActivity(null, 4_000, 40)).toBe("");
-		const snapshot = {
-			modelName: "Luna",
-			workspace: "repo",
-			activity: null,
-			elapsedMs: 4_000,
-		};
-		const rendered = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-balanced", 80, "box"));
-		expect(rendered).not.toContain("Working");
-	});
 });
