@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -20,6 +20,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/jfind/passages";
 import { readText, ReadTextError } from "@oh-my-pi/pi-coding-agent/tools/jfind/text";
 import { eligibleFile, renderTree } from "@oh-my-pi/pi-coding-agent/tools/jfind/tree";
+import * as natives from "@oh-my-pi/pi-natives";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 describe("jfind keywords", () => {
@@ -371,6 +372,34 @@ describe("jfind cascade", () => {
 			).rejects.toThrow("Operation aborted");
 		} finally {
 			await removeWithRetries(dir);
+		}
+	});
+
+	it("stops the file listing when the lexical scan fails", async () => {
+		// On a huge root the grep times out first. The listing must stop with it: left running, it walks on
+		// and later hands its whole result to the main thread after the search has already failed.
+		let listingSignal: AbortSignal | undefined;
+		const glob = vi.spyOn(natives, "glob").mockImplementation(options => {
+			const signal = options.signal as AbortSignal | undefined;
+			listingSignal = signal;
+			// Like the native walk: settles only when aborted, never on its own.
+			return new Promise((_, reject) => signal?.addEventListener("abort", () => reject(new Error("Aborted"))));
+		});
+		const grep = vi.spyOn(natives, "grep").mockRejectedValue(new Error("GenericFailure, Aborted: Timeout"));
+		try {
+			await expect(
+				runCascade({
+					root: os.tmpdir(),
+					query: "anything at all",
+					extraKeywords: [],
+					judge: new FakeJudge(() => 0.5),
+					includeHidden: false,
+				}),
+			).rejects.toThrow("Aborted: Timeout");
+			expect(listingSignal?.aborted).toBe(true);
+		} finally {
+			glob.mockRestore();
+			grep.mockRestore();
 		}
 	});
 });

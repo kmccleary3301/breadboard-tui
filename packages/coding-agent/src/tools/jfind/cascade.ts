@@ -172,10 +172,15 @@ class Cascade {
 		const keywords = deriveKeywords(query, this.#options.extraKeywords);
 
 		onProgress?.("lexical scan");
+		// Both scans walk the whole tree. When one fails (the grep's timeout on a huge root), stop the other:
+		// left running, the listing keeps walking and later converts millions of entries on the main thread,
+		// stalling the UI for seconds after this search has already failed.
+		const scan = new AbortController();
+		const scanSignal = signal ? AbortSignal.any([signal, scan.signal]) : scan.signal;
 		const [entries, index] = await Promise.all([
-			listFiles(root, { includeHidden, signal }),
-			grepIndex(root, keywords, { includeHidden, signal, timeoutMs: SCAN_TIMEOUT_MS }),
-		]);
+			listFiles(root, { includeHidden, signal: scanSignal }),
+			grepIndex(root, keywords, { includeHidden, signal: scanSignal, timeoutMs: SCAN_TIMEOUT_MS }),
+		]).finally(() => scan.abort());
 		this.stats.listed = entries.length;
 		const weights = idf(index);
 		const noCounts = Array.from({ length: keywords.length }, () => 0);
