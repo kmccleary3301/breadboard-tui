@@ -339,10 +339,15 @@ export function adaptReadInput(
 }
 
 /**
- * `glob`: pattern as written. `basename`: fd-style, a slash-free pattern matches file names at any depth.
+ * `glob`: pattern as written. `basename`: pi `find` (fd --glob), where a pattern matches at any depth; fd
+ * prefixes `**\/` to slash patterns in full-path mode and matches slash-free ones against file names.
  * `children`: ls-style, one directory level.
  */
 export type GlobListingMode = "glob" | "basename" | "children";
+
+function anyDepthPattern(pattern: string): string {
+	return pattern.startsWith("/") || pattern.startsWith("**/") || pattern === "**" ? pattern : `**/${pattern}`;
+}
 
 export function adaptGlobInput(
 	input: Record<string, unknown>,
@@ -355,11 +360,11 @@ export function adaptGlobInput(
 	const rawPattern =
 		mode === "children"
 			? "*"
-			: mode === "basename" && declaredPattern !== undefined && !String(declaredPattern).includes("/")
-				? `**/${String(declaredPattern)}`
+			: mode === "basename" && declaredPattern !== undefined
+				? anyDepthPattern(String(declaredPattern))
 				: declaredPattern;
 	let combinedPath: string | undefined;
-	if (rawPath !== undefined && rawPattern !== undefined) {
+	if (rawPath !== undefined && rawPattern !== undefined && !String(rawPattern).startsWith("/")) {
 		const p = String(rawPath).replace(/\/+$/, "");
 		combinedPath = p.length > 0 && p !== "." ? `${p}/${String(rawPattern)}` : String(rawPattern);
 	} else if (rawPattern !== undefined) {

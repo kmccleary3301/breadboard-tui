@@ -331,6 +331,13 @@ describe("research native builtin bindings", () => {
 				expect(text).toContain("low.ts");
 			}));
 
+		test("find matches a slash pattern at any depth like fd --full-path", () =>
+			withTree(async scratch => {
+				const text = await runPiTool(scratch, "find", { path: scratch, pattern: "deep/*.ts" });
+				expect(text).toContain("low.ts");
+				expect(text).not.toContain("mid.ts");
+			}));
+
 		test("grep literal matches the pattern text, not the regex", () =>
 			withTree(async scratch => {
 				const text = await runPiTool(scratch, "grep", { path: scratch, pattern: "call(a.b)", literal: true });
