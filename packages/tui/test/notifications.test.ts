@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { TUI } from "@oh-my-pi/pi-tui";
 import * as desktopNotify from "@oh-my-pi/pi-tui/desktop-notify";
 import { ProcessTerminal } from "@oh-my-pi/pi-tui/terminal";
 import {
@@ -12,6 +13,7 @@ import {
 	wrapTmuxPassthrough,
 } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
+import { VirtualTerminal } from "./virtual-terminal";
 
 const stdinIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
 const stdoutIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
@@ -586,5 +588,41 @@ describe("terminal notifications", () => {
 		} finally {
 			terminal.stop();
 		}
+	});
+
+	it("writes notifications through a running TUI's terminal, not directly to stdout", () => {
+		// Bun's process.stdout.write blocks the event loop until the terminal drains, so a
+		// notification written directly behind the TUI's queued frames froze input for seconds
+		// (ticket 42). While a TUI runs, the escape must join its output stream instead.
+		mutableTerminal.notifyProtocol = NotifyProtocol.Osc9;
+		const notification = { title: "session", body: "Complete", type: "completion" as const };
+		const expected = TERMINAL.formatNotification(notification);
+		const stdout: string[] = [];
+		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
+			stdout.push(typeof chunk === "string" ? chunk : chunk.toString());
+			return true;
+		});
+		const terminalWrites: string[] = [];
+		const terminal = new VirtualTerminal();
+		const write = terminal.write.bind(terminal);
+		terminal.write = data => {
+			terminalWrites.push(data);
+			write(data);
+		};
+		const tui = new TUI(terminal);
+
+		tui.start();
+		try {
+			TERMINAL.sendNotification(notification);
+			expect(terminalWrites).toContain(expected);
+			expect(stdout).not.toContain(expected);
+		} finally {
+			tui.stop();
+		}
+
+		const writesAtStop = terminalWrites.length;
+		TERMINAL.sendNotification(notification);
+		expect(stdout).toContain(expected);
+		expect(terminalWrites.length).toBe(writesAtStop);
 	});
 });

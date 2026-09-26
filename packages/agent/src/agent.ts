@@ -1593,6 +1593,20 @@ export class Agent {
 			return refreshToolChoiceForActiveTools(options?.toolChoice, this.#state.tools);
 		};
 
+		const hasHostGate = this.#beforeModelCall !== undefined;
+		const beforeModelCall: AgentLoopConfig["beforeModelCall"] =
+			hasHostGate || this.#additionalBeforeModelCalls.size > 0
+				? async (context, signal) => {
+						const result = (await this.#beforeModelCall?.(context, signal)) || undefined;
+						if (result?.stop) return result;
+						for (const callback of this.#additionalBeforeModelCalls) {
+							const callbackResult = (await callback(context, signal)) || undefined;
+							if (callbackResult?.stop) return callbackResult;
+						}
+						return undefined;
+					}
+				: undefined;
+
 		const config: AgentLoopConfig = {
 			model,
 			reasoning,
@@ -1633,18 +1647,14 @@ export class Agent {
 				context.systemPrompt = this.#state.systemPrompt;
 				context.tools = this.#toolsForModel(this.#state.model ?? model);
 			},
-			beforeModelCall:
-				this.#beforeModelCall || this.#additionalBeforeModelCalls.size > 0
-					? async (context, signal) => {
-							const result = (await this.#beforeModelCall?.(context, signal)) || undefined;
-							if (result?.stop) return result;
-							for (const callback of this.#additionalBeforeModelCalls) {
-								const callbackResult = (await callback(context, signal)) || undefined;
-								if (callbackResult?.stop) return callbackResult;
-							}
-							return undefined;
-						}
-					: undefined,
+			// agent-loop stops any present gate on an aborted signal without recording the aborted
+			// assistant message. With no host gate, an interrupted run must look like a run with no
+			// callbacks: the post-interrupt model call records "aborted", which routes agent_end down
+			// its aborted path. So additional callbacks gate only live model calls. A getter, because
+			// agent-loop reads this per model call; spreading this config would freeze it.
+			get beforeModelCall() {
+				return !hasHostGate && loopSignal.aborted ? undefined : beforeModelCall;
+			},
 			cursorExecHandlers: this.#cursorExecHandlers,
 			cursorOnToolResult,
 			cwd: this.#cwd,
