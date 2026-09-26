@@ -1,0 +1,26 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "add-dotdot",
+  "input": "*** Begin Patch\n*** Add File: ../escaped.txt\n+hello parent\n*** End Patch\n",
+  "initial": {},
+  "python": {
+    "text": "{\"ok\": true, \"action\": \"apply_patch\", \"exit\": 0, \"stdout\": \"\", \"stderr\": \"\", \"data\": {\"manual_fallback\": true, \"paths\": [\"../escaped.txt\"]}}",
+    "details": {
+      "ok": true,
+      "action": "apply_patch",
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "data": {
+        "manual_fallback": true,
+        "paths": [
+          "../escaped.txt"
+        ]
+      }
+    },
+    "isError": false
+  },
+  "final": {
+    "escaped.txt": "hello parent\n"
+  }
+}

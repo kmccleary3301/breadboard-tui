@@ -277,11 +277,12 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 		const converted = convertPatchToUnified(patchText);
 		if (converted) patchText = converted;
 	}
+	// The reference has no lexical path guard: git refuses what it cannot apply, and the
+	// direct fallback writes where `normalize_workspace_path` points (in-workspace absolute
+	// paths kept, `..` popped, outside paths clamped to the root). Check that same target, so a
+	// symlink that leaves the workspace is still refused before anything is written.
 	for (const path of patchTouchedPaths(patchSourceText)) {
-		if (isAbsolute(path) || path.split(/[\\/]/u).includes("..")) {
-			return result({ ok: false, stdout: "", stderr: `error: ${path}: does not exist in index\n` }, true);
-		}
-		if (leavesWorkspace(root, resolve(root, path))) {
+		if (leavesWorkspace(root, normalizeWorkspacePath(root, path))) {
 			const stderr = patchSourceText.includes("*** Begin Patch")
 				? 'error: No valid patches in input (allow with "--allow-empty")\n'
 				: `error: ${path}: Operation not permitted\n`;

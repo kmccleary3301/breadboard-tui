@@ -23,7 +23,16 @@ type Fixture = {
 	outside?: Record<string, string>;
 };
 
+/** Fixture inputs carry `<WORKSPACE>` where the reference capture used its absolute workspace path. */
+function materialize(value: unknown, root: string): unknown {
+	if (typeof value === "string") return value.replaceAll("<WORKSPACE>", root);
+	if (Array.isArray(value)) return value.map(item => materialize(item, root));
+	if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, materialize(item, root)]));
+	return value;
+}
+
 async function run(root: string, fixture: Fixture): Promise<NativeToolResult> {
+	fixture = { ...fixture, input: materialize(fixture.input, root) };
 	switch (fixture.tool) {
 		case "read_file": return readFileAdapter(root, fixture.input as { path: string; offset?: number; limit?: number });
 		case "list_dir": return listDirAdapter(root, fixture.input as { path: string; depth?: number });
@@ -104,6 +113,36 @@ describe("R39 native adapters", () => {
 		}, 30_000);
 	}
 });
+
+// Deliberate divergence. For an absolute path outside the workspace, the pinned reference
+// clamps the write target to the workspace root, and its local sandbox's write_text on a
+// directory returns an error instead of raising. It therefore reports
+// `{"ok": true, ..., "paths": [<outside path>]}` while writing nothing (capture:
+// 38-apply-patch-absolute-paths/captured_outside_abs_main.json). The native adapter
+// reports the failed write instead. Neither writes outside the workspace.
+test("apply_unified_patch reports an outside absolute Add File as a failed write and writes nothing", async () => {
+	const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-outside-abs-"));
+	const outsideRoot = await mkdtemp(join(tmpdir(), "bb-native-adapter-outside-target-"));
+	try {
+		await command(root, ["init"]);
+		const outsidePath = join(outsideRoot, "outside.txt");
+		const actual = await applyUnifiedPatchAdapter(root, `*** Begin Patch\n*** Add File: ${outsidePath}\n+hello outside\n*** End Patch\n`);
+		expect(actual.details).toEqual({
+			ok: false,
+			action: "apply_patch",
+			exit: 1,
+			stdout: "",
+			stderr: `patch did not apply: write failed in ${outsidePath}`,
+			data: { manual_fallback: true, reason: `write failed in ${outsidePath}` },
+		});
+		expect(actual.isError).toBe(true);
+		expect(await readdir(outsideRoot)).toEqual([]);
+		expect(await files(root)).toEqual({});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+		await rm(outsideRoot, { recursive: true, force: true });
+	}
+}, 30_000);
 
 test("read_file surfaces symlink loops as ELOOP", async () => {
 	const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-loop-"));

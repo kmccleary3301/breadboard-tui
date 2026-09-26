@@ -1,0 +1,28 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "update-abs",
+  "input": "*** Begin Patch\n*** Update File: <WORKSPACE>/existing.txt\n@@\n one\n-two\n+TWO\n three\n*** End Patch\n",
+  "initial": {
+    "existing.txt": "one\ntwo\nthree\n"
+  },
+  "python": {
+    "text": "{\"ok\": true, \"action\": \"apply_patch\", \"exit\": 0, \"stdout\": \"\", \"stderr\": \"\", \"data\": {\"manual_fallback\": true, \"paths\": [\"<WORKSPACE>/existing.txt\"]}}",
+    "details": {
+      "ok": true,
+      "action": "apply_patch",
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "data": {
+        "manual_fallback": true,
+        "paths": [
+          "<WORKSPACE>/existing.txt"
+        ]
+      }
+    },
+    "isError": false
+  },
+  "final": {
+    "existing.txt": "one\nTWO\nthree\n"
+  }
+}

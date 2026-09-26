@@ -1,0 +1,26 @@
+{
+  "tool": "apply_unified_patch",
+  "case": "add-abs",
+  "input": "*** Begin Patch\n*** Add File: <WORKSPACE>/new_abs.txt\n+hello absolute world\n*** End Patch\n",
+  "initial": {},
+  "python": {
+    "text": "{\"ok\": true, \"action\": \"apply_patch\", \"exit\": 0, \"stdout\": \"\", \"stderr\": \"\", \"data\": {\"manual_fallback\": true, \"paths\": [\"<WORKSPACE>/new_abs.txt\"]}}",
+    "details": {
+      "ok": true,
+      "action": "apply_patch",
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "data": {
+        "manual_fallback": true,
+        "paths": [
+          "<WORKSPACE>/new_abs.txt"
+        ]
+      }
+    },
+    "isError": false
+  },
+  "final": {
+    "new_abs.txt": "hello absolute world\n"
+  }
+}
