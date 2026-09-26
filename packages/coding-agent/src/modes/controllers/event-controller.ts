@@ -2136,6 +2136,22 @@ export class EventController {
 			// user was told they were only waiting for the turn. The transcript is
 			// quiescent at a settle, which is the condition #4806 wanted.
 			this.ctx.flushPendingCommandOutput();
+			if (this.ctx.session.hasPendingAsyncWork?.()) {
+				const runningBackgroundJobs =
+					this.ctx.session
+						.getAsyncJobSnapshot?.()
+						?.running.filter(
+							job => job.type !== "task" || job.agentId === undefined,
+						).length ?? 0;
+				const label =
+					runningBackgroundJobs === 1
+						? "Waiting on 1 background job"
+						: runningBackgroundJobs > 1
+							? `Waiting on ${runningBackgroundJobs} background jobs`
+							: "Waiting on background job";
+				this.#setBreadboardActivity({ kind: "tool", label });
+				this.ctx.ui.requestRender();
+			}
 			return;
 		}
 		setTerminalTitleState("idle");

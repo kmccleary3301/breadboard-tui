@@ -57,11 +57,12 @@ export function renderBreadboardActivity(
 	elapsedMs: number | null | undefined,
 	width: number,
 ): string {
-	if (!activity && elapsedMs == null) return "";
-	const kind = activity?.kind ?? "working";
+	if (!activity) return "";
+	const label = sanitizeStatusText(activity.label);
+	if (!label) return "";
+	const kind = activity.kind;
 	const color = kind === "error" ? "error" : kind === "approval" || kind === "cancelling" ? "warning" : "muted";
 	const icon = kind === "error" ? theme.status.error : kind === "approval" ? theme.status.warning : "";
-	const label = sanitizeStatusText(activity?.label ?? "Working");
 	const elapsed =
 		elapsedMs == null || elapsedMs < 1_000 || kind === "approval" || kind === "error"
 			? ""
