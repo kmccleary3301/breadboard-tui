@@ -126,7 +126,8 @@ describe("built-in native harnesses", () => {
 			todos: {} as never,
 			guard: {} as never,
 		});
-		expect(received).toEqual({ command: "cat fixture.txt", timeout: 5000, cwd: "." });
+		// Codex declares milliseconds; host bash takes seconds.
+		expect(received).toEqual({ command: "cat fixture.txt", timeout: 5, cwd: "." });
 	});
 
 	test("bb-omp.native runs on the host surface and contributes only the identity pack", async () => {

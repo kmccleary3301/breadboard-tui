@@ -2,12 +2,12 @@ import type { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { JsonRecord } from "../canonical-json";
 import {
+	adaptBashInput,
 	adaptGlobInput,
 	adaptGrepInput,
 	adaptReadInput,
 	adaptSkillInput,
 	adaptTaskInput,
-	adaptTmuxInput,
 	applyUnifiedPatchAdapter,
 } from "./adapters";
 import type { NativeBinding, NativeCall } from "./omp-extension";
@@ -106,15 +106,6 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 			].filter((entry): entry is [string, string] => entry[1] !== undefined),
 		);
 	}
-	if (delegateName === "bash") {
-		return Object.fromEntries(
-			[
-				["command", declaredAlias(properties, ["command"])],
-				["timeout", declaredAlias(properties, ["timeout", "timeout_ms"])],
-				["cwd", declaredAlias(properties, ["cwd", "workdir", "working_directory"])],
-			].filter((entry): entry is [string, string] => entry[1] !== undefined),
-		);
-	}
 	if (delegateName === "web_search") {
 		return Object.fromEntries(
 			[
@@ -176,8 +167,24 @@ function adapterForTool(
 		const includeKey = declaredAlias(properties, ["include", "glob"]);
 		return input => adaptGrepInput(input, pathKey, includeKey);
 	}
-	if (delegateName === "bash" && properties.has("tmux_command")) {
-		return input => adaptTmuxInput(input, "tmux_command");
+	if (delegateName === "bash") {
+		const commandKey = declaredAlias(properties, ["command", "tmux_command"]) ?? "command";
+		const timeoutKey = declaredAlias(properties, ["timeout", "timeout_ms"]);
+		const timeoutSchema =
+			timeoutKey === undefined
+				? undefined
+				: (tool.parameters.properties as Record<string, { description?: unknown }> | undefined)?.[timeoutKey];
+		const timeoutInMilliseconds =
+			timeoutKey === "timeout_ms" ||
+			(typeof timeoutSchema?.description === "string" && /millisecond/i.test(timeoutSchema.description));
+		const shape = {
+			commandKey,
+			timeoutKey,
+			timeoutInMilliseconds,
+			cwdKey: declaredAlias(properties, ["cwd", "workdir", "working_directory"]),
+			passthroughKeys: ["pty", "async", "env", "name", "ready"].filter(key => properties.has(key)),
+		};
+		return input => adaptBashInput(input, shape);
 	}
 	if (delegateName === "task") {
 		const isSingleTask = !properties.has("tasks");
@@ -310,7 +317,7 @@ function bindingFor(tool: NativeToolDefinition): NativeBinding {
 		approval:
 			plan.delegateName === "write" || plan.delegateName === "edit"
 				? "write"
-				: /^(Bash|bash|shell_command|apply_patch|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
+				: /^(Bash|bash|shell_command|apply_patch|background_task|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
 					? "exec"
 					: "read",
 		...(hostDelegate === undefined ? {} : { delegate: hostDelegate }),

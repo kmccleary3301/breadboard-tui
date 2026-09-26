@@ -235,6 +235,54 @@ describe("research native builtin bindings", () => {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
 	});
+	test("sends host bash seconds for each pack's declared timeout unit and keeps host-identical options", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-bash-timeout-"));
+		try {
+			const hostBash = new BashTool(patchSession(scratch));
+			const delegated = async (harnessId: string, name: string, input: Record<string, unknown>) => {
+				const loaded = await loadNativeHarness({ specPath: harnessId, workspaceRoot: scratch });
+				const tool = loaded.registeredToolSurface.native.find(t => t.name === name);
+				if (!tool) throw new Error(`missing ${harnessId} ${name} tool`);
+				let sent: Record<string, unknown> | undefined;
+				await researchBindingForTool(tool).run({
+					input: input as JsonObject,
+					harness: { workspaceRoot: scratch } as never,
+					context: {
+						invokeTool: async (params: JsonObject) => {
+							sent = hostBash.parameters.assert(params) as Record<string, unknown>;
+							return { content: [{ type: "text", text: "ok" }] };
+						},
+					} as never,
+					signal: undefined,
+					onUpdate: undefined,
+					todos: {} as never,
+					guard: {} as never,
+				});
+				return sent;
+			};
+			// claude_code, codex and opencode declare milliseconds; pi and oh_my_pi declare seconds.
+			expect((await delegated("claude_code", "Bash", { command: "true", timeout: 1500 }))?.timeout).toBe(2);
+			expect((await delegated("codex", "shell_command", { command: "true", timeout_ms: 5000, workdir: scratch }))).toMatchObject({
+				timeout: 5,
+				cwd: scratch,
+			});
+			expect((await delegated("opencode", "bash", { command: "true", timeout: 120000 }))?.timeout).toBe(120);
+			expect((await delegated("pi", "bash", { command: "true", timeout: 7 }))?.timeout).toBe(7);
+			expect(await delegated("oh_my_pi", "bash", { command: "sleep 1", timeout: 30, async: true, pty: false })).toMatchObject({
+				timeout: 30,
+				async: true,
+				pty: false,
+			});
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+	test("requires exec approval for oh_my_opencode background_task subagents", async () => {
+		const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: os.tmpdir() });
+		const tool = loaded.registeredToolSurface.native.find(t => t.name === "background_task");
+		if (!tool) throw new Error("missing oh_my_opencode background_task tool");
+		expect(researchBindingForTool(tool).approval).toBe("exec");
+	});
 	describe("pi listing and search contracts through real host tools", () => {
 		const runPiTool = async (scratch: string, name: string, input: Record<string, unknown>) => {
 			const loaded = await loadNativeHarness({ specPath: "pi", workspaceRoot: scratch });

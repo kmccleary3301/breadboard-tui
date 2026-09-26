@@ -447,8 +447,36 @@ export function adaptTaskInput(
 	};
 }
 
-/** tmux tool schemas take tmux arguments (`new-session -d -s x`), not a shell command line. */
-export function adaptTmuxInput(input: Record<string, unknown>, commandKey: string): { command: string } {
-	const args = String(input[commandKey] ?? "").trim().replace(/^tmux(\s+|$)/u, "");
-	return { command: `tmux ${args}` };
+export interface BashInputShape {
+	/** Declared command key; `tmux_command` carries tmux arguments (`new-session -d -s x`), not a shell line. */
+	readonly commandKey: string;
+	readonly timeoutKey?: string;
+	/** Host bash timeouts are seconds; packs declaring milliseconds are converted. */
+	readonly timeoutInMilliseconds: boolean;
+	readonly cwdKey?: string;
+	/** Declared keys that are also host bash parameters with the same meaning (`async`, `pty`, ...). */
+	readonly passthroughKeys: readonly string[];
+}
+
+export function adaptBashInput(input: Record<string, unknown>, shape: BashInputShape): Record<string, unknown> {
+	const rawCommand = String(input[shape.commandKey] ?? "");
+	const out: Record<string, unknown> = {
+		command:
+			shape.commandKey === "tmux_command" ? `tmux ${rawCommand.trim().replace(/^tmux(\s+|$)/u, "")}` : rawCommand,
+	};
+	const rawTimeout = shape.timeoutKey === undefined ? undefined : input[shape.timeoutKey];
+	if (rawTimeout !== undefined && rawTimeout !== null) {
+		const timeout = Number(rawTimeout);
+		if (shape.timeoutInMilliseconds) {
+			if (timeout > 0) out.timeout = Math.max(1, Math.ceil(timeout / 1000));
+		} else if (!Number.isNaN(timeout)) {
+			out.timeout = timeout;
+		}
+	}
+	const cwd = shape.cwdKey === undefined ? undefined : input[shape.cwdKey];
+	if (cwd !== undefined && cwd !== null) out.cwd = cwd;
+	for (const key of shape.passthroughKeys) {
+		if (input[key] !== undefined) out[key] = input[key];
+	}
+	return out;
 }
