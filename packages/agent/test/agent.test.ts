@@ -503,6 +503,71 @@ describe("Agent", () => {
 		expect(finalMessage.stopReason).toBe("aborted");
 		expect(finalMessage.errorMessage).toBe("caller cancelled");
 	});
+
+	it("records the interrupted-run assistant message whether or not a pre-model callback is registered", async () => {
+		// An interrupt during a tool must end the run with the aborted assistant message, so the
+		// session's agent_end takes its aborted path (no "Complete" notification, no maintenance).
+		// Hosts that register an additional pre-model callback must see the same transcript as hosts
+		// that register none (ticket 42: the fork's turn_prepare callback dropped this message).
+		const interrupt = async (withCallback: boolean) => {
+			const toolSchema = type({});
+			const toolStarted = Promise.withResolvers<void>();
+			const tool: AgentTool<typeof toolSchema, Record<string, never>> = {
+				name: "wait_forever",
+				label: "Wait",
+				description: "Runs until aborted",
+				parameters: toolSchema,
+				async execute(_toolCallId, _params, signal) {
+					toolStarted.resolve();
+					await new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
+					throw new Error("Command aborted");
+				},
+			};
+			let modelCalls = 0;
+			const agent = new Agent({
+				initialState: { model: createMockModel({ responses: [] }).model, systemPrompt: ["Test"], tools: [tool] },
+				streamFn: (_model, _context, options) => {
+					modelCalls++;
+					const stream = new AssistantMessageEventStream();
+					if (options?.signal?.aborted) {
+						queueMicrotask(() => stream.fail(new Error("provider aborted")));
+						return stream;
+					}
+					queueMicrotask(() => {
+						const message = createAssistantMessage(
+							[{ type: "toolCall", id: "call_1", name: "wait_forever", arguments: {} }],
+							"toolUse",
+						);
+						stream.push({ type: "start", partial: message });
+						stream.push({ type: "done", reason: "toolUse", message });
+					});
+					return stream;
+				},
+			});
+			let callbackRuns = 0;
+			if (withCallback) agent.addBeforeModelCall(async () => void callbackRuns++);
+
+			const running = agent.prompt("run the tool");
+			await toolStarted.promise;
+			agent.abort("Interrupted by user");
+			await running;
+			return { messages: agent.state.messages, modelCalls, callbackRuns };
+		};
+
+		const baseline = await interrupt(false);
+		const withCallback = await interrupt(true);
+
+		for (const run of [baseline, withCallback]) {
+			expect(run.messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+			const last = run.messages.at(-1);
+			if (last?.role !== "assistant") throw new Error("Expected aborted assistant message");
+			expect(last.stopReason).toBe("aborted");
+			expect(last.errorMessage).toBe("Interrupted by user");
+		}
+		expect(withCallback.modelCalls).toBe(baseline.modelCalls);
+		// The callback still gates the live model call; only the post-interrupt call skips it.
+		expect(withCallback.callbackRuns).toBe(1);
+	});
 	it("waits for async subscribers when applying an external event", async () => {
 		const agent = new Agent();
 		const release = Promise.withResolvers<void>();
