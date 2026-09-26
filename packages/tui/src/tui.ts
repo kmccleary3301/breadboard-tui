@@ -35,6 +35,7 @@ import {
 	isInsideTerminalMultiplexer,
 	parseKittyDirectPlacementLine,
 	setCellDimensions,
+	setNotificationWriter,
 	setTerminalImageProtocol,
 	shouldEnableSynchronizedOutputByDefault,
 	synchronizedOutputUserOverride,
@@ -936,6 +937,8 @@ export class TUI extends Container {
 	// it only logs `ui.loop-blocked` (with the current loop phase) when a frame
 	// budget is genuinely starved. Armed in start(), disarmed in stop().
 	#watchdog: LoopWatchdog;
+	// Clears this TUI's notification route (see setNotificationWriter). Set in start(), released in stop().
+	#releaseNotificationWriter: (() => void) | undefined;
 
 	// Transient alternate-screen state for a fullscreen overlay. While active, the
 	// engine paints only the modal on the alt buffer and leaves every
@@ -1309,6 +1312,8 @@ export class TUI extends Container {
 		}
 		this.#inputDeferred = options?.deferInput === true;
 		this.#watchdog.start();
+		this.#releaseNotificationWriter?.();
+		this.#releaseNotificationWriter = setNotificationWriter(data => this.terminal.write(data));
 		this.#ghosttyInitialImageDelayDone = false;
 		this.#ghosttyImageReadyAtMs = this.#renderScheduler.now() + TUI.#GHOSTTY_INITIAL_IMAGE_DELAY_MS;
 		// A confirmed DECRPM report for mode 2026 is authoritative: enable
@@ -2089,6 +2094,8 @@ export class TUI extends Container {
 		this.#clearSixelProbeState();
 		this.#stopped = true;
 		this.#watchdog.stop();
+		this.#releaseNotificationWriter?.();
+		this.#releaseNotificationWriter = undefined;
 		if (this.#renderTimer) {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;

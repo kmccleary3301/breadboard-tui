@@ -130,6 +130,28 @@ function sendHerdrNotification(message: string | TerminalNotification, env: Node
 	return true;
 }
 
+type NotificationWriter = (data: string) => void;
+let notificationWriter: NotificationWriter | undefined;
+
+/**
+ * Route in-band notification escapes through the running TUI's terminal. While a TUI owns stdout its
+ * frames go through an off-thread write pump, and Bun's `process.stdout.write` blocks the event loop
+ * until the terminal drains that backlog, so a direct write behind a large repaint froze input for
+ * seconds. Without a writer, notifications write to stdout directly. The returned release clears the
+ * writer only if it is still the registered one.
+ */
+export function setNotificationWriter(writer: NotificationWriter): () => void {
+	notificationWriter = writer;
+	return () => {
+		if (notificationWriter === writer) notificationWriter = undefined;
+	};
+}
+
+function writeNotification(data: string): void {
+	if (notificationWriter) notificationWriter(data);
+	else process.stdout.write(data);
+}
+
 const IMAGE_MARKER_SCAN_LIMIT = 512;
 const SIXEL_MARKER_SCAN_LIMIT = 128;
 const KITTY_PLACEHOLDER_HIGH_SURROGATE = KITTY_PLACEHOLDER.charCodeAt(0);
@@ -252,17 +274,17 @@ export class TerminalInfo {
 		// has that the agent finished or is waiting for input. `Bell` protocol
 		// already self-flags via tmux's bell monitoring, so leave it alone.
 		if (this.notifyProtocol !== NotifyProtocol.Bell && isInsideTmux()) {
-			process.stdout.write(`${wrapTmuxPassthrough(formatted)}\x07`);
+			writeNotification(`${wrapTmuxPassthrough(formatted)}\x07`);
 			return;
 		}
 		// Zellij drops OSC 9/99 and has no DCS passthrough envelope, but raises its
 		// `[!]` bell flag on a bare BEL — the same backgrounded-pane signal tmux
 		// users get. So follow the (Zellij-swallowed) OSC with a plain BEL.
 		if (this.notifyProtocol !== NotifyProtocol.Bell && isInsideZellij()) {
-			process.stdout.write(`${formatted}\x07`);
+			writeNotification(`${formatted}\x07`);
 			return;
 		}
-		process.stdout.write(formatted);
+		writeNotification(formatted);
 		// VTE-family terminals (Ptyxis, GNOME Terminal, Tilix, …) plus Alacritty
 		// and bare xterm-on-Wayland have no in-band escape that surfaces an
 		// arbitrary desktop toast (#3685). When the chosen `notifyProtocol` is
