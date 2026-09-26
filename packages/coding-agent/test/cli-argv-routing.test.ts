@@ -9,16 +9,19 @@
  * flags.
  */
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
 
 async function runBreadboardCli(
 	args: readonly string[],
+	env: Record<string, string> = {},
 ): Promise<{ readonly exitCode: number; readonly stderr: string }> {
 	const child = Bun.spawn([process.execPath, "src/bb.ts", ...args], {
 		cwd: path.resolve(import.meta.dir, ".."),
-		env: { ...Bun.env, BREADBOARD_PRODUCT: "1" },
+		env: { ...Bun.env, BREADBOARD_PRODUCT: "1", ...env },
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -35,6 +38,34 @@ describe("BreadBoard product CLI rejects native agent commands", () => {
 			expect(result.exitCode).toBe(1);
 			expect(result.stderr).toContain(`\`${cases[index]?.at(-1)}\``);
 			expect(result.stderr).toContain("unavailable in BreadBoard product mode");
+		}
+	});
+
+	test("names the product command, not upstream omp, in resume and reserved-verb hints", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "bb-identity-hints-"));
+		try {
+			const env = {
+				HOME: root,
+				PI_CODING_AGENT_DIR: path.join(root, "agent"),
+				BREADBOARD_CONFIG_DIR: path.join(root, "config"),
+				OMP_SKIP_SETUP: "1",
+			};
+			const [resume, fork, verb] = await Promise.all([
+				runBreadboardCli(["--resume", "01deadbeef"], env),
+				runBreadboardCli(["--fork", "01deadbeef"], env),
+				runBreadboardCli(["list"], env),
+			]);
+			const hint = "Run `bb --resume` without an argument to pick from recent sessions, or `bb` to start a new one.";
+			for (const result of [resume, fork]) {
+				expect(result.exitCode).toBe(1);
+				expect(result.stderr).toContain('Session "01deadbeef" not found.');
+				expect(result.stderr).toContain(hint);
+			}
+			expect(verb.exitCode).toBe(1);
+			expect(verb.stderr).toContain("`bb list` is not a top-level command. Use `bb plugin list`");
+			for (const result of [resume, fork, verb]) expect(result.stderr).not.toContain("`omp");
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
 		}
 	});
 });
