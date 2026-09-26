@@ -987,7 +987,12 @@ const breadboardActivitySegment: StatusLineSegment = {
 	id: "bb_activity",
 	render(ctx) {
 		if (ctx.startupPlaceholder) return { content: "", visible: false };
-		const content = renderBreadboardActivity(ctx.breadboardActivity, ctx.turnElapsedMs, Math.max(1, Math.min(36, ctx.width - 2)));
+		const content = renderBreadboardActivity(
+			ctx.breadboardActivity,
+			ctx.turnElapsedMs,
+			Math.max(1, Math.min(36, ctx.width - 2)),
+			ctx.breadboardBackgroundWait,
+		);
 		return { content, visible: content.length > 0 };
 	},
 };

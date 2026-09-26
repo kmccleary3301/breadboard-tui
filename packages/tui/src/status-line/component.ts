@@ -642,6 +642,16 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#isBreadboardOwned(): boolean {
 		return this.host.isBreadboardOwned?.(this.session) ?? false;
 	}
+	/** Background jobs counted exactly as the stock job badge counts them. */
+	#runningBackgroundJobCount(): number {
+		return (
+			this.session
+				.getAsyncJobSnapshot()
+				?.running.filter(
+					job => job.type !== "task" || job.agentId === undefined || !this.#runningSubagentIds.has(job.agentId),
+				).length ?? 0
+		);
+	}
 	#hasGitBackedSegment(): boolean {
 		const effectiveSettings = this.#resolveSettings();
 		return (
@@ -2275,6 +2285,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			harness: this.#harness ?? this.host.getHarness?.(this.session) ?? null,
 			breadboardOwned,
 			breadboardActivity: this.#breadboardActivity ?? this.host.getBreadboardActivity?.(this.session) ?? null,
+			breadboardBackgroundWait: turnElapsedMs !== null && !this.session.isStreaming ? this.#runningBackgroundJobCount() : 0,
 			activeRepo: activeRepoCache.activeRepo,
 			width,
 			options: segmentOptions ?? {},
@@ -2664,6 +2675,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				branch: ctx.git.branch,
 				activity: placeholders ? null : ctx.breadboardActivity,
 				elapsedMs: placeholders ? null : ctx.turnElapsedMs,
+				backgroundWait: placeholders ? 0 : ctx.breadboardBackgroundWait,
 				context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
 				inputTokens: placeholders ? undefined : ctx.usageStats.input,
 				outputTokens: placeholders ? undefined : ctx.usageStats.output,

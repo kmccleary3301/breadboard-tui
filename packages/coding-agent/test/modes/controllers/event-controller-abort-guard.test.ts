@@ -409,25 +409,4 @@ describe("EventController — terminal title across a non-terminal agent_end", (
 		expect(stateSpy).toHaveBeenCalledWith("idle");
 		expect(markActivityEnd).toHaveBeenCalledTimes(1);
 	});
-
-	it("updates BreadBoard activity to report background job wait instead of Working during pending async wake", async () => {
-		const ctx = makeTurnEndContext();
-		const setActivitySpy = vi.fn();
-		(ctx.statusLine as unknown as { setBreadboardActivity: typeof setActivitySpy }).setBreadboardActivity = setActivitySpy;
-		(ctx.session as unknown as { mainStreamOwnsTurnLifecycle: boolean }).mainStreamOwnsTurnLifecycle = true;
-		(ctx.session as unknown as { hasPendingAsyncWork: () => boolean }).hasPendingAsyncWork = () => true;
-		(ctx.session as unknown as { getAsyncJobSnapshot: () => unknown }).getAsyncJobSnapshot = () => ({
-			running: [{ id: "bg_1", type: "bash" }],
-			recent: [],
-		});
-		const controller = new EventController(ctx);
-		await controller.handleEvent({
-			...makeAgentEndEvent([makeAssistantMessage("stop")]),
-			isTerminal: false,
-		} as Extract<AgentSessionEvent, { type: "agent_end" }> & { isTerminal: false });
-		expect(setActivitySpy).toHaveBeenCalledWith({
-			kind: "tool",
-			label: "Waiting on 1 background job",
-		});
-	});
 });

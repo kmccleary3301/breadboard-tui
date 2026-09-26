@@ -25,6 +25,8 @@ export interface BreadboardStatusSnapshot {
 	} | null;
 	readonly activity?: BreadboardComposerActivity | null;
 	readonly elapsedMs?: number | null;
+	/** Running background jobs holding an open turn that is no longer streaming. */
+	readonly backgroundWait?: number;
 	readonly context?: { readonly tokens: number; readonly capacity: number } | null;
 	readonly inputTokens?: number;
 	readonly outputTokens?: number;
@@ -52,17 +54,24 @@ function elapsedLabel(elapsedMs: number): string {
 	return elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : formatDuration(elapsedMs);
 }
 
+function backgroundWaitLabel(jobs: number): string {
+	return jobs === 1 ? "Waiting on 1 background job" : `Waiting on ${jobs} background jobs`;
+}
+
 export function renderBreadboardActivity(
 	activity: BreadboardComposerActivity | null | undefined,
 	elapsedMs: number | null | undefined,
 	width: number,
+	backgroundWait = 0,
 ): string {
-	if (!activity) return "";
-	const label = sanitizeStatusText(activity.label);
-	if (!label) return "";
-	const kind = activity.kind;
+	// A turn held open only by background jobs is not working: the composer takes
+	// input. Operator states (approval, cancelling, error, running tools) keep priority.
+	const waiting = backgroundWait > 0 && (!activity || activity.kind === "working");
+	if (!activity && elapsedMs == null && !waiting) return "";
+	const kind = activity?.kind ?? "working";
 	const color = kind === "error" ? "error" : kind === "approval" || kind === "cancelling" ? "warning" : "muted";
 	const icon = kind === "error" ? theme.status.error : kind === "approval" ? theme.status.warning : "";
+	const label = waiting ? backgroundWaitLabel(backgroundWait) : sanitizeStatusText(activity?.label ?? "Working");
 	const elapsed =
 		elapsedMs == null || elapsedMs < 1_000 || kind === "approval" || kind === "error"
 			? ""
@@ -204,7 +213,12 @@ function statusParts(
 	const activity = snapshot.activity;
 	const critical = activity?.kind === "approval" || activity?.kind === "error" || activity?.kind === "cancelling";
 	if (critical || fields.activity === "shown") {
-		const text = renderBreadboardActivity(activity, activity ? null : snapshot.elapsedMs == null ? null : 0, 36);
+		const text = renderBreadboardActivity(
+			activity,
+			activity ? null : snapshot.elapsedMs == null ? null : 0,
+			36,
+			snapshot.backgroundWait,
+		);
 		add(
 			text,
 			critical ? 120 : 85,
