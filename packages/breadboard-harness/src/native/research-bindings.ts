@@ -167,7 +167,9 @@ function adapterForTool(
 	if (delegateName === "glob") {
 		const pathKey = declaredAlias(properties, ["path", "filePath", "file_path"]) ?? "path";
 		const patternKey = declaredAlias(properties, ["pattern"]) ?? "pattern";
-		return input => adaptGlobInput(input, pathKey, patternKey);
+		// `ls` lists one level; `find` follows fd, whose slash-free globs match names at any depth.
+		const mode = tool.name === "ls" ? "children" : tool.name === "find" ? "basename" : "glob";
+		return input => adaptGlobInput(input, pathKey, patternKey, mode);
 	}
 	if (delegateName === "grep") {
 		const pathKey = declaredAlias(properties, ["path"]) ?? "path";

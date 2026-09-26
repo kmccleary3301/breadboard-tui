@@ -338,13 +338,26 @@ export function adaptReadInput(
 	return { path: resolvedPath };
 }
 
+/**
+ * `glob`: pattern as written. `basename`: fd-style, a slash-free pattern matches file names at any depth.
+ * `children`: ls-style, one directory level.
+ */
+export type GlobListingMode = "glob" | "basename" | "children";
+
 export function adaptGlobInput(
 	input: Record<string, unknown>,
 	pathKey = "path",
 	patternKey = "pattern",
+	mode: GlobListingMode = "glob",
 ): { path?: string; hidden?: boolean; gitignore?: boolean; limit?: number } {
 	const rawPath = input[pathKey];
-	const rawPattern = input[patternKey];
+	const declaredPattern = input[patternKey];
+	const rawPattern =
+		mode === "children"
+			? "*"
+			: mode === "basename" && declaredPattern !== undefined && !String(declaredPattern).includes("/")
+				? `**/${String(declaredPattern)}`
+				: declaredPattern;
 	let combinedPath: string | undefined;
 	if (rawPath !== undefined && rawPattern !== undefined) {
 		const p = String(rawPath).replace(/\/+$/, "");
@@ -354,6 +367,8 @@ export function adaptGlobInput(
 	} else if (rawPath !== undefined) {
 		combinedPath = String(rawPath);
 	}
+	// Host glob expands a leading bare `*` to `**/*`; anchoring at `.` keeps a children listing one level deep.
+	if (mode === "children" && combinedPath === "*") combinedPath = "./*";
 	const out: { path?: string; hidden?: boolean; gitignore?: boolean; limit?: number } = {};
 	if (combinedPath !== undefined) out.path = combinedPath;
 	if (input.hidden !== undefined) out.hidden = typeof input.hidden === "boolean" ? input.hidden : Boolean(input.hidden);
@@ -376,18 +391,15 @@ export function adaptGrepInput(
 	let combinedPath: string | undefined;
 	if (rawPath !== undefined && rawInclude !== undefined) {
 		const p = String(rawPath).replace(/\/+$/, "");
-		// ripgrep-style include globs match at any depth; host `dir/*.ts` only matches direct children.
-		const include = String(rawInclude);
-		const scoped = include.includes("/") ? include : `**/${include}`;
-		combinedPath = p.length > 0 && p !== "." ? `${p}/${scoped}` : include;
+		combinedPath = p.length > 0 && p !== "." ? `${p}/${String(rawInclude)}` : String(rawInclude);
 	} else if (rawInclude !== undefined) {
 		combinedPath = String(rawInclude);
 	} else if (rawPath !== undefined) {
 		combinedPath = String(rawPath);
 	}
-	const out: { pattern: string; path?: string; case?: boolean; gitignore?: boolean; skip?: number | null } = {
-		pattern: rawPattern,
-	};
+	// Host grep takes a regex only; a declared literal pattern is escaped to match itself.
+	const pattern = input.literal === true ? rawPattern.replace(/[\\^$.*+?()[\]{}|#&~-]/gu, "\\$&") : rawPattern;
+	const out: { pattern: string; path?: string; case?: boolean; gitignore?: boolean; skip?: number | null } = { pattern };
 	if (combinedPath !== undefined) out.path = combinedPath;
 	if (input.case !== undefined) {
 		out.case = typeof input.case === "boolean" ? input.case : Boolean(input.case);

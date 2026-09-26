@@ -235,6 +235,61 @@ describe("research native builtin bindings", () => {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
 	});
+	describe("pi listing and search contracts through real host tools", () => {
+		const runPiTool = async (scratch: string, name: string, input: Record<string, unknown>) => {
+			const loaded = await loadNativeHarness({ specPath: "pi", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === name);
+			if (!tool) throw new Error(`missing pi ${name} tool`);
+			const host = name === "grep" ? new GrepTool(patchSession(scratch)) : new GlobTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: input as JsonObject,
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => host.execute(`research-${name}`, host.parameters.assert(params) as never),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			return result.text;
+		};
+		const withTree = async (body: (scratch: string) => Promise<void>) => {
+			const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-pi-"));
+			try {
+				await fs.mkdir(path.join(scratch, "sub", "deep"), { recursive: true });
+				await Bun.write(path.join(scratch, "top.ts"), "call(a.b)\n");
+				await Bun.write(path.join(scratch, "sub", "mid.ts"), "callXaYb\n");
+				await Bun.write(path.join(scratch, "sub", "deep", "low.ts"), "nothing\n");
+				await body(scratch);
+			} finally {
+				await fs.rm(scratch, { recursive: true, force: true });
+			}
+		};
+
+		test("ls lists one directory level", () =>
+			withTree(async scratch => {
+				const text = await runPiTool(scratch, "ls", { path: scratch });
+				expect(text).toContain("top.ts");
+				expect(text).toContain("sub/");
+				expect(text).not.toContain("mid.ts");
+			}));
+
+		test("find matches a slash-free glob against file names at any depth", () =>
+			withTree(async scratch => {
+				const text = await runPiTool(scratch, "find", { path: scratch, pattern: "*.ts" });
+				expect(text).toContain("top.ts");
+				expect(text).toContain("low.ts");
+			}));
+
+		test("grep literal matches the pattern text, not the regex", () =>
+			withTree(async scratch => {
+				const text = await runPiTool(scratch, "grep", { path: scratch, pattern: "call(a.b)", literal: true });
+				expect(text).toContain("top.ts");
+				expect(text).not.toContain("mid.ts");
+			}));
+	});
 	test("executes the oh_my_opencode list schema through real host glob", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-list-"));
 		try {
