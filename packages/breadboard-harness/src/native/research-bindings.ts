@@ -158,7 +158,9 @@ function adapterForTool(
 			return input => adaptSkillInput(input, skillKey);
 		}
 		const pathKey = declaredAlias(properties, ["filePath", "file_path", "path", "file_name"]) ?? "path";
-		return input => adaptReadInput(input, pathKey);
+		const offsetSchema = (tool.parameters.properties as Record<string, { description?: unknown }> | undefined)?.offset;
+		const zeroBasedOffset = typeof offsetSchema?.description === "string" && /\b0-based\b/i.test(offsetSchema.description);
+		return input => adaptReadInput(input, pathKey, zeroBasedOffset);
 	}
 	if (delegateName === "glob") {
 		const pathKey = declaredAlias(properties, ["path", "filePath", "file_path"]) ?? "path";

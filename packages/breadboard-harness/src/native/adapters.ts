@@ -312,9 +312,11 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 export function markTaskCompleteAdapter(): NativeToolResult {
 	return result({ action: "complete" });
 }
+/** `zeroBasedOffset` follows the pack's declared `offset` contract; host line selectors are 1-indexed. */
 export function adaptReadInput(
 	input: Record<string, unknown>,
 	pathKey = "path",
+	zeroBasedOffset = false,
 ): { path: string | undefined } {
 	const rawPath = input[pathKey];
 	if (rawPath === undefined || rawPath === null) return { path: undefined };
@@ -326,14 +328,11 @@ export function adaptReadInput(
 		const numLimit = typeof limit === "number" ? limit : Number(limit);
 		const hasOffset = !Number.isNaN(numOffset) && offset !== undefined;
 		const hasLimit = !Number.isNaN(numLimit) && limit !== undefined;
-		if (hasOffset && hasLimit) {
-			const start = Math.max(1, Math.floor(numOffset));
+		const start = hasOffset ? Math.max(1, Math.floor(numOffset) + (zeroBasedOffset ? 1 : 0)) : 1;
+		if (hasLimit) {
 			resolvedPath = `${resolvedPath}:${start}+${Math.floor(numLimit)}`;
 		} else if (hasOffset) {
-			const start = Math.max(1, Math.floor(numOffset));
 			resolvedPath = `${resolvedPath}:${start}-`;
-		} else if (hasLimit) {
-			resolvedPath = `${resolvedPath}:1+${Math.floor(numLimit)}`;
 		}
 	}
 	return { path: resolvedPath };

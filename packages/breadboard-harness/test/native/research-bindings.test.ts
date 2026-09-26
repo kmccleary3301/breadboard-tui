@@ -270,30 +270,36 @@ describe("research native builtin bindings", () => {
 		}
 	});
 
-	test("executes the pi read schema with offset/limit through real host read", async () => {
+	test("reads the same host window for a 1-indexed and a declared 0-based offset", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-read-"));
 		try {
 			const target = path.join(scratch, "lines.txt");
-			const lines = Array.from({ length: 30 }, (_, i) => `line-${i + 1}`).join("\n");
-			await Bun.write(target, lines);
-			const loaded = await loadNativeHarness({ specPath: "pi", workspaceRoot: scratch });
-			const tool = loaded.registeredToolSurface.native.find(t => t.name === "read");
-			if (!tool) throw new Error("missing pi read tool");
+			await Bun.write(target, Array.from({ length: 30 }, (_, i) => `line-${i + 1}`).join("\n"));
 			const hostRead = new ReadTool(patchSession(scratch));
-			const result = await researchBindingForTool(tool).run({
-				input: { path: target, offset: 10, limit: 5 },
-				harness: { workspaceRoot: scratch } as never,
-				context: {
-					invokeTool: async (params: JsonObject) => hostRead.execute("research-read", hostRead.parameters.assert(params)),
-				} as never,
-				signal: undefined,
-				onUpdate: undefined,
-				todos: {} as never,
-				guard: {} as never,
-			});
-			expect(result.isError).not.toBe(true);
-			expect(result.text).toContain("line-10");
-			expect(result.text).toContain("line-14");
+			const readWindow = async (harnessId: string, input: Record<string, unknown>) => {
+				const loaded = await loadNativeHarness({ specPath: harnessId, workspaceRoot: scratch });
+				const tool = loaded.registeredToolSurface.native.find(t => t.name === "read");
+				if (!tool) throw new Error(`missing ${harnessId} read tool`);
+				const result = await researchBindingForTool(tool).run({
+					input: input as JsonObject,
+					harness: { workspaceRoot: scratch } as never,
+					context: {
+						invokeTool: async (params: JsonObject) => hostRead.execute("research-read", hostRead.parameters.assert(params)),
+					} as never,
+					signal: undefined,
+					onUpdate: undefined,
+					todos: {} as never,
+					guard: {} as never,
+				});
+				expect(result.isError).not.toBe(true);
+				return result.text;
+			};
+			// Line 10 is offset 10 in pi's declared 1-indexed contract and offset 9 in oh_my_opencode's 0-based one.
+			const oneIndexed = await readWindow("pi", { path: target, offset: 10, limit: 5 });
+			const zeroBased = await readWindow("oh_my_opencode", { filePath: target, offset: 9, limit: 5 });
+			expect(oneIndexed).toContain("line-10");
+			expect(oneIndexed).toContain("line-14");
+			expect(zeroBased).toBe(oneIndexed);
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
