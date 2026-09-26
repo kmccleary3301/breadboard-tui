@@ -425,15 +425,13 @@ export function adaptTaskInput(
 	}
 	const taskPrompt = input.prompt ?? input.task ?? "";
 	const description = input.description ?? input.name ?? "";
-	const agent = input.subagent_type ?? input.agent ?? "task";
-	const context = typeof input.context === "string" ? input.context : String(description || taskPrompt);
-	const singleTask: Record<string, unknown> = {
-		task: String(taskPrompt),
-		name: String(description),
-		agent: String(agent),
-	};
+	// Single-task packs name their own product's agent roles (general, explore, oracle, ...), none of which
+	// are host agents. The host default agent runs the task; the requested role stays visible in context.
+	const role = input.subagent_type ?? input.agent;
+	const baseContext = typeof input.context === "string" ? input.context : String(description || taskPrompt);
+	const context = role === undefined || role === "" ? baseContext : `${baseContext}\nRequested agent role: ${String(role)}`;
 	return {
 		context,
-		tasks: [singleTask],
+		tasks: [{ task: String(taskPrompt), name: String(description) }],
 	};
 }

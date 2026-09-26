@@ -372,9 +372,11 @@ describe("research native builtin bindings", () => {
 			expect(result.isError).not.toBe(true);
 			expect(result.text).toContain("task-staged: 1 tasks");
 			expect(capturedBatch).toBeDefined();
-			expect(capturedBatch!.context).toBe("Research task");
-			expect(Array.isArray(capturedBatch!.tasks)).toBe(true);
-			expect((capturedBatch!.tasks as Array<Record<string, unknown>>)[0].task).toBe("Perform subagent investigation");
+			expect(capturedBatch!.context).toBe("Research task\nRequested agent role: general");
+			const [item] = capturedBatch!.tasks as Array<Record<string, unknown>>;
+			expect(item.task).toBe("Perform subagent investigation");
+			// "general" is an oh-my-opencode role, not a host agent; the host default agent must run it.
+			expect(item.agent).toBeUndefined();
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
