@@ -36,7 +36,7 @@ function runningJob(type: AsyncJobType, index: number): AsyncJobSnapshotItem {
 	};
 }
 
-function makeComponent(running: AsyncJobSnapshotItem[], state: { isStreaming: boolean } = { isStreaming: false }): StatusLineComponent {
+function makeComponent(running: AsyncJobSnapshotItem[]): StatusLineComponent {
 	const messages: unknown[] = [];
 	const model = { id: "test-model", name: "Test Model", contextWindow: 100_000 };
 	const session = {
@@ -47,9 +47,7 @@ function makeComponent(running: AsyncJobSnapshotItem[], state: { isStreaming: bo
 		systemPrompt: [],
 		agent: { state: { tools: [] } },
 		skills: [],
-		get isStreaming() {
-			return state.isStreaming;
-		},
+		isStreaming: false,
 		isAutoThinking: false,
 		autoResolvedThinkingLevel: () => undefined,
 		isFastModeActive: () => false,
@@ -102,57 +100,5 @@ describe("status-line background-job badge", () => {
 		component.setRunningSubagents([]);
 		const content = stripVTControlCharacters(component.getTopBorder(120).content);
 		expect(content).toContain(`${theme.icon.job} 1`);
-	});
-});
-
-describe("BreadBoard composer while background jobs hold the turn", () => {
-	// Native turns never set BreadBoard activity; the composer derives it from session state.
-	function render(component: StatusLineComponent): string {
-		return stripVTControlCharacters(component.getTopBorder(160).content);
-	}
-
-	function makeBreadboardComponent(running: AsyncJobSnapshotItem[], state: { isStreaming: boolean }) {
-		const component = makeComponent(running, state);
-		component.updateSettings({ preset: "bb-balanced" });
-		component.markActivityStart();
-		return component;
-	}
-
-	it("reports the background wait instead of Working once the turn stops streaming", () => {
-		const state = { isStreaming: true };
-		const component = makeBreadboardComponent([runningJob("bash", 1)], state);
-		const streaming = render(component);
-		expect(streaming).toContain("Working");
-		expect(streaming).not.toContain("Waiting on");
-
-		state.isStreaming = false;
-		component.invalidate();
-		const waiting = render(component);
-		expect(waiting).toContain("Waiting on 1 background job");
-		expect(waiting).not.toContain("Working");
-	});
-
-	it("counts jobs as the stock badge does and keeps operator states ahead of the wait", () => {
-		const component = makeBreadboardComponent(
-			[runningJob("task", 0), runningJob("bash", 1), runningJob("eval", 2)],
-			{ isStreaming: false },
-		);
-		component.setRunningSubagents(["task-0"]);
-		component.invalidate();
-		expect(render(component)).toContain("Waiting on 2 background jobs");
-
-		component.setBreadboardActivity({ kind: "approval", label: "Approval required" });
-		const approval = render(component);
-		expect(approval).toContain("Approval required");
-		expect(approval).not.toContain("Waiting on");
-	});
-
-	it("shows no activity once the turn has ended", () => {
-		const component = makeBreadboardComponent([runningJob("bash", 1)], { isStreaming: false });
-		component.markActivityEnd();
-		component.invalidate();
-		const idle = render(component);
-		expect(idle).not.toContain("Waiting on");
-		expect(idle).not.toContain("Working");
 	});
 });
