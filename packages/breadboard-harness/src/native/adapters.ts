@@ -434,3 +434,9 @@ export function adaptTaskInput(
 		tasks: [{ task: String(taskPrompt), name: String(description) }],
 	};
 }
+
+/** tmux tool schemas take tmux arguments (`new-session -d -s x`), not a shell command line. */
+export function adaptTmuxInput(input: Record<string, unknown>, commandKey: string): { command: string } {
+	const args = String(input[commandKey] ?? "").trim().replace(/^tmux(\s+|$)/u, "");
+	return { command: `tmux ${args}` };
+}

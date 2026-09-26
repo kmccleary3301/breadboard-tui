@@ -185,6 +185,56 @@ describe("research native builtin bindings", () => {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
 	});
+	test.skipIf(!Bun.which("tmux"))("executes the oh_my_opencode interactive_bash tmux schema through real host bash", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-tmux-"));
+		try {
+			const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "interactive_bash");
+			if (!tool) throw new Error("missing oh_my_opencode interactive_bash tool");
+			const hostBash = new BashTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { tmux_command: "-V" },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostBash.execute("research-tmux", hostBash.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toMatch(/tmux \d/u);
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+	test("executes the oh_my_opencode webfetch schema by reading the URL through real host read", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-webfetch-"));
+		const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("WEBFETCH_BODY_OK\n") });
+		try {
+			const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "webfetch");
+			if (!tool) throw new Error("missing oh_my_opencode webfetch tool");
+			const hostRead = new ReadTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { url: `http://127.0.0.1:${server.port}/page.txt`, format: "text" },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostRead.execute("research-webfetch", hostRead.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("WEBFETCH_BODY_OK");
+		} finally {
+			server.stop(true);
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
 	test("executes the oh_my_opencode list schema through real host glob", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-list-"));
 		try {

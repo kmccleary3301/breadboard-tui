@@ -7,6 +7,7 @@ import {
 	adaptReadInput,
 	adaptSkillInput,
 	adaptTaskInput,
+	adaptTmuxInput,
 	applyUnifiedPatchAdapter,
 } from "./adapters";
 import type { NativeBinding, NativeCall } from "./omp-extension";
@@ -37,7 +38,7 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	ls: "glob",
 	task: "task",
 	background_task: "task",
-	webfetch: "web_search",
+	webfetch: "read",
 	manage_skill: "manage_skill",
 	eval: "eval",
 	todo: "todo",
@@ -108,7 +109,7 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 	if (delegateName === "bash") {
 		return Object.fromEntries(
 			[
-				["command", declaredAlias(properties, ["command", "tmux_command"])],
+				["command", declaredAlias(properties, ["command"])],
 				["timeout", declaredAlias(properties, ["timeout", "timeout_ms"])],
 				["cwd", declaredAlias(properties, ["cwd", "workdir", "working_directory"])],
 			].filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -117,7 +118,7 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 	if (delegateName === "web_search") {
 		return Object.fromEntries(
 			[
-				["query", declaredAlias(properties, ["query", "url"])],
+				["query", declaredAlias(properties, ["query"])],
 				["recency", declaredAlias(properties, ["recency"])],
 				["limit", declaredAlias(properties, ["limit"])],
 				["max_tokens", declaredAlias(properties, ["max_tokens"])],
@@ -157,7 +158,8 @@ function adapterForTool(
 			const skillKey = declaredAlias(properties, ["skill", "name"]) ?? "skill";
 			return input => adaptSkillInput(input, skillKey);
 		}
-		const pathKey = declaredAlias(properties, ["filePath", "file_path", "path", "file_name"]) ?? "path";
+		// Host read accepts URLs, so URL fetch tools read their `url` directly.
+		const pathKey = declaredAlias(properties, ["filePath", "file_path", "path", "file_name", "url"]) ?? "path";
 		const offsetSchema = (tool.parameters.properties as Record<string, { description?: unknown }> | undefined)?.offset;
 		const zeroBasedOffset = typeof offsetSchema?.description === "string" && /\b0-based\b/i.test(offsetSchema.description);
 		return input => adaptReadInput(input, pathKey, zeroBasedOffset);
@@ -171,6 +173,9 @@ function adapterForTool(
 		const pathKey = declaredAlias(properties, ["path"]) ?? "path";
 		const includeKey = declaredAlias(properties, ["include", "glob"]);
 		return input => adaptGrepInput(input, pathKey, includeKey);
+	}
+	if (delegateName === "bash" && properties.has("tmux_command")) {
+		return input => adaptTmuxInput(input, "tmux_command");
 	}
 	if (delegateName === "task") {
 		const isSingleTask = !properties.has("tasks");
