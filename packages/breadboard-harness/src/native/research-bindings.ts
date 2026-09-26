@@ -1,7 +1,14 @@
 import type { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { JsonRecord } from "../canonical-json";
-import { applyUnifiedPatchAdapter } from "./adapters";
+import {
+	adaptGlobInput,
+	adaptGrepInput,
+	adaptReadInput,
+	adaptSkillInput,
+	adaptTaskInput,
+	applyUnifiedPatchAdapter,
+} from "./adapters";
 import type { NativeBinding, NativeCall } from "./omp-extension";
 import type { NativeToolDefinition, NativeToolResult } from "./types";
 
@@ -12,8 +19,10 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	Write: "write",
 	Glob: "glob",
 	Grep: "grep",
-	Skill: "manage_skill",
+	Skill: "read",
+	skill: "read",
 	WebSearch: "web_search",
+	web_search: "web_search",
 	bash: "bash",
 	shell_command: "bash",
 	interactive_bash: "bash",
@@ -23,9 +32,9 @@ const DIRECT_DELEGATES: Readonly<Record<string, string>> = {
 	write: "write",
 	glob: "glob",
 	grep: "grep",
-	list: "find",
-	find: "find",
-	ls: "find",
+	list: "glob",
+	find: "glob",
+	ls: "glob",
 	task: "task",
 	background_task: "task",
 	webfetch: "web_search",
@@ -54,6 +63,7 @@ type ArgumentMapping = Readonly<Record<string, string>>;
 interface BindingPlan {
 	readonly delegateName: DelegateName | undefined;
 	readonly argumentMapping: ArgumentMapping;
+	readonly adaptInput?: (input: Record<string, unknown>) => Record<string, unknown>;
 }
 
 function schemaProperties(tool: NativeToolDefinition): ReadonlySet<string> {
@@ -77,15 +87,6 @@ function identityMapping(properties: ReadonlySet<string>): ArgumentMapping {
 function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName | undefined): ArgumentMapping {
 	const properties = schemaProperties(tool);
 	if (tool.name === "apply_patch" || (delegateName === "edit" && properties.has("input"))) return { input: "input" };
-	if (delegateName === "read") {
-		return Object.fromEntries(
-			[
-				["path", declaredAlias(properties, ["filePath", "file_path", "path", "file_name"])],
-				["offset", declaredAlias(properties, ["offset"])],
-				["limit", declaredAlias(properties, ["limit"])],
-			].filter((entry): entry is [string, string] => entry[1] !== undefined),
-		);
-	}
 	if (delegateName === "write") {
 		return Object.fromEntries(
 			[
@@ -113,17 +114,6 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 			].filter((entry): entry is [string, string] => entry[1] !== undefined),
 		);
 	}
-	if (delegateName === "task") {
-		return Object.fromEntries(
-			[
-				["name", declaredAlias(properties, ["name", "description"])],
-				["agent", declaredAlias(properties, ["agent", "subagent_type"])],
-				["task", declaredAlias(properties, ["task", "prompt"])],
-				["context", declaredAlias(properties, ["context"])],
-				["tasks", declaredAlias(properties, ["tasks"])],
-			].filter((entry): entry is [string, string] => entry[1] !== undefined),
-		);
-	}
 	if (delegateName === "web_search") {
 		return Object.fromEntries(
 			[
@@ -143,32 +133,6 @@ function mappingForTool(tool: NativeToolDefinition, delegateName: DelegateName |
 				.map(name => [name, name]),
 		);
 	}
-	if (delegateName === "grep") {
-		return Object.fromEntries(
-			[
-				["pattern", declaredAlias(properties, ["pattern"])],
-				["path", declaredAlias(properties, ["path"])],
-				["include", declaredAlias(properties, ["include", "glob"])],
-			].filter((entry): entry is [string, string] => entry[1] !== undefined),
-		);
-	}
-	if (delegateName === "glob") {
-		return Object.fromEntries(
-			[
-				["path", declaredAlias(properties, ["path"])],
-				["pattern", declaredAlias(properties, ["pattern"])],
-			].filter((entry): entry is [string, string] => entry[1] !== undefined),
-		);
-	}
-	if (delegateName === "find") {
-		return Object.fromEntries(
-			[
-				["path", declaredAlias(properties, ["path"])],
-				["pattern", declaredAlias(properties, ["pattern"])],
-				["limit", declaredAlias(properties, ["limit"])],
-			].filter((entry): entry is [string, string] => entry[1] !== undefined),
-		);
-	}
 	return identityMapping(properties);
 }
 
@@ -183,12 +147,45 @@ export function researchDelegateForTool(tool: NativeToolDefinition): DelegateNam
 	return direct;
 }
 
+function adapterForTool(
+	tool: NativeToolDefinition,
+	delegateName: DelegateName | undefined,
+): ((input: Record<string, unknown>) => Record<string, unknown>) | undefined {
+	const properties = schemaProperties(tool);
+	if (delegateName === "read") {
+		if (tool.name === "Skill" || tool.name === "skill") {
+			const skillKey = declaredAlias(properties, ["skill", "name"]) ?? "skill";
+			return input => adaptSkillInput(input, skillKey);
+		}
+		const pathKey = declaredAlias(properties, ["filePath", "file_path", "path", "file_name"]) ?? "path";
+		return input => adaptReadInput(input, pathKey);
+	}
+	if (delegateName === "glob") {
+		const pathKey = declaredAlias(properties, ["path", "filePath", "file_path"]) ?? "path";
+		const patternKey = declaredAlias(properties, ["pattern"]) ?? "pattern";
+		return input => adaptGlobInput(input, pathKey, patternKey);
+	}
+	if (delegateName === "grep") {
+		const pathKey = declaredAlias(properties, ["path"]) ?? "path";
+		const includeKey = declaredAlias(properties, ["include", "glob"]);
+		return input => adaptGrepInput(input, pathKey, includeKey);
+	}
+	if (delegateName === "task") {
+		const isSingleTask = !properties.has("tasks");
+		return input => adaptTaskInput(input, isSingleTask);
+	}
+	return undefined;
+}
+
 function bindingPlanForTool(tool: NativeToolDefinition): BindingPlan {
 	const delegateName = researchDelegateForTool(tool);
+	const adaptInput = adapterForTool(tool, delegateName);
+	if (adaptInput) return { delegateName, argumentMapping: {}, adaptInput };
 	return { delegateName, argumentMapping: mappingForTool(tool, delegateName) };
 }
 
 function mappedInput(plan: BindingPlan, input: Record<string, unknown>): Record<string, unknown> {
+	if (plan.adaptInput) return plan.adaptInput(input);
 	return Object.fromEntries(Object.entries(plan.argumentMapping).map(([target, source]) => [target, input[source]]));
 }
 

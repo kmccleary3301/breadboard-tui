@@ -312,3 +312,128 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 export function markTaskCompleteAdapter(): NativeToolResult {
 	return result({ action: "complete" });
 }
+export function adaptReadInput(
+	input: Record<string, unknown>,
+	pathKey = "path",
+): { path: string | undefined } {
+	const rawPath = input[pathKey];
+	if (rawPath === undefined || rawPath === null) return { path: undefined };
+	let resolvedPath = String(rawPath);
+	const offset = input.offset;
+	const limit = input.limit;
+	if (offset !== undefined || limit !== undefined) {
+		const numOffset = typeof offset === "number" ? offset : Number(offset);
+		const numLimit = typeof limit === "number" ? limit : Number(limit);
+		const hasOffset = !Number.isNaN(numOffset) && offset !== undefined;
+		const hasLimit = !Number.isNaN(numLimit) && limit !== undefined;
+		if (hasOffset && hasLimit) {
+			const start = Math.max(1, Math.floor(numOffset));
+			resolvedPath = `${resolvedPath}:${start}+${Math.floor(numLimit)}`;
+		} else if (hasOffset) {
+			const start = Math.max(1, Math.floor(numOffset));
+			resolvedPath = `${resolvedPath}:${start}-`;
+		} else if (hasLimit) {
+			resolvedPath = `${resolvedPath}:1+${Math.floor(numLimit)}`;
+		}
+	}
+	return { path: resolvedPath };
+}
+
+export function adaptGlobInput(
+	input: Record<string, unknown>,
+	pathKey = "path",
+	patternKey = "pattern",
+): { path?: string; hidden?: boolean; gitignore?: boolean; limit?: number } {
+	const rawPath = input[pathKey];
+	const rawPattern = input[patternKey];
+	let combinedPath: string | undefined;
+	if (rawPath !== undefined && rawPattern !== undefined) {
+		const p = String(rawPath).replace(/\/+$/, "");
+		combinedPath = p.length > 0 && p !== "." ? `${p}/${String(rawPattern)}` : String(rawPattern);
+	} else if (rawPattern !== undefined) {
+		combinedPath = String(rawPattern);
+	} else if (rawPath !== undefined) {
+		combinedPath = String(rawPath);
+	}
+	const out: { path?: string; hidden?: boolean; gitignore?: boolean; limit?: number } = {};
+	if (combinedPath !== undefined) out.path = combinedPath;
+	if (input.hidden !== undefined) out.hidden = typeof input.hidden === "boolean" ? input.hidden : Boolean(input.hidden);
+	if (input.gitignore !== undefined) out.gitignore = typeof input.gitignore === "boolean" ? input.gitignore : Boolean(input.gitignore);
+	if (input.limit !== undefined) {
+		const num = typeof input.limit === "number" ? input.limit : Number(input.limit);
+		out.limit = !Number.isNaN(num) ? num : (input.limit as number);
+	}
+	return out;
+}
+
+export function adaptGrepInput(
+	input: Record<string, unknown>,
+	pathKey = "path",
+	includeKey?: string,
+): { pattern: string; path?: string; case?: boolean; gitignore?: boolean; skip?: number | null } {
+	const rawPattern = input.pattern !== undefined ? String(input.pattern) : "";
+	const rawPath = input[pathKey];
+	const rawInclude = includeKey ? input[includeKey] : (input.include ?? input.glob);
+	let combinedPath: string | undefined;
+	if (rawPath !== undefined && rawInclude !== undefined) {
+		const p = String(rawPath).replace(/\/+$/, "");
+		// ripgrep-style include globs match at any depth; host `dir/*.ts` only matches direct children.
+		const include = String(rawInclude);
+		const scoped = include.includes("/") ? include : `**/${include}`;
+		combinedPath = p.length > 0 && p !== "." ? `${p}/${scoped}` : include;
+	} else if (rawInclude !== undefined) {
+		combinedPath = String(rawInclude);
+	} else if (rawPath !== undefined) {
+		combinedPath = String(rawPath);
+	}
+	const out: { pattern: string; path?: string; case?: boolean; gitignore?: boolean; skip?: number | null } = {
+		pattern: rawPattern,
+	};
+	if (combinedPath !== undefined) out.path = combinedPath;
+	if (input.case !== undefined) {
+		out.case = typeof input.case === "boolean" ? input.case : Boolean(input.case);
+	} else if (input.ignoreCase !== undefined) {
+		out.case = typeof input.ignoreCase === "boolean" ? !input.ignoreCase : false;
+	} else if (input["-i"] !== undefined) {
+		out.case = typeof input["-i"] === "boolean" ? !input["-i"] : false;
+	}
+	if (input.gitignore !== undefined) out.gitignore = typeof input.gitignore === "boolean" ? input.gitignore : Boolean(input.gitignore);
+	if (input.skip !== undefined) {
+		const num = typeof input.skip === "number" ? input.skip : Number(input.skip);
+		out.skip = !Number.isNaN(num) ? num : (input.skip as number | null);
+	}
+	return out;
+}
+
+export function adaptSkillInput(
+	input: Record<string, unknown>,
+	skillKey = "skill",
+): { path: string } {
+	const name = input[skillKey] ?? input.skill ?? input.name ?? "";
+	return { path: `skill://${String(name)}` };
+}
+
+export function adaptTaskInput(
+	input: Record<string, unknown>,
+	isSingleTask = true,
+): { context: string; tasks: Array<Record<string, unknown>> } {
+	if (!isSingleTask && Array.isArray(input.tasks)) {
+		return {
+			context: typeof input.context === "string" ? input.context : String(input.context ?? ""),
+			tasks: input.tasks as Array<Record<string, unknown>>,
+		};
+	}
+	const taskPrompt = input.prompt ?? input.task ?? "";
+	const description = input.description ?? input.name ?? "";
+	const agent = input.subagent_type ?? input.agent ?? "task";
+	const context = typeof input.context === "string" ? input.context : String(description || taskPrompt);
+	const singleTask: Record<string, unknown> = {
+		task: String(taskPrompt),
+		name: String(description),
+		agent: String(agent),
+	};
+	return {
+		context,
+		tasks: [singleTask],
+	};
+}

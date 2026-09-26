@@ -8,6 +8,14 @@ import { researchBindingForTool } from "../../src/native/research-bindings";
 import type { JsonRecord } from "../../src/canonical-json";
 import type { NativeToolDefinition } from "../../src/native/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import type { NativeBinding } from "../../src/native/omp-extension";
+import { loadNativeHarness } from "../../src/native/load-native-harness";
+import { BUILTIN_TOOLS, type Tool } from "@oh-my-pi/pi-coding-agent/tools";
+import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
+import { GlobTool } from "@oh-my-pi/pi-coding-agent/tools/glob";
+import { GrepTool } from "@oh-my-pi/pi-coding-agent/tools/grep";
+import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
 
 type JsonObject = JsonRecord;
 
@@ -23,6 +31,52 @@ function patchSession(cwd: string): ToolSession {
 		getPlanModeState: () => undefined,
 		settings: Settings.isolated({ "edit.mode": "replace" }),
 	};
+}
+
+function createHostSession(cwd: string, options: { taskBatch?: boolean } = {}): ToolSession {
+	return {
+		cwd,
+		hasUI: true,
+		canPromptUser: true,
+		enableLsp: true,
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+		getArtifactsDir: () => null,
+		getSessionId: () => null,
+		getPlanModeState: () => undefined,
+		// Enable the gated host tools some packs delegate to (memory_edit, manage_skill, debug).
+		settings: Settings.isolated({
+			"autolearn.enabled": true,
+			"memory.backend": "mnemopi",
+			"debug.enabled": true,
+			"task.batch": options.taskBatch ?? true,
+		}),
+		refreshSkills: async () => {},
+	};
+}
+
+async function resolveHostTool(
+	binding: NativeBinding,
+	tool: NativeToolDefinition,
+	session: ToolSession,
+): Promise<Tool | undefined> {
+	if (typeof binding.delegate === "function") {
+		return (await binding.delegate(session)) as Tool;
+	}
+	if (typeof binding.delegate === "string") {
+		if (binding.delegate === "apply_patch") return undefined;
+		const name = binding.delegate;
+		if (name === "task") {
+			const taskSession = createHostSession(session.cwd, { taskBatch: true });
+			return TaskTool.create(taskSession);
+		}
+		const factory = BUILTIN_TOOLS[name as keyof typeof BUILTIN_TOOLS];
+		if (!factory) throw new Error(`Unknown host tool delegate name: ${name}`);
+		const created = await factory(session);
+		if (!created) throw new Error(`Host tool factory for '${name}' returned null`);
+		return created;
+	}
+	return undefined;
 }
 
 
@@ -113,7 +167,7 @@ describe("research native builtin bindings", () => {
 			const nested = path.join(scratch, "nested");
 			await fs.mkdir(nested);
 			await Bun.write(path.join(nested, "fixture.txt"), "codex-shell-ok\n");
-			const hostBash = new (await import("@oh-my-pi/pi-coding-agent/tools/bash")).BashTool(patchSession(scratch));
+			const hostBash = new BashTool(patchSession(scratch));
 			const result = await researchBindingForTool(tool).run({
 				input: { command: "cat fixture.txt", workdir: nested, timeout_ms: 5000 },
 				harness: { workspaceRoot: scratch } as never,
@@ -129,6 +183,264 @@ describe("research native builtin bindings", () => {
 			expect(result.text).toContain("codex-shell-ok");
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+	test("executes the oh_my_opencode list schema through real host glob", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-list-"));
+		try {
+			await Bun.write(path.join(scratch, "sample.txt"), "sample-content\n");
+			const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "list");
+			if (!tool) throw new Error("missing oh_my_opencode list tool");
+			const hostGlob = new GlobTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { path: scratch },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostGlob.execute("research-list", hostGlob.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("sample.txt");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	test("executes the claude_code Glob schema through real host glob", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-glob-"));
+		try {
+			const sub = path.join(scratch, "subdir");
+			await fs.mkdir(sub);
+			await Bun.write(path.join(sub, "matched.ts"), "ts-content\n");
+			await Bun.write(path.join(sub, "ignored.txt"), "txt-content\n");
+			const loaded = await loadNativeHarness({ specPath: "claude_code", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "Glob");
+			if (!tool) throw new Error("missing claude_code Glob tool");
+			const hostGlob = new GlobTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { path: sub, pattern: "*.ts" },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostGlob.execute("research-glob", hostGlob.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("matched.ts");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	test("executes the oh_my_opencode grep schema with include through real host grep", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-grep-"));
+		try {
+			await Bun.write(path.join(scratch, "needle.ts"), "FIND_ME_IN_TS\n");
+			await Bun.write(path.join(scratch, "needle.md"), "FIND_ME_IN_MD\n");
+			await Bun.write(path.join(scratch, "nested", "deeper.ts"), "FIND_ME_NESTED\n");
+			const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "grep");
+			if (!tool) throw new Error("missing oh_my_opencode grep tool");
+			const hostGrep = new GrepTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { pattern: "FIND_ME", path: scratch, include: "*.ts" },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostGrep.execute("research-grep", hostGrep.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("needle.ts");
+			expect(result.text).not.toContain("needle.md");
+			expect(result.text).toContain("deeper.ts");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	test("executes the pi read schema with offset/limit through real host read", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-read-"));
+		try {
+			const target = path.join(scratch, "lines.txt");
+			const lines = Array.from({ length: 30 }, (_, i) => `line-${i + 1}`).join("\n");
+			await Bun.write(target, lines);
+			const loaded = await loadNativeHarness({ specPath: "pi", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "read");
+			if (!tool) throw new Error("missing pi read tool");
+			const hostRead = new ReadTool(patchSession(scratch));
+			const result = await researchBindingForTool(tool).run({
+				input: { path: target, offset: 10, limit: 5 },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostRead.execute("research-read", hostRead.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("line-10");
+			expect(result.text).toContain("line-14");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	test("executes the claude_code Skill schema by loading skill:// URI through real host read", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-skill-"));
+		const skillDir = path.join(scratch, "test-skill");
+		try {
+			await fs.mkdir(skillDir);
+			await Bun.write(path.join(skillDir, "SKILL.md"), "# Specialized Test Skill Instructions\n");
+			const session = {
+				...patchSession(scratch),
+				skills: [
+					{
+						name: "test-skill",
+						description: "test skill description",
+						filePath: path.join(skillDir, "SKILL.md"),
+						baseDir: skillDir,
+						source: "user" as const,
+					},
+				],
+			};
+			const loaded = await loadNativeHarness({ specPath: "claude_code", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "Skill");
+			if (!tool) throw new Error("missing claude_code Skill tool");
+			const hostRead = new ReadTool(session);
+			const result = await researchBindingForTool(tool).run({
+				input: { skill: "test-skill" },
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => hostRead.execute("research-skill", hostRead.parameters.assert(params)),
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("Specialized Test Skill Instructions");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	test("adapts oh_my_opencode task schema into host batch task, validating at executor boundary", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-task-"));
+		try {
+			const session = createHostSession(scratch, { taskBatch: true });
+			const hostTask = await TaskTool.create(session);
+			const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
+			const tool = loaded.registeredToolSurface.native.find(t => t.name === "task");
+			if (!tool) throw new Error("missing oh_my_opencode task tool");
+			let capturedBatch: JsonObject | undefined;
+			const result = await researchBindingForTool(tool).run({
+				input: {
+					description: "Research task",
+					prompt: "Perform subagent investigation",
+					subagent_type: "general",
+				},
+				harness: { workspaceRoot: scratch } as never,
+				context: {
+					invokeTool: async (params: JsonObject) => {
+						capturedBatch = params;
+						const validated = hostTask.parameters.assert(params) as { tasks: unknown[] };
+						return {
+							content: [{ type: "text", text: `task-staged: ${validated.tasks.length} tasks` }],
+						};
+					},
+				} as never,
+				signal: undefined,
+				onUpdate: undefined,
+				todos: {} as never,
+				guard: {} as never,
+			});
+			expect(result.isError).not.toBe(true);
+			expect(result.text).toContain("task-staged: 1 tasks");
+			expect(capturedBatch).toBeDefined();
+			expect(capturedBatch!.context).toBe("Research task");
+			expect(Array.isArray(capturedBatch!.tasks)).toBe(true);
+			expect((capturedBatch!.tasks as Array<Record<string, unknown>>)[0].task).toBe("Perform subagent investigation");
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	describe("research pack delegation contract against current host schemas", () => {
+		const RESEARCH_HARNESS_IDS = ["claude_code", "codex", "opencode", "oh_my_opencode", "pi", "oh_my_pi"] as const;
+
+		for (const harnessId of RESEARCH_HARNESS_IDS) {
+			test(`validates delegated tools for ${harnessId} against current host tool schemas`, async () => {
+				const scratch = await fs.mkdtemp(path.join(os.tmpdir(), `research-contract-${harnessId}-`));
+				try {
+					const session = createHostSession(scratch);
+					const loaded = await loadNativeHarness({ specPath: harnessId, workspaceRoot: scratch });
+					for (const tool of loaded.registeredToolSurface.native) {
+						const binding = researchBindingForTool(tool);
+						if (!binding.delegate || binding.delegate === "apply_patch") continue;
+
+						const hostTool = await resolveHostTool(binding, tool, session);
+						expect(hostTool).toBeDefined();
+
+						const hostSchema = hostTool!.parameters.toJsonSchema();
+						const hostProperties = new Set(Object.keys(hostSchema.properties ?? {}));
+						const hostRequired = new Set<string>((hostSchema.required as string[] | undefined) ?? []);
+
+						const packProperties = Object.keys(tool.parameters.properties ?? {});
+						const dummyInput = Object.fromEntries(packProperties.map(key => [key, `mock-${key}`]));
+
+						let mappedArgs: Record<string, unknown> | undefined;
+						await binding.run({
+							input: dummyInput,
+							harness: { workspaceRoot: scratch } as never,
+							context: {
+								invokeTool: async (params: Record<string, unknown>) => {
+									mappedArgs = params;
+									return { content: [{ type: "text", text: "ok" }] };
+								},
+							} as never,
+							signal: undefined,
+							onUpdate: undefined,
+							todos: {} as never,
+							guard: {} as never,
+						});
+
+						expect(mappedArgs).toBeDefined();
+
+						// (1) Every mapped argument must be an accepted parameter of the host tool
+						for (const mappedKey of Object.keys(mappedArgs!)) {
+							expect(
+								hostProperties.has(mappedKey),
+								`Pack '${harnessId}' tool '${tool.name}' mapped argument '${mappedKey}' which is not a parameter of host '${hostTool!.name}' (valid parameters: ${[...hostProperties].join(", ")})`,
+							).toBe(true);
+						}
+
+						// (2) Every required host parameter must have a declared source in the pack schema
+						for (const requiredKey of hostRequired) {
+							expect(
+								mappedArgs![requiredKey],
+								`Pack '${harnessId}' tool '${tool.name}' delegates to host '${hostTool!.name}', but required parameter '${requiredKey}' has no declared source in pack parameters (${packProperties.join(", ")})`,
+							).toBeDefined();
+						}
+					}
+				} finally {
+					await fs.rm(scratch, { recursive: true, force: true });
+				}
+			});
 		}
 	});
 });
