@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { registerBreadboardUi, unregisterBreadboardUi } from "../src/breadboard/ui";
 import {
 	getAvailableSymbolPresets,
 	getAvailableThemes,
+	initTheme,
 	isValidSymbolPreset,
 	loadThemeJson,
 	setSymbolPreset,
@@ -10,6 +11,10 @@ import {
 } from "@oh-my-pi/pi-tui/theme";
 
 describe("BreadBoard UI registration slice", () => {
+	beforeAll(async () => {
+		await initTheme();
+	});
+
 	beforeEach(async () => {
 		unregisterBreadboardUi();
 		await setSymbolPreset("unicode");
@@ -65,7 +70,7 @@ describe("BreadBoard UI registration slice", () => {
 		const stockThemes = await getAvailableThemes();
 		expect(stockThemes).not.toContain("breadboard");
 		expect(stockThemes).not.toContain("breadboard-light");
-		expect(loadThemeJson("breadboard")).rejects.toThrow();
+		await expect(loadThemeJson("breadboard")).rejects.toThrow();
 
 		registerBreadboardUi();
 

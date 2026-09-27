@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
-import { getAvailableThemes, getThemeByName, initTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
+import { initTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
 	OMP_PRODUCT_IDENTITY,
@@ -233,15 +233,5 @@ describe("WelcomeComponent native identity", () => {
 		expect(stripAnsi(dark[0] ?? "")).toContain("Alternate v1.2.3");
 		expect(hasRow(dark.map(stripAnsi), "ALT")).toBe(true);
 		expect(dark.join("\n")).not.toBe(light.join("\n"));
-	});
-});
-
-describe("BreadBoard product themes", () => {
-	it("registers the dune-orange brand themes for both appearances", async () => {
-		const available = await getAvailableThemes();
-		expect(available).toContain("breadboard");
-		expect(available).toContain("breadboard-light");
-		expect(await getThemeByName("breadboard")).toBeDefined();
-		expect(await getThemeByName("breadboard-light")).toBeDefined();
 	});
 });
