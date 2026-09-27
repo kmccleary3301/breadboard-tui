@@ -483,11 +483,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/session-teardown.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/src/modes/setup.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -823,11 +818,6 @@
 			"path": "packages/coding-agent/test/modes/magic-keywords.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/session-teardown.test.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/test/plugin-extensions-discovery.test.ts",
@@ -1448,7 +1438,17 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/utils/test/fixtures/product-logger-probe.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/utils/test/product-distribution.test.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/utils/test/product-logger.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},

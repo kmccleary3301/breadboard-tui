@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { BREADBOARD_DISTRIBUTION_POLICY } from "../src/product-distribution";
 
 const fixtureDir = path.join(import.meta.dir, "fixtures");
 const probePath = path.join(fixtureDir, "logger-contract-probe.ts");
@@ -33,10 +32,7 @@ afterEach(async () => {
 	await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
-async function runScenario(
-	scenario: string,
-	environment: Readonly<Record<string, string>> = {},
-): Promise<ScenarioResult> {
+async function runScenario(scenario: string): Promise<ScenarioResult> {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-logger-contract-"));
 	roots.push(root);
 	const primaryDir = path.join(root, "primary");
@@ -65,7 +61,6 @@ async function runScenario(
 				BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
 				OMP_LOGGER_TEST_NOW: fixedNow,
 				TZ: "Etc/GMT+5",
-				...environment,
 			},
 			stdout: Bun.file(stdoutPath),
 			stderr: "pipe",
@@ -99,20 +94,6 @@ function expectedLine(
 	timestamp = fixedTimestamp,
 ): string {
 	return `${JSON.stringify({ timestamp, level, pid, message, ...context })}${os.EOL}`;
-}
-
-function calendarDateInTimeZone(value: string, timeZone: string): string {
-	const parts = Object.fromEntries(
-		new Intl.DateTimeFormat("en-US", {
-			timeZone,
-			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
-		})
-			.formatToParts(new Date(value))
-			.map(part => [part.type, part.value]),
-	);
-	return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 describe("central logger byte contract", () => {
@@ -202,36 +183,6 @@ describe("central logger transport lifecycle", () => {
 		const defaultLogsDir = path.join(result.primaryDir, ".omp", "logs");
 		const log = await readSingleLog(defaultLogsDir);
 		expect(log.text).toBe(expectedLine(result.pid, "info", "mode-default", { mode: "default" }));
-	});
-
-	test("keeps the advertised product log path aligned with the rotating sink", async () => {
-		const result = await runScenario("product-default", { BREADBOARD_PRODUCT: "1" });
-		const payload = JSON.parse(await fs.readFile(result.resultPath, "utf8")) as { advertisedPath: string };
-		const logPath = payload.advertisedPath;
-		const logName = path.basename(logPath);
-		const logMatch = /^([^.]+)\.(\d{4}-\d{2}-\d{2})\.(\d+)\.log$/.exec(logName);
-
-		expect(path.dirname(logPath)).toBe(path.join(result.primaryDir, "logs"));
-		expect(logMatch?.[1]).toBe(BREADBOARD_DISTRIBUTION_POLICY.productName);
-		expect(logMatch?.[2]).toBe(calendarDateInTimeZone(fixedNow, "Etc/GMT+5"));
-		expect(logMatch?.[3]).toBe(String(result.pid));
-		expect((await fs.stat(logPath)).isFile()).toBeTrue();
-
-		const records = (await fs.readFile(logPath, "utf8"))
-			.trim()
-			.split(os.EOL)
-			.map(line => JSON.parse(line) as { level: string; message: string; pid: number });
-		expect(records).toContainEqual(
-			expect.objectContaining({ level: "info", message: "mode-product", pid: result.pid }),
-		);
-
-		const auditPath = path.join(
-			path.dirname(logPath),
-			`.${BREADBOARD_DISTRIBUTION_POLICY.productName}.${result.pid}-audit.json`,
-		);
-		expect((await fs.stat(auditPath)).isFile()).toBeTrue();
-		const audit = JSON.parse(await fs.readFile(auditPath, "utf8")) as { auditLog: string };
-		expect(audit.auditLog).toBe(auditPath);
 	});
 
 	test("emits file-only, console-only, and dual modes exactly once", async () => {

@@ -270,7 +270,6 @@ describe("runRootCommand startup teardown", () => {
 		const originalProject = getProjectDir();
 		const originalIsTTY = process.stdin.isTTY;
 		const previousExitCode = process.exitCode;
-		const previousEngineMode = process.env.BREADBOARD_ENGINE_MODE;
 		resetSettingsForTest();
 		await initTheme();
 		const testSession = await createTestSession({ inMemory: true });
@@ -284,8 +283,16 @@ describe("runRootCommand startup teardown", () => {
 		const authStorage = await AuthStorage.create(path.join(testSession.tempDir, "startup-auth.db"));
 		const terminal = new InputTrackingTerminal();
 		beginStartupComposer({ terminal, version: "test", cache: false });
-		const rawArgs = ["--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-tools", "--no-lsp"];
-		process.env.BREADBOARD_ENGINE_MODE = "local-owned";
+		const rawArgs = [
+			"--engine-mode",
+			"local-owned",
+			"--no-session",
+			"--no-extensions",
+			"--no-skills",
+			"--no-rules",
+			"--no-tools",
+			"--no-lsp",
+		];
 		const discoverAuthStorage = vi.fn(async () => authStorage);
 		const runInteractiveMode = vi.fn(async () => {});
 		vi.spyOn(ModelRegistry.prototype, "refreshInBackground").mockImplementation(() => {});
@@ -307,8 +314,6 @@ describe("runRootCommand startup teardown", () => {
 			expect(terminal.inputEvents).toBe(0);
 		} finally {
 			stopPendingStartupComposer();
-			if (previousEngineMode === undefined) delete process.env.BREADBOARD_ENGINE_MODE;
-			else process.env.BREADBOARD_ENGINE_MODE = previousEngineMode;
 			vi.restoreAllMocks();
 			authStorage.close();
 			await testSession.cleanup();
