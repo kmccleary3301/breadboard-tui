@@ -1,5 +1,5 @@
 import { registerBreadboardStatusLine } from "../../src/breadboard/ui/status-line";
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
@@ -44,8 +44,12 @@ function down(menu: BreadboardCustomizeSubmenu, count: number) {
 }
 
 describe("BreadBoard field customization", () => {
+	let unregisterStatusLine: () => void;
 	beforeEach(() => {
-		registerBreadboardStatusLine();
+		unregisterStatusLine = registerBreadboardStatusLine();
+	});
+	afterEach(() => {
+		unregisterStatusLine();
 	});
 	it("previews staged choices, discards Cancel, and reopens applied choices", () => {
 		const config = Settings.isolated({ "composer.shape": "box" });

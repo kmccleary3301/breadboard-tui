@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
 import { createGallerySegmentContext } from "@oh-my-pi/pi-coding-agent/cli/gallery-fixtures/segments";
 import { renderSegment } from "@oh-my-pi/pi-tui/status-line/segments";
@@ -12,8 +12,14 @@ beforeAll(async () => {
 	await initTheme();
 });
 
+let unregisterStatusLine: () => void;
+
 beforeEach(() => {
-	registerBreadboardStatusLine();
+	unregisterStatusLine = registerBreadboardStatusLine();
+});
+
+afterEach(() => {
+	unregisterStatusLine();
 });
 
 describe("harness status segment", () => {

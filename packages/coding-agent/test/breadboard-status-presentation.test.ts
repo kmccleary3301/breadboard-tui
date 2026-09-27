@@ -34,13 +34,17 @@ const harness: HarnessSnapshot = {
 	},
 };
 
+let unregisterStatusLine: (() => void) | undefined;
+
 afterEach(async () => {
+	unregisterStatusLine?.();
+	unregisterStatusLine = undefined;
 	await setSymbolPreset("unicode");
 });
 
 describe("BreadBoard composer presentation", () => {
 	it("after registerBreadboardStatusLine(), rendering bb-balanced produces the expected output", async () => {
-		registerBreadboardStatusLine();
+		unregisterStatusLine = registerBreadboardStatusLine();
 		await initTheme(false, "unicode", false, "titanium", "light");
 		const snapshot = { modelName: "Luna", workspace: "repo", context: { tokens: 2_000, capacity: 100_000 } };
 		const balanced = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-balanced", 100, "box"));
@@ -211,7 +215,7 @@ describe("BreadBoard composer while background jobs hold the turn", () => {
 	const statusLines = new StatusLineTestComponents();
 
 	beforeEach(async () => {
-		registerBreadboardStatusLine();
+		unregisterStatusLine = registerBreadboardStatusLine();
 		settingsState = beginSettingsTest();
 		await Settings.init({ inMemory: true });
 		await initTheme();
