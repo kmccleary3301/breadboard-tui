@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import type { TerminalStartOptions } from "@oh-my-pi/pi-tui";
-import { BreadboardLifecycleStartupError } from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { importRoomKey } from "@oh-my-pi/pi-coding-agent/collab/crypto";
 import { COLLAB_PROTO, type CollabFrame, parseCollabLink } from "@oh-my-pi/pi-coding-agent/collab/protocol";
@@ -267,10 +266,11 @@ describe("outer startup collaboration gate", () => {
 });
 
 describe("runRootCommand startup teardown", () => {
-	it("stops prepaint input when BreadBoard runtime preparation reports a handled failure", async () => {
+	it("stops prepaint input and exits 2 when startup refuses a removed-bridge request", async () => {
 		const originalProject = getProjectDir();
 		const originalIsTTY = process.stdin.isTTY;
 		const previousExitCode = process.exitCode;
+		const previousEngineMode = process.env.BREADBOARD_ENGINE_MODE;
 		resetSettingsForTest();
 		await initTheme();
 		const testSession = await createTestSession({ inMemory: true });
@@ -285,18 +285,8 @@ describe("runRootCommand startup teardown", () => {
 		const terminal = new InputTrackingTerminal();
 		beginStartupComposer({ terminal, version: "test", cache: false });
 		const rawArgs = ["--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-tools", "--no-lsp"];
-		const startupFailure = new BreadboardLifecycleStartupError({
-			kind: "failure",
-			state: {
-				name: "failed",
-				mode: "remote",
-				attempt: 1,
-				reason: "endpoint_unreachable",
-			},
-		});
-		const prepareBreadboardRuntime = vi.fn(async () => {
-			throw startupFailure;
-		});
+		process.env.BREADBOARD_ENGINE_MODE = "local-owned";
+		const discoverAuthStorage = vi.fn(async () => authStorage);
 		const runInteractiveMode = vi.fn(async () => {});
 		vi.spyOn(ModelRegistry.prototype, "refreshInBackground").mockImplementation(() => {});
 		vi.spyOn(pluginHelpers, "preloadPluginRoots").mockResolvedValue(undefined);
@@ -304,13 +294,12 @@ describe("runRootCommand startup teardown", () => {
 		try {
 			await runRootCommand(parseArgs(rawArgs), rawArgs, {
 				settings: activeSettings,
-				discoverAuthStorage: async () => authStorage,
-				prepareBreadboardRuntime,
+				discoverAuthStorage,
 				runInteractiveMode,
 			});
 
-			expect(prepareBreadboardRuntime).toHaveBeenCalled();
-			expect(process.exitCode).toBe(1);
+			expect(process.exitCode).toBe(2);
+			expect(discoverAuthStorage).not.toHaveBeenCalled();
 			expect(runInteractiveMode).not.toHaveBeenCalled();
 			expect(terminal.starts).toBe(1);
 			expect(terminal.stops).toBe(1);
@@ -318,6 +307,8 @@ describe("runRootCommand startup teardown", () => {
 			expect(terminal.inputEvents).toBe(0);
 		} finally {
 			stopPendingStartupComposer();
+			if (previousEngineMode === undefined) delete process.env.BREADBOARD_ENGINE_MODE;
+			else process.env.BREADBOARD_ENGINE_MODE = previousEngineMode;
 			vi.restoreAllMocks();
 			authStorage.close();
 			await testSession.cleanup();

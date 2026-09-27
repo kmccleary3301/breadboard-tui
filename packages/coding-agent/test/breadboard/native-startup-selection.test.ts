@@ -1,83 +1,139 @@
 /**
- * Native mode runs OMP's own loop on a harness: no engine owns turns, and the harness comes from
- * `--harness`, then the selected `sessionConfigPath`, then `breadboard.harness.default`, whose
- * default names the built-in `bb-omp.native`.
+ * Native mode runs OMP's own loop on a harness: the harness comes from `--harness`, then the
+ * selected `sessionConfigPath`, then `breadboard.harness.default`, whose default names the built-in
+ * `bb-omp.native`. Every request for the removed Python bridge refuses startup.
  */
 import { describe, expect, it } from "bun:test";
-import * as os from "node:os";
+import { BreadboardBridgeRefusalError } from "@oh-my-pi/pi-coding-agent/breadboard/bridge-refusal";
 import {
+	BreadboardSettingsError,
+	resolveBreadboardEngineMode,
 	resolveNativeHarnessSpec,
-	resolveNativeSurfaceEngineSelection,
 } from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 
-const WORKSPACE = os.tmpdir();
+function settingsWith(breadboard?: Record<string, unknown>): Settings {
+	const settings = Settings.isolated();
+	if (breadboard !== undefined) settings.getRaw = (key: string) => (key === "breadboard" ? breadboard : undefined);
+	return settings;
+}
 
-function settingsWith(values: { engineMode?: string; sessionConfigPath?: string; harnessDefault?: string }): Settings {
-	return Settings.isolated({
-		...(values.engineMode === undefined ? {} : { "breadboard.engineMode": values.engineMode }),
-		...(values.sessionConfigPath === undefined ? {} : { "breadboard.sessionConfigPath": values.sessionConfigPath }),
-		...(values.harnessDefault === undefined ? {} : { "breadboard.harness.default": values.harnessDefault }),
-	});
+function refusal(run: () => unknown): { source: string; value: string; exitCode: number } {
+	try {
+		run();
+	} catch (error) {
+		if (error instanceof BreadboardBridgeRefusalError) {
+			return { source: error.source, value: error.value, exitCode: error.exitCode };
+		}
+		throw error;
+	}
+	throw new Error("expected a bridge refusal");
 }
 
 describe("native startup selection", () => {
-	it("defaults product launches to the native OMP loop", () => {
-		const defaults = settingsWith({});
-		expect(resolveNativeSurfaceEngineSelection({}, defaults, WORKSPACE, true)).toEqual({ engineMode: "native" });
-		expect(resolveNativeHarnessSpec({}, defaults, WORKSPACE, true)).toBe("bb-omp.native");
+	it("defaults the product to native and stock OMP to off", () => {
+		expect(resolveBreadboardEngineMode({}, settingsWith(), true, {})).toBe("native");
+		expect(resolveBreadboardEngineMode({}, settingsWith(), false, {})).toBe("off");
 	});
 
-	it("keeps turns on OMP's loop in native and off modes only", () => {
-		const native = settingsWith({ engineMode: "native" });
-		expect(resolveNativeSurfaceEngineSelection({}, native, WORKSPACE, true)).toEqual({
-			engineMode: "native",
-			engineUrl: undefined,
-		});
-		expect(resolveNativeSurfaceEngineSelection({ engineMode: "off" }, native, WORKSPACE, true)).toEqual({
-			engineMode: "off",
-			engineUrl: undefined,
-		});
-		expect(() =>
-			resolveNativeSurfaceEngineSelection({ engineMode: "local-owned" }, native, WORKSPACE, true),
-		).toThrow();
+	it("takes the flag over the environment over settings", () => {
+		const settings = settingsWith({ engineMode: "native" });
+		expect(resolveBreadboardEngineMode({}, settings, false, {})).toBe("native");
+		expect(resolveBreadboardEngineMode({}, settings, true, { BREADBOARD_ENGINE_MODE: "off" })).toBe("off");
+		expect(
+			resolveBreadboardEngineMode({ engineMode: "native" }, settings, true, { BREADBOARD_ENGINE_MODE: "off" }),
+		).toBe("native");
+	});
+
+	it("refuses every bridge source with exit code 2, naming the source", () => {
+		const none = settingsWith();
+		for (const mode of ["local-owned", "local-external", "remote"]) {
+			expect(refusal(() => resolveBreadboardEngineMode({ engineMode: mode }, none, true, {}))).toEqual({
+				source: "--engine-mode",
+				value: mode,
+				exitCode: 2,
+			});
+			expect(
+				refusal(() => resolveBreadboardEngineMode({}, none, true, { BREADBOARD_ENGINE_MODE: mode })).source,
+			).toBe("BREADBOARD_ENGINE_MODE");
+			expect(refusal(() => resolveBreadboardEngineMode({}, settingsWith({ engineMode: mode }), true, {}))).toEqual({
+				source: "breadboard.engineMode",
+				value: mode,
+				exitCode: 2,
+			});
+		}
+		expect(
+			refusal(() => resolveBreadboardEngineMode({ engineUrl: "http://127.0.0.1:1" }, none, true, {})).source,
+		).toBe("--engine-url");
+		for (const name of ["BREADBOARD_API_URL", "BREADBOARD_ENGINE_ARTIFACT"]) {
+			expect(refusal(() => resolveBreadboardEngineMode({}, none, true, { [name]: "/x" })).source).toBe(name);
+		}
+		// Blank bridge variables are treated as unset.
+		expect(resolveBreadboardEngineMode({}, none, true, { BREADBOARD_API_URL: " " })).toBe("native");
+	});
+
+	it("refuses every legacy bridge setting, whatever its value", () => {
+		for (const field of [
+			"baseUrl",
+			"auth",
+			"tls",
+			"engineArtifact",
+			"workspaceId",
+			"startupTimeoutMs",
+			"requestTimeoutMs",
+			"ownerExitPolicy",
+		]) {
+			expect(refusal(() => resolveBreadboardEngineMode({}, settingsWith({ [field]: false }), true, {}))).toEqual({
+				source: `breadboard.${field}`,
+				value: "false",
+				exitCode: 2,
+			});
+		}
+		expect(
+			refusal(() => resolveBreadboardEngineMode({}, settingsWith({ engineArtifact: { path: "/bundle" } }), true, {}))
+				.value,
+		).toBe("/bundle");
+	});
+
+	it("rejects unknown and malformed breadboard settings with exit code 2", () => {
+		for (const [raw, message] of [
+			[{ unexpectedField: true }, "bb: breadboard.unexpectedField is not a BreadBoard setting; remove it."],
+			[{ sessionConfigPath: " " }, "bb: breadboard.sessionConfigPath must be a non-empty harness spec path."],
+		] as const) {
+			let caught: unknown;
+			try {
+				resolveNativeHarnessSpec({}, settingsWith(raw), true);
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(BreadboardSettingsError);
+			expect((caught as BreadboardSettingsError).message).toBe(message);
+			expect((caught as BreadboardSettingsError).exitCode).toBe(2);
+		}
 	});
 
 	it("resolves the spec from --harness, then sessionConfigPath, then the configured default", () => {
 		const configured = settingsWith({
 			engineMode: "native",
 			sessionConfigPath: "selected/harness.yaml",
-			harnessDefault: "default/harness.yaml",
+			harness: { default: "default/harness.yaml" },
 		});
-		expect(resolveNativeHarnessSpec({ harness: "cli/harness.yaml" }, configured, WORKSPACE, true)).toBe(
-			"cli/harness.yaml",
-		);
-		expect(resolveNativeHarnessSpec({}, configured, WORKSPACE, true)).toBe("selected/harness.yaml");
-		const defaultOnly = settingsWith({ engineMode: "native", harnessDefault: "default/harness.yaml" });
-		expect(resolveNativeHarnessSpec({}, defaultOnly, WORKSPACE, true)).toBe("default/harness.yaml");
+		expect(resolveNativeHarnessSpec({ harness: "cli/harness.yaml" }, configured, true)).toBe("cli/harness.yaml");
+		expect(resolveNativeHarnessSpec({}, configured, true)).toBe("selected/harness.yaml");
+		const defaultOnly = settingsWith({ harness: { default: "default/harness.yaml" } });
+		expect(resolveNativeHarnessSpec({}, defaultOnly, true)).toBe("default/harness.yaml");
 	});
 
 	it("returns no spec outside native mode and defaults native mode to bb-omp.native", () => {
-		expect(resolveNativeHarnessSpec({ engineMode: "off" }, settingsWith({}), WORKSPACE, false)).toBeUndefined();
-		expect(resolveNativeHarnessSpec({}, settingsWith({ engineMode: "native" }), WORKSPACE, true)).toBe(
+		expect(resolveNativeHarnessSpec({ engineMode: "off" }, settingsWith(), true)).toBeUndefined();
+		expect(resolveNativeHarnessSpec({}, settingsWith(), false)).toBeUndefined();
+		expect(resolveNativeHarnessSpec({}, settingsWith({ harness: { default: "daily_driver" } }), true)).toBe(
 			"bb-omp.native",
 		);
-		expect(
-			resolveNativeHarnessSpec(
-				{ harness: "bb-omp.native" },
-				settingsWith({ engineMode: "native" }),
-				WORKSPACE,
-				true,
-			),
-		).toBe("bb-omp.native");
-		// Other engine catalog ids name Python harnesses; native mode has no engine to resolve them.
-		expect(() =>
-			resolveNativeHarnessSpec(
-				{ harness: "research_agent" },
-				settingsWith({ engineMode: "native" }),
-				WORKSPACE,
-				true,
-			),
-		).toThrow(/native mode runs a built-in harness \(bb-omp\.native\) or a harness spec/);
+		expect(resolveNativeHarnessSpec({ harness: "bb-omp.native" }, settingsWith(), true)).toBe("bb-omp.native");
+		// Engine catalog ids named Python harnesses; native mode runs only built-ins and specs.
+		expect(() => resolveNativeHarnessSpec({ harness: "research_agent" }, settingsWith(), true)).toThrow(
+			/native mode runs a built-in harness \(bb-omp\.native\) or a harness spec/,
+		);
 	});
 });

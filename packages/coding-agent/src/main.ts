@@ -28,14 +28,7 @@ import type { HarnessPort } from "./breadboard/harness-port";
 import { createNativeHarnessPort } from "./breadboard/native-harness-port";
 import { applyNativeHarnessSessionOptions } from "./breadboard/native-harness-session";
 import { BreadboardBridgeRefusalError } from "./breadboard/bridge-refusal";
-import {
-	formatBreadboardStartupError,
-	type PreparedBreadboardRuntime,
-	prepareBreadboardRuntime,
-	resolveBreadboardOmpAgentDir,
-	resolveNativeHarnessSpec,
-	resolveNativeSurfaceEngineSelection,
-} from "./breadboard/runtime";
+import { BreadboardSettingsError, resolveBreadboardOmpAgentDir, resolveNativeHarnessSpec } from "./breadboard/runtime";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
@@ -1274,7 +1267,7 @@ export async function loadStartupNativeHarness(
 	activeSettings: Settings,
 ): Promise<LoadedNativeHarness | undefined> {
 	const workspacePath = parsed.cwd ?? getProjectDir();
-	const specPath = resolveNativeHarnessSpec(parsed, activeSettings, workspacePath, IS_BREADBOARD_PRODUCT);
+	const specPath = resolveNativeHarnessSpec(parsed, activeSettings, IS_BREADBOARD_PRODUCT);
 	if (specPath === undefined) return undefined;
 	return await loadNativeHarness({ specPath, workspaceRoot: fsSync.realpathSync(workspacePath) });
 }
@@ -1702,7 +1695,6 @@ interface RunRootCommandDependencies {
 	runAcpMode?: RunAcpMode;
 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
 	runInteractiveMode?: typeof runInteractiveMode;
-	prepareBreadboardRuntime?: typeof prepareBreadboardRuntime;
 	settings?: Settings;
 	forceSetupWizard?: boolean;
 }
@@ -1725,7 +1717,6 @@ export async function runRootCommand(
 ): Promise<void> {
 	logger.startTiming();
 	startStartupWatchdog();
-	let preparedBreadboardRuntime: PreparedBreadboardRuntime | null | undefined;
 	try {
 		// Non-prepaint commands still need a default theme; an existing Composer
 		// already initialized its cached theme synchronously for the first frame.
@@ -1823,6 +1814,18 @@ export async function runRootCommand(
 			? Promise.resolve(deps.settings)
 			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
 		settingsPromise.catch(() => {});
+		// Refuse removed-bridge requests and invalid BreadBoard settings before auth or session state opens.
+		try {
+			resolveNativeHarnessSpec(parsedArgs, await settingsPromise, IS_BREADBOARD_PRODUCT);
+		} catch (error) {
+			if (!(error instanceof BreadboardBridgeRefusalError || error instanceof BreadboardSettingsError)) throw error;
+			stopPendingStartupComposer();
+			process.stderr.write(`${error.message}\n`);
+			process.exitCode = error.exitCode;
+			stopStartupWatchdog();
+			stopThemeWatcher();
+			return;
+		}
 		const authStoragePromise = logger.time("discoverAuthStorage", async () =>
 			(deps.discoverAuthStorage ?? discoverAuthStorage)(ompAgentDir, { settings: await settingsPromise }),
 		);
@@ -1862,17 +1865,6 @@ export async function runRootCommand(
 				}),
 		);
 
-		try {
-			resolveNativeSurfaceEngineSelection(parsedArgs, settingsInstance, getProjectDir());
-		} catch (error) {
-			if (!(error instanceof BreadboardBridgeRefusalError)) throw error;
-			stopPendingStartupComposer();
-			process.stderr.write(`${error.message}\n`);
-			process.exitCode = error.exitCode;
-			stopStartupWatchdog();
-			stopThemeWatcher();
-			return;
-		}
 		if (parsedArgs.noPty || parsedArgs.mode === "rpc-ui") {
 			Bun.env.PI_NO_PTY = "1";
 		}
@@ -2331,22 +2323,6 @@ export async function runRootCommand(
 					)
 				: undefined;
 
-			if (isInteractive) {
-				try {
-					preparedBreadboardRuntime = await logger.time(
-						"prepareBreadboardRuntime",
-						deps.prepareBreadboardRuntime ?? prepareBreadboardRuntime,
-						parsedArgs,
-						settingsInstance,
-						cwd,
-					);
-				} catch (error) {
-					stopStartupWatchdog();
-					process.stderr.write(`${chalk.red(formatBreadboardStartupError(error))}\n`);
-					process.exit(1);
-				}
-			}
-
 			const {
 				session,
 				setToolUIContext,
@@ -2509,11 +2485,7 @@ export async function runRootCommand(
 		stopStartupWatchdog();
 		throw error;
 	} finally {
-		try {
-			stopPendingStartupComposer();
-		} finally {
-			await preparedBreadboardRuntime?.close();
-		}
+		stopPendingStartupComposer();
 	}
 }
 

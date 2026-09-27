@@ -19,6 +19,26 @@ export function formatBridgeRefusal(source: string, value: string): string {
 	return `bb: the Python engine bridge was removed; ${source} requests "${value}". bb runs the native OMP loop; remove ${source} to use it.`;
 }
 
+/** `breadboard.*` settings that configured only the removed bridge; any value refuses launch. */
+export const BRIDGE_SETTING_FIELDS = [
+	"baseUrl",
+	"auth",
+	"tls",
+	"engineArtifact",
+	"workspaceId",
+	"startupTimeoutMs",
+	"requestTimeoutMs",
+	"ownerExitPolicy",
+] as const;
+
+function displayValue(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (typeof value === "object" && value !== null && typeof (value as { path?: unknown }).path === "string") {
+		return (value as { path: string }).path;
+	}
+	return JSON.stringify(value) ?? String(value);
+}
+
 export interface BridgeRefusalCheckInput {
 	readonly cli?: {
 		readonly engineMode?: string;
@@ -89,29 +109,13 @@ export function detectBridgeRefusal(
 
 	// 3. Selected configuration / settings
 	if (selected && typeof selected === "object" && !Array.isArray(selected)) {
-		if (
-			"engineMode" in selected &&
-			selected.engineMode !== undefined &&
-			selected.engineMode !== "native" &&
-			selected.engineMode !== "off"
-		) {
-			return { source: "breadboard.engineMode", value: String(selected.engineMode) };
+		const mode = selected.engineMode;
+		if (mode !== undefined && mode !== "native" && mode !== "off") {
+			return { source: "breadboard.engineMode", value: displayValue(mode) };
 		}
-		if ("baseUrl" in selected && selected.baseUrl !== undefined) {
-			return { source: "breadboard.baseUrl", value: String(selected.baseUrl) };
-		}
-		if ("engineArtifact" in selected && selected.engineArtifact !== undefined) {
-			const val = selected.engineArtifact;
-			const displayVal =
-				typeof val === "string"
-					? val
-					: typeof val === "object" &&
-						  val !== null &&
-						  "path" in val &&
-						  typeof (val as Record<string, unknown>).path === "string"
-						? String((val as Record<string, unknown>).path)
-						: JSON.stringify(val);
-			return { source: "breadboard.engineArtifact", value: displayVal };
+		for (const field of BRIDGE_SETTING_FIELDS) {
+			if (selected[field] !== undefined)
+				return { source: `breadboard.${field}`, value: displayValue(selected[field]) };
 		}
 	}
 
