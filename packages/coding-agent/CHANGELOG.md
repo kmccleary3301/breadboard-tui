@@ -28,11 +28,16 @@
 
 - Removed the Python engine bridge: the `@breadboard/sdk` client, the engine attach modes (`local-owned`, `local-external`, `remote`), the lifecycle supervisor, engine distribution and installer, the OMP auth gateway, the shared-engine worker protocol, and the `engine` and `research` subcommands. Standalone archives no longer carry an engine.
 - A request for the removed bridge now stops `bb` before it creates any session or opens the auth store, with exit status 2 and a message naming the setting to remove, for example: `bb: the Python engine bridge was removed; --engine-mode requests "local-owned". bb runs the native OMP loop; remove --engine-mode to use it.` This covers `--engine-mode`, `--engine-url`, `BREADBOARD_ENGINE_MODE` (values other than `native` and `off`), `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`, and the `breadboard.*` bridge settings (`engineMode`, `baseUrl`, `auth`, `tls`, `engineArtifact`, `workspaceId`, `startupTimeoutMs`, `requestTimeoutMs`, `ownerExitPolicy`) in any settings file or `--config` overlay, for every subcommand.
+- Stock `omp` never refuses these bridge sources. It ignores them and runs its own loop; only `bb` stops.
 - BreadBoard builds no longer disable OMP commands: `acp`, `agents`, `cleanse`, `commit`, `compress` and `join` behave as in OMP.
 
 ### Fixed
 
 - `find` stops its file listing when the parallel content scan fails, so a timed-out search on a large root no longer stalls the UI afterwards.
+- An explicit tool list keeps a name that a registered tool uses exactly as written. Before, `Bash` always selected the built-in `bash`, so the `claude_code` harness sent OMP's `bash`, `glob`, `grep`, `read`, `edit` and `write` in place of its own `Bash`, `Glob`, `Grep`, `Read`, `Edit` and `Write`.
+- The `claude_code` harness caches its system prompt with the one-hour TTL its reference config declares, whatever the auth type.
+- After `/harness reload`, the exported session transcript names the reloaded spec and graph hash rather than the first generation's.
+- Release third-party notices include the repository root, `packages/natives` and browser-relay aggregate notice files.
 
 ## [18.3.0] - 2026-09-24
 
