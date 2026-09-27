@@ -1540,7 +1540,13 @@ export function registerSymbolOverrides(
  * Get available symbol presets.
  */
 export function getAvailableSymbolPresets(): SymbolPreset[] {
-	return Object.keys(SYMBOL_PRESETS) as SymbolPreset[];
+	const keys = Object.keys(SYMBOL_PRESETS) as SymbolPreset[];
+	const asciiIndex = keys.indexOf("ascii");
+	if (asciiIndex >= 0 && asciiIndex !== keys.length - 1) {
+		keys.splice(asciiIndex, 1);
+		keys.push("ascii");
+	}
+	return keys;
 }
 
 /**

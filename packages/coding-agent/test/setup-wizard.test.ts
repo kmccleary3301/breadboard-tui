@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { webModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/special";
@@ -24,6 +24,7 @@ import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { SEARCH_PROVIDER_OPTIONS } from "@oh-my-pi/pi-tui/tools/web-search";
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
+import { registerBreadboardUi, unregisterBreadboardUi } from "@oh-my-pi/pi-coding-agent/breadboard/ui";
 
 /** The information-layout scene runs only in the BreadBoard product. */
 function productSceneIds(): string[] {
@@ -511,6 +512,13 @@ describe("setup wizard theme previews", () => {
 	});
 });
 describe("setup wizard glyph scene", () => {
+	beforeEach(() => {
+		registerBreadboardUi();
+	});
+	afterEach(() => {
+		unregisterBreadboardUi();
+	});
+
 	it("commits Emoji after an immediately confirmed preview", async () => {
 		await initTheme(false, "unicode", false, "titanium", "light");
 		const settings = Settings.isolated();

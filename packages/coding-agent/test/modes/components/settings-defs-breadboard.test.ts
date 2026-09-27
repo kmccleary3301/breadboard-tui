@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
 	SETTING_TABS,
 	SETTINGS_SCHEMA,
@@ -7,7 +7,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
 import { getSettingsForTab } from "@oh-my-pi/pi-tui/overlays/settings-defs";
-
+import { registerBreadboardUi, unregisterBreadboardUi } from "../../../src/breadboard/ui";
 const BREADBOARD_PATHS = [
 	"breadboard.harness.default",
 	"breadboard.harness.paletteHeader",
@@ -19,8 +19,16 @@ const BREADBOARD_PATHS = [
 	"breadboard.harness.max_concurrent_agents",
 ] as const satisfies readonly SettingPath[];
 
-const settingsHost = createSettingsHost();
+let settingsHost = createSettingsHost();
 
+beforeAll(() => {
+	registerBreadboardUi();
+	settingsHost = createSettingsHost();
+});
+
+afterAll(() => {
+	unregisterBreadboardUi();
+});
 describe("BreadBoard settings definitions", () => {
 	it("exposes the eleventh tab and every declared group has at least one row", () => {
 		expect(SETTING_TABS).toHaveLength(11);
