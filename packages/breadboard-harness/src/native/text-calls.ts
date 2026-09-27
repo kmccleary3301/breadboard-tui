@@ -22,10 +22,6 @@ function normalizeName(rawName: string, tools: readonly ToolShape[]): string | u
 		?.definition.name;
 }
 
-function isWhitespace(value: string): boolean {
-	return /\s/.test(value);
-}
-
 function matchingDelimiter(source: string, start: number): number | undefined {
 	const stack: string[] = [];
 	let quote = "";

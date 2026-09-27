@@ -1,4 +1,4 @@
-import { JsonFloat, type CanonicalJson } from "../canonical-json";
+import { JsonFloat } from "../canonical-json";
 import { bundledEngineDataSnapshot } from "../engine-data";
 
 export interface HarnessValidationFinding {
@@ -20,10 +20,6 @@ type RawError = {
 const CANONICAL_SCHEMA_ID = "https://breadboard.dev/contracts/public/schemas/bb.harness_definition.v1.schema.json";
 const LEGACY_SCHEMA_ID = "https://breadboard.dev/contracts/kernel/schemas/bb.agent_config_surface.v2.schema.json";
 const MAX_JSON_INTEGER_DIGITS = 640;
-const KNOWN_VERSIONS: Readonly<Record<string, number>> = {
-	bb_harness_definition_v1: 1,
-	bb_agent_config_surface_v2: 2,
-};
 
 function compareCodePoints(left: string, right: string): number {
 	const a = [...left];
@@ -72,15 +68,6 @@ function sameJson(left: unknown, right: unknown): boolean {
 
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof JsonFloat);
-}
-
-function jsonType(value: unknown): string {
-	if (value === null) return "null";
-	if (typeof value === "boolean") return "boolean";
-	if (typeof value === "string") return "string";
-	if (typeof value === "number" || typeof value === "bigint" || value instanceof JsonFloat) return "number";
-	if (Array.isArray(value)) return "array";
-	return "object";
 }
 
 function numericValue(value: unknown): number | undefined {

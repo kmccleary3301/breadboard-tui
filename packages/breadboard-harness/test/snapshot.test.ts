@@ -8,7 +8,6 @@ import { type EngineDataSnapshotFile, loadEngineDataSnapshot } from "../src/inde
 
 const PACKAGE_ROOT = join(import.meta.dir, "..");
 const DATA_DIR = join(PACKAGE_ROOT, "engine-data");
-const SNAPSHOT_PATH = join(DATA_DIR, "snapshot.json");
 const SCRIPT = join(PACKAGE_ROOT, "scripts", "snapshot-engine-data.ts");
 const ENGINE =
 	process.env["BB_HARNESS_ENGINE"] ??

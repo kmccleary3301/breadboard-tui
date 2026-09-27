@@ -2,7 +2,6 @@ import type { JsonRecord } from "../canonical-json";
 import { isJsonRecord } from "../canonical-json";
 
 const TODO_OPEN_STATUSES = ["todo", "in_progress", "blocked"] as const;
-type TodoOpenStatus = (typeof TODO_OPEN_STATUSES)[number];
 type TodoItem = { title: string; status: string; metadata: JsonRecord };
 
 const STATUS_MAP: Readonly<Record<string, string>> = {

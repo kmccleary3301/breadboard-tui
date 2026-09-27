@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { createNativeHarnessExtension, startNativeHarnessWatcher } from "../../src/native/omp-extension";
 import { NativeHarnessReloadError, loadNativeHarness } from "../../src/native/load-native-harness";
 
@@ -254,6 +255,69 @@ describe("native harness live state", () => {
 			spec_path: SPEC,
 			graph_hash: g4?.graphHash,
 		});
+	});
+	it("exports the committed generation's harness identity after a live reload", async () => {
+		const root = await workspace();
+		const sessionDir = await mkdtemp(join(tmpdir(), "bb-live-harness-sessions-"));
+		roots.push(sessionDir);
+		const harness = await loadNativeHarness({ workspaceRoot: root, specPath: SPEC });
+		const handlers = new Map<string, Array<(event: unknown, context: unknown) => unknown>>();
+		let exportTranscript: ((args: string, context: unknown) => Promise<void>) | undefined;
+		const api = {
+			on(event: string, handler: unknown) {
+				handlers.set(event, [
+					...(handlers.get(event) ?? []),
+					handler as (event: unknown, context: unknown) => unknown,
+				]);
+			},
+			registerCommand(name: string, command: { handler: (args: string, context: unknown) => Promise<void> }) {
+				if (name === "bb-transcript") exportTranscript = command.handler;
+			},
+			registerTool() {},
+			setActiveTools() {},
+			appendEntry() {},
+		};
+		const invoke = async (event: string): Promise<void> => {
+			for (const handler of handlers.get(event) ?? []) await handler({}, {});
+		};
+		createNativeHarnessExtension(harness)(api as never);
+		const g1Hash = harness.graphHash;
+		await invoke("agent_start");
+		const sourcePath = join(root, SPEC);
+		await writeFile(sourcePath, (await readFile(sourcePath, "utf8")).replace("  - list_dir\n", ""));
+		const g2 = await harness.live?.reload();
+		await invoke("turn_start");
+		expect(g2?.graphHash).not.toBe(g1Hash);
+
+		const manager = SessionManager.create(root, sessionDir);
+		manager.appendMessage({ role: "user", content: "hi", timestamp: 1 });
+		manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "hello" }],
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-test",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 2,
+		});
+		await manager.flush();
+		const notices: string[] = [];
+		await exportTranscript?.("", {
+			sessionManager: manager,
+			ui: { notify: (message: string) => notices.push(message) },
+		});
+		const written = notices[0]?.replace(/^Transcript written to /, "");
+		expect(written).toBeDefined();
+		const transcript = JSON.parse(await readFile(written!, "utf8"));
+		expect(transcript.metadata.harness).toEqual({ spec_path: SPEC, graph_hash: g2?.graphHash });
 	});
 	it("hashes equal-metadata edits and disposes an in-flight debounce deterministically", async () => {
 		const root = await workspace();

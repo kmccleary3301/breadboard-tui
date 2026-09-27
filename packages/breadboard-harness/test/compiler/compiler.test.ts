@@ -4,7 +4,6 @@ import { canonicalJson, JsonFloat } from "../../src/canonical-json";
 import {
 	compileHarnessDefinition,
 	compileHarnessYaml,
-	HarnessCompileError,
 	parseHarnessYaml,
 	validateHarnessDefinition,
 } from "../../src/compiler";

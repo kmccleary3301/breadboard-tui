@@ -236,16 +236,6 @@ function flatten(
 	return rows;
 }
 
-function sourceRows(sources: Provenance, prefix = ""): [string, string][] {
-	if (sources.kind === "leaf") return [[prefix, sources.layerId]];
-	const rows: [string, string][] = [];
-	for (const key of Object.keys(sources.children).sort(compareCodePoints)) {
-		const path = prefix ? `${prefix}.${key}` : key;
-		rows.push(...sourceRows(sources.children[key]!, path));
-	}
-	return rows;
-}
-
 function valueKind(value: CanonicalJson): string {
 	if (value === null) return "null";
 	if (typeof value === "boolean") return "boolean";
@@ -314,58 +304,6 @@ function validateDefinition(document: JsonRecord): void {
 		stage: "validation",
 		findings,
 	});
-}
-
-function fieldStrings(value: CanonicalJson): string[] {
-	if (typeof value === "string") return value ? [value] : [];
-	if (Array.isArray(value)) return value.flatMap(fieldStrings);
-	if (isRecord(value)) return sortedKeys(value).flatMap(key => fieldStrings(value[key]!));
-	return [];
-}
-
-function summary(values: JsonRecord, extendsChain: readonly string[]): JsonRecord {
-	const providers = values.providers;
-	const modes = values.modes;
-	const prompts = values.prompts;
-	const modeRows = Array.isArray(modes) ? modes : [];
-	const tools = new Set<string>();
-	for (const mode of modeRows) {
-		if (!isRecord(mode)) continue;
-		const enabled = mode.tools_enabled;
-		if (Array.isArray(enabled)) for (const tool of enabled) if (typeof tool === "string") tools.add(tool);
-	}
-	const defaultModel =
-		isRecord(providers) && typeof providers.default_model === "string" ? providers.default_model : "";
-	const modeIds = modeRows
-		.filter((mode): mode is JsonRecord => isRecord(mode) && "name" in mode)
-		.map(mode => String(mode.name))
-		.sort(compareCodePoints);
-	const packs = isRecord(prompts) ? prompts.packs : undefined;
-	return {
-		provider_default_model: defaultModel,
-		mode_ids: modeIds,
-		tool_count: tools.size,
-		prompt_files: [...new Set(fieldStrings(packs ?? null))].sort(compareCodePoints),
-		extends_chain: [...extendsChain],
-	};
-}
-
-function effect(path: string, severity: string, message: string, source: string, blocker = false): JsonRecord {
-	return {
-		severity,
-		class: "other",
-		path,
-		message: `${blocker ? "blocker" : "effect"}=${message}; source=${source}`,
-	};
-}
-
-function override(path: string, source: string, winner: string): JsonRecord {
-	return {
-		severity: "info",
-		class: "other",
-		path,
-		message: `effect=overridden; source=${source}; winner=${winner}`,
-	};
 }
 
 function compileDocument(definition: JsonRecord, options: HarnessCompileOptions): HarnessCompilation {
@@ -469,7 +407,6 @@ function compileDocument(definition: JsonRecord, options: HarnessCompileOptions)
 	let provenance: Provenance = { kind: "map", children: {} };
 	let author: CanonicalJson = {};
 	let authorSources: Provenance = { kind: "map", children: {} };
-	const diagnostics: JsonRecord[] = [];
 	const sourceLayers: SourceLayer[] = [];
 	for (const [index, layer] of layers.entries()) {
 		layer.record.precedence = index * 10;
@@ -479,18 +416,9 @@ function compileDocument(definition: JsonRecord, options: HarnessCompileOptions)
 			author = mergedAuthor.value;
 			authorSources = mergedAuthor.source;
 		}
-		const before = new Map(sourceRows(provenance));
 		const merged = merge(effective, provenance, layer.values, layer.record.layer_id);
 		effective = merged.value;
 		provenance = merged.source;
-		const after = new Map(sourceRows(provenance));
-		if (layer.record.source_kind === "default") {
-			for (const [path, source] of after)
-				if (source === layer.record.layer_id)
-					diagnostics.push(effect(path, "info", "defaulted", layer.record.layer_id));
-		}
-		for (const [path, source] of before)
-			if (after.get(path) !== source) diagnostics.push(override(path, source, layer.record.layer_id));
 	}
 	sourceLayers.push(...resourceEntries(options.resourceInputs, sourceLayers.length * 10));
 	const effectiveRecord = asRecord(effective, "effective configuration");
@@ -545,20 +473,6 @@ function compileDocument(definition: JsonRecord, options: HarnessCompileOptions)
 			visibility: redacted ? "redacted" : "model-visible",
 		});
 	}
-	for (const [path, value, source] of rows) {
-		diagnostics.push(effect(path, "info", "selected", source));
-		if (
-			path === "capabilities" ||
-			path.startsWith("capabilities.") ||
-			path.includes(".capabilities.") ||
-			path.endsWith(".capabilities")
-		) {
-			diagnostics.push(
-				effect(path, "info", value === true ? "capability_enabled" : "capability_configured", source),
-			);
-			if (value === false) diagnostics.push(effect(path, "warning", "capability_disabled", source, true));
-		}
-	}
 	const redactedPaths = effectiveValues.filter(row => row.visibility === "redacted").map(row => String(row.path));
 	const graph: JsonRecord = {
 		effective_values: effectiveValues,
@@ -589,30 +503,6 @@ function compileDocument(definition: JsonRecord, options: HarnessCompileOptions)
 		},
 	};
 	graph.graph_hash = graphContentHash(graph);
-	const surface =
-		effectiveRecord.schema_version === "bb.agent_config_surface.v2" ||
-		effectiveRecord.schema_version === "bb.agent_config_surface.v1"
-			? effectiveRecord.schema_version
-			: "bb.agent_config_surface.v1";
-	const explanation: JsonRecord = {
-		schema_version: "bb.config_explanation.v1",
-		explanation_id: `harness_explanation:${sha256Json(options.sourceRef).slice(7, 23)}`,
-		config_path: options.sourceRef,
-		config_sha256: sha256Json(authorRecord),
-		generated_at_utc: "1970-01-01T00:00:00Z",
-		surface_schema_version: surface,
-		resolved_summary: summary(effectiveRecord, extendsChain),
-		fields: rows.map(([path, _value, source]) => ({
-			classification: "operational",
-			consumer_ref: null,
-			path,
-			source_layer: source,
-		})),
-		diagnostics: diagnostics.sort((left, right) =>
-			compareCodePoints(String(left.path) + String(left.message), String(right.path) + String(right.message)),
-		),
-		ok: true,
-	};
 	return { lock: graph, effective: effectiveRecord, resolvedAuthor: authorRecord };
 }
 

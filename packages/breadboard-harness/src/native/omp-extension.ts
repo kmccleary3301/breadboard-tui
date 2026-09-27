@@ -374,7 +374,6 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 	let disposed = false;
 	let lifecycle = 0;
 	let observed: NativeHarnessSourceInfo | undefined;
-	let lastPublishedHash: string | undefined;
 	let lastObservedHash: string | undefined;
 	let reloadInFlight: Promise<void> | undefined;
 	let pendingHash: string | undefined;
@@ -405,7 +404,6 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 			})
 			.then(async loaded => {
 				if (disposed || lifecycle !== reloadLifecycle) return;
-				lastPublishedHash = loaded.sourceHash;
 				const currentSource = await readSource(options.specPath).catch(() => undefined);
 				if (disposed || lifecycle !== reloadLifecycle || currentSource === undefined) return;
 				const currentHash = sha256Source(currentSource);
@@ -466,7 +464,6 @@ export function startNativeHarnessWatcher(options: NativeHarnessWatchOptions): N
 		const initialSource = await readSource(options.specPath).catch(() => undefined);
 		if (disposed) return;
 		const loadedHash = options.live.current().sourceHash;
-		lastPublishedHash = loadedHash;
 		lastObservedHash = loadedHash;
 		if (initialInfo !== undefined && initialSource !== undefined) {
 			observed = initialInfo;
@@ -592,6 +589,8 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			const generation = pendingGeneration;
 			registerFunctionTools(api, next, todos, guard);
 			activeHarness = next;
+			transcript.specPath = next.harnessId;
+			transcript.graphHash = next.graphHash;
 			stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
 			policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
 			await applyStage();
