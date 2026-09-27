@@ -48,7 +48,7 @@ function formatFixture(fixture: Fixture): NativeToolResult {
 
 describe("native shell/eval result formatting", () => {
 	test("replays every oracle and captured fixture byte-exactly", async () => {
-		const paths = (await readdir(FIXTURES)).filter((path) => path.endsWith(".json")).sort();
+		const paths = (await readdir(FIXTURES)).filter(path => path.endsWith(".json")).sort();
 		for (const path of paths) {
 			const fixture = JSON.parse(await readFile(join(FIXTURES, path), "utf8")) as Fixture;
 			expect(formatFixture(fixture), path).toEqual(expectedResult(fixture));
@@ -62,7 +62,9 @@ describe("native shell/eval result formatting", () => {
 			isError: true,
 		});
 		const trailing = runShellOutcomeFromBash({
-			content: [{ type: "text", text: "partial\n\n[Command timed out after 30 seconds]\n\nWall time: 1.25 seconds" }],
+			content: [
+				{ type: "text", text: "partial\n\n[Command timed out after 30 seconds]\n\nWall time: 1.25 seconds" },
+			],
 			details: { timedOut: true, wallTimeMs: 1_250 },
 			isError: true,
 		});
@@ -71,12 +73,12 @@ describe("native shell/eval result formatting", () => {
 		expect(formatRunShellResult(leading)).toEqual({
 			text: '{"stdout": "partial", "exit": 124, "__mvi_text_output": "partial\\nCommand timed out", "stderr": "Command timed out"}',
 			details: {
-			stdout: "partial",
-			exit: 124,
-			__mvi_text_output: "partial\nCommand timed out",
-			stderr: "Command timed out",
-		},
-		isError: true,
+				stdout: "partial",
+				exit: 124,
+				__mvi_text_output: "partial\nCommand timed out",
+				stderr: "Command timed out",
+			},
+			isError: true,
 		});
 	});
 
@@ -104,15 +106,15 @@ describe("native shell/eval result formatting", () => {
 		expect(formatEvalResult(outcome)).toEqual({
 			text: '{"stdout": "trace", "stderr": "", "exit": 1, "result": "", "kernel_reset": false, "output_truncated": false, "__mvi_text_output": "trace"}',
 			details: {
-			stdout: "trace",
-			stderr: "",
-			exit: 1,
-			result: "",
-			kernel_reset: false,
-			output_truncated: false,
-			__mvi_text_output: "trace",
-		},
-		isError: true,
+				stdout: "trace",
+				stderr: "",
+				exit: 1,
+				result: "",
+				kernel_reset: false,
+				output_truncated: false,
+				__mvi_text_output: "trace",
+			},
+			isError: true,
 		});
 	});
 });

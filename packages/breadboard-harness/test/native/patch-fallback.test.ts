@@ -25,8 +25,11 @@ async function withWorkspace<T>(initial: Record<string, string>, callback: (root
 
 describe("applyUnifiedPatchAdapter direct fallback", () => {
 	test("applies a unified diff adding a file in a non-Git workspace", async () => {
-		await withWorkspace({}, async (root) => {
-			const result = await applyUnifiedPatchAdapter(root, "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,2 @@\n+new\n+file\n");
+		await withWorkspace({}, async root => {
+			const result = await applyUnifiedPatchAdapter(
+				root,
+				"diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,2 @@\n+new\n+file\n",
+			);
 			const expected = {
 				ok: true,
 				action: "apply_patch",
@@ -43,7 +46,7 @@ describe("applyUnifiedPatchAdapter direct fallback", () => {
 	});
 
 	test("applies an OpenCode update hunk in a non-Git workspace", async () => {
-		await withWorkspace({ "a.txt": "one\ntwo\nthree\n" }, async (root) => {
+		await withWorkspace({ "a.txt": "one\ntwo\nthree\n" }, async root => {
 			const patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n one\n-two\n+TWO\n three\n*** End Patch\n";
 			const result = await applyUnifiedPatchAdapter(root, patch);
 			const expected = {
@@ -62,7 +65,7 @@ describe("applyUnifiedPatchAdapter direct fallback", () => {
 	});
 
 	test("reports the Python failure for a non-applying update hunk", async () => {
-		await withWorkspace({ "a.txt": "one\ntwo\n" }, async (root) => {
+		await withWorkspace({ "a.txt": "one\ntwo\n" }, async root => {
 			const patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n one\n-WRONG\n+TWO\n*** End Patch\n";
 			const result = await applyUnifiedPatchAdapter(root, patch);
 			const reason = "Failed to apply patch hunk in a.txt: context not found";
@@ -82,7 +85,7 @@ describe("applyUnifiedPatchAdapter direct fallback", () => {
 	});
 
 	test("moves an updated file and removes the source in a non-Git workspace", async () => {
-		await withWorkspace({ "old.txt": "old\n" }, async (root) => {
+		await withWorkspace({ "old.txt": "old\n" }, async root => {
 			const patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n old\n*** End Patch\n";
 			const result = await applyUnifiedPatchAdapter(root, patch);
 			const expected = {

@@ -29,7 +29,7 @@ function splitLines(text: string): string[] {
 function normalizeBlankHunkLines(patchText: string): string {
 	const lines = splitLines(String(patchText || ""));
 	let inHunk = false;
-	const normalized = lines.map((line) => {
+	const normalized = lines.map(line => {
 		if (line.startsWith("*** ")) {
 			inHunk = false;
 			return line;
@@ -209,7 +209,8 @@ function seekPatchSequence(lines: readonly string[], target: readonly string[], 
 	const needle = target.map(normalizePatchLine);
 	if (eof) {
 		for (let index = haystack.length - needle.length; index >= 0; index--) {
-			if (haystack.slice(index, index + needle.length).every((line, offset) => line === needle[offset])) return index;
+			if (haystack.slice(index, index + needle.length).every((line, offset) => line === needle[offset]))
+				return index;
 		}
 		return undefined;
 	}
@@ -254,15 +255,23 @@ export function normalizeWorkspacePath(workspaceRoot: string, pathIn: string): s
 	let normalized = raw.replaceAll("\\", "/");
 	while (normalized.startsWith("./")) normalized = normalized.slice(2);
 	if (!normalized || normalized === ".") return workspace;
-	let segments = normalized.split("/").filter((segment) => segment && segment !== ".");
+	let segments = normalized.split("/").filter(segment => segment && segment !== ".");
 	while (segments[0] === workspace.split("/").at(-1)) segments = segments.slice(1);
 	const workspaceNormalized = workspace.replaceAll("\\", "/");
 	if (workspaceNormalized && normalized.includes(workspaceNormalized)) {
-		segments = normalized.split(workspaceNormalized, 2)[1]!.replace(/^[/\\]+/u, "").split("/").filter((segment) => segment && segment !== ".");
+		segments = normalized
+			.split(workspaceNormalized, 2)[1]!
+			.replace(/^[/\\]+/u, "")
+			.split("/")
+			.filter(segment => segment && segment !== ".");
 	} else {
 		const withoutLeadingSlash = workspaceNormalized.replace(/^\//u, "");
 		if (withoutLeadingSlash && normalized.startsWith(withoutLeadingSlash)) {
-			segments = normalized.slice(withoutLeadingSlash.length).replace(/^[/\\]+/u, "").split("/").filter((segment) => segment && segment !== ".");
+			segments = normalized
+				.slice(withoutLeadingSlash.length)
+				.replace(/^[/\\]+/u, "")
+				.split("/")
+				.filter(segment => segment && segment !== ".");
 		}
 	}
 	const cleaned: string[] = [];
@@ -349,7 +358,8 @@ export async function applyPatchOperationsDirect(workspaceRoot: string, patchTex
 			const relativePath = operation.filePath.trim();
 			if (!relativePath) return patchFailure("missing file path");
 			if (operation.kind === "add") {
-				if (!(await writePatchFile(relativePath, operation.content || ""))) return patchFailure("write failed", relativePath);
+				if (!(await writePatchFile(relativePath, operation.content || "")))
+					return patchFailure("write failed", relativePath);
 				continue;
 			}
 			if (operation.kind === "delete") {
@@ -366,14 +376,16 @@ export async function applyPatchOperationsDirect(workspaceRoot: string, patchTex
 			const target = (operation.moveTo || relativePath).trim();
 			if (!target) return patchFailure("missing target path", relativePath);
 			if (!(await writePatchFile(target, updated))) return patchFailure("write failed", target);
-			if (target !== relativePath && !(await deletePatchFile(relativePath))) return patchFailure("delete failed", relativePath);
+			if (target !== relativePath && !(await deletePatchFile(relativePath)))
+				return patchFailure("delete failed", relativePath);
 		}
 	}
 	if (operations.length === 0) {
 		const diffAdds: Array<[string, string]> = [];
 		let current: { path: string | null; isNew: boolean; collect: boolean; lines: string[] } | null = null;
 		const flush = (): void => {
-			if (current?.isNew && current.path && current.lines.length > 0) diffAdds.push([current.path, current.lines.join("\n").replace(/\n+$/u, "")]);
+			if (current?.isNew && current.path && current.lines.length > 0)
+				diffAdds.push([current.path, current.lines.join("\n").replace(/\n+$/u, "")]);
 		};
 		for (const line of splitLines(patchText)) {
 			if (line.startsWith("diff --git ")) {

@@ -449,7 +449,6 @@ class BoundedStack<T> {
 	}
 }
 
-
 interface LayoutLine {
 	text: string;
 	/** Exact `visibleWidth(text)` carried from wrap/layout, never re-derived. */
@@ -3345,7 +3344,6 @@ export class Editor implements Component, Focusable {
 			cursorLine: this.#state.cursorLine,
 			cursorCol: this.#state.cursorCol,
 		});
-
 	}
 	#applyUndo(): void {
 		const snapshot = this.#undoStack.pop();

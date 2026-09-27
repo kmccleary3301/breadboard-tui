@@ -56,7 +56,6 @@ export interface NativeHarnessLiveState {
 	subscribe(listener: (change: NativeHarnessGenerationChange) => void): () => void;
 }
 
-
 export interface LoadedNativeHarness {
 	/** The built-in id, or the spec path relative to the workspace (`/`-separated). */
 	readonly harnessId: string;
@@ -108,7 +107,8 @@ function posixRelative(root: string, path: string): string {
 function promptResourceCandidates(definition: JsonRecord): Set<string> {
 	const candidates = new Set<string>();
 	const add = (value: unknown): void => {
-		if (typeof value === "string" && value.length > 0 && !value.includes("\n") && value.length <= 256) candidates.add(value);
+		if (typeof value === "string" && value.length > 0 && !value.includes("\n") && value.length <= 256)
+			candidates.add(value);
 	};
 	const prompts = isJsonRecord(definition.prompts) ? definition.prompts : undefined;
 	if (isJsonRecord(prompts?.packs)) {
@@ -117,7 +117,8 @@ function promptResourceCandidates(definition: JsonRecord): Set<string> {
 	if (isJsonRecord(prompts?.injection)) {
 		for (const order of Object.values(prompts.injection)) {
 			if (!Array.isArray(order)) continue;
-			for (const token of order) if (typeof token === "string" && token !== "mode_specific" && !token.startsWith("@pack(")) add(token);
+			for (const token of order)
+				if (typeof token === "string" && token !== "mode_specific" && !token.startsWith("@pack(")) add(token);
 		}
 	}
 	if (Array.isArray(definition.modes)) for (const mode of definition.modes) if (isJsonRecord(mode)) add(mode.prompt);
@@ -140,7 +141,9 @@ async function readResource(specDirectory: string, resource: string): Promise<Pr
 	if (isAbsolute(resource) || (path !== specDirectory && !contained(specDirectory, path))) {
 		throw new Error(`native harness resource escapes its spec directory: ${resource}`);
 	}
-	return info.isFile() ? { bytes: new Uint8Array(await readFile(path)), file: true } : { bytes: new Uint8Array(), file: false };
+	return info.isFile()
+		? { bytes: new Uint8Array(await readFile(path)), file: true }
+		: { bytes: new Uint8Array(), file: false };
 }
 
 function stringValue(lock: JsonRecord, path: string): string | undefined {
@@ -169,7 +172,10 @@ interface HarnessSource {
 }
 
 function bindWorkspaceDescription(tool: NativeToolDefinition, workspaceRoot: string): NativeToolDefinition {
-	const description = tool.description.replace(/All commands run in\s+.*?\s+by default\./su, `All commands run in ${workspaceRoot} by default.`);
+	const description = tool.description.replace(
+		/All commands run in\s+.*?\s+by default\./su,
+		`All commands run in ${workspaceRoot} by default.`,
+	);
 	return description === tool.description ? tool : { ...tool, description };
 }
 
@@ -293,7 +299,8 @@ async function loadNativeHarnessOnce(options: LoadNativeHarnessOptions): Promise
 		});
 	}
 	const specPath = resolve(workspaceRoot, options.specPath);
-	if (!contained(workspaceRoot, specPath)) throw new Error(`native harness spec must be inside the workspace: ${specPath}`);
+	if (!contained(workspaceRoot, specPath))
+		throw new Error(`native harness spec must be inside the workspace: ${specPath}`);
 	const specDirectory = dirname(specPath);
 	const sourceRef = posixRelative(workspaceRoot, specPath);
 	return compileNativeHarness({
@@ -328,10 +335,8 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 	const listeners = new Set<(change: NativeHarnessGenerationChange) => void>();
 	let reloadValidator: ((harness: LoadedNativeHarness) => void | Promise<void>) | undefined;
 	let reloadInFlight: Promise<LoadedNativeHarness> | undefined;
-	let live: NativeHarnessLiveState;
-	const withLive = (harness: LoadedNativeHarness): LoadedNativeHarness =>
-		Object.freeze({ ...harness, live });
-	live = {
+	const withLive = (harness: LoadedNativeHarness): LoadedNativeHarness => Object.freeze({ ...harness, live });
+	const live: NativeHarnessLiveState = {
 		editable,
 		get generation() {
 			return generation;
@@ -345,44 +350,44 @@ export async function loadNativeHarness(options: LoadNativeHarnessOptions): Prom
 						"builtin",
 						generation,
 						`Harness ${current.harnessId} is built in and cannot be live-edited.`,
-				);
-			}
-			let next: LoadedNativeHarness;
-			try {
-				next = await loadNativeHarnessOnce(options);
-			} catch (error) {
-				const code = reloadErrorCode(error);
-				throw new NativeHarnessReloadError(
-					code,
-					generation,
-					`Harness reload rejected (${code}): ${error instanceof Error ? error.message : String(error)}`,
-					{ cause: error },
-				);
-			}
-			if (current.hostSurface || next.hostSurface) {
-				throw new NativeHarnessReloadError(
-					"host-surface-refused",
-					generation,
-					"Live reload cannot change or introduce a host-surface harness.",
-				);
-			}
-			try {
-				await reloadValidator?.(next);
-				await prepare?.(next);
-			} catch (error) {
-				throw new NativeHarnessReloadError(
-					"bind",
-					generation,
-					`Harness reload rejected (bind): ${error instanceof Error ? error.message : String(error)}`,
-					{ cause: error },
-				);
-			}
-			const previousGeneration = generation;
-			generation += 1;
-			current = withLive(next);
-			const change = { previousGeneration, generation, harness: current } as const;
-			for (const listener of listeners) listener(change);
-			return current;
+					);
+				}
+				let next: LoadedNativeHarness;
+				try {
+					next = await loadNativeHarnessOnce(options);
+				} catch (error) {
+					const code = reloadErrorCode(error);
+					throw new NativeHarnessReloadError(
+						code,
+						generation,
+						`Harness reload rejected (${code}): ${error instanceof Error ? error.message : String(error)}`,
+						{ cause: error },
+					);
+				}
+				if (current.hostSurface || next.hostSurface) {
+					throw new NativeHarnessReloadError(
+						"host-surface-refused",
+						generation,
+						"Live reload cannot change or introduce a host-surface harness.",
+					);
+				}
+				try {
+					await reloadValidator?.(next);
+					await prepare?.(next);
+				} catch (error) {
+					throw new NativeHarnessReloadError(
+						"bind",
+						generation,
+						`Harness reload rejected (bind): ${error instanceof Error ? error.message : String(error)}`,
+						{ cause: error },
+					);
+				}
+				const previousGeneration = generation;
+				generation += 1;
+				current = withLive(next);
+				const change = { previousGeneration, generation, harness: current } as const;
+				for (const listener of listeners) listener(change);
+				return current;
 			})();
 			reloadInFlight = operation.finally(() => {
 				reloadInFlight = undefined;

@@ -58,7 +58,7 @@ async function setupLauncher(withR39Profile = true): Promise<LauncherFixture> {
 		"count=0",
 		'[[ -f "$count_file" ]] && count="$(cat "$count_file")"',
 		"count=$((count + 1))",
-		"printf '%s' \"$count\" > \"$count_file\"",
+		'printf \'%s\' "$count" > "$count_file"',
 		`if [[ "$count" == 1 && -n "\${BREADBOARD_NATIVE_PROFILE_MIGRATION:-}" && "${withR39Profile ? "1" : "0"}" == 1 ]]; then exit 1; fi`,
 	].join("\n");
 	const launcher = join(root, "candidate");
@@ -120,7 +120,9 @@ describe("native daily-driver launcher", () => {
 		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(false);
 		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
-		const databaseFiles = (await readdir(join(fixture.nativeProfile, "agent"))).filter(name => name.startsWith("agent.db"));
+		const databaseFiles = (await readdir(join(fixture.nativeProfile, "agent"))).filter(name =>
+			name.startsWith("agent.db"),
+		);
 		expect(databaseFiles).toEqual(["agent.db"]);
 	});
 
@@ -140,7 +142,9 @@ describe("native daily-driver launcher", () => {
 		expect(config).toContain('"default":"daily_driver"');
 		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).exists()).toBe(true);
-		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.receipt.v1.json")).exists()).toBe(true);
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.receipt.v1.json")).exists()).toBe(
+			true,
+		);
 	});
 
 	test("migrates a markerless local-owned profile without an R39 source", async () => {
@@ -157,7 +161,9 @@ describe("native daily-driver launcher", () => {
 		expect(config).toContain('"default":"daily_driver"');
 		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
 		expect(config).not.toContain("engineMode");
-		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain(
+			'"source":"fresh"',
+		);
 	});
 	test("repairs a missing auth symlink on a valid fresh profile", async () => {
 		const fixture = await setupLauncher(false);
@@ -189,11 +195,16 @@ describe("native daily-driver launcher", () => {
 	test("repairs a markerless existing fresh profile without an R39 source", async () => {
 		const fixture = await setupLauncher(false);
 		await mkdir(join(fixture.nativeProfile, "agent"), { recursive: true });
-		await writeFile(join(fixture.nativeProfile, "agent", "config.yml"), '{"breadboard":{"harness":{"default":"daily_driver"}}}\n');
+		await writeFile(
+			join(fixture.nativeProfile, "agent", "config.yml"),
+			'{"breadboard":{"harness":{"default":"daily_driver"}}}\n',
+		);
 		const result = spawn(fixture);
 		expect(result.exitCode).toBe(0);
 		expect(readlinkSync(join(fixture.nativeProfile, "agent", "agent.db"))).toBe(join(fixture.authSource, "agent.db"));
-		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain(
+			'"source":"fresh"',
+		);
 		expect(lstatSync(join(fixture.nativeProfile, "agent", "agent.db")).isSymbolicLink()).toBe(true);
 	});
 
@@ -204,11 +215,17 @@ describe("native daily-driver launcher", () => {
 		const config = join(fixture.nativeProfile, "agent", "config.yml");
 		const written = JSON.parse(await Bun.file(marker).text()) as Record<string, string>;
 		const { schema, source, sourceConfigSha256, sourceAgentDbSha256 } = written;
-		await writeFile(marker, `${JSON.stringify({ sourceAgentDbSha256, sourceConfigSha256, source, schema }, null, 2)}\n`);
+		await writeFile(
+			marker,
+			`${JSON.stringify({ sourceAgentDbSha256, sourceConfigSha256, source, schema }, null, 2)}\n`,
+		);
 		await writeFile(config, "kept: true\n");
 		expect(spawn(fixture).exitCode).toBe(0);
 		expect(await Bun.file(config).text()).toBe("kept: true\n");
-		await writeFile(marker, `${JSON.stringify({ schema, source: join(fixture.root, "elsewhere"), sourceConfigSha256, sourceAgentDbSha256 })}\n`);
+		await writeFile(
+			marker,
+			`${JSON.stringify({ schema, source: join(fixture.root, "elsewhere"), sourceConfigSha256, sourceAgentDbSha256 })}\n`,
+		);
 		expect(spawn(fixture).exitCode).toBe(0);
 		expect(await Bun.file(config).text()).toContain('"default":"daily_driver"');
 		expect(await Bun.file(marker).text()).toContain('"source":"fresh"');
@@ -219,7 +236,9 @@ describe("native daily-driver launcher", () => {
 		const children = [spawnAsync(fixture), spawnAsync(fixture)];
 		const exits = await Promise.all(children.map(child => child.exited));
 		expect(exits.sort()).toEqual([0, 0]);
-		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain('"source":"fresh"');
+		expect(await Bun.file(join(fixture.nativeProfile, ".bb-native-profile-migration.v1.json")).text()).toContain(
+			'"source":"fresh"',
+		);
 		expect(await Bun.file(join(fixture.nativeProfile, "agent", "config.yml")).exists()).toBe(true);
 	});
 });

@@ -9,7 +9,8 @@ const META_SCHEMA = "bb.harness_lock_metadata.v1";
 
 function stringField(value: JsonRecord, key: string, label: string): string {
 	const candidate = value[key];
-	if (typeof candidate !== "string" || candidate.length === 0) throw new Error(`native harness ${label}.${key} is required`);
+	if (typeof candidate !== "string" || candidate.length === 0)
+		throw new Error(`native harness ${label}.${key} is required`);
 	return candidate;
 }
 
@@ -40,7 +41,8 @@ export async function loadNativeLock(lockPath: string): Promise<LoadedNativeLock
 	}
 	const lock = parseCanonicalJson(lockText);
 	const meta = parseCanonicalJson(metaText);
-	if (!isJsonRecord(lock) || !isJsonRecord(meta)) throw new Error(`native harness lock and sidecar must be JSON objects: ${lockPath}`);
+	if (!isJsonRecord(lock) || !isJsonRecord(meta))
+		throw new Error(`native harness lock and sidecar must be JSON objects: ${lockPath}`);
 	if (stringField(lock, "schema_version", "lock") !== LOCK_SCHEMA) {
 		throw new Error(`native harness lock schema_version must be ${LOCK_SCHEMA}`);
 	}
@@ -48,7 +50,8 @@ export async function loadNativeLock(lockPath: string): Promise<LoadedNativeLock
 		throw new Error(`native harness metadata schema_version must be ${META_SCHEMA}`);
 	}
 	const lockHash = stringField(lock, "graph_hash", "lock");
-	if (!GRAPH_HASH.test(lockHash)) throw new Error("native harness graph_hash must be sha256:<64 lowercase hex digits>");
+	if (!GRAPH_HASH.test(lockHash))
+		throw new Error("native harness graph_hash must be sha256:<64 lowercase hex digits>");
 	if (stringField(meta, "graph_hash", "metadata") !== lockHash) {
 		throw new Error("native harness lock and metadata graph_hash values differ");
 	}

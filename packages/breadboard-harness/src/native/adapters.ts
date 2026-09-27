@@ -9,7 +9,9 @@ export function pythonJson(value: CanonicalJson): string {
 	if (value === null || typeof value === "boolean" || typeof value === "number") return JSON.stringify(value);
 	if (typeof value === "string") return JSON.stringify(value);
 	if (Array.isArray(value)) return `[${value.map(pythonJson).join(", ")}]`;
-	return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`).join(", ")}}`;
+	return `{${Object.entries(value)
+		.map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`)
+		.join(", ")}}`;
 }
 
 function result(details: CanonicalJson, isError = false): NativeToolResult {
@@ -32,12 +34,17 @@ function resolveSymlinkAware(workspaceRoot: string, path: string): string {
 			continue;
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ELOOP") throw error;
-			if (!(error instanceof Error) || !("code" in error) || (error.code !== "ENOENT" && error.code !== "ENOTDIR")) throw error;
+			if (!(error instanceof Error) || !("code" in error) || (error.code !== "ENOENT" && error.code !== "ENOTDIR"))
+				throw error;
 			let stat;
 			try {
 				stat = lstatSync(next);
 			} catch (statError) {
-				if (statError instanceof Error && "code" in statError && (statError.code === "ENOENT" || statError.code === "ENOTDIR")) {
+				if (
+					statError instanceof Error &&
+					"code" in statError &&
+					(statError.code === "ENOENT" || statError.code === "ENOTDIR")
+				) {
 					return resolve(current, segment, ...pending);
 				}
 				throw statError;
@@ -76,7 +83,8 @@ function privateWorkspacePath(workspaceRoot: string, requested: string): boolean
 	return parts[0] === ".breadboard" && (parts[1] === "artifacts" || parts[1] === "attachments");
 }
 function symlinkResolutionError(error: unknown): NativeToolResult | undefined {
-	if (error instanceof Error && "code" in error && error.code === "ELOOP") return result({ error: error.message }, true);
+	if (error instanceof Error && "code" in error && error.code === "ELOOP")
+		return result({ error: error.message }, true);
 	return undefined;
 }
 function leavesWorkspace(workspaceRoot: string, path: string): boolean {
@@ -87,9 +95,9 @@ function leavesWorkspace(workspaceRoot: string, path: string): boolean {
 	return relativePath === ".." || relativePath.startsWith("../") || isAbsolute(relativePath);
 }
 
-
 function patchTouchesPrivateWorkspace(workspaceRoot: string, patch: string): boolean {
-	const pattern = /^(?:\*\*\* (?:Add|Update|Delete) File:|\*\*\* Move to:|---|\+\+\+|(?:rename|copy) (?:from|to))\s+(?:[ab][/])?("?[^"\t\n]+"?)(?:\t.*)?$/gmu;
+	const pattern =
+		/^(?:\*\*\* (?:Add|Update|Delete) File:|\*\*\* Move to:|---|\+\+\+|(?:rename|copy) (?:from|to))\s+(?:[ab][/])?("?[^"\t\n]+"?)(?:\t.*)?$/gmu;
 	let match: RegExpExecArray | null;
 	while ((match = pattern.exec(patch)) !== null) {
 		const requested = match[1]!.trim().replace(/^"+|"+$/gu, "");
@@ -139,7 +147,12 @@ export async function readFileAdapter(
 	try {
 		path = workspacePath(workspaceRoot, input.path);
 	} catch {
-		return pathError(workspaceRoot, input.path, { content: "", truncated: false, offset: Math.max(0, Math.trunc(input.offset ?? 0)), limit: input.limit ?? null });
+		return pathError(workspaceRoot, input.path, {
+			content: "",
+			truncated: false,
+			offset: Math.max(0, Math.trunc(input.offset ?? 0)),
+			limit: input.limit ?? null,
+		});
 	}
 	const offset = Math.max(0, Math.trunc(input.offset ?? 0));
 	let raw = "";
@@ -161,7 +174,12 @@ export async function readFileAdapter(
 	return result({ path, content, truncated, offset, limit: input.limit ?? null });
 }
 
-async function treeEntries(directory: string, depth: number, prefix: string, workspaceRoot: string): Promise<CanonicalJson[]> {
+async function treeEntries(
+	directory: string,
+	depth: number,
+	prefix: string,
+	workspaceRoot: string,
+): Promise<CanonicalJson[]> {
 	let entries;
 	try {
 		entries = await readdir(directory, { withFileTypes: true });
@@ -246,10 +264,12 @@ export async function createFileFromBlockAdapter(
 	}
 }
 
-
 async function git(root: string, args: readonly string[]): Promise<{ exit: number; stdout: string; stderr: string }> {
 	const process = Bun.spawn(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
-	const [stdout, stderr] = await Promise.all([new Response(process.stdout).text(), new Response(process.stderr).text()]);
+	const [stdout, stderr] = await Promise.all([
+		new Response(process.stdout).text(),
+		new Response(process.stderr).text(),
+	]);
 	return { exit: await process.exited, stdout, stderr };
 }
 
@@ -269,10 +289,10 @@ export async function applyUnifiedPatchAdapter(workspaceRoot: string, patch: str
 	}
 
 	if (
-		patchText.includes("*** Add File:")
-		|| patchText.includes("*** Update File:")
-		|| patchText.includes("*** Delete File:")
-		|| patchText.includes("*** Begin Patch")
+		patchText.includes("*** Add File:") ||
+		patchText.includes("*** Update File:") ||
+		patchText.includes("*** Delete File:") ||
+		patchText.includes("*** Begin Patch")
 	) {
 		const converted = convertPatchToUnified(patchText);
 		if (converted) patchText = converted;
@@ -377,8 +397,10 @@ export function adaptGlobInput(
 	if (mode === "children" && combinedPath === "*") combinedPath = "./*";
 	const out: { path?: string; hidden?: boolean; gitignore?: boolean; limit?: number } = {};
 	if (combinedPath !== undefined) out.path = combinedPath;
-	if (input.hidden !== undefined) out.hidden = typeof input.hidden === "boolean" ? input.hidden : Boolean(input.hidden);
-	if (input.gitignore !== undefined) out.gitignore = typeof input.gitignore === "boolean" ? input.gitignore : Boolean(input.gitignore);
+	if (input.hidden !== undefined)
+		out.hidden = typeof input.hidden === "boolean" ? input.hidden : Boolean(input.hidden);
+	if (input.gitignore !== undefined)
+		out.gitignore = typeof input.gitignore === "boolean" ? input.gitignore : Boolean(input.gitignore);
 	if (input.limit !== undefined) {
 		const num = typeof input.limit === "number" ? input.limit : Number(input.limit);
 		out.limit = !Number.isNaN(num) ? num : (input.limit as number);
@@ -405,7 +427,9 @@ export function adaptGrepInput(
 	}
 	// Host grep takes a regex only; a declared literal pattern is escaped to match itself.
 	const pattern = input.literal === true ? rawPattern.replace(/[\\^$.*+?()[\]{}|#&~-]/gu, "\\$&") : rawPattern;
-	const out: { pattern: string; path?: string; case?: boolean; gitignore?: boolean; skip?: number | null } = { pattern };
+	const out: { pattern: string; path?: string; case?: boolean; gitignore?: boolean; skip?: number | null } = {
+		pattern,
+	};
 	if (combinedPath !== undefined) out.path = combinedPath;
 	if (input.case !== undefined) {
 		out.case = typeof input.case === "boolean" ? input.case : Boolean(input.case);
@@ -414,7 +438,8 @@ export function adaptGrepInput(
 	} else if (input["-i"] !== undefined) {
 		out.case = typeof input["-i"] === "boolean" ? !input["-i"] : false;
 	}
-	if (input.gitignore !== undefined) out.gitignore = typeof input.gitignore === "boolean" ? input.gitignore : Boolean(input.gitignore);
+	if (input.gitignore !== undefined)
+		out.gitignore = typeof input.gitignore === "boolean" ? input.gitignore : Boolean(input.gitignore);
 	if (input.skip !== undefined) {
 		const num = typeof input.skip === "number" ? input.skip : Number(input.skip);
 		out.skip = !Number.isNaN(num) ? num : (input.skip as number | null);
@@ -422,10 +447,7 @@ export function adaptGrepInput(
 	return out;
 }
 
-export function adaptSkillInput(
-	input: Record<string, unknown>,
-	skillKey = "skill",
-): { path: string } {
+export function adaptSkillInput(input: Record<string, unknown>, skillKey = "skill"): { path: string } {
 	const name = input[skillKey] ?? input.skill ?? input.name ?? "";
 	return { path: `skill://${String(name)}` };
 }
@@ -446,7 +468,8 @@ export function adaptTaskInput(
 	// are host agents. The host default agent runs the task; the requested role stays visible in context.
 	const role = input.subagent_type ?? input.agent;
 	const baseContext = typeof input.context === "string" ? input.context : String(description || taskPrompt);
-	const context = role === undefined || role === "" ? baseContext : `${baseContext}\nRequested agent role: ${String(role)}`;
+	const context =
+		role === undefined || role === "" ? baseContext : `${baseContext}\nRequested agent role: ${String(role)}`;
 	return {
 		context,
 		tasks: [{ task: String(taskPrompt), name: String(description) }],

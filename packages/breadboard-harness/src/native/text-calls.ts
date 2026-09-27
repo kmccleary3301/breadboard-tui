@@ -18,7 +18,8 @@ function normalizeName(rawName: string, tools: readonly ToolShape[]): string | u
 	const cleaned = rawName.toLowerCase().replace(/[^a-z0-9]+/g, "");
 	const alias = ALIASES[cleaned];
 	if (alias && tools.some(({ definition }) => definition.name === alias)) return alias;
-	return tools.find(({ definition }) => definition.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === cleaned)?.definition.name;
+	return tools.find(({ definition }) => definition.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === cleaned)
+		?.definition.name;
 }
 
 function isWhitespace(value: string): boolean {
@@ -48,7 +49,7 @@ function matchingDelimiter(source: string, start: number): number | undefined {
 			}
 			continue;
 		}
-		if (character === "\"" || character === "'") {
+		if (character === '"' || character === "'") {
 			triple = source.startsWith(character.repeat(3), index);
 			quote = character;
 			if (triple) index += 2;
@@ -93,7 +94,7 @@ function splitTopLevel(source: string, delimiter: string): string[] | undefined 
 			}
 			continue;
 		}
-		if (character === "\"" || character === "'") {
+		if (character === '"' || character === "'") {
 			triple = source.startsWith(character.repeat(3), index);
 			quote = character;
 			if (triple) index += 2;
@@ -265,7 +266,10 @@ function parseCall(body: string, tool: ToolShape): JsonRecord | undefined {
 function stableKey(value: CanonicalJson): string {
 	if (Array.isArray(value)) return `[${value.map(stableKey).join(",")}]`;
 	if (isJsonRecord(value)) {
-		return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableKey(value[key])}`).join(",")}}`;
+		return `{${Object.keys(value)
+			.sort()
+			.map(key => `${JSON.stringify(key)}:${stableKey(value[key])}`)
+			.join(",")}}`;
 	}
 	return JSON.stringify(value);
 }
@@ -275,7 +279,7 @@ export function parseTextToolCalls(
 	assistantText: string,
 	allowed: readonly NativeToolDefinition[],
 ): { calls: Array<{ name: string; arguments: JsonRecord }>; errors: string[] } {
-	const tools: ToolShape[] = allowed.map((definition) => {
+	const tools: ToolShape[] = allowed.map(definition => {
 		const properties = isJsonRecord(definition.parameters.properties) ? definition.parameters.properties : undefined;
 		return { definition, parameters: properties ? Object.keys(properties) : [] };
 	});
@@ -304,7 +308,9 @@ function pythonJson(value: CanonicalJson): string {
 	if (value === null || typeof value === "boolean" || typeof value === "number") return JSON.stringify(value);
 	if (typeof value === "string") return JSON.stringify(value);
 	if (Array.isArray(value)) return `[${value.map(pythonJson).join(", ")}]`;
-	return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`).join(", ")}}`;
+	return `{${Object.entries(value)
+		.map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`)
+		.join(", ")}}`;
 }
 
 function pythonTruthy(value: CanonicalJson | undefined): boolean {
@@ -322,8 +328,14 @@ function pythonTruthy(value: CanonicalJson | undefined): boolean {
  */
 export function formatTextToolResults(results: Array<{ name: string; output: JsonRecord }>): string {
 	if (results.length === 0) return "(no tool output)";
-	return results.map(({ name, output }) => {
-		const selected = pythonTruthy(output.output) ? output.output : pythonTruthy(output.__mvi_text_output) ? output.__mvi_text_output : output;
-		return `[${name}] ${pythonJson(selected)}`;
-	}).join("\n\n");
+	return results
+		.map(({ name, output }) => {
+			const selected = pythonTruthy(output.output)
+				? output.output
+				: pythonTruthy(output.__mvi_text_output)
+					? output.__mvi_text_output
+					: output;
+			return `[${name}] ${pythonJson(selected)}`;
+		})
+		.join("\n\n");
 }

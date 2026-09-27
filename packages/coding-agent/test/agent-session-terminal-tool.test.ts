@@ -96,7 +96,11 @@ function toolResults(messages: AgentMessage[]): Array<{ isError: boolean }> {
 
 describe("AgentSession terminal tools", () => {
 	it("ends the run after a successful terminal call and accepts the next prompt", async () => {
-		const { session, mock } = createSession([completeCall(true, "call-1"), textStop("unreached"), textStop("second")]);
+		const { session, mock } = createSession([
+			completeCall(true, "call-1"),
+			textStop("unreached"),
+			textStop("second"),
+		]);
 
 		await session.prompt("finish");
 		await session.waitForIdle();

@@ -43,7 +43,7 @@ function pathPointer(path: readonly PathPart[]): string {
 
 function jsonText(value: unknown): string {
 	if (value instanceof JsonFloat) return String(value.value);
-	return JSON.stringify(value, (_key, item) => item instanceof JsonFloat ? item.value : item);
+	return JSON.stringify(value, (_key, item) => (item instanceof JsonFloat ? item.value : item));
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -58,7 +58,14 @@ function sameJson(left: unknown, right: unknown): boolean {
 	if (typeof left === "object" && typeof right === "object") {
 		const leftKeys = Object.keys(left as object).sort(compareCodePoints);
 		const rightKeys = Object.keys(right as object).sort(compareCodePoints);
-		return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index] && sameJson((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
+		return (
+			leftKeys.length === rightKeys.length &&
+			leftKeys.every(
+				(key, index) =>
+					key === rightKeys[index] &&
+					sameJson((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]),
+			)
+		);
 	}
 	return false;
 }
@@ -95,14 +102,26 @@ function isPythonInteger(value: unknown): boolean {
 
 function acceptsType(value: unknown, type: string): boolean {
 	switch (type) {
-		case "null": return value === null;
-		case "boolean": return typeof value === "boolean";
-		case "string": return typeof value === "string";
-		case "number": return (typeof value === "number" && Number.isFinite(value)) || value instanceof JsonFloat || typeof value === "bigint";
-		case "integer": return isInteger(value);
-		case "array": return Array.isArray(value);
-		case "object": return isObject(value);
-		default: return true;
+		case "null":
+			return value === null;
+		case "boolean":
+			return typeof value === "boolean";
+		case "string":
+			return typeof value === "string";
+		case "number":
+			return (
+				(typeof value === "number" && Number.isFinite(value)) ||
+				value instanceof JsonFloat ||
+				typeof value === "bigint"
+			);
+		case "integer":
+			return isInteger(value);
+		case "array":
+			return Array.isArray(value);
+		case "object":
+			return isObject(value);
+		default:
+			return true;
 	}
 }
 
@@ -174,25 +193,47 @@ function schemaType(schema: JsonSchema): string[] {
 function constraintMessage(validator: string, validatorValue: unknown): string {
 	const value = jsonText(validatorValue);
 	switch (validator) {
-		case "type": return `Value must have type ${value}`;
-		case "const": return `Value must equal ${value}`;
-		case "enum": return `Value must be one of ${value}`;
-		case "minItems": return `Array must contain at least ${value} item(s)`;
-		case "maxItems": return `Array must contain at most ${value} item(s)`;
-		case "minLength": return `String must contain at least ${value} character(s)`;
-		case "maxLength": return `String must contain at most ${value} character(s)`;
-		case "oneOf": return "Value must match exactly one allowed schema";
-		case "anyOf": return "Value must match at least one allowed schema";
-		case "not": return "Value must not match the disallowed schema";
-		default: return `Value violates ${validator} constraint ${value}`;
+		case "type":
+			return `Value must have type ${value}`;
+		case "const":
+			return `Value must equal ${value}`;
+		case "enum":
+			return `Value must be one of ${value}`;
+		case "minItems":
+			return `Array must contain at least ${value} item(s)`;
+		case "maxItems":
+			return `Array must contain at most ${value} item(s)`;
+		case "minLength":
+			return `String must contain at least ${value} character(s)`;
+		case "maxLength":
+			return `String must contain at most ${value} character(s)`;
+		case "oneOf":
+			return "Value must match exactly one allowed schema";
+		case "anyOf":
+			return "Value must match at least one allowed schema";
+		case "not":
+			return "Value must not match the disallowed schema";
+		default:
+			return `Value violates ${validator} constraint ${value}`;
 	}
 }
 
-function error(path: readonly PathPart[], validator: string, validatorValue: unknown, schema: JsonSchema, context?: readonly RawError[]): RawError {
+function error(
+	path: readonly PathPart[],
+	validator: string,
+	validatorValue: unknown,
+	schema: JsonSchema,
+	context?: readonly RawError[],
+): RawError {
 	return { path, validator, validatorValue, schema, ...(context === undefined ? {} : { context }) };
 }
 
-function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly PathPart[], root: JsonSchema): RawError[] {
+function validateSchema(
+	value: unknown,
+	rawSchema: JsonSchema,
+	path: readonly PathPart[],
+	root: JsonSchema,
+): RawError[] {
 	const schema = dereference(rawSchema, root);
 	const errors: RawError[] = [];
 	const types = schemaType(schema);
@@ -200,15 +241,23 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 		errors.push(error(path, "type", schema.type, schema));
 	}
 	if ("const" in schema && !sameJson(value, schema.const)) errors.push(error(path, "const", schema.const, schema));
-	if (Array.isArray(schema.enum) && !schema.enum.some(item => sameJson(value, item))) errors.push(error(path, "enum", schema.enum, schema));
+	if (Array.isArray(schema.enum) && !schema.enum.some(item => sameJson(value, item)))
+		errors.push(error(path, "enum", schema.enum, schema));
 	const numeric = numericValue(value);
-	if (numeric !== undefined && typeof schema.minimum === "number" && numeric < schema.minimum) errors.push(error(path, "minimum", schema.minimum, schema));
-	if (numeric !== undefined && typeof schema.maximum === "number" && numeric > schema.maximum) errors.push(error(path, "maximum", schema.maximum, schema));
-	if (numeric !== undefined && typeof schema.exclusiveMinimum === "number" && numeric <= schema.exclusiveMinimum) errors.push(error(path, "exclusiveMinimum", schema.exclusiveMinimum, schema));
-	if (numeric !== undefined && typeof schema.exclusiveMaximum === "number" && numeric >= schema.exclusiveMaximum) errors.push(error(path, "exclusiveMaximum", schema.exclusiveMaximum, schema));
-	if (numeric !== undefined && typeof schema.multipleOf === "number" && numeric % schema.multipleOf !== 0) errors.push(error(path, "multipleOf", schema.multipleOf, schema));
-	if (typeof schema.minLength === "number" && typeof value === "string" && [...value].length < schema.minLength) errors.push(error(path, "minLength", schema.minLength, schema));
-	if (typeof schema.maxLength === "number" && typeof value === "string" && [...value].length > schema.maxLength) errors.push(error(path, "maxLength", schema.maxLength, schema));
+	if (numeric !== undefined && typeof schema.minimum === "number" && numeric < schema.minimum)
+		errors.push(error(path, "minimum", schema.minimum, schema));
+	if (numeric !== undefined && typeof schema.maximum === "number" && numeric > schema.maximum)
+		errors.push(error(path, "maximum", schema.maximum, schema));
+	if (numeric !== undefined && typeof schema.exclusiveMinimum === "number" && numeric <= schema.exclusiveMinimum)
+		errors.push(error(path, "exclusiveMinimum", schema.exclusiveMinimum, schema));
+	if (numeric !== undefined && typeof schema.exclusiveMaximum === "number" && numeric >= schema.exclusiveMaximum)
+		errors.push(error(path, "exclusiveMaximum", schema.exclusiveMaximum, schema));
+	if (numeric !== undefined && typeof schema.multipleOf === "number" && numeric % schema.multipleOf !== 0)
+		errors.push(error(path, "multipleOf", schema.multipleOf, schema));
+	if (typeof schema.minLength === "number" && typeof value === "string" && [...value].length < schema.minLength)
+		errors.push(error(path, "minLength", schema.minLength, schema));
+	if (typeof schema.maxLength === "number" && typeof value === "string" && [...value].length > schema.maxLength)
+		errors.push(error(path, "maxLength", schema.maxLength, schema));
 	if (typeof schema.pattern === "string" && typeof value === "string") {
 		try {
 			if (!new RegExp(schema.pattern, "u").test(value)) errors.push(error(path, "pattern", schema.pattern, schema));
@@ -216,19 +265,24 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 			// Bundled schemas contain only valid regular expressions.
 		}
 	}
-	if (typeof schema.minItems === "number" && Array.isArray(value) && value.length < schema.minItems) errors.push(error(path, "minItems", schema.minItems, schema));
-	if (typeof schema.maxItems === "number" && Array.isArray(value) && value.length > schema.maxItems) errors.push(error(path, "maxItems", schema.maxItems, schema));
+	if (typeof schema.minItems === "number" && Array.isArray(value) && value.length < schema.minItems)
+		errors.push(error(path, "minItems", schema.minItems, schema));
+	if (typeof schema.maxItems === "number" && Array.isArray(value) && value.length > schema.maxItems)
+		errors.push(error(path, "maxItems", schema.maxItems, schema));
 	if (Array.isArray(schema.allOf)) {
-		for (const branch of schema.allOf) if (isObject(branch)) errors.push(...validateSchema(value, branch, path, root));
+		for (const branch of schema.allOf)
+			if (isObject(branch)) errors.push(...validateSchema(value, branch, path, root));
 	}
 	for (const keyword of ["anyOf", "oneOf"] as const) {
 		const branches = schema[keyword];
 		if (!Array.isArray(branches)) continue;
-		const branchErrors = branches.map(branch => isObject(branch) ? validateSchema(value, branch, path, root) : []);
+		const branchErrors = branches.map(branch => (isObject(branch) ? validateSchema(value, branch, path, root) : []));
 		const passing = branchErrors.filter(item => item.length === 0).length;
 		const valid = keyword === "oneOf" ? passing === 1 : passing > 0;
 		if (!valid) {
-			const compatible = branchErrors.filter(items => !items.some(item => item.validator === "type" && item.path.length === path.length));
+			const compatible = branchErrors.filter(
+				items => !items.some(item => item.validator === "type" && item.path.length === path.length),
+			);
 			if (compatible.length > 0) {
 				errors.push(error(path, keyword, branches, schema, compatible.flat()));
 			} else {
@@ -239,12 +293,16 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 	if (isObject(value)) {
 		const properties = isObject(schema.properties) ? schema.properties : {};
 		if (Array.isArray(schema.required)) {
-			for (const name of [...schema.required].filter((item): item is string => typeof item === "string").sort(compareCodePoints)) {
+			for (const name of [...schema.required]
+				.filter((item): item is string => typeof item === "string")
+				.sort(compareCodePoints)) {
 				if (!Object.hasOwn(value, name)) errors.push(error([...path, name], "required", name, schema));
 			}
 		}
 		if (schema.additionalProperties === false) {
-			const patterns = isObject(schema.patternProperties) ? Object.keys(schema.patternProperties).map(pattern => new RegExp(pattern, "u")) : [];
+			const patterns = isObject(schema.patternProperties)
+				? Object.keys(schema.patternProperties).map(pattern => new RegExp(pattern, "u"))
+				: [];
 			for (const name of Object.keys(value).sort(compareCodePoints)) {
 				if (!Object.hasOwn(properties, name) && !patterns.some(pattern => pattern.test(name))) {
 					errors.push(error([...path, name], "additionalProperties", name, schema));
@@ -256,29 +314,45 @@ function validateSchema(value: unknown, rawSchema: JsonSchema, path: readonly Pa
 			if (isObject(child)) errors.push(...validateSchema(value[name], child, [...path, name], root));
 		}
 		if (isObject(schema.additionalProperties)) {
-			for (const name of Object.keys(value)) if (!Object.hasOwn(properties, name)) errors.push(...validateSchema(value[name], schema.additionalProperties, [...path, name], root));
+			for (const name of Object.keys(value))
+				if (!Object.hasOwn(properties, name))
+					errors.push(...validateSchema(value[name], schema.additionalProperties, [...path, name], root));
 		}
 		if (isObject(schema.patternProperties)) {
 			for (const [pattern, child] of Object.entries(schema.patternProperties)) {
 				if (!isObject(child)) continue;
 				const matcher = new RegExp(pattern, "u");
-				for (const name of Object.keys(value)) if (matcher.test(name)) errors.push(...validateSchema(value[name], child, [...path, name], root));
+				for (const name of Object.keys(value))
+					if (matcher.test(name)) errors.push(...validateSchema(value[name], child, [...path, name], root));
 			}
 		}
 	}
 	if (Array.isArray(value) && isObject(schema.items)) {
-		for (const [index, item] of value.entries()) errors.push(...validateSchema(item, schema.items, [...path, index], root));
+		for (const [index, item] of value.entries())
+			errors.push(...validateSchema(item, schema.items, [...path, index], root));
 	}
 	return errors;
 }
 
 function requiredFinding(raw: RawError): HarnessValidationFinding[] {
-	return [{ pointer: pathPointer(raw.path), code: "required", message: `'${String(raw.validatorValue)}' is a required property` }];
+	return [
+		{
+			pointer: pathPointer(raw.path),
+			code: "required",
+			message: `'${String(raw.validatorValue)}' is a required property`,
+		},
+	];
 }
 
 function additionalFinding(raw: RawError): HarnessValidationFinding[] {
 	const key = String(raw.validatorValue);
-	return [{ pointer: pathPointer(raw.path), code: "additionalProperties", message: `Additional property '${key.replaceAll("'", "\\'")}' is not allowed` }];
+	return [
+		{
+			pointer: pathPointer(raw.path),
+			code: "additionalProperties",
+			message: `Additional property '${key.replaceAll("'", "\\'")}' is not allowed`,
+		},
+	];
 }
 
 function transformError(raw: RawError): HarnessValidationFinding[] {
@@ -288,11 +362,19 @@ function transformError(raw: RawError): HarnessValidationFinding[] {
 	}
 	if (raw.validator === "required") return requiredFinding(raw);
 	if (raw.validator === "additionalProperties") return additionalFinding(raw);
-	return [{ pointer: pathPointer(raw.path), code: raw.validator, message: constraintMessage(raw.validator, raw.validatorValue) }];
+	return [
+		{
+			pointer: pathPointer(raw.path),
+			code: raw.validator,
+			message: constraintMessage(raw.validator, raw.validatorValue),
+		},
+	];
 }
 
 function sortFindings(findings: readonly HarnessValidationFinding[]): HarnessValidationFinding[] {
-	return [...new Map(findings.map(item => [`${item.pointer}\u0000${item.code}\u0000${item.message ?? ""}`, item])).values()].sort((left, right) => {
+	return [
+		...new Map(findings.map(item => [`${item.pointer}\u0000${item.code}\u0000${item.message ?? ""}`, item])).values(),
+	].sort((left, right) => {
 		const pointerOrder = compareCodePoints(left.pointer, right.pointer);
 		if (pointerOrder !== 0) return pointerOrder;
 		const codeOrder = compareCodePoints(left.code, right.code);
@@ -301,24 +383,42 @@ function sortFindings(findings: readonly HarnessValidationFinding[]): HarnessVal
 	});
 }
 
-function jsonDomainFindings(value: unknown, path: readonly PathPart[] = [], active = new Set<object>()): HarnessValidationFinding[] {
-	if (path.length > 100) return [{ pointer: pathPointer(path), code: "json_depth", message: "JSON paths must not exceed 100 segments" }];
+function jsonDomainFindings(
+	value: unknown,
+	path: readonly PathPart[] = [],
+	active = new Set<object>(),
+): HarnessValidationFinding[] {
+	if (path.length > 100)
+		return [{ pointer: pathPointer(path), code: "json_depth", message: "JSON paths must not exceed 100 segments" }];
 	if (value === null || typeof value === "boolean" || typeof value === "string") return [];
 	if (value instanceof JsonFloat || typeof value === "number") {
 		const numeric = value instanceof JsonFloat ? value.value : value;
-		return Number.isFinite(numeric) ? [] : [{ pointer: pathPointer(path), code: "finite", message: "JSON numbers must be finite" }];
+		return Number.isFinite(numeric)
+			? []
+			: [{ pointer: pathPointer(path), code: "finite", message: "JSON numbers must be finite" }];
 	}
 	if (typeof value === "bigint") {
-		return value.toString().replace(/^-/, "").length <= MAX_JSON_INTEGER_DIGITS ? [] : [{ pointer: pathPointer(path), code: "integer_range", message: "JSON integers must contain at most 640 decimal digits" }];
+		return value.toString().replace(/^-/, "").length <= MAX_JSON_INTEGER_DIGITS
+			? []
+			: [
+					{
+						pointer: pathPointer(path),
+						code: "integer_range",
+						message: "JSON integers must contain at most 640 decimal digits",
+					},
+				];
 	}
 	if (Array.isArray(value) || isObject(value)) {
-		if (active.has(value)) return [{ pointer: pathPointer(path), code: "json_cycle", message: "JSON values must not contain cycles" }];
+		if (active.has(value))
+			return [{ pointer: pathPointer(path), code: "json_cycle", message: "JSON values must not contain cycles" }];
 		active.add(value);
 		const findings: HarnessValidationFinding[] = [];
 		if (isObject(value)) {
-			for (const key of Object.keys(value).sort(compareCodePoints)) findings.push(...jsonDomainFindings(value[key], [...path, key], active));
+			for (const key of Object.keys(value).sort(compareCodePoints))
+				findings.push(...jsonDomainFindings(value[key], [...path, key], active));
 		} else {
-			for (const [index, item] of value.entries()) findings.push(...jsonDomainFindings(item, [...path, index], active));
+			for (const [index, item] of value.entries())
+				findings.push(...jsonDomainFindings(item, [...path, index], active));
 		}
 		active.delete(value);
 		return findings;
@@ -328,17 +428,40 @@ function jsonDomainFindings(value: unknown, path: readonly PathPart[] = [], acti
 
 function sourcePairFindings(document: Record<string, unknown>): HarnessValidationFinding[] {
 	const findings: HarnessValidationFinding[] = [];
-	for (const name of ["schema_version", "version"] as const) if (!Object.hasOwn(document, name)) findings.push({ pointer: `/${name}`, code: "required", message: `'${name}' is a required property` });
+	for (const name of ["schema_version", "version"] as const)
+		if (!Object.hasOwn(document, name))
+			findings.push({ pointer: `/${name}`, code: "required", message: `'${name}' is a required property` });
 	if (findings.length > 0) return findings;
 	const schemaVersion = document.schema_version;
 	const version = document.version;
-	const expected = typeof schemaVersion === "string" ? ({
-		"bb.harness_definition.v1": 1,
-		"bb.agent_config_surface.v2": 2,
-	} as Readonly<Record<string, number>>)[schemaVersion] : undefined;
-	if (expected === undefined) findings.push({ pointer: "/schema_version", code: "unsupported_schema_version", message: "Unsupported schema_version; expected one of 'bb.agent_config_surface.v2', 'bb.harness_definition.v1'" });
-	if (expected !== undefined && (!isPythonInteger(version) || Number(version) !== expected)) findings.push({ pointer: "/version", code: "unsupported_version", message: `Version does not match schema_version; expected ${expected}` });
-	else if (expected === undefined && (!isPythonInteger(version) || ![1, 2].includes(Number(version)))) findings.push({ pointer: "/version", code: "unsupported_version", message: "Unsupported version; expected integer 1 or 2" });
+	const expected =
+		typeof schemaVersion === "string"
+			? (
+					{
+						"bb.harness_definition.v1": 1,
+						"bb.agent_config_surface.v2": 2,
+					} as Readonly<Record<string, number>>
+				)[schemaVersion]
+			: undefined;
+	if (expected === undefined)
+		findings.push({
+			pointer: "/schema_version",
+			code: "unsupported_schema_version",
+			message:
+				"Unsupported schema_version; expected one of 'bb.agent_config_surface.v2', 'bb.harness_definition.v1'",
+		});
+	if (expected !== undefined && (!isPythonInteger(version) || Number(version) !== expected))
+		findings.push({
+			pointer: "/version",
+			code: "unsupported_version",
+			message: `Version does not match schema_version; expected ${expected}`,
+		});
+	else if (expected === undefined && (!isPythonInteger(version) || ![1, 2].includes(Number(version))))
+		findings.push({
+			pointer: "/version",
+			code: "unsupported_version",
+			message: "Unsupported version; expected integer 1 or 2",
+		});
 	return findings;
 }
 
@@ -350,7 +473,9 @@ export function validateHarnessDefinition(document: unknown): readonly HarnessVa
 	if (source.length > 0) return sortFindings(source);
 	const schemaVersion = document.schema_version;
 	const version = Number(document.version);
-	const root = schemas().get(schemaVersion === "bb.harness_definition.v1" && version === 1 ? CANONICAL_SCHEMA_ID : LEGACY_SCHEMA_ID);
+	const root = schemas().get(
+		schemaVersion === "bb.harness_definition.v1" && version === 1 ? CANONICAL_SCHEMA_ID : LEGACY_SCHEMA_ID,
+	);
 	if (root === undefined) throw new Error("Harness definition schemas are unavailable");
 	const errors = validateSchema(document, root, [], root);
 	return sortFindings(errors.flatMap(transformError));
@@ -373,5 +498,18 @@ export function validateBundledSchema(schemaId: string, value: unknown): readonl
 }
 
 export const harnessValidationKeywords = [
-	"$ref", "type", "properties", "required", "additionalProperties", "items", "minItems", "minLength", "pattern", "enum", "const", "minimum", "exclusiveMinimum", "oneOf",
+	"$ref",
+	"type",
+	"properties",
+	"required",
+	"additionalProperties",
+	"items",
+	"minItems",
+	"minLength",
+	"pattern",
+	"enum",
+	"const",
+	"minimum",
+	"exclusiveMinimum",
+	"oneOf",
 ] as const;

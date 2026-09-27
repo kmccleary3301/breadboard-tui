@@ -29,8 +29,12 @@ describe("loadNativeHarness", () => {
 		expect(harness.graphHash).toBe(R39_GRAPH_HASH);
 		expect(harness.verifiedCachePath).toBe(join(R39_WORKSPACE, R39_LOCK));
 		// Oracle bytes from the R39 QC run's compiled system prompt and first per-turn catalog.
-		expect(harness.systemPrompt).toBe(await readFile(join(import.meta.dir, "fixtures/r39-openai/compiled_system.md"), "utf8"));
-		expect(harness.perTurnPrompt).toBe(await readFile(join(import.meta.dir, "fixtures/r39-openai/per_turn/turn_1.md"), "utf8"));
+		expect(harness.systemPrompt).toBe(
+			await readFile(join(import.meta.dir, "fixtures/r39-openai/compiled_system.md"), "utf8"),
+		);
+		expect(harness.perTurnPrompt).toBe(
+			await readFile(join(import.meta.dir, "fixtures/r39-openai/per_turn/turn_1.md"), "utf8"),
+		);
 		expect(harness.defaultModel).toBe("openai-codex/gpt-5.6-luna");
 		expect(harness.permissions).toEqual({ mode: "prompt", shell: "ask" });
 		expect(harness.todos).toEqual({ enabled: true, strict: true });
@@ -70,17 +74,30 @@ describe("loadNativeHarness", () => {
 		const root = await copyOfR39();
 		await rm(join(root, R39_LOCK));
 		const spec = join(root, R39_SPEC);
-		await writeFile(spec, (await readFile(spec, "utf8")).replace("prompts:\n", "prompts:\n  injection:\n    system_order:\n    - mode_specific\n"));
+		await writeFile(
+			spec,
+			(await readFile(spec, "utf8")).replace(
+				"prompts:\n",
+				"prompts:\n  injection:\n    system_order:\n    - mode_specific\n",
+			),
+		);
 		const harness = await loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root });
-		expect(harness.systemPrompt).toBe(await readFile(join(import.meta.dir, "fixtures/r39-openai/compiled_system.md"), "utf8"));
+		expect(harness.systemPrompt).toBe(
+			await readFile(join(import.meta.dir, "fixtures/r39-openai/compiled_system.md"), "utf8"),
+		);
 	});
 
 	test("refuses a prompt resource outside the spec directory", async () => {
 		const root = await copyOfR39();
 		const spec = join(root, R39_SPEC);
-		await writeFile(spec, (await readFile(spec, "utf8")).replace("prompts/daily_driver_system.md", "../../../secret.md"));
+		await writeFile(
+			spec,
+			(await readFile(spec, "utf8")).replace("prompts/daily_driver_system.md", "../../../secret.md"),
+		);
 		await writeFile(join(root, "secret.md"), "not a prompt\n");
-		await expect(loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root })).rejects.toThrow(/escapes its spec directory/);
+		await expect(loadNativeHarness({ specPath: R39_SPEC, workspaceRoot: root })).rejects.toThrow(
+			/escapes its spec directory/,
+		);
 	});
 	test("compiles plan and build stages with stage-specific prompts and tools", async () => {
 		const root = await copyOfR39();

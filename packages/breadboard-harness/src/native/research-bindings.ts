@@ -75,7 +75,9 @@ function schemaProperties(tool: NativeToolDefinition): ReadonlySet<string> {
 
 function requiredProperties(tool: NativeToolDefinition): ReadonlySet<string> {
 	const required = tool.parameters.required;
-	return new Set(Array.isArray(required) ? required.filter((value): value is string => typeof value === "string") : []);
+	return new Set(
+		Array.isArray(required) ? required.filter((value): value is string => typeof value === "string") : [],
+	);
 }
 
 function declaredAlias(properties: ReadonlySet<string>, aliases: readonly string[]): string | undefined {
@@ -151,8 +153,10 @@ function adapterForTool(
 		}
 		// Host read accepts URLs, so URL fetch tools read their `url` directly.
 		const pathKey = declaredAlias(properties, ["filePath", "file_path", "path", "file_name", "url"]) ?? "path";
-		const offsetSchema = (tool.parameters.properties as Record<string, { description?: unknown }> | undefined)?.offset;
-		const zeroBasedOffset = typeof offsetSchema?.description === "string" && /\b0-based\b/i.test(offsetSchema.description);
+		const offsetSchema = (tool.parameters.properties as Record<string, { description?: unknown }> | undefined)
+			?.offset;
+		const zeroBasedOffset =
+			typeof offsetSchema?.description === "string" && /\b0-based\b/i.test(offsetSchema.description);
 		return input => adaptReadInput(input, pathKey, zeroBasedOffset);
 	}
 	if (delegateName === "glob") {
@@ -279,7 +283,8 @@ async function delegate(
 ): Promise<NativeToolResult> {
 	if (plan.delegateName === "apply_patch") {
 		const patchText = input.input;
-		if (typeof patchText !== "string") return { text: "Tool 'apply_patch' requires its declared input string.", isError: true };
+		if (typeof patchText !== "string")
+			return { text: "Tool 'apply_patch' requires its declared input string.", isError: true };
 		const result = await applyUnifiedPatchAdapter(call.harness.workspaceRoot, patchText);
 		return {
 			text: result.text,
@@ -297,7 +302,9 @@ async function delegate(
 	const text = result.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("");
 	return {
 		text,
-		...(typeof result.details === "object" && result.details !== null ? { details: result.details as JsonRecord } : {}),
+		...(typeof result.details === "object" && result.details !== null
+			? { details: result.details as JsonRecord }
+			: {}),
 		...(result.isError === true ? { isError: true } : {}),
 	};
 }
@@ -317,14 +324,15 @@ function bindingFor(tool: NativeToolDefinition): NativeBinding {
 		approval:
 			plan.delegateName === "write" || plan.delegateName === "edit"
 				? "write"
-				: /^(Bash|bash|shell_command|apply_patch|background_task|task|webfetch|eval|interactive_bash)$/u.test(tool.name)
+				: /^(Bash|bash|shell_command|apply_patch|background_task|task|webfetch|eval|interactive_bash)$/u.test(
+							tool.name,
+					  )
 					? "exec"
 					: "read",
 		...(hostDelegate === undefined ? {} : { delegate: hostDelegate }),
 		run: (call: NativeCall) => delegate(call, tool.name, plan, call.input),
 	};
 }
-
 
 export function researchBindingForTool(tool: NativeToolDefinition): NativeBinding {
 	return bindingFor(tool);

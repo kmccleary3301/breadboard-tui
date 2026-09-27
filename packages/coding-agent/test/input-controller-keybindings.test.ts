@@ -319,7 +319,6 @@ describe("InputController keybinding setup", () => {
 		expect(spies.shutdown).toHaveBeenCalledTimes(1);
 	});
 
-
 	it("does not mark pasted shell prompts as Python mode while editing", async () => {
 		const { InputController, ctx, editor } = await createContext();
 		const controller = new InputController(ctx);

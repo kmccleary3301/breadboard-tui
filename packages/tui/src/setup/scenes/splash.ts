@@ -223,4 +223,3 @@ export function renderStarfield(width: number, height: number, frame: number): s
 	}
 	return lines;
 }
-

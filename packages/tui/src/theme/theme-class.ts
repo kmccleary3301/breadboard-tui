@@ -431,7 +431,6 @@ export class Theme {
 		return this.mode;
 	}
 
-
 	/** Border color for a thinking/effort level name (`off`…`max`); unknown levels fall back to `thinkingOff`. */
 	getThinkingBorderColor(level: string): (str: string) => string {
 		switch (level) {

@@ -181,7 +181,14 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		let lines: string[];
 		switch (this.#phase) {
 			case "splash":
-				lines = renderSetupSplash(safeWidth, height, this.#now() - this.#phaseStartedAt, identity, appearance, mode);
+				lines = renderSetupSplash(
+					safeWidth,
+					height,
+					this.#now() - this.#phaseStartedAt,
+					identity,
+					appearance,
+					mode,
+				);
 				break;
 			case "transition": {
 				const elapsed = this.#now() - this.#phaseStartedAt;
@@ -192,14 +199,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 				break;
 			}
 			case "outro":
-				lines = renderSetupOutro(
-					safeWidth,
-					height,
-					this.#now() - this.#phaseStartedAt,
-					identity,
-					appearance,
-					mode,
-				);
+				lines = renderSetupOutro(safeWidth, height, this.#now() - this.#phaseStartedAt, identity, appearance, mode);
 				break;
 			case "scene":
 				lines = this.#renderScene(safeWidth, height, identity, appearance, mode);

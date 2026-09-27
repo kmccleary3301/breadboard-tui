@@ -88,7 +88,6 @@ export function paintAnsi(ansi: string, text: string, reset = "\x1b[0m"): string
 	return ansi ? `${ansi}${text}${reset}` : text;
 }
 
-
 export function resolveVarRefs(
 	value: ColorValue,
 	vars: Record<string, ColorValue>,

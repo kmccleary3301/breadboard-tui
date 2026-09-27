@@ -83,7 +83,6 @@ function parameterOrder(parameters: JsonRecord): readonly [string, JsonRecord][]
 	return Object.entries(properties).filter((entry): entry is [string, JsonRecord] => isJsonRecord(entry[1]));
 }
 
-
 function pythonicFunctionPrompt(tools: readonly NativeToolDefinition[]): string {
 	const functions = tools.map(tool => {
 		const argumentLines = parameterOrder(tool.parameters).map(([name, schema]) => {
@@ -104,7 +103,9 @@ function pythonicFunctionPrompt(tools: readonly NativeToolDefinition[]): string 
 }
 
 function perTurnCatalog(surface: NativeToolSurfacePack, persistent = false): string {
-	const nativeTools: NativeToolDefinition[] = persistent ? [...surface.native, ...surface.textInvoked] : [...surface.native];
+	const nativeTools: NativeToolDefinition[] = persistent
+		? [...surface.native, ...surface.textInvoked]
+		: [...surface.native];
 	if (persistent) {
 		const todoIndex = nativeTools.findIndex(tool => tool.name === "TodoWrite");
 		const webSearchIndex = nativeTools.findIndex(tool => tool.name === "WebSearch");
@@ -117,9 +118,7 @@ function perTurnCatalog(surface: NativeToolSurfacePack, persistent = false): str
 	const sections = ["\n\nSYSTEM MESSAGE - AVAILABLE TOOLS\n"];
 	if (nativeTools.length > 0) {
 		sections.push(
-			"NATIVE TOOLS AVAILABLE VIA TOOL CALLING:\n" +
-				nativeTools.map(tool => `- ${tool.name}`).join("\n") +
-				"\n",
+			"NATIVE TOOLS AVAILABLE VIA TOOL CALLING:\n" + nativeTools.map(tool => `- ${tool.name}`).join("\n") + "\n",
 		);
 	}
 	if (textTools.length > 0) {
@@ -159,7 +158,11 @@ async function environmentTree(workspaceRoot: string, fileLimit: number, ignored
 		for (const entry of entries) {
 			const child = join(directory, entry.name);
 			const childRelative = relative(workspaceRoot, child);
-			if (childRelative.split("/").includes(".git") || (ignoredDirectory.length > 0 && childRelative.includes(ignoredDirectory))) continue;
+			if (
+				childRelative.split("/").includes(".git") ||
+				(ignoredDirectory.length > 0 && childRelative.includes(ignoredDirectory))
+			)
+				continue;
 			let isDirectory = entry.isDirectory();
 			if (entry.isSymbolicLink()) {
 				try {
@@ -175,12 +178,18 @@ async function environmentTree(workspaceRoot: string, fileLimit: number, ignored
 	await walk(workspaceRoot);
 
 	const root: EnvironmentTreeNode = { path: [], children: [] };
-	const getPath = (node: EnvironmentTreeNode, parts: readonly string[], create: boolean): EnvironmentTreeNode | undefined => {
+	const getPath = (
+		node: EnvironmentTreeNode,
+		parts: readonly string[],
+		create: boolean,
+	): EnvironmentTreeNode | undefined => {
 		let current: EnvironmentTreeNode | undefined = node;
 		for (const part of parts) {
 			const parent: EnvironmentTreeNode | undefined = current;
 			if (parent === undefined) return undefined;
-			let child: EnvironmentTreeNode | undefined = parent.children.find((candidate: EnvironmentTreeNode) => candidate.path.at(-1) === part);
+			let child: EnvironmentTreeNode | undefined = parent.children.find(
+				(candidate: EnvironmentTreeNode) => candidate.path.at(-1) === part,
+			);
 			if (child === undefined) {
 				if (!create) return undefined;
 				child = { path: [...parent.path, part], children: [] };
@@ -221,7 +230,10 @@ async function environmentTree(workspaceRoot: string, fileLimit: number, ignored
 			for (const node of [...current, ...nextLevel]) {
 				const compare = getPath(result, node.path, false);
 				if (compare === undefined || compare.children.length === node.children.length) continue;
-				compare.children.push({ path: [...compare.path, `[${node.children.length - compare.children.length} truncated]`], children: [] });
+				compare.children.push({
+					path: [...compare.path, `[${node.children.length - compare.children.length} truncated]`],
+					children: [],
+				});
 			}
 			break;
 		}
@@ -254,7 +266,11 @@ async function findGitRoot(workspaceRoot: string): Promise<boolean> {
 
 async function appendEnvironment(lock: JsonRecord, system: string, workspaceRoot: string | undefined): Promise<string> {
 	const environmentFormat = nativeLockValue(lock, "prompts.environment.format");
-	if (nativeLockValue(lock, "prompts.environment.enabled") !== true || environmentFormat !== "opencode" || workspaceRoot === undefined) {
+	if (
+		nativeLockValue(lock, "prompts.environment.enabled") !== true ||
+		environmentFormat !== "opencode" ||
+		workspaceRoot === undefined
+	) {
 		return system;
 	}
 	const rawLimit = nativeLockValue(lock, "prompts.environment.file_limit");
@@ -344,9 +360,7 @@ export async function assembleNativePrompts(
 
 	const systemOrder = normalizedOrder(lock, "prompts.injection.system_order");
 	const perTurnOrder = normalizedOrder(lock, "prompts.injection.per_turn_order");
-	const system = systemOrder.defined
-		? systemOrder.value
-		: ["@pack(base).system"];
+	const system = systemOrder.defined ? systemOrder.value : ["@pack(base).system"];
 	if (todosEnabled && system.length > 0) {
 		if (!system.includes("@pack(base).todo_plan") && !perTurnOrder.value.includes("@pack(base).todo_plan")) {
 			system.push("@pack(base).todo_plan");
@@ -373,10 +387,22 @@ export type NativeUserTextBlock = { readonly type: "text"; readonly text: string
  * Frame user content with the same block structure as Python's persistent per-turn mode:
  * the compiled system is inside BREADBOARD_INTERNAL, followed by a separate tool-catalog text block.
  */
-export function frameNativeUserContent(userText: string, stage: { readonly perTurnPrompt: string; readonly toolPromptMode?: string; readonly suppressPrompts?: boolean; readonly toolSurface: NativeToolSurfacePack }): string | NativeUserTextBlock[] {
+export function frameNativeUserContent(
+	userText: string,
+	stage: {
+		readonly perTurnPrompt: string;
+		readonly toolPromptMode?: string;
+		readonly suppressPrompts?: boolean;
+		readonly toolSurface: NativeToolSurfacePack;
+	},
+): string | NativeUserTextBlock[] {
 	const framed = frameNativeUserMessage(userText, stage.perTurnPrompt);
-	if (stage.toolPromptMode !== "system_compiled_and_persistent_per_turn" || stage.suppressPrompts === true) return framed;
-	return [{ type: "text", text: framed }, { type: "text", text: perTurnCatalog(stage.toolSurface, true) }];
+	if (stage.toolPromptMode !== "system_compiled_and_persistent_per_turn" || stage.suppressPrompts === true)
+		return framed;
+	return [
+		{ type: "text", text: framed },
+		{ type: "text", text: perTurnCatalog(stage.toolSurface, true) },
+	];
 }
 
 /**

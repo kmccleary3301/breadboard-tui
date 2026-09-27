@@ -1777,13 +1777,7 @@ export class ExtensionRunner {
 			if (!handlers || handlers.length === 0) continue;
 			for (const handler of handlers) {
 				const event: TurnPrepareEvent = { type: "turn_prepare", ...context };
-				const result = await this.#runHandlerWithTimeout(
-					handler,
-					event,
-					ctx,
-					ext,
-					extensionHandlerTimeoutMs,
-				);
+				const result = await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs);
 				if (result !== undefined) current = { ...(current ?? {}), ...result };
 			}
 		}

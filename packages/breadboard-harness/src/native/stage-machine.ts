@@ -16,7 +16,6 @@ interface StageStep {
 	readonly condition?: string;
 }
 
-
 function modeFromStep(step: JsonRecord): string | undefined {
 	if (typeof step.mode === "string") return step.mode;
 	const then = step.then;
@@ -120,13 +119,9 @@ export class NativeStageMachine {
 	}
 }
 
-export function createNativeStageMachine(
-	lock: JsonRecord,
-	stages: readonly NativeHarnessStage[],
-): NativeStageMachine {
+export function createNativeStageMachine(lock: JsonRecord, stages: readonly NativeHarnessStage[]): NativeStageMachine {
 	return new NativeStageMachine(lock, new Map(stages.map(stage => [stage.mode, stage])));
 }
-
 
 export function allNativeToolSurface(stages: readonly NativeHarnessStage[]): NativeToolSurfacePack {
 	const mode = stages[0]?.mode ?? "";

@@ -1,13 +1,26 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isJsonRecord, type JsonRecord, parseCanonicalJson } from "../canonical-json";
-import { applyUnifiedPatchAdapter, createFileFromBlockAdapter, listDirAdapter, markTaskCompleteAdapter, readFileAdapter } from "./adapters";
+import {
+	applyUnifiedPatchAdapter,
+	createFileFromBlockAdapter,
+	listDirAdapter,
+	markTaskCompleteAdapter,
+	readFileAdapter,
+} from "./adapters";
 import { RESEARCH_NATIVE_BINDINGS, researchBindingForTool } from "./research-bindings";
 import { NativeHarnessReloadError, type LoadedNativeHarness, type NativeHarnessLiveState } from "./load-native-harness";
 import { nativeLockValue } from "./lock-values";
 import { frameNativeUserContent } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
-import { evalOutcomeFromOmp, formatEvalResult, formatRunShellResult, type OmpBashDetails, type OmpEvalDetails, runShellOutcomeFromBash } from "./shell-eval-results";
+import {
+	evalOutcomeFromOmp,
+	formatEvalResult,
+	formatRunShellResult,
+	type OmpBashDetails,
+	type OmpEvalDetails,
+	runShellOutcomeFromBash,
+} from "./shell-eval-results";
 import { formatTextToolResults, parseTextToolCalls } from "./text-calls";
 import { TodoWriteState, todoCompletionGuardReason } from "./todo-write";
 import { registerSessionTranscriptExport } from "./session-transcript";
@@ -108,7 +121,8 @@ function bashDetails(details: unknown): OmpBashDetails | undefined {
 	if (typeof details !== "object" || details === null) return undefined;
 	const exitCode = "exitCode" in details && typeof details.exitCode === "number" ? details.exitCode : undefined;
 	const timedOut = "timedOut" in details && details.timedOut === true ? true : undefined;
-	const wallTimeMs = "wallTimeMs" in details && typeof details.wallTimeMs === "number" ? details.wallTimeMs : undefined;
+	const wallTimeMs =
+		"wallTimeMs" in details && typeof details.wallTimeMs === "number" ? details.wallTimeMs : undefined;
 	return { exitCode, timedOut, wallTimeMs };
 }
 
@@ -193,7 +207,11 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 		async run(call) {
 			const result = await invokeBuiltin(call, call.input);
 			return formatEvalResult(
-				evalOutcomeFromOmp({ content: result.content, details: evalDetails(result.details), isError: result.isError }),
+				evalOutcomeFromOmp({
+					content: result.content,
+					details: evalDetails(result.details),
+					isError: result.isError,
+				}),
 			);
 		},
 	},
@@ -207,7 +225,10 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 				call.harness.todos.enabled && call.harness.todos.strict ? todoCompletionGuardReason(call.todos) : undefined;
 			if (reason === undefined) return output;
 			call.guard.block(reason);
-			return { ...output, details: { ...(isJsonRecord(output.details) ? output.details : {}), [GUARD_BLOCKED]: true } };
+			return {
+				...output,
+				details: { ...(isJsonRecord(output.details) ? output.details : {}), [GUARD_BLOCKED]: true },
+			};
 		},
 	},
 };
@@ -260,11 +281,20 @@ async function runTextCalls(
 				harness.permissions.mode !== "prompt" ||
 				(context.hasUI && (await context.ui.confirm("Apply patch?", stringField(call.arguments, "patch") ?? "")));
 			if (!approved) {
-				results.push({ name: call.name, output: { error: PERMISSION_REJECTED, __mvi_text_output: PERMISSION_REJECTED } });
+				results.push({
+					name: call.name,
+					output: { error: PERMISSION_REJECTED, __mvi_text_output: PERMISSION_REJECTED },
+				});
 				continue;
 			}
-			const applied = await applyUnifiedPatchAdapter(harness.workspaceRoot, stringField(call.arguments, "patch") ?? "");
-			results.push({ name: call.name, output: isJsonRecord(applied.details) ? applied.details : { output: applied.text } });
+			const applied = await applyUnifiedPatchAdapter(
+				harness.workspaceRoot,
+				stringField(call.arguments, "patch") ?? "",
+			);
+			results.push({
+				name: call.name,
+				output: isJsonRecord(applied.details) ? applied.details : { output: applied.text },
+			});
 			continue;
 		}
 		throw new Error(`native harness text tool ${call.name} has no OMP binding`);
@@ -274,7 +304,8 @@ async function runTextCalls(
 
 function assertNativeHarnessBindings(harness: LoadedNativeHarness): void {
 	for (const tool of harness.registeredToolSurface.native) {
-		if (NATIVE_BINDINGS[tool.name] === undefined) throw new Error(`native harness tool ${tool.name} has no OMP binding`);
+		if (NATIVE_BINDINGS[tool.name] === undefined)
+			throw new Error(`native harness tool ${tool.name} has no OMP binding`);
 	}
 }
 
@@ -496,7 +527,10 @@ function instructionsPayload(payload: unknown): unknown {
 				? content
 				: Array.isArray(content)
 					? content
-							.filter((part): part is JsonRecord => isJsonRecord(part) && part.type === "input_text" && typeof part.text === "string")
+							.filter(
+								(part): part is JsonRecord =>
+									isJsonRecord(part) && part.type === "input_text" && typeof part.text === "string",
+							)
 							.map(part => part.text as string)
 							.join("")
 					: "";
@@ -620,25 +654,34 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			const text = await runTextCalls(event.message, activeHarness, policy, todos, context);
 			stageMachine.endTurn(todos.hasItems);
 			const messages = [
-				...(text === undefined ? [] : [{ customType: NATIVE_TEXT_RESULTS_MESSAGE_TYPE, content: text, display: true }]),
-				...guard.takeAdvisories().map(content => ({ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true })),
+				...(text === undefined
+					? []
+					: [{ customType: NATIVE_TEXT_RESULTS_MESSAGE_TYPE, content: text, display: true }]),
+				...guard
+					.takeAdvisories()
+					.map(content => ({ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true })),
 			];
 			return messages.length === 0 ? undefined : { messages };
 		});
 		api.on("agent_end", () => {
 			for (const content of guard.takeAdvisories()) {
-				api.sendMessage({ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true }, { deliverAs: "nextTurn" });
+				api.sendMessage(
+					{ customType: NATIVE_GUARD_MESSAGE_TYPE, content, display: true },
+					{ deliverAs: "nextTurn" },
+				);
 			}
 		});
 		api.on("context", event => ({
 			messages: event.messages.map(message => {
 				if (
 					message.role === "custom" &&
-					(message.customType === NATIVE_TEXT_RESULTS_MESSAGE_TYPE || message.customType === NATIVE_GUARD_MESSAGE_TYPE)
+					(message.customType === NATIVE_TEXT_RESULTS_MESSAGE_TYPE ||
+						message.customType === NATIVE_GUARD_MESSAGE_TYPE)
 				) {
 					return {
 						role: "user",
-						content: typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content,
+						content:
+							typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content,
 						attribution: "agent",
 						timestamp: message.timestamp,
 					};
@@ -660,7 +703,10 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 						),
 					};
 				}
-				return { ...message, content: [...message.content.slice(0, first), ...framed, ...message.content.slice(first + 1)] };
+				return {
+					...message,
+					content: [...message.content.slice(0, first), ...framed, ...message.content.slice(first + 1)],
+				};
 			}),
 		}));
 	};

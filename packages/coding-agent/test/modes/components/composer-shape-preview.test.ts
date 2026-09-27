@@ -1,10 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { COMPOSER_SHAPE_VALUES, type ComposerShape } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
-import {
-	ComposerShapePreview,
-	renderComposerShapePreview,
-} from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
+import { ComposerShapePreview, renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import {
 	getComposerShapeOptions,
 	installExtensionComposerShape,

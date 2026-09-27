@@ -76,7 +76,6 @@ export class LoginDialogComponent extends OverlayPanel {
 		});
 	}
 
-
 	get signal(): AbortSignal {
 		return this.#abortController.signal;
 	}

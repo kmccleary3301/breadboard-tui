@@ -232,9 +232,7 @@ describe("native harness live state", () => {
 		await invoke("turn_start");
 		expect(activeTools.at(-1)).not.toEqual(toolsDuringTurn);
 		expect(registeredTools).toHaveLength(registrationsBeforeReload + toolsDuringTurn.length - 1);
-		expect(entries.map(entry => entry.data)).toEqual([
-			{ generation: 2, spec_path: SPEC, graph_hash: g2?.graphHash },
-		]);
+		expect(entries.map(entry => entry.data)).toEqual([{ generation: 2, spec_path: SPEC, graph_hash: g2?.graphHash }]);
 		const g2Source = await readFile(sourcePath, "utf8");
 		await writeFile(sourcePath, g2Source.replace("  - run_shell\n", ""));
 		const g3 = await harness.live?.reload();
@@ -306,7 +304,11 @@ describe("native harness live state", () => {
 		let published = false;
 		let clearCount = 0;
 		const context = {
-			ui: { notify() { notifyCount += 1; } },
+			ui: {
+				notify() {
+					notifyCount += 1;
+				},
+			},
 			setInterval(callback: () => void) {
 				intervalCallback = callback;
 				return {} as Timer;

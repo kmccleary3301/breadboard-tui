@@ -65,8 +65,8 @@ function result(details: JsonRecord, isError = false): NativeToolResult {
 
 function textContent(content: readonly OmpTextContent[]): string {
 	return content
-		.filter((part) => part.type === "text" && typeof part.text === "string")
-		.map((part) => part.text ?? "")
+		.filter(part => part.type === "text" && typeof part.text === "string")
+		.map(part => part.text ?? "")
 		.join("\n");
 }
 
@@ -127,7 +127,7 @@ export function runShellOutcomeFromBash(result: OmpBashToolResult): RunShellOutc
 	const details = result.details;
 	const timedOut = details?.timedOut === true;
 	const output = stripBashNotices(textContent(result.content), details);
-	const exitCode = timedOut ? 124 : details?.exitCode ?? (result.isError ? 1 : 0);
+	const exitCode = timedOut ? 124 : (details?.exitCode ?? (result.isError ? 1 : 0));
 	return { output, exitCode, timedOut, cancelled: false };
 }
 
@@ -163,9 +163,8 @@ export function evalOutcomeFromOmp(result: OmpEvalToolResult): EvalOutcome {
  */
 export function formatRunShellResult(omp: RunShellOutcome): NativeToolResult {
 	const stderr = omp.timedOut ? "Command timed out" : "";
-	const visible = stderr && (omp.output.length > 0 || omp.exitCode !== 0)
-		? [omp.output, stderr].join("\n")
-		: omp.output || stderr;
+	const visible =
+		stderr && (omp.output.length > 0 || omp.exitCode !== 0) ? [omp.output, stderr].join("\n") : omp.output || stderr;
 	const details: JsonRecord = {
 		stdout: omp.output,
 		exit: omp.exitCode ?? null,

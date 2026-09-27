@@ -56,9 +56,7 @@ describe("highlightMagicKeywords", () => {
 		expect(Bun.stripANSI(frame1)).toBe(text);
 		expect(frame0).not.toBe(frame1);
 		expect(highlightMagicKeywords(text, undefined, 1)).toBe(frame0);
-		expect(highlightMagicKeywords(text, undefined, -0.25)).toBe(
-			highlightMagicKeywords(text, undefined, 0.75),
-		);
+		expect(highlightMagicKeywords(text, undefined, -0.25)).toBe(highlightMagicKeywords(text, undefined, 0.75));
 	});
 });
 

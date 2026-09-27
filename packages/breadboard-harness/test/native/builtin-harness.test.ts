@@ -64,9 +64,14 @@ const FORBIDDEN_NATIVE_IDENTIFIERS = [
 describe("built-in native harnesses", () => {
 	test("native runtime has no registry or harness-id dispatch literals", async () => {
 		const sourceDirectory = join(import.meta.dir, "../../src/native");
-		const files = (await readdir(sourceDirectory)).filter(file => file.endsWith(".ts") && file !== "builtin-harnesses.ts");
+		const files = (await readdir(sourceDirectory)).filter(
+			file => file.endsWith(".ts") && file !== "builtin-harnesses.ts",
+		);
 		for (const file of files) {
-			const source = withoutAllowedLockEnums(file, stripComments(await readFile(join(sourceDirectory, file), "utf8")));
+			const source = withoutAllowedLockEnums(
+				file,
+				stripComments(await readFile(join(sourceDirectory, file), "utf8")),
+			);
 			for (const pattern of FORBIDDEN_NATIVE_IDENTIFIERS) {
 				pattern.lastIndex = 0;
 				expect(source.match(pattern), `${file} contains forbidden native dispatch literal ${pattern}`).toBeNull();
@@ -100,7 +105,8 @@ describe("built-in native harnesses", () => {
 			const loaded = await loadNativeHarness({ specPath: harness.id, workspaceRoot: await workspace() });
 			const delegates = nativeToolDelegates(loaded);
 			for (const tool of loaded.registeredToolSurface.native) {
-				if (!/^(?:Bash|bash|shell_command|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name)) continue;
+				if (!/^(?:Bash|bash|shell_command|background_|task|webfetch|eval|interactive_bash)$/u.test(tool.name))
+					continue;
 				expect(delegates[tool.name], `${harness.id}/${tool.name} has no runtime delegate`).toBeDefined();
 			}
 		}

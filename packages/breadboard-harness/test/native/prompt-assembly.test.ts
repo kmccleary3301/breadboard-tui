@@ -10,12 +10,17 @@ const OPENAI = join(import.meta.dir, "fixtures", "r39-openai");
 
 describe("native prompt assembly", () => {
 	test("frames only the Python-owned internal block", async () => {
-		const { perTurnPrompt } = await loadNativeHarness({ specPath: `${R39}/bb-omp.harness.yaml`, workspaceRoot: ROOT });
+		const { perTurnPrompt } = await loadNativeHarness({
+			specPath: `${R39}/bb-omp.harness.yaml`,
+			workspaceRoot: ROOT,
+		});
 		// Python agent_llm_openai.py:6442-6453 joins user_prompt and BREADBOARD_INTERNAL.
 		// The capture fixture was generated through conductor/prompt_planner.py:62-85,
 		// dialects/pythonic02.py:15-46, execution/composite.py:13-19, and
 		// execution/dialect_manager.py:29-35,99-104 (the Pythonic block is repeated twice).
-		expect(frameNativeUserMessage("hello", perTurnPrompt)).toBe(await readFile(join(OPENAI, "framed_hello.txt"), "utf8"));
+		expect(frameNativeUserMessage("hello", perTurnPrompt)).toBe(
+			await readFile(join(OPENAI, "framed_hello.txt"), "utf8"),
+		);
 		expect(frameNativeUserMessage("hello", perTurnPrompt)).not.toStartWith("<system-reminder>");
 	});
 
@@ -31,6 +36,9 @@ describe("native prompt assembly", () => {
 		expect(Array.isArray(content)).toBe(true);
 		expect(content).toHaveLength(2);
 		expect(content[0]).toEqual({ type: "text", text: frameNativeUserMessage("hello", harness.perTurnPrompt) });
-		expect(content[1]).toEqual({ type: "text", text: expect.stringContaining("\n\nSYSTEM MESSAGE - AVAILABLE TOOLS\n") });
+		expect(content[1]).toEqual({
+			type: "text",
+			text: expect.stringContaining("\n\nSYSTEM MESSAGE - AVAILABLE TOOLS\n"),
+		});
 	});
 });

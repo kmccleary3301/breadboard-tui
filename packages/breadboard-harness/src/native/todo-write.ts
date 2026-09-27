@@ -33,7 +33,7 @@ function pythonString(value: JsonRecord[string] | undefined): string {
 
 function normalizedStatus(value: JsonRecord[string] | undefined): string {
 	const source = pythonString(value).trim().toLowerCase();
-	return source ? STATUS_MAP[source] ?? "todo" : "todo";
+	return source ? (STATUS_MAP[source] ?? "todo") : "todo";
 }
 
 function errorResult(message: string): JsonRecord {
@@ -81,7 +81,9 @@ export class TodoWriteState {
 
 	/** Titles whose status belongs to Python's `TODO_OPEN_STATUSES` tuple. */
 	get openItems(): readonly string[] {
-		return this.items.filter((item) => (TODO_OPEN_STATUSES as readonly string[]).includes(item.status)).map((item) => item.title);
+		return this.items
+			.filter(item => (TODO_OPEN_STATUSES as readonly string[]).includes(item.status))
+			.map(item => item.title);
 	}
 	/** Whether the board contains any item, including completed and canceled entries. */
 	get hasItems(): boolean {

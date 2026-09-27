@@ -52,8 +52,20 @@ async function createSession(factory: ExtensionFactory, responses: MockResponse[
 	const runtime = new ExtensionRuntime();
 	const extension = await loadExtensionFromFactory(factory, tempDir.path(), new EventBus(), runtime, "turn-settle");
 	const sessionManager = SessionManager.inMemory(tempDir.path());
-	const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, sharedModelRegistry);
-	const session = new AgentSession({ agent, sessionManager, settings, modelRegistry: sharedModelRegistry, extensionRunner });
+	const extensionRunner = new ExtensionRunner(
+		[extension],
+		runtime,
+		tempDir.path(),
+		sessionManager,
+		sharedModelRegistry,
+	);
+	const session = new AgentSession({
+		agent,
+		sessionManager,
+		settings,
+		modelRegistry: sharedModelRegistry,
+		extensionRunner,
+	});
 	active.push({ session, tempDir });
 	return { session, mock };
 }
@@ -66,7 +78,9 @@ describe("AgentSession turn_settle", () => {
 				api.on("turn_settle", event => {
 					seen.push(event.willContinue);
 					const text = assistantText(event.message);
-					return text === "call pending" ? { messages: [{ customType: "settle", content: "result: 42" }] } : undefined;
+					return text === "call pending"
+						? { messages: [{ customType: "settle", content: "result: 42" }] }
+						: undefined;
 				});
 			},
 			[
@@ -91,7 +105,10 @@ describe("AgentSession turn_settle", () => {
 			api => {
 				api.on("turn_settle", () => undefined);
 			},
-			[{ content: [{ type: "text", text: "done" }], stopReason: "stop" }, { content: [{ type: "text", text: "extra" }] }],
+			[
+				{ content: [{ type: "text", text: "done" }], stopReason: "stop" },
+				{ content: [{ type: "text", text: "extra" }] },
+			],
 		);
 
 		await session.prompt("go");

@@ -165,6 +165,7 @@ describe("Agent hub row ordering", () => {
 		);
 		const initialNotice = Promise.withResolvers<void>();
 		const refreshedNotice = Promise.withResolvers<void>();
+		// oxlint-disable-next-line prefer-const -- the constructor renders before assignment
 		let hub: AgentHubOverlayComponent | undefined;
 		hub = makeHub(new AgentRegistry(), {
 			sessionFile,

@@ -27,18 +27,27 @@ type Fixture = {
 function materialize(value: unknown, root: string): unknown {
 	if (typeof value === "string") return value.replaceAll("<WORKSPACE>", root);
 	if (Array.isArray(value)) return value.map(item => materialize(item, root));
-	if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, materialize(item, root)]));
+	if (value !== null && typeof value === "object")
+		return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, materialize(item, root)]));
 	return value;
 }
 
 async function run(root: string, fixture: Fixture): Promise<NativeToolResult> {
 	fixture = { ...fixture, input: materialize(fixture.input, root) };
 	switch (fixture.tool) {
-		case "read_file": return readFileAdapter(root, fixture.input as { path: string; offset?: number; limit?: number });
-		case "list_dir": return listDirAdapter(root, fixture.input as { path: string; depth?: number });
-		case "create_file_from_block": return createFileFromBlockAdapter(root, fixture.input as { filePath?: string; file_name?: string; content: string });
-		case "apply_unified_patch": return applyUnifiedPatchAdapter(root, fixture.input as string);
-		default: throw new Error(`unknown fixture tool ${fixture.tool}`);
+		case "read_file":
+			return readFileAdapter(root, fixture.input as { path: string; offset?: number; limit?: number });
+		case "list_dir":
+			return listDirAdapter(root, fixture.input as { path: string; depth?: number });
+		case "create_file_from_block":
+			return createFileFromBlockAdapter(
+				root,
+				fixture.input as { filePath?: string; file_name?: string; content: string },
+			);
+		case "apply_unified_patch":
+			return applyUnifiedPatchAdapter(root, fixture.input as string);
+		default:
+			throw new Error(`unknown fixture tool ${fixture.tool}`);
 	}
 }
 
@@ -65,7 +74,8 @@ async function files(root: string): Promise<Record<string, string>> {
 function scrub(value: unknown, root: string): unknown {
 	if (typeof value === "string") return value.replaceAll(root, "<WORKSPACE>");
 	if (Array.isArray(value)) return value.map(item => scrub(item, root));
-	if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrub(item, root)]));
+	if (value !== null && typeof value === "object")
+		return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrub(item, root)]));
 	return value;
 }
 
@@ -73,44 +83,66 @@ const fixturePaths = (await readdir(FIXTURES)).filter(path => path.endsWith(".js
 
 describe("R39 native adapters", () => {
 	for (const fixturePath of fixturePaths) {
-		test(fixturePath, async () => {
-			const fixture = JSON.parse(await readFile(join(FIXTURES, fixturePath), "utf8")) as Fixture;
-			const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-"));
-			const outsidePaths: string[] = [];
-			let outsideRoot: string | undefined;
-			try {
-				for (const [path, content] of Object.entries(fixture.initial)) {
-					const target = join(root, path);
-					await mkdir(resolve(target, ".."), { recursive: true });
-					await writeFile(target, content, "utf8");
-				}
-				if (Object.keys(fixture.outside ?? {}).length > 0) {
-					outsideRoot = await mkdtemp(join(tmpdir(), "bb-native-adapter-outside-"));
-					outsidePaths.push(outsideRoot);
-					for (const [path, content] of Object.entries(fixture.outside ?? {})) {
-						const target = join(outsideRoot, path);
+		test(
+			fixturePath,
+			async () => {
+				const fixture = JSON.parse(await readFile(join(FIXTURES, fixturePath), "utf8")) as Fixture;
+				const root = await mkdtemp(join(tmpdir(), "bb-native-adapter-"));
+				const outsidePaths: string[] = [];
+				let outsideRoot: string | undefined;
+				try {
+					for (const [path, content] of Object.entries(fixture.initial)) {
+						const target = join(root, path);
 						await mkdir(resolve(target, ".."), { recursive: true });
 						await writeFile(target, content, "utf8");
 					}
+					if (Object.keys(fixture.outside ?? {}).length > 0) {
+						outsideRoot = await mkdtemp(join(tmpdir(), "bb-native-adapter-outside-"));
+						outsidePaths.push(outsideRoot);
+						for (const [path, content] of Object.entries(fixture.outside ?? {})) {
+							const target = join(outsideRoot, path);
+							await mkdir(resolve(target, ".."), { recursive: true });
+							await writeFile(target, content, "utf8");
+						}
+					}
+					for (const [path, target] of Object.entries(fixture.symlinks ?? {})) {
+						const resolvedTarget =
+							target === "__OUTSIDE__" ? outsideRoot! : target === "__REENTER__" ? join(root, "public") : target;
+						await symlink(resolvedTarget, join(root, path), "dir");
+					}
+					if (fixture.tool === "apply_unified_patch") {
+						await command(root, ["init"]);
+						await command(root, ["add", "-A"]);
+						if (Object.keys(fixture.initial).length > 0)
+							await command(root, [
+								"-c",
+								"user.name=BreadBoard",
+								"-c",
+								"user.email=breadboard@local",
+								"commit",
+								"-m",
+								"fixture",
+							]);
+					}
+					const actual = await run(root, fixture);
+					const expected = {
+						text: fixture.python.text,
+						details: fixture.python.details,
+						isError: Boolean(fixture.python.isError),
+					};
+					expect({
+						text: actual.text.replaceAll(root, "<WORKSPACE>"),
+						details: scrub(actual.details, root),
+						isError: Boolean(actual.isError),
+					}).toEqual(expected);
+					expect(await files(root)).toEqual(fixture.final);
+				} finally {
+					await rm(root, { recursive: true, force: true });
+					for (const path of new Set(outsidePaths)) await rm(path, { recursive: true, force: true });
 				}
-				for (const [path, target] of Object.entries(fixture.symlinks ?? {})) {
-					const resolvedTarget = target === "__OUTSIDE__" ? outsideRoot! : target === "__REENTER__" ? join(root, "public") : target;
-					await symlink(resolvedTarget, join(root, path), "dir");
-				}
-				if (fixture.tool === "apply_unified_patch") {
-					await command(root, ["init"]);
-					await command(root, ["add", "-A"]);
-					if (Object.keys(fixture.initial).length > 0) await command(root, ["-c", "user.name=BreadBoard", "-c", "user.email=breadboard@local", "commit", "-m", "fixture"]);
-				}
-				const actual = await run(root, fixture);
-				const expected = { text: fixture.python.text, details: fixture.python.details, isError: Boolean(fixture.python.isError) };
-				expect({ text: actual.text.replaceAll(root, "<WORKSPACE>"), details: scrub(actual.details, root), isError: Boolean(actual.isError) }).toEqual(expected);
-				expect(await files(root)).toEqual(fixture.final);
-			} finally {
-				await rm(root, { recursive: true, force: true });
-				for (const path of new Set(outsidePaths)) await rm(path, { recursive: true, force: true });
-			}
-		}, 30_000);
+			},
+			30_000,
+		);
 	}
 });
 
@@ -126,7 +158,10 @@ test("apply_unified_patch reports an outside absolute Add File as a failed write
 	try {
 		await command(root, ["init"]);
 		const outsidePath = join(outsideRoot, "outside.txt");
-		const actual = await applyUnifiedPatchAdapter(root, `*** Begin Patch\n*** Add File: ${outsidePath}\n+hello outside\n*** End Patch\n`);
+		const actual = await applyUnifiedPatchAdapter(
+			root,
+			`*** Begin Patch\n*** Add File: ${outsidePath}\n+hello outside\n*** End Patch\n`,
+		);
 		expect(actual.details).toEqual({
 			ok: false,
 			action: "apply_patch",
@@ -150,7 +185,8 @@ test("read_file surfaces symlink loops as ELOOP", async () => {
 		await symlink("b", join(root, "a"), "dir");
 		await symlink("a", join(root, "b"), "dir");
 		const actual = await readFileAdapter(root, { path: "a/x.txt" });
-		if (!isJsonRecord(actual.details) || typeof actual.details.error !== "string") throw new Error("missing ELOOP error");
+		if (!isJsonRecord(actual.details) || typeof actual.details.error !== "string")
+			throw new Error("missing ELOOP error");
 		expect(actual.details.error).toContain("ELOOP: too many symbolic links encountered");
 		expect(actual.isError).toBe(true);
 	} finally {

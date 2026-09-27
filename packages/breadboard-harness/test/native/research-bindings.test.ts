@@ -79,7 +79,6 @@ async function resolveHostTool(
 	return undefined;
 }
 
-
 describe("research native builtin bindings", () => {
 	test("applies the declared patch to workspace files", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-patch-"));
@@ -144,7 +143,11 @@ describe("research native builtin bindings", () => {
 						input: `*** Begin Patch\n*** Update File: ${file}\n@@\n-before\n+after\n*** End Patch\n`,
 					},
 					harness: { workspaceRoot: scratch } as never,
-					context: { invokeTool: async () => { throw new Error("unexpected invokeTool"); } } as never,
+					context: {
+						invokeTool: async () => {
+							throw new Error("unexpected invokeTool");
+						},
+					} as never,
 					signal: undefined,
 					onUpdate: undefined,
 					todos: {} as never,
@@ -172,7 +175,8 @@ describe("research native builtin bindings", () => {
 				input: { command: "cat fixture.txt", workdir: nested, timeout_ms: 5000 },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostBash.execute("research-shell", hostBash.parameters.assert(params)),
+					invokeTool: async (params: JsonObject) =>
+						hostBash.execute("research-shell", hostBash.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,
@@ -185,30 +189,34 @@ describe("research native builtin bindings", () => {
 			await fs.rm(scratch, { recursive: true, force: true });
 		}
 	});
-	test.skipIf(!Bun.which("tmux"))("executes the oh_my_opencode interactive_bash tmux schema through real host bash", async () => {
-		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-tmux-"));
-		try {
-			const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
-			const tool = loaded.registeredToolSurface.native.find(t => t.name === "interactive_bash");
-			if (!tool) throw new Error("missing oh_my_opencode interactive_bash tool");
-			const hostBash = new BashTool(patchSession(scratch));
-			const result = await researchBindingForTool(tool).run({
-				input: { tmux_command: "-V" },
-				harness: { workspaceRoot: scratch } as never,
-				context: {
-					invokeTool: async (params: JsonObject) => hostBash.execute("research-tmux", hostBash.parameters.assert(params)),
-				} as never,
-				signal: undefined,
-				onUpdate: undefined,
-				todos: {} as never,
-				guard: {} as never,
-			});
-			expect(result.isError).not.toBe(true);
-			expect(result.text).toMatch(/tmux \d/u);
-		} finally {
-			await fs.rm(scratch, { recursive: true, force: true });
-		}
-	});
+	test.skipIf(!Bun.which("tmux"))(
+		"executes the oh_my_opencode interactive_bash tmux schema through real host bash",
+		async () => {
+			const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-tmux-"));
+			try {
+				const loaded = await loadNativeHarness({ specPath: "oh_my_opencode", workspaceRoot: scratch });
+				const tool = loaded.registeredToolSurface.native.find(t => t.name === "interactive_bash");
+				if (!tool) throw new Error("missing oh_my_opencode interactive_bash tool");
+				const hostBash = new BashTool(patchSession(scratch));
+				const result = await researchBindingForTool(tool).run({
+					input: { tmux_command: "-V" },
+					harness: { workspaceRoot: scratch } as never,
+					context: {
+						invokeTool: async (params: JsonObject) =>
+							hostBash.execute("research-tmux", hostBash.parameters.assert(params)),
+					} as never,
+					signal: undefined,
+					onUpdate: undefined,
+					todos: {} as never,
+					guard: {} as never,
+				});
+				expect(result.isError).not.toBe(true);
+				expect(result.text).toMatch(/tmux \d/u);
+			} finally {
+				await fs.rm(scratch, { recursive: true, force: true });
+			}
+		},
+	);
 	test("executes the oh_my_opencode webfetch schema by reading the URL through real host read", async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "research-binding-webfetch-"));
 		const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("WEBFETCH_BODY_OK\n") });
@@ -221,7 +229,8 @@ describe("research native builtin bindings", () => {
 				input: { url: `http://127.0.0.1:${server.port}/page.txt`, format: "text" },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostRead.execute("research-webfetch", hostRead.parameters.assert(params)),
+					invokeTool: async (params: JsonObject) =>
+						hostRead.execute("research-webfetch", hostRead.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,
@@ -262,13 +271,17 @@ describe("research native builtin bindings", () => {
 			};
 			// claude_code, codex and opencode declare milliseconds; pi and oh_my_pi declare seconds.
 			expect((await delegated("claude_code", "Bash", { command: "true", timeout: 1500 }))?.timeout).toBe(2);
-			expect((await delegated("codex", "shell_command", { command: "true", timeout_ms: 5000, workdir: scratch }))).toMatchObject({
+			expect(
+				await delegated("codex", "shell_command", { command: "true", timeout_ms: 5000, workdir: scratch }),
+			).toMatchObject({
 				timeout: 5,
 				cwd: scratch,
 			});
 			expect((await delegated("opencode", "bash", { command: "true", timeout: 120000 }))?.timeout).toBe(120);
 			expect((await delegated("pi", "bash", { command: "true", timeout: 7 }))?.timeout).toBe(7);
-			expect(await delegated("oh_my_pi", "bash", { command: "sleep 1", timeout: 30, async: true, pty: false })).toMatchObject({
+			expect(
+				await delegated("oh_my_pi", "bash", { command: "sleep 1", timeout: 30, async: true, pty: false }),
+			).toMatchObject({
 				timeout: 30,
 				async: true,
 				pty: false,
@@ -293,7 +306,8 @@ describe("research native builtin bindings", () => {
 				input: input as JsonObject,
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => host.execute(`research-${name}`, host.parameters.assert(params) as never),
+					invokeTool: async (params: JsonObject) =>
+						host.execute(`research-${name}`, host.parameters.assert(params) as never),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,
@@ -357,7 +371,8 @@ describe("research native builtin bindings", () => {
 				input: { path: scratch },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostGlob.execute("research-list", hostGlob.parameters.assert(params)),
+					invokeTool: async (params: JsonObject) =>
+						hostGlob.execute("research-list", hostGlob.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,
@@ -386,7 +401,8 @@ describe("research native builtin bindings", () => {
 				input: { path: sub, pattern: "*.ts" },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostGlob.execute("research-glob", hostGlob.parameters.assert(params)),
+					invokeTool: async (params: JsonObject) =>
+						hostGlob.execute("research-glob", hostGlob.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,
@@ -414,7 +430,8 @@ describe("research native builtin bindings", () => {
 				input: { pattern: "FIND_ME", path: scratch, include: "*.ts" },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostGrep.execute("research-grep", hostGrep.parameters.assert(params)),
+					invokeTool: async (params: JsonObject) =>
+						hostGrep.execute("research-grep", hostGrep.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,
@@ -444,7 +461,8 @@ describe("research native builtin bindings", () => {
 					input: input as JsonObject,
 					harness: { workspaceRoot: scratch } as never,
 					context: {
-						invokeTool: async (params: JsonObject) => hostRead.execute("research-read", hostRead.parameters.assert(params)),
+						invokeTool: async (params: JsonObject) =>
+							hostRead.execute("research-read", hostRead.parameters.assert(params)),
 					} as never,
 					signal: undefined,
 					onUpdate: undefined,
@@ -491,7 +509,8 @@ describe("research native builtin bindings", () => {
 				input: { skill: "test-skill" },
 				harness: { workspaceRoot: scratch } as never,
 				context: {
-					invokeTool: async (params: JsonObject) => hostRead.execute("research-skill", hostRead.parameters.assert(params)),
+					invokeTool: async (params: JsonObject) =>
+						hostRead.execute("research-skill", hostRead.parameters.assert(params)),
 				} as never,
 				signal: undefined,
 				onUpdate: undefined,

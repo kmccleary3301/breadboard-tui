@@ -34,7 +34,6 @@ function activityClock(timestamp: number): string {
 	});
 }
 
-
 export interface AgentHubMessagesViewDeps {
 	registry: AgentRegistry;
 	irc: IrcBus;

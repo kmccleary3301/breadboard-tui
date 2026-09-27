@@ -121,7 +121,6 @@ export type AnyUiMetadata = UiBase & {
 	secret?: boolean;
 	ordered?: boolean;
 };
- 
 
 /** Structural schema entries supplied by the application host. */
 export interface SettingsDisplayEntry {

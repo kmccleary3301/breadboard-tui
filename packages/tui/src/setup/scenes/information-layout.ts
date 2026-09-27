@@ -27,9 +27,21 @@ import { getSelectListTheme, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 export const PRESENTATION_PRESETS: readonly SelectItem[] = [
-	{ value: "bb-balanced", label: "BreadBoard Balanced", description: "Folder, session, model, compact context and available spend" },
-	{ value: "bb-quiet", label: "BreadBoard Quiet", description: "Folder and model, with activity and context pressure when needed" },
-	{ value: "bb-detailed", label: "BreadBoard Detailed", description: "Identity, harness, token counts, available spend and timing" },
+	{
+		value: "bb-balanced",
+		label: "BreadBoard Balanced",
+		description: "Folder, session, model, compact context and available spend",
+	},
+	{
+		value: "bb-quiet",
+		label: "BreadBoard Quiet",
+		description: "Folder and model, with activity and context pressure when needed",
+	},
+	{
+		value: "bb-detailed",
+		label: "BreadBoard Detailed",
+		description: "Identity, harness, token counts, available spend and timing",
+	},
 	{ value: "default", label: "Default", description: "Model, path, git, context, tokens, cost" },
 	{ value: "minimal", label: "Minimal", description: "Path and git only" },
 	{ value: "compact", label: "Compact", description: "Model, git, cost, context" },

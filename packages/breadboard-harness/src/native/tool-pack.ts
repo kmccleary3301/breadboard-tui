@@ -8,7 +8,8 @@ import type { NativeToolDefinition, NativeToolSurfacePack } from "./types";
 const NON_SCHEMA_PARAMETER_KEYS = new Set(["name", "description", "required", "default", "examples", "validation"]);
 
 function requiredString(value: CanonicalJson | undefined, label: string): string {
-	if (typeof value !== "string" || value.length === 0) throw new Error(`tool definition ${label} must be a non-empty string`);
+	if (typeof value !== "string" || value.length === 0)
+		throw new Error(`tool definition ${label} must be a non-empty string`);
 	return value;
 }
 const TYPE_MAP: Readonly<Record<string, string>> = {
@@ -42,9 +43,11 @@ function parameterSchema(parameter: JsonRecord, label: string, provider: "anthro
 		}
 	}
 	if (Object.keys(schema).length === 0) schema.type = schemaType(parameter.type);
-	else if (!("type" in schema) && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema)) schema.type = schemaType(parameter.type);
+	else if (!("type" in schema) && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema))
+		schema.type = schemaType(parameter.type);
 	const description = parameter.description;
-	if (typeof description === "string" && description.length > 0 && !("description" in schema)) schema.description = description;
+	if (typeof description === "string" && description.length > 0 && !("description" in schema))
+		schema.description = description;
 	if (schema.type === "array" && !("items" in schema)) schema.items = { type: "string" };
 	if (schema.type === "object") {
 		if (provider === "openai" || !hasSchemaShape) schema.properties ??= {};
@@ -52,7 +55,8 @@ function parameterSchema(parameter: JsonRecord, label: string, provider: "anthro
 	}
 	const fallback = parameter.default;
 	if (fallback !== undefined && fallback !== null && !("default" in schema)) schema.default = fallback;
-	if (typeof schema.type !== "string" && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema)) throw new Error(`tool definition ${label}.type must be a string`);
+	if (typeof schema.type !== "string" && !("anyOf" in schema) && !("oneOf" in schema) && !("allOf" in schema))
+		throw new Error(`tool definition ${label}.type must be a string`);
 	return schema;
 }
 
@@ -101,18 +105,26 @@ function parseToolDefinition(source: JsonRecord, path: string, provider: Provide
 	});
 }
 
-
 function definitionSourcePath(definition: NativeToolDefinition): string {
 	return definition.sourcePath ?? definition.name;
 }
 
 function compareSourcePath(left: NativeToolDefinition, right: NativeToolDefinition): number {
-	return definitionSourcePath(left) < definitionSourcePath(right) ? -1 : definitionSourcePath(left) > definitionSourcePath(right) ? 1 : 0;
+	return definitionSourcePath(left) < definitionSourcePath(right)
+		? -1
+		: definitionSourcePath(left) > definitionSourcePath(right)
+			? 1
+			: 0;
 }
 type DefinitionCatalog = ReadonlyMap<string, readonly NativeToolDefinition[]>;
 
 function looksLikeToolDefinition(source: JsonRecord): boolean {
-	return typeof source.id === "string" && typeof source.name === "string" && Array.isArray(source.parameters) && isRecord(source.provider_routing);
+	return (
+		typeof source.id === "string" &&
+		typeof source.name === "string" &&
+		Array.isArray(source.parameters) &&
+		isRecord(source.provider_routing)
+	);
 }
 
 async function vendoredToolDefinitions(provider: ProviderDialect = "openai"): Promise<DefinitionCatalog> {
@@ -150,7 +162,9 @@ function registryValue(lock: JsonRecord, path: string): CanonicalJson | undefine
 	return nativeLockValue(lock, path);
 }
 function baselineDefinitions(catalog: DefinitionCatalog): readonly NativeToolDefinition[] {
-	return [...catalog.values()].find(definitions => definitions.some(definition => definition.name === "run_shell")) ?? [];
+	return (
+		[...catalog.values()].find(definitions => definitions.some(definition => definition.name === "run_shell")) ?? []
+	);
 }
 
 function registryDefinitions(lock: JsonRecord, catalog: DefinitionCatalog): Array<[string, NativeToolDefinition]> {
@@ -173,7 +187,9 @@ function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): Reado
 	let entries = registryDefinitions(lock, catalog);
 	const legacyEnabled = registryValue(lock, "tools.enabled");
 	const exclude = registryValue(lock, "tools.registry.exclude");
-	const excludeSet = new Set(Array.isArray(exclude) ? exclude.filter((name): name is string => typeof name === "string") : []);
+	const excludeSet = new Set(
+		Array.isArray(exclude) ? exclude.filter((name): name is string => typeof name === "string") : [],
+	);
 	entries = entries.filter(([name]) => !excludeSet.has(name));
 
 	const include = registryInclude(lock);
@@ -202,13 +218,21 @@ function definitionsForLock(lock: JsonRecord, catalog: DefinitionCatalog): Reado
 	const multiAgent = registryValue(lock, "multi_agent.enabled");
 	const taskTool = registryValue(lock, "task_tool");
 	if (multiAgent !== undefined || taskTool !== undefined) {
-		const taskEnabled = multiAgent === true || (isRecord(taskTool) ? Object.keys(taskTool).length > 0 : taskTool === true);
+		const taskEnabled =
+			multiAgent === true || (isRecord(taskTool) ? Object.keys(taskTool).length > 0 : taskTool === true);
 		if (!taskEnabled) entries = entries.filter(([name]) => name !== "task" && name !== "Task");
 	}
 
 	const rlmEnabled = registryValue(lock, "features.rlm.enabled");
 	if (rlmEnabled !== undefined && rlmEnabled !== true) {
-		const rlmNames = new Set(["blob.put", "blob.put_file_slice", "blob.get", "blob.search", "llm.query", "llm.batch_query"]);
+		const rlmNames = new Set([
+			"blob.put",
+			"blob.put_file_slice",
+			"blob.get",
+			"blob.search",
+			"llm.query",
+			"llm.batch_query",
+		]);
 		entries = entries.filter(([name]) => !rlmNames.has(name));
 	}
 	return new Map(entries);
@@ -226,9 +250,13 @@ function selectedToolNames(
 	definitions: ReadonlyMap<string, NativeToolDefinition>,
 	preserveExplicitOrder: boolean,
 ): readonly string[] {
-	const enabled = Array.isArray(mode.tools_enabled) ? mode.tools_enabled.filter((name): name is string => typeof name === "string") : [];
+	const enabled = Array.isArray(mode.tools_enabled)
+		? mode.tools_enabled.filter((name): name is string => typeof name === "string")
+		: [];
 	const disabled = new Set(
-		Array.isArray(mode.tools_disabled) ? mode.tools_disabled.filter((name): name is string => typeof name === "string") : [],
+		Array.isArray(mode.tools_disabled)
+			? mode.tools_disabled.filter((name): name is string => typeof name === "string")
+			: [],
 	);
 	const enabledSet = new Set(enabled);
 	const selected =
@@ -268,7 +296,6 @@ async function loadNativeToolSurfacesWithDefinitions(
 	return surfaces;
 }
 
-
 /**
  * Build the locked mode tool surfaces from vendored definitions. Disabled names are removed after
  * inclusion, matching `agent_llm_openai.py:3093-3111`.
@@ -287,11 +314,14 @@ export async function loadNativeToolSurface(lock: JsonRecord): Promise<NativeToo
 
 /** Provider function-tool payload for one native tool, as the Python reference serializes it. */
 export function nativeFunctionTool(tool: NativeToolDefinition): JsonRecord {
-	const fn: Record<string, CanonicalJson> = { name: tool.name, description: tool.description, parameters: tool.parameters };
+	const fn: Record<string, CanonicalJson> = {
+		name: tool.name,
+		description: tool.description,
+		parameters: tool.parameters,
+	};
 	if (tool.strict !== undefined) fn.strict = tool.strict;
 	return { type: "function", function: fn };
 }
-
 
 /** Load every snapshotted research registry from its source YAML. */
 export async function loadNativeToolDefinitionsByRegistryPath(): Promise<DefinitionCatalog> {

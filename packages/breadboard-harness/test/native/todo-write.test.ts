@@ -31,7 +31,7 @@ describe("TodoWrite completion guard fixtures", () => {
 	for (const [count, fixture] of Object.entries(guard.cases)) {
 		test(`${count} open items`, () => {
 			const state = new TodoWriteState();
-			state.apply({ todos: fixture.open_titles.map((content) => ({ content, status: "todo" })) });
+			state.apply({ todos: fixture.open_titles.map(content => ({ content, status: "todo" })) });
 			expect(state.openItems).toEqual(fixture.open_titles);
 			expect(todoCompletionGuardReason(state) ?? null).toBe(fixture.reason);
 		});

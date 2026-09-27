@@ -20,7 +20,8 @@ export function applyNativeHarnessSessionOptions(
 		options.modelPattern = harness.defaultModel;
 	}
 	// Python's prompt mode asks before edits and shell (`permissions/broker.py:119-129`).
-	if (harness.permissions.mode === "prompt" && !cli.approvalSelected) activeSettings.override("tools.approvalMode", "always-ask");
+	if (harness.permissions.mode === "prompt" && !cli.approvalSelected)
+		activeSettings.override("tools.approvalMode", "always-ask");
 	if (harness.hostSurface) return;
 
 	options.systemPrompt = harness.systemPrompt;

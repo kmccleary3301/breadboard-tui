@@ -78,7 +78,6 @@ export interface AgentTranscriptViewerDeps {
 	onClose: () => void;
 	/** Close this viewer AND the hub (hub-toggle keys). */
 	onHubClose: () => void;
-
 }
 
 /** How often to re-stat a file-backed transcript for growth (advisor/live tail). */
