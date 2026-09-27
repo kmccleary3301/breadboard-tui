@@ -47,7 +47,7 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 				"process.env.PI_TINY_TRANSFORMERS_VERSION": JSON.stringify(options.transformersVersion),
 				"process.env.PI_DOCS_EMBED": JSON.stringify((await buildDocsIndexPayload()).payload),
 			},
-// Bun 1.4 bytecode leaves import.meta.resolve in CommonJS output.
+			// Bun 1.4 bytecode leaves import.meta.resolve in CommonJS output.
 			// Precompiled bytecode skips parsing the ~20 MB bundle at boot:
 			// `omp --version` 256 ms -> 30 ms on M4 Max (+52 MB binary).
 			// Keep import.meta.resolve in bundled dependencies valid under bytecode.

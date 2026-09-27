@@ -85,7 +85,7 @@ async function runCommand(
 async function main(): Promise<void> {
 	const product = resolveBinaryProduct(Bun.env.BUILD_PRODUCT);
 	const crossBuild = resolveCrossBuild(Bun.env.CROSS_TARGET);
-const shouldAdhocSign =
+	const shouldAdhocSign =
 		process.platform === "darwin" &&
 		(!crossBuild || crossBuild.platform === "darwin") &&
 		Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";

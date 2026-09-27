@@ -311,12 +311,7 @@ function validatePolicy(raw: unknown): asserts raw is DeltaPolicy {
 			throw new Error(`adapters.${field} must be a non-empty string array`);
 		}
 	}
-	for (const field of [
-		"packageRoot",
-		"packageLicensePath",
-		"noticeBundlePath",
-		"noticeManifestPath",
-	] as const)
+	for (const field of ["packageRoot", "packageLicensePath", "noticeBundlePath", "noticeManifestPath"] as const)
 		assertString(raw.distribution[field], `distribution.${field}`);
 }
 
