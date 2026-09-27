@@ -36,7 +36,8 @@ export interface DeltaPolicy extends SyncPolicy {
 		readonly tree: string;
 	};
 	readonly budgets: {
-		readonly maxTotalChangedPaths: number;
+		readonly maxNonPackageChangedPaths: number;
+		readonly unboundedPackagePrefix: string;
 		readonly maxUpstreamEntrypointPaths: number;
 	};
 	readonly manualBoundaries: readonly PolicyManualBoundary[];
@@ -70,6 +71,7 @@ export interface ManifestPathEntry {
 	readonly rule: string;
 	readonly owner?: string;
 	readonly layer?: number;
+	readonly genericSeams?: readonly string[];
 }
 
 export interface ForkLayerManifest {
@@ -98,6 +100,7 @@ export interface ClassifiedDeltaPath {
 	readonly declared: boolean;
 	readonly owner?: string;
 	readonly layer?: number;
+	readonly genericSeams?: readonly string[];
 }
 
 export interface AuditViolation {
@@ -110,6 +113,7 @@ export interface AuditViolation {
 		| "adapter-boundary"
 		| "monorepo-dependency"
 		| "inline-breadboard"
+		| "tui-breadboard-identifier"
 		| "distribution";
 	readonly path?: string;
 	readonly detail: string;
@@ -134,10 +138,17 @@ export interface ForkDeltaReceipt {
 		readonly renameCount: number;
 		readonly paths: readonly ClassifiedDeltaPath[];
 	};
+	readonly changedPaths: {
+		readonly total: number;
+		readonly nonPackage: number;
+		readonly package: number;
+	};
 	readonly budgets: {
-		readonly maxTotalChangedPaths: number | null;
+		readonly maxNonPackageChangedPaths: number | null;
+		readonly unboundedPackagePrefix: string | null;
 		readonly maxUpstreamEntrypointPaths: number | null;
 		readonly upstreamEntrypointPaths: number;
+		readonly nonPackageChangedPaths: number;
 	};
 	readonly checks: Readonly<Record<string, "pass" | "fail" | "skipped">>;
 	readonly violations: readonly AuditViolation[];
@@ -273,24 +284,38 @@ function validatePolicy(raw: unknown): asserts raw is DeltaPolicy {
 		throw new Error("delta policy is missing upstream, budgets, adapters, or distribution");
 	}
 	for (const field of ["tag", "commit", "tree"] as const) assertString(raw.upstream[field], `upstream.${field}`);
-	if (!/^[0-9a-f]{40,64}$/.test(raw.upstream.commit) || !/^[0-9a-f]{40,64}$/.test(raw.upstream.tree)) {
+	const commit = raw.upstream.commit;
+	const tree = raw.upstream.tree;
+	if (
+		typeof commit !== "string" ||
+		typeof tree !== "string" ||
+		!/^[0-9a-f]{40,64}$/.test(commit) ||
+		!/^[0-9a-f]{40,64}$/.test(tree)
+	) {
 		throw new Error("upstream commit/tree must be full git object ids");
 	}
-	for (const field of ["maxTotalChangedPaths", "maxUpstreamEntrypointPaths"] as const) {
-		if (!Number.isSafeInteger(raw.budgets[field]) || raw.budgets[field] < 1)
+	if ("maxTotalChangedPaths" in raw.budgets) {
+		throw new Error(
+			"budgets.maxTotalChangedPaths is no longer supported; use budgets.maxNonPackageChangedPaths and budgets.unboundedPackagePrefix",
+		);
+	}
+	for (const field of ["maxNonPackageChangedPaths", "maxUpstreamEntrypointPaths"] as const) {
+		const val = raw.budgets[field];
+		if (typeof val !== "number" || !Number.isSafeInteger(val) || val < 1)
 			throw new Error(`budgets.${field} must be a positive integer`);
 	}
+	assertString(raw.budgets.unboundedPackagePrefix, "budgets.unboundedPackagePrefix");
 	if (!Array.isArray(raw.manualBoundaries) || raw.manualBoundaries.length === 0)
 		throw new Error("manualBoundaries must be non-empty");
 	const layers = raw.manualBoundaries.map(boundary => {
 		if (!isRecord(boundary)) throw new Error("manual boundary must be an object");
 		assertString(boundary.id, "manual boundary id");
 		assertString(boundary.owner, `manual boundary ${boundary.id} owner`);
-		if (!Number.isSafeInteger(boundary.layer) || boundary.layer < 1)
+		if (typeof boundary.layer !== "number" || !Number.isSafeInteger(boundary.layer) || boundary.layer < 1)
 			throw new Error(`manual boundary ${boundary.id} layer must be positive`);
 		if (!Array.isArray(boundary.patterns) || boundary.patterns.length === 0)
 			throw new Error(`manual boundary ${boundary.id} patterns must be non-empty`);
-		return boundary.layer;
+		return boundary.layer as number;
 	});
 	if (layers.some((layer, index) => index > 0 && layer <= layers[index - 1]!))
 		throw new Error("manual boundary layers must be strictly ordered");
@@ -342,8 +367,19 @@ export async function loadForkManifest(manifestPath = MANIFEST_PATH): Promise<Fo
 			throw new Error(`manifest path ${entry.path} has an invalid class`);
 		if (entry.owner !== undefined && (typeof entry.owner !== "string" || entry.owner.length === 0))
 			throw new Error(`manifest path ${entry.path} owner is invalid`);
-		if (entry.layer !== undefined && (!Number.isSafeInteger(entry.layer) || entry.layer < 1))
+		if (
+			entry.layer !== undefined &&
+			(typeof entry.layer !== "number" || !Number.isSafeInteger(entry.layer) || entry.layer < 1)
+		)
 			throw new Error(`manifest path ${entry.path} layer is invalid`);
+		if (entry.genericSeams !== undefined) {
+			if (
+				!Array.isArray(entry.genericSeams) ||
+				entry.genericSeams.some(item => typeof item !== "string" || item.length === 0)
+			) {
+				throw new Error(`manifest path ${entry.path} genericSeams must be an array of non-empty strings`);
+			}
+		}
 		return entry as unknown as ManifestPathEntry;
 	});
 	const paths = entries.map(entry => normalizePath(entry.path));
@@ -409,6 +445,7 @@ export function auditDeclarations(
 			declared: declaration !== undefined,
 			...(declaration?.owner === undefined ? {} : { owner: declaration.owner }),
 			...(declaration?.layer === undefined ? {} : { layer: declaration.layer }),
+			...(declaration?.genericSeams === undefined ? {} : { genericSeams: declaration.genericSeams }),
 		};
 		paths.push(entry);
 		if (classification.rule === "manual-review-unknown") {
@@ -516,6 +553,71 @@ export async function readChangedPathPatch(
 	]);
 }
 
+export const TUI_SCAN_PACKAGE_PREFIXES = ["packages/tui/", "packages/ai/", "packages/agent/"] as const;
+
+export function isTuiScanPath(filePath: string): boolean {
+	return TUI_SCAN_PACKAGE_PREFIXES.some(prefix => filePath.startsWith(prefix));
+}
+
+export function isPackagePath(filePath: string, prefix: string): boolean {
+	const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+	return filePath.startsWith(normalizedPrefix) || filePath === prefix.replace(/\/$/, "");
+}
+
+export const TUI_BREADBOARD_IDENTIFIER = /\bbb-[a-z][a-z0-9_-]*|[a-z0-9_$-]*breadboard[a-z0-9_$-]*/gi;
+
+export interface DiffLine {
+	readonly line: number;
+	readonly text: string;
+}
+
+export function parseDiffLines(diffText: string): DiffLine[] {
+	const results: DiffLine[] = [];
+	let currentLine = 1;
+	for (const line of diffText.split(/\r?\n/)) {
+		if (line.startsWith("@@ ")) {
+			const match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+			if (match) currentLine = parseInt(match[1]!, 10);
+			continue;
+		}
+		if (line.startsWith("+++") || line.startsWith("---")) continue;
+		if (line.startsWith("+")) {
+			results.push({ line: currentLine, text: line.slice(1) });
+			currentLine++;
+		} else if (!line.startsWith("-")) {
+			currentLine++;
+		}
+	}
+	return results;
+}
+
+export async function inspectTuiBreadboardIdentifiers(
+	repoRoot: string,
+	state: AuditState,
+	declarations: DeclarationAudit,
+): Promise<AuditViolation[]> {
+	const violations: AuditViolation[] = [];
+	for (const entry of declarations.paths) {
+		if (!isTuiScanPath(entry.path)) continue;
+		const diff = await readChangedPathPatch(repoRoot, state.policy.upstream.tag, entry);
+		const lines = parseDiffLines(diff);
+		const genericSeams = new Set(entry.genericSeams ?? []);
+		for (const { line, text } of lines) {
+			const matches = text.match(TUI_BREADBOARD_IDENTIFIER);
+			if (!matches) continue;
+			const forbidden = [...new Set(matches)].filter(identifier => !genericSeams.has(identifier));
+			for (const identifier of forbidden) {
+				violations.push({
+					code: "tui-breadboard-identifier",
+					path: entry.path,
+					detail: `line ${line}: forbidden identifier '${identifier}'`,
+				});
+			}
+		}
+	}
+	return violations;
+}
+
 async function inspectUpstreamInlineLogic(
 	repoRoot: string,
 	state: AuditState,
@@ -524,6 +626,7 @@ async function inspectUpstreamInlineLogic(
 	const violations: AuditViolation[] = [];
 	for (const entry of declarations.paths) {
 		if (entry.class !== "upstream-owned") continue;
+		if (isTuiScanPath(entry.path)) continue;
 		const diff = await readChangedPathPatch(repoRoot, state.policy.upstream.tag, entry);
 		for (const line of diff.split(/\r?\n/)) {
 			if (!line.startsWith("+") || line.startsWith("+++")) continue;
@@ -646,7 +749,14 @@ function createFailureReceipt(detail: string): ForkDeltaReceipt {
 		},
 		candidate: { commit: null, tree: null },
 		delta: { changedPathCount: 0, renameCount: 0, paths: [] },
-		budgets: { maxTotalChangedPaths: null, maxUpstreamEntrypointPaths: null, upstreamEntrypointPaths: 0 },
+		changedPaths: { total: 0, nonPackage: 0, package: 0 },
+		budgets: {
+			maxNonPackageChangedPaths: null,
+			unboundedPackagePrefix: null,
+			maxUpstreamEntrypointPaths: null,
+			upstreamEntrypointPaths: 0,
+			nonPackageChangedPaths: 0,
+		},
 		checks: { policy: "fail" },
 		violations: [{ code: "upstream-identity", detail }],
 	};
@@ -659,9 +769,21 @@ function markdownReceipt(receipt: ForkDeltaReceipt): string {
 		`- Schema: \`${receipt.schemaVersion}\``,
 		`- Status: **${receipt.status}**`,
 		`- Changed paths: ${receipt.delta.changedPathCount}`,
+		`  - changedPaths.total: ${receipt.changedPaths.total}`,
+		`  - changedPaths.nonPackage: ${receipt.changedPaths.nonPackage}`,
+		`  - changedPaths.package: ${receipt.changedPaths.package}`,
 		`- Renames: ${receipt.delta.renameCount}`,
 		"",
 		"## Upstream identity",
+		"",
+		`- Tag: \`${receipt.upstream.tag}\``,
+		`- Commit: expected \`${receipt.upstream.expectedCommit}\`, observed \`${receipt.upstream.observedCommit ?? "unavailable"}\``,
+		`- Tree: expected \`${receipt.upstream.expectedTree}\`, observed \`${receipt.upstream.observedTree ?? "unavailable"}\``,
+		"",
+		"## Budgets",
+		"",
+		`- Non-package changed paths: ${receipt.budgets.nonPackageChangedPaths} / ${receipt.budgets.maxNonPackageChangedPaths ?? "unlimited"} (prefix: \`${receipt.budgets.unboundedPackagePrefix ?? "none"}\`)`,
+		`- Upstream entrypoints: ${receipt.budgets.upstreamEntrypointPaths} / ${receipt.budgets.maxUpstreamEntrypointPaths ?? "unlimited"}`,
 		"",
 		`- Tag: \`${receipt.upstream.tag}\``,
 		`- Commit: expected \`${receipt.upstream.expectedCommit}\`, observed \`${receipt.upstream.observedCommit ?? "unavailable"}\``,
@@ -710,6 +832,35 @@ export function countUpstreamEntrypointPaths(
 	).length;
 }
 
+export function evaluatePathBudgets(
+	paths: readonly string[],
+	policy: DeltaPolicy,
+): {
+	readonly changedPaths: {
+		readonly total: number;
+		readonly nonPackage: number;
+		readonly package: number;
+	};
+	readonly violation?: AuditViolation;
+} {
+	const prefix = policy.budgets.unboundedPackagePrefix;
+	const packagePaths = paths.filter(p => isPackagePath(p, prefix));
+	const nonPackagePaths = paths.filter(p => !isPackagePath(p, prefix));
+	const changedPaths = {
+		total: paths.length,
+		nonPackage: nonPackagePaths.length,
+		package: packagePaths.length,
+	};
+	let violation: AuditViolation | undefined;
+	if (changedPaths.nonPackage > policy.budgets.maxNonPackageChangedPaths) {
+		violation = {
+			code: "budget",
+			detail: `non-package changed path count ${changedPaths.nonPackage} exceeds budget ${policy.budgets.maxNonPackageChangedPaths}`,
+		};
+	}
+	return { changedPaths, violation };
+}
+
 export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDeltaReceipt> {
 	const repoRoot = path.resolve(options.repoRoot ?? path.resolve(import.meta.dir, ".."));
 	let receipt: ForkDeltaReceipt;
@@ -723,11 +874,8 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 		const declarationAudit = auditDeclarations(collected.records, manifest, policy);
 		const violations: AuditViolation[] = [...validateIdentity(identity, policy), ...declarationAudit.violations];
 		const upstreamEntrypointPaths = countUpstreamEntrypointPaths(collected.records, policy.upstreamEntrypoints);
-		if (collected.paths.length > policy.budgets.maxTotalChangedPaths)
-			violations.push({
-				code: "budget",
-				detail: `changed path count ${collected.paths.length} exceeds total budget ${policy.budgets.maxTotalChangedPaths}`,
-			});
+		const { changedPaths, violation: budgetViolation } = evaluatePathBudgets(collected.paths, policy);
+		if (budgetViolation) violations.push(budgetViolation);
 		if (upstreamEntrypointPaths > policy.budgets.maxUpstreamEntrypointPaths)
 			violations.push({
 				code: "budget",
@@ -735,11 +883,12 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 			});
 		violations.push(...(await inspectAdapters(repoRoot, state)));
 		violations.push(...(await inspectUpstreamInlineLogic(repoRoot, state, declarationAudit)));
+		violations.push(...(await inspectTuiBreadboardIdentifiers(repoRoot, state, declarationAudit)));
 		violations.push(...(await inspectFilesystemDependencies(repoRoot, state)));
 		const checks: Record<string, "pass" | "fail" | "skipped"> = {
 			adapters: violations.some(violation => violation.code === "adapter-boundary") ? "fail" : "pass",
 			budgets:
-				collected.paths.length <= policy.budgets.maxTotalChangedPaths &&
+				changedPaths.nonPackage <= policy.budgets.maxNonPackageChangedPaths &&
 				upstreamEntrypointPaths <= policy.budgets.maxUpstreamEntrypointPaths
 					? "pass"
 					: "fail",
@@ -749,7 +898,13 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 			upstreamIdentity: validateIdentity(identity, policy).length === 0 ? "pass" : "fail",
 			upstreamInlineLogic: "pass",
 		};
-		if (violations.some(violation => violation.code === "inline-breadboard")) checks.upstreamInlineLogic = "fail";
+		if (
+			violations.some(
+				violation => violation.code === "inline-breadboard" || violation.code === "tui-breadboard-identifier",
+			)
+		) {
+			checks.upstreamInlineLogic = "fail";
+		}
 		if (violations.some(violation => violation.code === "monorepo-dependency")) checks.monorepoDependencies = "fail";
 		try {
 			await verifyDistribution(repoRoot, policy);
@@ -773,10 +928,13 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 				renameCount: collected.records.filter(record => record.oldPath !== undefined).length,
 				paths: declarationAudit.paths,
 			},
+			changedPaths,
 			budgets: {
-				maxTotalChangedPaths: policy.budgets.maxTotalChangedPaths,
+				maxNonPackageChangedPaths: policy.budgets.maxNonPackageChangedPaths,
+				unboundedPackagePrefix: policy.budgets.unboundedPackagePrefix,
 				maxUpstreamEntrypointPaths: policy.budgets.maxUpstreamEntrypointPaths,
 				upstreamEntrypointPaths,
+				nonPackageChangedPaths: changedPaths.nonPackage,
 			},
 			checks,
 			violations,
@@ -792,7 +950,7 @@ export async function auditForkDelta(options: AuditOptions = {}): Promise<ForkDe
 if (import.meta.main) {
 	const receiptDirArgumentIndex = process.argv.indexOf("--receipt-dir");
 	const receiptDir = receiptDirArgumentIndex >= 0 ? process.argv[receiptDirArgumentIndex + 1] : undefined;
-	const result = await auditForkDelta({ ...(receiptDir ? { receiptDir } : {}) });
+	const result = await auditForkDelta(receiptDir ? { receiptDir } : {});
 	console.log(JSON.stringify(result, null, 2));
 	if (result.status !== "pass") process.exitCode = 1;
 }

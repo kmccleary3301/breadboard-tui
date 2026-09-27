@@ -7,7 +7,8 @@
 		"tree": "b36226cce6a225a4c0d2c2162da223d61d7123da"
 	},
 	"budgets": {
-		"maxTotalChangedPaths": 400,
+		"maxNonPackageChangedPaths": 400,
+		"unboundedPackagePrefix": "packages/breadboard-harness/",
 		"maxUpstreamEntrypointPaths": 13
 	},
 	"rules": [
