@@ -249,10 +249,6 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 		} else if (arg === "--engine-url" || arg.startsWith("--engine-url=")) {
 			if (arg.startsWith("--engine-url=")) result.engineUrl = arg.slice("--engine-url=".length);
 			else if (i + 1 < args.length && !args[i + 1].startsWith("-")) result.engineUrl = args[++i];
-		} else if (arg === "--harness" && i + 1 < args.length) {
-			result.harness = args[++i];
-		} else if (arg.startsWith("--harness=")) {
-			result.harness = arg.slice("--harness=".length);
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--from-claude") {
