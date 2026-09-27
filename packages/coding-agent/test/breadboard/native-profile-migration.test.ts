@@ -4,7 +4,10 @@ import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
-import { migrateNativeProfile } from "@oh-my-pi/pi-coding-agent/breadboard/native-profile-migration";
+import {
+	migrateNativeProfile,
+	registerNativeProfileMigration,
+} from "@oh-my-pi/pi-coding-agent/breadboard/native-profile-migration";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
@@ -59,11 +62,10 @@ describe("native profile migration", () => {
 			},
 		});
 		const previousProduct = process.env.BREADBOARD_PRODUCT;
-		const previousMigration = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
 		const previousReceipt = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
 		const migrationReceipt = path.join(agentDir, ".bb-native-profile-migration.receipt.v1.json");
 		process.env.BREADBOARD_PRODUCT = "1";
-		process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = "1";
+		const unregisterMigration = registerNativeProfileMigration();
 		process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT = migrationReceipt;
 		try {
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
@@ -89,8 +91,7 @@ describe("native profile migration", () => {
 		} finally {
 			if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
 			else process.env.BREADBOARD_PRODUCT = previousProduct;
-			if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
-			else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
+			unregisterMigration();
 			if (previousReceipt === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
 			else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT = previousReceipt;
 		}
@@ -99,11 +100,10 @@ describe("native profile migration", () => {
 	it("writes a receipt when an already migrated profile is requested again", async () => {
 		await writeSettings({ breadboard: { harness: { default: "daily_driver" } } });
 		const previousProduct = process.env.BREADBOARD_PRODUCT;
-		const previousMigration = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
 		const previousReceipt = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
 		const migrationReceipt = path.join(agentDir, ".bb-native-profile-migration.receipt.v1.json");
 		process.env.BREADBOARD_PRODUCT = "1";
-		process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = "1";
+		const unregisterMigration = registerNativeProfileMigration();
 		process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT = migrationReceipt;
 		try {
 			await Settings.init({ cwd: projectDir, agentDir });
@@ -111,8 +111,7 @@ describe("native profile migration", () => {
 		} finally {
 			if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
 			else process.env.BREADBOARD_PRODUCT = previousProduct;
-			if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
-			else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
+			unregisterMigration();
 			if (previousReceipt === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT;
 			else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION_RECEIPT = previousReceipt;
 		}
@@ -137,9 +136,8 @@ describe("native profile migration", () => {
 			}),
 		);
 		const previousProduct = process.env.BREADBOARD_PRODUCT;
-		const previousMigration = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
 		process.env.BREADBOARD_PRODUCT = "1";
-		process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = "1";
+		const unregisterMigration = registerNativeProfileMigration();
 		try {
 			const settings = await Settings.init({ cwd: projectDir, agentDir, configFiles: [overlayPath] });
 			expect(settings.getRaw("breadboard")).toMatchObject({
@@ -150,8 +148,7 @@ describe("native profile migration", () => {
 		} finally {
 			if (previousProduct === undefined) delete process.env.BREADBOARD_PRODUCT;
 			else process.env.BREADBOARD_PRODUCT = previousProduct;
-			if (previousMigration === undefined) delete process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION;
-			else process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION = previousMigration;
+			unregisterMigration();
 		}
 	});
 	it("recognizes already migrated profiles through the BreadBoard migration module", () => {

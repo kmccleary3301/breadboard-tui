@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { registerGlobalSettingsMigration } from "../config/settings-extensions";
 import { replaceFileAtomically } from "../utils/atomic-file";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -49,4 +50,12 @@ export async function writeNativeProfileMigrationReceipt(
 	} finally {
 		await fs.promises.unlink(temporaryPath).catch(() => {});
 	}
+}
+
+/** Register the one-shot profile rewrite the launcher requests; returns a handle that removes it. */
+export function registerNativeProfileMigration(): () => void {
+	return registerGlobalSettingsMigration({
+		apply: migrateNativeProfile,
+		afterWrite: () => writeNativeProfileMigrationReceipt(),
+	});
 }

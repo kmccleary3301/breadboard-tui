@@ -49,7 +49,6 @@ import { type Settings as SettingsCapabilityItem, settingsCapability } from "../
 import type { ModelRole } from "../config/model-roles";
 import { loadCapability } from "../discovery";
 
-import { migrateNativeProfile, writeNativeProfileMigrationReceipt } from "../breadboard/native-profile-migration";
 import { AgentStorage } from "../session/agent-storage";
 import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
 import MODEL_PRIO from "../priority.json" with { type: "json" };
@@ -76,11 +75,7 @@ import {
 	type SettingPath,
 	type SettingValue,
 } from "./settings-schema";
-import {
-	BREADBOARD_FIELD_DEFINITIONS,
-	type BreadboardFieldSettings,
-	DEFAULT_BREADBOARD_FIELD_SETTINGS,
-} from "../breadboard/ui/status-line/breadboard-fields";
+import { getGlobalSettingsMigrations, getSettingValueNormalizer } from "./settings-extensions";
 
 // Re-export types that callers need
 export type * from "./settings-schema";
@@ -109,19 +104,6 @@ function assertKnownStatusLineSegments(path: SettingPath, value: unknown): void 
 	throw new Error(
 		`Unknown status line ${noun}: ${unknown.join(", ")}. Valid segments: ${STATUS_LINE_SEGMENT_IDS.join(", ")}`,
 	);
-}
-
-function assertBreadboardFieldSettings(value: unknown): asserts value is Partial<BreadboardFieldSettings> {
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error("statusLine.breadboard must be an object of field choices.");
-	}
-	for (const [key, choice] of Object.entries(value)) {
-		const field = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
-		if (!field) throw new Error(`Unknown BreadBoard information field: ${key}`);
-		if (!field.options.some(option => option.value === choice)) {
-			throw new Error(`Invalid BreadBoard information choice for ${key}: ${String(choice)}`);
-		}
-	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -623,8 +605,6 @@ export class Settings {
 
 	/** Whether to persist changes */
 	#persist: boolean;
-	/** Explicit one-shot R39-to-native profile migration requested by the launcher. */
-	#nativeProfileMigrationRequested = process.env.BREADBOARD_NATIVE_PROFILE_MIGRATION === "1";
 
 	private constructor(options: SettingsOptions = {}) {
 		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
@@ -741,9 +721,10 @@ export class Settings {
 		const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
 		let resolved =
 			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : getDefault(path);
-		if (path === "statusLine.breadboard") {
-			assertBreadboardFieldSettings(resolved);
-			resolved = { ...DEFAULT_BREADBOARD_FIELD_SETTINGS, ...resolved };
+		const normalizer = getSettingValueNormalizer(path);
+		if (normalizer) {
+			normalizer.validate(resolved);
+			if (normalizer.resolve) resolved = normalizer.resolve(resolved) as typeof resolved;
 		}
 		this.#resolvedCache.set(path, resolved);
 		return resolved as SettingValue<P>;
@@ -773,7 +754,7 @@ export class Settings {
 	 */
 	set<P extends SettingPath>(path: P, value: SettingValue<P>): void {
 		assertKnownStatusLineSegments(path, value);
-		if (path === "statusLine.breadboard") assertBreadboardFieldSettings(value);
+		getSettingValueNormalizer(path)?.validate(value);
 		const prev = this.get(path);
 		const segments = path.split(".");
 		this.#captureGlobalMutation(path, this.#modifiedPathMutations, getByPath(this.#global, segments));
@@ -1525,9 +1506,12 @@ export class Settings {
 			await this.#migrateFromLegacy();
 			this.#global = await this.#loadYaml(this.#configPath!);
 		}
-		if (this.#nativeProfileMigrationRequested && this.#configPath && migrateNativeProfile(this.#global)) {
-			await this.#writeYamlAtomically(this.#configPath, this.#global);
-			await writeNativeProfileMigrationReceipt();
+		if (this.#configPath) {
+			const applied = getGlobalSettingsMigrations().filter(migration => migration.apply(this.#global));
+			if (applied.length > 0) {
+				await this.#writeYamlAtomically(this.#configPath, this.#global);
+				for (const migration of applied) await migration.afterWrite?.();
+			}
 		}
 		await this.#seedLastChangelogVersionMarker();
 	}
