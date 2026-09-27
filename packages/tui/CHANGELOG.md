@@ -12,10 +12,6 @@
   - setup: `registerSetupScene(scene, { before, after })`, `getSetupScenes` and `registerComposerPreviewStatusFactory`;
   - product identity: `composerShapeLabels` overrides composer shape labels.
 
-### Removed
-
-- Removed the BreadBoard status-line presets (`bb-balanced`, `bb-quiet`, `bb-detailed`) and their fields, the BreadBoard themes and monochrome glyph overrides, the BreadBoard settings tab and the information-layout setup scene from pi-tui. `bb` registers them from coding-agent, and stock pi-tui shows none of them.
-
 ### Fixed
 
 - Fixed a stale `/skill:` completion consuming Enter instead of submitting the command currently typed in the composer.
