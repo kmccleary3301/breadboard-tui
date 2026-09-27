@@ -12,7 +12,7 @@ import { createStatusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-lin
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
 import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
 import { composerSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/composer";
-import { createBreadboardPreviewStatusSource } from "@oh-my-pi/pi-tui/setup/scenes/information-layout";
+import { createBreadboardPreviewStatusSource } from "../../../src/breadboard/ui/information-layout";
 import type { SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
 import { initTheme, setTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import {
