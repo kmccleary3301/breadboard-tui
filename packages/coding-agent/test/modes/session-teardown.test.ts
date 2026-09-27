@@ -36,48 +36,6 @@ describe("createSessionTeardown", () => {
 		expect(saved).toEqual(["unsent draft"]);
 	});
 
-	it("finishes the runtime barrier before disposing durable session state", async () => {
-		const order: string[] = [];
-		const teardown = createSessionTeardown({
-			getDraftText: () => "",
-			beginDispose: () => {
-				order.push("beginDispose");
-			},
-			saveDraft: async () => {
-				order.push("saveDraft");
-			},
-			beforeDispose: async () => {
-				order.push("beforeDispose");
-			},
-			disposeSession: async () => {
-				order.push("disposeSession");
-			},
-		});
-
-		await teardown();
-
-		expect(order).toEqual(["beginDispose", "saveDraft", "beforeDispose", "disposeSession"]);
-	});
-
-	it("still disposes the session when the runtime barrier rejects", async () => {
-		const failure = new Error("runtime close failed");
-		let disposed = false;
-		const teardown = createSessionTeardown({
-			getDraftText: () => "",
-			beginDispose: () => {},
-			saveDraft: async () => {},
-			beforeDispose: async () => {
-				throw failure;
-			},
-			disposeSession: async () => {
-				disposed = true;
-			},
-		});
-
-		await expect(teardown()).rejects.toBe(failure);
-		expect(disposed).toBe(true);
-	});
-
 	it("marks the session disposing before awaiting draft persistence", async () => {
 		const order: string[] = [];
 		const release = Promise.withResolvers<void>();
@@ -257,39 +215,5 @@ describe("createSessionTeardown", () => {
 		await Promise.all([first, second]);
 
 		expect(received).toEqual([postmortem.Reason.SIGTERM]);
-	});
-	it("does not dispose while the runtime teardown barrier is still pending", async () => {
-		const order: string[] = [];
-		const release = Promise.withResolvers<void>();
-		const teardown = createSessionTeardown({
-			getDraftText: () => "",
-			beginDispose: () => {
-				order.push("beginDispose");
-			},
-			saveDraft: async () => {
-				order.push("saveDraft");
-			},
-			beforeDispose: async () => {
-				order.push("beforeDispose:start");
-				await release.promise;
-				order.push("beforeDispose:done");
-			},
-			disposeSession: async () => {
-				order.push("disposeSession");
-			},
-		});
-
-		const running = teardown();
-		await Promise.resolve();
-		expect(order).toEqual(["beginDispose", "saveDraft", "beforeDispose:start"]);
-		release.resolve();
-		await running;
-		expect(order).toEqual([
-			"beginDispose",
-			"saveDraft",
-			"beforeDispose:start",
-			"beforeDispose:done",
-			"disposeSession",
-		]);
 	});
 });

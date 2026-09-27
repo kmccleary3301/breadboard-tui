@@ -146,8 +146,6 @@ export interface InteractiveModeContext {
 	focusParentSession(): Promise<void>;
 	/** Return the view to the main session (delegates to SessionFocusController.unfocus). */
 	unfocusSession(): Promise<void>;
-	/** Start a new BreadBoard session bound to a selected harness lock. */
-	startHarnessSession: (harnessId: string) => Promise<boolean>;
 	/** Drop pending focus requests without changing the view (delegates to SessionFocusController.invalidatePendingFocus). */
 	invalidatePendingFocus(): void;
 	/** Candidate subagent ids under a mutable-viewport line, for click-to-focus. Empty when the line has no target. */

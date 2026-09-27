@@ -620,13 +620,9 @@ async function runInteractiveMode(
 	joinLink?: string,
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
-	_breadboard?: never,
 	/** Native mode: the harness hub, palette and status read the session's loaded lock. */
 	nativeHarnessPort?: HarnessPort,
-	/** Native mode with a shared credential vault: the store setup and /login sign in to. */
-	nativeVaultAuthStorage?: AuthStorage,
 ): Promise<void> {
-	const nativeAuthStorage = nativeVaultAuthStorage;
 	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
 	let mode: InteractiveMode;
 	try {
@@ -639,15 +635,7 @@ async function runInteractiveMode(
 			mcpManager,
 			eventBus,
 			startupLease?.composer,
-			undefined,
 			subagentEventBus,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			nativeAuthStorage,
 			nativeHarnessPort,
 		);
 		startupLease?.adopt();
@@ -2453,9 +2441,7 @@ export async function runRootCommand(
 						parsedArgs.join,
 						startBackgroundModelDiscovery,
 						startupLease,
-						undefined,
 						nativeHarness ? createNativeHarnessPort(nativeHarness) : undefined,
-						ompAgentDir !== undefined ? authStorage : undefined,
 					);
 				} finally {
 					startupLease?.dispose();

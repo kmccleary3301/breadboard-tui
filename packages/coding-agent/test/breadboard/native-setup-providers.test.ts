@@ -39,7 +39,7 @@ describe("native setup credential store", () => {
 			},
 		});
 		if (!args) throw new Error("interactive mode was not started");
-		return { breadboard: args[19], nativeVaultAuthStorage: args[21] };
+		return { authStorage: args[0].modelRegistry.authStorage };
 	}
 
 	it("hands the shared vault store to setup and /login", async () => {
@@ -50,15 +50,14 @@ describe("native setup credential store", () => {
 		const launched = await launchSetup(async agentDir =>
 			agentDir === vaultDir ? vault : AuthStorage.create(path.join(vaultDir, "private.db")),
 		);
-		expect(launched.breadboard).toBeUndefined();
-		expect(launched.nativeVaultAuthStorage).toBe(vault);
+		expect(launched.authStorage).toBe(vault);
 	});
 
-	it("offers no sign-in store without a shared vault", async () => {
+	it("signs in to the private store without a shared vault", async () => {
 		delete process.env.BREADBOARD_OMP_AGENT_DIR;
 		using tempDir = TempDir.createSync("@bb-native-setup-novault-");
 		const privateStore = await AuthStorage.create(path.join(tempDir.path(), "agent.db"));
 		const launched = await launchSetup(async () => privateStore);
-		expect(launched.nativeVaultAuthStorage).toBeUndefined();
+		expect(launched.authStorage).toBe(privateStore);
 	});
 });

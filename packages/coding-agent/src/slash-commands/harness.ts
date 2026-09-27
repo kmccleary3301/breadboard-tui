@@ -1,5 +1,5 @@
 import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
-import { NativeHarnessReloadError } from "@breadboard/harness";
+import { NativeHarnessReloadError, builtinNativeHarnesses } from "@breadboard/harness";
 import type { HarnessCommandSpec, HarnessSnapshot } from "../breadboard/harness-port";
 import type { Settings } from "../config/settings";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
@@ -204,53 +204,36 @@ export function harnessCommandsAsSlashCommands(
 	});
 }
 
-function harnessUse(runtime: TuiSlashCommandRuntime, target: string): Promise<boolean> {
-	if (!runtime.ctx.startHarnessSession) {
-		runtime.ctx.showStatus("/harness use is unavailable: no BreadBoard session route");
-		return Promise.resolve(true);
-	}
-	return runtime.ctx.startHarnessSession(target);
-}
-
-async function harnessList(runtime: TuiSlashCommandRuntime, directory?: string): Promise<boolean> {
+function harnessList(runtime: TuiSlashCommandRuntime): boolean {
 	const snapshot = runtime.ctx.harnessPort?.current() ?? null;
-	const listChoices = runtime.ctx.harnessPort?.listHarnessChoices;
-	if (!listChoices) {
-		runtime.ctx.showStatus("Harness listing is unavailable: no BreadBoard control-plane client");
+	const choices = builtinNativeHarnesses();
+	if (choices.length === 0) {
+		runtime.ctx.showStatus("No BreadBoard harnesses available");
 		return true;
 	}
-	try {
-		const choices = directory === undefined ? await listChoices() : await listChoices(directory);
-		if (choices.length === 0) {
-			runtime.ctx.showStatus("No BreadBoard harnesses available");
-			return true;
-		}
-		const activeId = snapshot?.verifiedIdentity?.harnessId;
-		const activeBasename = activeId?.split(/[\\/]/u).at(-1);
-		const activeChoice = activeId
-			? choices.find(
-					choice =>
-						choice.id === activeId ||
-						choice.path === activeId ||
-						choice.id === activeBasename ||
-						choice.path === activeBasename,
-				)
-			: undefined;
-		const rows = choices.map(choice =>
-			choice === activeChoice
-				? `* Active harness: ${choice.name} (${choice.path})`
-				: `  ${choice.name} (${choice.path})`,
-		);
-		runtime.ctx.showStatus(rows.join("\n"));
-	} catch (error) {
-		const detail = error instanceof Error ? error.message : String(error);
-		runtime.ctx.showStatus(`Unable to list BreadBoard harnesses: ${detail}`);
-	}
+	const activeId = snapshot?.verifiedIdentity?.harnessId;
+	const activeBasename = activeId?.split(/[\\/]/u).at(-1);
+	const activeChoice = activeId
+		? choices.find(
+				choice =>
+					choice.id === activeId ||
+					choice.sourceRef === activeId ||
+					choice.id === activeBasename ||
+					choice.sourceRef === activeBasename,
+			)
+		: undefined;
+	const rows = choices.map(choice =>
+		choice === activeChoice
+			? `* Active harness: ${choice.id} (${choice.sourceRef})`
+			: `  ${choice.id} (${choice.sourceRef})`,
+	);
+	// A spec-path harness is not built in; list it first so the active harness is always shown.
+	if (activeId && !activeChoice) rows.unshift(`* Active harness: ${snapshot?.name ?? activeId} (${activeId})`);
+	runtime.ctx.showStatus(rows.join("\n"));
 	return true;
 }
 
 async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<boolean> {
-	const port = runtime.ctx.harnessPort;
 	if (parsed.name === "plan" || parsed.name === "todo") return false;
 	if (isStaticPanelCommand(parsed.name)) {
 		runtime.ctx.showAgentHub({ initialSection: "harness", initialHarnessPanel: parsed.name });
@@ -261,55 +244,12 @@ async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSla
 		parsed.name === "wait" ||
 		parsed.name === "bus" ||
 		parsed.name === "longrun" ||
-		parsed.name === "checkpoint"
+		parsed.name === "checkpoint" ||
+		parsed.name === "mode" ||
+		parsed.name === "role" ||
+		parsed.name === "skills"
 	) {
 		runtime.ctx.showStatus(`/${parsed.name} unavailable: no host implementation`);
-		return true;
-	}
-	if (!port) return false;
-	try {
-		if (parsed.name === "mode") {
-			const mode = parsed.args.trim();
-			if (!mode) {
-				runtime.ctx.showStatus("Usage: /mode <name>");
-				return true;
-			}
-			if (!port.setSessionMode) throw new Error("/mode unavailable: no BreadBoard engine control route");
-			await port.setSessionMode(mode);
-			runtime.ctx.showStatus(`Mode set to ${mode}.`);
-			return true;
-		}
-		if (parsed.name === "model") {
-			const model = parsed.args.trim();
-			if (!model) {
-				runtime.ctx.showModelSelector();
-				return true;
-			}
-			if (!port.setSessionModel) throw new Error("/model unavailable: no BreadBoard engine control route");
-			await port.setSessionModel(model);
-			runtime.ctx.showStatus(`Model set to ${model}.`);
-			return true;
-		}
-		if (parsed.name === "role") {
-			const [role, model] = parsed.args.trim().split(/\s+/u);
-			if (!role) {
-				runtime.ctx.showStatus("Usage: /role <role> [model]");
-				return true;
-			}
-			if (!port.setSessionRole) throw new Error("/role unavailable: no BreadBoard engine control route");
-			await port.setSessionRole(role, model);
-			runtime.ctx.showStatus(`Role set to ${role}.`);
-			return true;
-		}
-		if (parsed.name === "skills") {
-			if (!port.setSessionSkills) throw new Error("/skills unavailable: no BreadBoard engine control route");
-			const skills = parsed.args.trim() ? parsed.args.trim().split(/\s+/u) : [];
-			await port.setSessionSkills(skills);
-			runtime.ctx.showStatus(skills.length ? `Skills set to ${skills.join(", ")}.` : "Skills cleared.");
-			return true;
-		}
-	} catch (error) {
-		runtime.ctx.showStatus(error instanceof Error ? error.message : String(error));
 		return true;
 	}
 	return false;
@@ -326,7 +266,7 @@ export async function executeHarnessSlashCommand(
 	// Hiding unavailable commands is presentation only; direct invocation must still reject.
 	const specs = materializeHarnessCommands(snapshot, { ...settings, unsupportedCommands: "dim" });
 	if (parsed.name === "harness") {
-		const { verb, rest } = parseSubcommand(parsed.args);
+		const { verb } = parseSubcommand(parsed.args);
 		if (!verb) {
 			runtime.ctx.showStatus(
 				snapshot
@@ -335,7 +275,7 @@ export async function executeHarnessSlashCommand(
 			);
 			return true;
 		}
-		if (verb === "list") return harnessList(runtime, rest || undefined);
+		if (verb === "list") return harnessList(runtime);
 		if (verb === "reload") {
 			const port = runtime.ctx.harnessPort;
 			if (!port?.reloadNativeHarness) {
@@ -362,19 +302,6 @@ export async function executeHarnessSlashCommand(
 			}
 			return true;
 		}
-		if (verb === "use") {
-			if (!rest) {
-				runtime.ctx.showStatus("Usage: /harness use <name|path>");
-				return true;
-			}
-			if (rest.split(/\s+/u).includes("--here")) {
-				runtime.ctx.showStatus(
-					"A BreadBoard session is pinned to its engine session and lock; an in-process harness switch is not possible.",
-				);
-				return true;
-			}
-			return harnessUse(runtime, rest);
-		}
 		runtime.ctx.showStatus(`Unknown /harness operation: ${verb}`);
 		return true;
 	}
@@ -391,12 +318,11 @@ export async function executeHarnessSlashCommand(
 export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
 	{
 		name: "harness",
-		description: "Inspect and switch the active BreadBoard harness",
+		description: "Inspect and reload the active BreadBoard harness",
 		allowArgs: true,
 		subcommands: [
-			{ name: "list", description: "List available harnesses", usage: "[directory]" },
+			{ name: "list", description: "List available harnesses" },
 			{ name: "reload", description: "Compile the workspace harness and apply it at the next turn", usage: "" },
-			{ name: "use", description: "Start a new session on a harness", usage: "<name|path>" },
 		],
 	},
 ];

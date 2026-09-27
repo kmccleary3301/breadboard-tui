@@ -12,7 +12,7 @@ import {
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, AuthStorage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { execReplace } from "@oh-my-pi/pi-natives";
 import type {
@@ -1273,19 +1273,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		mcpManager?: MCPManager,
 		eventBus?: EventBus,
 		composer?: Composer,
-		private readonly providerAuthPort?: unknown,
 		subagentEventBus?: EventBus,
-		private readonly beforeSessionDispose?: () => Promise<void>,
-		harnessClient?: unknown,
-		harnessId?: string,
-		setSessionModel?: (model: string) => Promise<void>,
-		switchHarnessSession?: (
-			configPath: string,
-			lockId: string,
-			transition: () => Promise<boolean>,
-		) => Promise<boolean>,
-		breadboardSessionId?: () => string,
-		private readonly nativeAuthStorage?: AuthStorage,
 		nativeHarnessPort?: HarnessPort,
 	) {
 		this.session = session;
@@ -1630,7 +1618,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			getDraftText: () => this.#inputController.getDraftText(),
 			beginDispose: () => this.session.beginDispose(),
 			saveDraft: text => this.sessionManager.saveDraft(text),
-			beforeDispose: this.beforeSessionDispose,
 			disposeSession: async reason => {
 				await this.#btwController.dispose();
 				await this.session.dispose({
@@ -6882,10 +6869,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleHandoffCommand(customInstructions?: string): Promise<void> {
 		return this.#commandController.handleHandoffCommand(customInstructions);
-	}
-	async startHarnessSession(_harnessId: string): Promise<boolean> {
-		this.showError("BreadBoard harness switching requires an attached engine, which was removed.");
-		return false;
 	}
 
 	handleShakeCommand(mode: ShakeMode): Promise<void> {
