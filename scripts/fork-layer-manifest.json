@@ -391,11 +391,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/commands/research.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/commands/setup.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"

@@ -9,7 +9,7 @@
  * regression that motivated the split.
  */
 import type { CommandEntry } from "@oh-my-pi/pi-utils/cli";
-import { APP_NAME, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
+import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
 import * as commandHelp from "./cli/command-help";
 import {
 	EXTENSION_SHADOWABLE_STRING_FLAGS,
@@ -25,7 +25,7 @@ function loadLaunchHelp(): typeof LaunchHelp.launchHelp {
 	return module.launchHelp;
 }
 
-const ALL_COMMANDS: CommandEntry[] = [
+export const commands: CommandEntry[] = [
 	{
 		name: "launch",
 		load: () => import("./commands/launch").then(m => m.default),
@@ -33,7 +33,6 @@ const ALL_COMMANDS: CommandEntry[] = [
 			return loadLaunchHelp();
 		},
 	},
-	{ name: "research", load: () => import("./commands/research").then(m => m.default), help: commandHelp.researchHelp },
 	{
 		name: "acp",
 		load: () => import("./commands/acp").then(m => m.default),
@@ -283,31 +282,6 @@ const ALL_COMMANDS: CommandEntry[] = [
 	},
 ];
 
-/**
- * Native agent definitions and execution do not configure or run BreadBoard
- * workers. Frontend and engine-backed helpers remain registered.
- */
-const BREADBOARD_NATIVE_AGENT_COMMANDS: Readonly<Record<string, true>> = {
-	acp: true,
-	agents: true,
-	cleanse: true,
-	commit: true,
-	compress: true,
-	join: true,
-};
-
-export const commands: CommandEntry[] = IS_BREADBOARD_PRODUCT
-	? ALL_COMMANDS.filter(command => BREADBOARD_NATIVE_AGENT_COMMANDS[command.name] !== true)
-	: ALL_COMMANDS;
-
-const ALL_SUBCOMMAND_NAMES = new Set<string>();
-for (const command of ALL_COMMANDS) {
-	ALL_SUBCOMMAND_NAMES.add(command.name);
-	if (command.aliases) {
-		for (const alias of command.aliases) ALL_SUBCOMMAND_NAMES.add(alias);
-	}
-}
-
 const SUBCOMMAND_NAMES = new Set<string>();
 for (const command of commands) {
 	SUBCOMMAND_NAMES.add(command.name);
@@ -387,11 +361,11 @@ export type ResolvedCliArgv = { argv: string[] } | { error: string };
  * scanning hits a non-subcommand positional, an end-of-options `--`, or the end
  * of argv first.
  */
-function leadingSubcommandIndex(argv: readonly string[], names: ReadonlySet<string> = SUBCOMMAND_NAMES): number {
+function leadingSubcommandIndex(argv: string[]): number {
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		if (arg === "--") return -1;
-		if (!arg.startsWith("-")) return names.has(arg) ? index : -1;
+		if (!arg.startsWith("-")) return isSubcommand(arg) ? index : -1;
 		if (flagConsumesValue(arg, argv[index + 1])) index += 1;
 	}
 	return -1;
@@ -431,31 +405,15 @@ function stripLaunchGlobalFlags(leading: readonly string[]): string[] {
 }
 
 /**
- * Product-only top-level commands are rejected before `run()` can load their
- * native agent implementation. The full command set remains available to OMP.
- */
-function productDisabledCommandMessage(argv: readonly string[]): string | undefined {
-	if (!IS_BREADBOARD_PRODUCT) return undefined;
-	const subIndex = leadingSubcommandIndex(argv, ALL_SUBCOMMAND_NAMES);
-	if (subIndex < 0) return undefined;
-	const command = argv[subIndex];
-	if (!command || BREADBOARD_NATIVE_AGENT_COMMANDS[command] !== true) return undefined;
-	return `\`${command}\` is unavailable in BreadBoard product mode; native execution has no BreadBoard host route.`;
-}
-
-/**
  * Decide what the CLI runner should do with raw argv: reject bare reserved
- * management words, reject product-disabled native agent commands, pass
- * help/version through untouched, route a recognized subcommand (even behind
- * leading global flags like `--approval-mode=yolo`) to that command, and
- * forward everything else to `launch` (#2970). Leading launch-global flags
- * are forwarded to launch-shaped commands but stripped for other subcommands
- * that cannot parse them (#8891).
+ * management words, pass help/version through untouched, route a recognized
+ * subcommand (even behind leading global flags like `--approval-mode=yolo`) to
+ * that command, and forward everything else to `launch` (#2970). Leading
+ * launch-global flags are forwarded to launch-shaped commands but stripped for
+ * other subcommands that cannot parse them (#8891).
  */
 export function resolveCliArgv(argv: string[]): ResolvedCliArgv {
 	const first = argv[0];
-	const productDisabledMessage = productDisabledCommandMessage(argv);
-	if (productDisabledMessage) return { error: productDisabledMessage };
 	const reservedMessage = reservedTopLevelWordMessage(argv);
 	if (reservedMessage) return { error: reservedMessage };
 	if (first === "--help" || first === "-h" || first === "--version" || first === "-v" || first === "help") {

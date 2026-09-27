@@ -30,17 +30,7 @@ async function runBreadboardCli(
 	return { exitCode: await child.exited, stderr };
 }
 
-describe("BreadBoard product CLI rejects native agent commands", () => {
-	test("rejects cleanse, commit, and compress before they fall through to launch", async () => {
-		const cases = [["cleanse"], ["commit"], ["compress"], ["--cwd", "/tmp", "cleanse"]] as const;
-		const results = await Promise.all(cases.map(args => runBreadboardCli(args)));
-		for (const [index, result] of results.entries()) {
-			expect(result.exitCode).toBe(1);
-			expect(result.stderr).toContain(`\`${cases[index]?.at(-1)}\``);
-			expect(result.stderr).toContain("unavailable in BreadBoard product mode");
-		}
-	});
-
+describe("BreadBoard product CLI identity", () => {
 	test("names the product command, not upstream omp, in resume and reserved-verb hints", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "bb-identity-hints-"));
 		try {
