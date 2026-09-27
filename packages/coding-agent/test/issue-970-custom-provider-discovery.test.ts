@@ -40,19 +40,11 @@ async function createHub(state: ProviderDiscoveryState): Promise<ModelHubCompone
 		authStorage: { keys: { source: () => undefined } },
 	} as unknown as ModelRegistry;
 	const ui = { requestRender: vi.fn(), terminal: { rows: 40 } } as unknown as TUI;
-	const hub = new ModelHubComponent(
-		ui,
-		createModelBrowserSource(Settings.isolated({})),
-		modelRegistry,
-		[],
-		{
-			onAssign: () => {},
-			onSelectModel: () => {},
-			onUnassign: () => {},
-			onCancel: () => {},
-		},
-		{ mainStreamOwnsTurnLifecycle: false },
-	);
+	const hub = new ModelHubComponent(ui, createModelBrowserSource(Settings.isolated({})), modelRegistry, [], {
+		onAssign: () => {},
+		onUnassign: () => {},
+		onCancel: () => {},
+	});
 	await Bun.sleep(0);
 	installTestTheme();
 	// Scope-hop is the default arrow mode: one Down moves All models → the

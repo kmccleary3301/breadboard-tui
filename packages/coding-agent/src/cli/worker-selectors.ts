@@ -7,8 +7,6 @@
  */
 /** Blob-broker selector shared by the CLI dispatcher and worker launcher. */
 export const BLOB_BROKER_WORKER_ARG = "__omp_worker_blob_broker";
-/** Shared engine owner, separate from any interactive frontend. */
-export const SHARED_ENGINE_WORKER_ARG = "__omp_worker_breadboard_engine";
 /** Computer-worker selector shared by the CLI dispatcher and worker launcher. */
 export const COMPUTER_WORKER_ARG = "__omp_worker_computer";
 /** Daemon-broker selector shared by the CLI dispatcher and worker launcher. */

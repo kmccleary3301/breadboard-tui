@@ -152,7 +152,15 @@ export const STATUS_LINE_PRESET_VALUES = [
 	"custom",
 ] as const;
 export type StatusLinePreset = (typeof STATUS_LINE_PRESET_VALUES)[number];
-export const STATUS_LINE_SEPARATOR_VALUES = ["powerline", "powerline-thin", "slash", "pipe", "block", "none", "ascii"] as const;
+export const STATUS_LINE_SEPARATOR_VALUES = [
+	"powerline",
+	"powerline-thin",
+	"slash",
+	"pipe",
+	"block",
+	"none",
+	"ascii",
+] as const;
 export type StatusLineSeparatorStyle = (typeof STATUS_LINE_SEPARATOR_VALUES)[number];
 
 export type SettingTab =
@@ -239,7 +247,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	],
 	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
 	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
-	breadboard: ["Harness", "Engine", "Subagents"],
+	breadboard: ["Harness", "Subagents"],
 };
 
 /** Status line segment identifiers accepted by custom status-line settings. */
@@ -272,7 +280,6 @@ export const STATUS_LINE_SEGMENT_IDS = [
 	"vim",
 	"harness",
 	"longrun",
-	"bb_activity",
 	"bb_policy",
 ] as const;
 
@@ -523,79 +530,6 @@ export const SETTINGS_SCHEMA = {
 	"auth.broker.url": { type: "string", default: undefined },
 	"auth.broker.token": { type: "string", default: undefined, credential: true },
 	"auth.accountPolicies": { type: "array", default: EMPTY_AUTH_ACCOUNT_POLICIES },
-	"breadboard.engineMode": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Engine",
-			label: "Engine mode",
-			description: "BreadBoard lifecycle mode used when no command-line override is provided",
-			options: [
-				{ value: "local-owned", label: "Local (owned)" },
-				{ value: "local-external", label: "Local (external)" },
-				{ value: "remote", label: "Remote" },
-				{ value: "native", label: "Native (OMP loop)" },
-				{ value: "off", label: "Off" },
-			],
-		},
-	},
-	"breadboard.baseUrl": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Engine",
-			label: "Engine endpoint",
-			description: "Endpoint used by local-external and remote modes",
-		},
-	},
-	"breadboard.startupTimeoutMs": {
-		type: "number",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Engine",
-			label: "Startup timeout",
-			description: "Maximum time to wait for an owned engine to become ready",
-			options: [
-				{ value: "10000", label: "10 seconds" },
-				{ value: "30000", label: "30 seconds" },
-				{ value: "60000", label: "1 minute" },
-				{ value: "120000", label: "2 minutes" },
-			],
-		},
-	},
-	"breadboard.requestTimeoutMs": {
-		type: "number",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Engine",
-			label: "Request timeout",
-			description: "Maximum time to wait for an engine request",
-			options: [
-				{ value: "5000", label: "5 seconds" },
-				{ value: "10000", label: "10 seconds" },
-				{ value: "30000", label: "30 seconds" },
-				{ value: "60000", label: "1 minute" },
-			],
-		},
-	},
-	"breadboard.ownerExitPolicy": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Engine",
-			label: "Engine cleanup",
-			description: "Whether an owned engine remains after this process exits",
-			options: [
-				{ value: "attached", label: "Stop with OMP" },
-				{ value: "detached", label: "Keep running" },
-			],
-		},
-	},
 	"breadboard.sessionConfigPath": {
 		type: "string",
 		default: undefined,
@@ -952,7 +886,7 @@ export const SETTINGS_SCHEMA = {
 	// Status line
 	"statusLine.preset": {
 		type: "enum",
-values: [
+		values: [
 			"bb-balanced",
 			"bb-quiet",
 			"bb-detailed",

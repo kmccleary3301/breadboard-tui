@@ -1,10 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
-import { createBreadboardClient, type SessionSummary } from "@breadboard/sdk/engine";
-import {
-	BREADBOARD_SESSION_BINDING_CUSTOM_TYPE,
-	type BreadboardSessionBindingData,
-} from "@oh-my-pi/pi-coding-agent/breadboard/session-binding";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -18,7 +13,6 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
-import { asGlobalFetch } from "./helpers/fetch-mock";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./modes/components/effective-lock-fixture";
 
 function plainRows(rows: readonly string[]): string[] {
@@ -321,156 +315,6 @@ describe("libkitty end-to-end", () => {
 		// from scrollback and viewport alike — while the live editor stays mounted.
 		expect(plainRows(term.getScrollBuffer()).some(row => row.includes(THINK))).toBe(false);
 		expect(plainRows(term.getViewport()).some(row => row.includes("LIVE_EDITOR_DRAFT"))).toBe(true);
-	});
-
-	it("retains parent session file, header ID, and binding content on harness switch", async () => {
-		const sessionSummary: SessionSummary = {
-			session_id: "engine-session-1",
-			status: "running",
-			generation_id: "generation-1",
-			trajectory_segment_id: "segment-1",
-			lineage: null,
-			effective_lock_hash: "sha256:lock-hash",
-			mode: "coding",
-		};
-
-		const makeEnvelope = <T>(data: T) =>
-			Response.json({
-				schema_version: "bb.cli.result.v1",
-				ok: true,
-				status: "ok",
-				command: [],
-				record_refs: [],
-				hashes: {
-					graph: "sha256:lock-hash",
-				},
-				stage_outcomes: [],
-				warnings: [],
-				next_actions: [],
-				error: null,
-				exit_code: 0,
-				data,
-			});
-
-		const client = createBreadboardClient({
-			baseUrl: "http://127.0.0.1:9099",
-			fetch: asGlobalFetch(async input => {
-				const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-				const pathname = new URL(url).pathname;
-				if (pathname.endsWith("/validate")) {
-					return makeEnvelope({ valid: true });
-				}
-				if (pathname.endsWith("/lock")) {
-					return makeEnvelope({
-						path: "daily_driver.v1.lock.json",
-						graph_hash: "sha256:lock-hash",
-						lock: {
-							schema_version: "bb.effective_config_graph.v1",
-							graph_hash: "sha256:lock-hash",
-							source_layers: [],
-							effective_values: [],
-						},
-					});
-				}
-				if (pathname.endsWith("/explain")) {
-					return makeEnvelope({ fields: [] });
-				}
-				if (pathname.startsWith("/v1/harness-locks/")) {
-					return makeEnvelope({
-						path: "daily_driver.v1.lock.json",
-						lock: {
-							schema_version: "bb.effective_config_graph.v1",
-							graph_hash: "sha256:lock-hash",
-							source_layers: [],
-							effective_values: [],
-						},
-					});
-				}
-				if (pathname.startsWith("/v1/sessions/")) {
-					return makeEnvelope({ session: sessionSummary });
-				}
-				if (pathname.startsWith("/v1/harnesses/")) {
-					return makeEnvelope({
-						path: "daily_driver.v1.yaml",
-						definition: {
-							schema_version: "bb.harness_definition.v1",
-							profile: { name: "Daily Driver" },
-						},
-					});
-				}
-				throw new Error(`Unexpected harness fixture request: ${pathname}`);
-			}),
-		});
-
-		term = new VirtualTerminal(120, 32);
-		const composer = new Composer({ terminal: term });
-		mode = new InteractiveMode(
-			session,
-			"test",
-			undefined,
-			() => {},
-			undefined,
-			undefined,
-			undefined,
-			composer,
-			undefined,
-			undefined,
-			undefined,
-			client,
-			"daily_driver.v1.yaml",
-			undefined,
-			async (_configPath, _lockId, transition) => transition(),
-			() => "engine-session-1",
-		);
-
-		await mode.init({ suppressWelcomeIntro: true });
-
-		const expectedParentId = session.sessionManager.getSessionId();
-		const parentSessionFile = session.sessionManager.getSessionFile();
-		if (!parentSessionFile) throw new Error("Expected a persistent parent session path");
-
-		const expectedBinding: BreadboardSessionBindingData = {
-			schemaVersion: "breadboard.session-binding.v4",
-			sessionId: "engine-parent-session-1",
-			previousSessionId: null,
-			replayConfigurationDigest: "sha256:parent-replay",
-			cursor: {
-				eventId: null,
-				sequence: 0,
-			},
-			ownedSubmissions: [],
-		};
-		session.sessionManager.appendCustomEntry(BREADBOARD_SESSION_BINDING_CUSTOM_TYPE, expectedBinding);
-
-		// Assert parent is initially unpersisted and has no assistant messages
-		expect(session.sessionManager.isSessionOnDisk()).toBe(false);
-		expect(session.sessionManager.getEntries().some(e => e.type === "message")).toBe(false);
-
-		const switched = await mode.startHarnessSession("daily_driver.v1.yaml");
-		expect(switched).toBe(true);
-
-		// Parent session must now exist on disk and be openable through SessionManager
-		const openedParent = await SessionManager.open(parentSessionFile);
-		try {
-			expect(openedParent.getSessionId()).toBe(expectedParentId);
-
-			const bindingEntry = openedParent
-				.getEntries()
-				.find(entry => entry.type === "custom" && entry.customType === BREADBOARD_SESSION_BINDING_CUSTOM_TYPE);
-			if (bindingEntry?.type !== "custom") throw new Error("Retained parent binding is missing");
-			expect(bindingEntry.data).toEqual(expectedBinding);
-		} finally {
-			await openedParent.close();
-		}
-
-		// Child local ID is distinct from parent
-		const childSessionId = session.sessionManager.getSessionId();
-		expect(childSessionId).not.toBe(expectedParentId);
-		const childHeader = session.sessionManager.getHeader();
-
-		// Child parent path points to actual parent file
-		expect(childHeader?.parentSession).toBe(parentSessionFile);
-		expect(await Bun.file(parentSessionFile).exists()).toBe(true);
 	});
 
 	it("hides tool activity already retired to native scrollback when the real shortcut toggles", async () => {

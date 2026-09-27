@@ -76,7 +76,6 @@ function createHub(registry: ModelRegistry): ModelHubComponent {
 	const ui = { requestRender: () => {}, terminal: { rows: 40 } } as unknown as TUI;
 	const callbacks: ModelHubCallbacks = {
 		onAssign: () => {},
-		onSelectModel: () => {},
 		onUnassign: () => {},
 		onLoginRequest: () => {},
 		onCancel: () => {},

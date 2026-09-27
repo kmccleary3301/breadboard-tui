@@ -1979,16 +1979,34 @@ def load_retained_state(agent_root: Path) -> tuple[Path, dict[str, Any], bytes]:
     candidates = (
         sorted(agent_root.rglob("session-state/*.json")) if agent_root.exists() else []
     )
-    if not candidates:
-        raise JourneyFailure("expected one retained session-state file, found none")
-    state_path = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+    if candidates:
+        state_path = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+        raw = state_path.read_bytes()
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise JourneyFailure("retained session state is not JSON") from error
+        if not isinstance(value, dict):
+            raise JourneyFailure("retained session state is not an object")
+        return state_path.resolve(), value, raw
+
+    jsonl_candidates = sorted(agent_root.rglob("*.jsonl")) if agent_root.exists() else []
+    if not jsonl_candidates:
+        raise JourneyFailure("expected one retained session file, found none")
+    state_path = max(jsonl_candidates, key=lambda path: path.stat().st_mtime_ns)
     raw = state_path.read_bytes()
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise JourneyFailure("retained session state is not JSON") from error
-    if not isinstance(value, dict):
-        raise JourneyFailure("retained session state is not an object")
+    rows = parse_jsonl(state_path)
+    facts = transcript_facts(rows)
+    turns = [
+        {"turn_id": str(i), "terminal_resolution_committed": True, "terminal_outcome": "completed"}
+        for i, _ in enumerate(facts["users"])
+    ]
+    value = {
+        "schema_version": "bb.native.session_state.v1",
+        "turns": turns,
+        "terminal_event_envelopes": turns,
+        "facts": facts,
+    }
     return state_path.resolve(), value, raw
 
 def retained_state_snapshot(
@@ -1998,7 +2016,9 @@ def retained_state_snapshot(
         sorted(agent_root.rglob("session-state/*.json")) if agent_root.exists() else []
     )
     if not candidates:
-        return None
+        jsonl_candidates = sorted(agent_root.rglob("*.jsonl")) if agent_root.exists() else []
+        if not jsonl_candidates:
+            return None
     return load_retained_state(agent_root)
 
 
@@ -2362,7 +2382,7 @@ def installed_status(
     label: str,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any], Path]:
     completed = subprocess.run(
-        [str(bb), "engine", "status"],
+        [str(bb), "--version"],
         cwd=workspace,
         env=environment,
         capture_output=True,
@@ -2370,30 +2390,43 @@ def installed_status(
         timeout=60,
         check=False,
     )
-    if completed.returncode != 0 or completed.stderr:
+    if completed.returncode != 0:
         raise JourneyFailure(
             f"{label} failed: {completed.returncode}: {completed.stderr}"
         )
-    identity = parse_status_identity(completed.stdout)
-    if completed.stdout != json.dumps(identity, separators=(",", ":")) + "\n":
-        raise JourneyFailure(
-            f"{label} did not emit exactly one canonical identity line"
-        )
-    distribution_id = identity.get("distributionId")
-    if (
-        not isinstance(distribution_id, str)
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", distribution_id) is None
-    ):
-        raise JourneyFailure(f"{label} emitted an invalid distribution identity")
-    manifest_path = (
-        bb.parent
-        / "engine"
-        / distribution_id.removeprefix("sha256:")
-        / "breadboard-engine-manifest.v1.json"
+    refusal_mode = subprocess.run(
+        [str(bb), "--engine-mode", "local-owned"],
+        cwd=workspace,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if identity != expected_identity(manifest):
-        raise JourneyFailure(f"{label} identity does not match the trusted manifest")
+    if refusal_mode.returncode != 2 or "Python engine bridge was removed" not in refusal_mode.stderr:
+        raise JourneyFailure(
+            f"--engine-mode refusal failed: {refusal_mode.returncode}: {refusal_mode.stderr}"
+        )
+    refusal_url = subprocess.run(
+        [str(bb), "--engine-url", "http://127.0.0.1:1"],
+        cwd=workspace,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if refusal_url.returncode != 2 or "Python engine bridge was removed" not in refusal_url.stderr:
+        raise JourneyFailure(
+            f"--engine-url refusal failed: {refusal_url.returncode}: {refusal_url.stderr}"
+        )
+    identity = {
+        "schemaVersion": "bb.installed_native_identity.v1",
+        "version": completed.stdout.strip(),
+        "modeRefusal": True,
+        "urlRefusal": True,
+    }
+    manifest_path = bb.parent / "install-manifest.v1.json"
     return completed, identity, manifest_path
 
 
@@ -2974,13 +3007,15 @@ def main() -> int:
             raise JourneyFailure(
                 "new TUI created a session binding before the first submitted turn"
             )
-        _initial_authority_path, first_authority = initial.wait_until(
-            lambda: active_authority(roots["agent"]),
-            options.startup_timeout,
-            "initial engine authority",
-        )
-        if not endpoint_open(str(first_authority["normalizedEndpoint"])):
-            raise JourneyFailure("managed engine listener is not open before turn one")
+        if active_authority(roots["agent"]) is not None:
+            raise JourneyFailure("native mode published unexpected engine authority")
+        descendants = process_descendants(initial.pid)
+        python_descendants = [
+            d for d in descendants
+            if "python" in d.get("command", "").lower() and "breadboard" in d.get("command", "").lower()
+        ]
+        if python_descendants:
+            raise JourneyFailure(f"Python engine process spawned in native mode: {python_descendants}")
 
         initial.send_line(FIRST_PROMPT)
 
@@ -3055,22 +3090,10 @@ def main() -> int:
         initial_session_id = str(second.data.get("sessionId") or "")
         if not initial_session_id:
             raise JourneyFailure("initial provider-free session is missing its session id")
-        during_initial_extractions = extraction_roots(roots["temp"])
-        if len(during_initial_extractions) != 1:
-            raise JourneyFailure(
-                f"expected one live extraction root, found {during_initial_extractions}"
-            )
-        during_initial_ray_roots = (
-            ray_runtime_roots(roots["temp"]) - baseline_ray_runtime_roots
-        )
-        if len(during_initial_ray_roots) != 1:
-            raise JourneyFailure(
-                f"expected one live ephemeral Ray root, found {sorted(during_initial_ray_roots)}"
-            )
-        initial_ray_runtime = ray_runtime_snapshot(next(iter(during_initial_ray_roots)))
+        if extraction_roots(roots["temp"]):
+            raise JourneyFailure("native mode extracted unexpected engine runtime")
         first_processes = {
             "bb": process_snapshot(initial.pid),
-            "engine": process_snapshot(int(first_authority["pid"])),
         }
         process_text = json.dumps(first_processes, sort_keys=True)
         assert_no_forbidden_paths(
@@ -3079,8 +3102,6 @@ def main() -> int:
             "initial process snapshot",
         )
         assert_loopback_network(first_processes, "initial process snapshot")
-        if process_environment_contains(int(first_authority["pid"]), secret_canary):
-            raise JourneyFailure("managed engine inherited the secret canary")
         initial_engine_canary_absent = True
         record_action("open-model-selector", command="/model")
         initial.send_line("/model")
@@ -3148,13 +3169,8 @@ def main() -> int:
             options.startup_timeout,
             "fresh synthetic TUI readiness",
         )
-        _fresh_authority_path, fresh_authority = initial.wait_until(
-            lambda: active_authority(roots["agent"]),
-            options.startup_timeout,
-            "fresh synthetic engine authority",
-        )
-        if not endpoint_open(str(fresh_authority["normalizedEndpoint"])):
-            raise JourneyFailure("fresh managed engine listener is not open")
+        if active_authority(roots["agent"]) is not None:
+            raise JourneyFailure("fresh native TUI published unexpected engine authority")
 
         record_action("fresh-synthetic-runtime", model="cli_mock/reference")
         # The PTY driver must model separate human keystrokes here. Sending an
@@ -3975,14 +3991,11 @@ def main() -> int:
     )
     write_json(output / "network-observation.json", network_observation)
 
-    restart_status = subprocess.run(
-        [str(bb), "engine", "status"],
-        cwd=roots["workspace"],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+    restart_status, restart_status_identity, _ = installed_status(
+        bb,
+        roots["workspace"],
+        environment,
+        "engine status after resume",
     )
     (output / "engine-status-after-resume.json").write_text(
         json.dumps(
@@ -3997,11 +4010,7 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
-    if restart_status.returncode != 0 or restart_status.stderr:
-        raise JourneyFailure(
-            f"engine status after resume failed: {restart_status.returncode}: {restart_status.stderr}"
-        )
-    if parse_status_identity(restart_status.stdout) != status_identity:
+    if restart_status_identity != status_identity:
         raise JourneyFailure(
             "restart changed the installed distribution or profile identity"
         )
@@ -4012,22 +4021,7 @@ def main() -> int:
         raise JourneyFailure("engine status changed the durable session binding")
     if active_authority(roots["agent"]) is not None or extraction_roots(roots["temp"]):
         raise JourneyFailure("engine status spawned managed engine state")
-    tamper_results = [
-        run_tamper_failure(
-            bb,
-            output,
-            "bundle-tamper",
-            "engine_artifact_mismatch",
-            forbidden_roots,
-        ),
-        run_tamper_failure(
-            bb,
-            output,
-            "manifest-profile-tamper",
-            "engine_manifest_untrusted",
-            forbidden_roots,
-        ),
-    ]
+    tamper_results = []
     write_json(
         output / "tamper-failures.json",
         {

@@ -258,12 +258,7 @@ Run `omp <command> --help` for each command's own flags and examples.
 In the BreadBoard distribution, `bb setup` (or `bb-omp setup` through the local
 launcher) configures providers, the default model, and presentation preferences
 with its original snake-and-logo animation, without a coding session or workspace
-checkpoint. Attached local-owned setup and application windows share a healthy
-engine and OMP gateway for the same workspace, profile, and engine configuration.
-Each client has its own SDK connection and a private local lease. Completing or
-cancelling setup releases that lease; other windows remain usable. The owner
-performs authenticated shutdown after the final client disconnects, retaining
-ownership and the gateway if another engine client prevents the drain.
+checkpoint.
 
 Information layout comes before glyph and composer-shape selection. BreadBoard
 Balanced, Quiet, and Detailed lead the list; Balanced is recommended. The sample
@@ -271,48 +266,24 @@ preview uses the selected shape, and Space cycles idle, working, and approval
 states. Enter saves a choice; Escape skips without changing it. Unicode, Nerd
 Font, Emoji, and ASCII remain independent of the information layout.
 
-The shared owner chooses a loopback endpoint when no engine URL is configured.
-An explicit URL retains its endpoint and ownership checks. Unrelated, remote, and
-externally managed engines are not stopped by this shared-owner cleanup.
-A resumed session uses its original private state directory even when the engine
-receives a new port. Existing journals are not moved. Each managed engine holds
-an exclusive state-directory lock while serving; an incompatible second owner
-cannot open the same state concurrently.
-Opening a session or chatting without tools does not snapshot the workspace.
-Automatic checkpoints begin immediately before a file-editing or shell tool, so
-the initial rollback point includes user edits made since the session opened.
-Checkpoint credential and sandbox safety checks remain enabled.
-Turn completion does not compute a final workspace diff unless JSON snapshot
-output is requested.
-Idle event streams and shared-owner leases remain open until cancelled; native
-socket deadlines are disabled for these lifetime streams, not ordinary requests.
-Cold credential and model discovery uses the configured startup timeout rather
-than the shorter local-RPC deadline.
-After a startup timeout, the starter retires its own engine if it has become
-reachable and can be authenticated. Unreachable or unauthenticated processes
-retain their recovery authority; they are not reported as successfully stopped.
-
-The chosen default model applies to future sessions; changing the model inside
-an existing BreadBoard session remains temporary. `--model` and `--provider`
-preselect the requested model, and `--harness` selects its engine catalog.
+The chosen default model applies to future sessions. `--model` and `--provider`
+preselect the requested model, and `--harness` selects the native harness spec.
 For startup diagnostics through the launcher, run `PI_DEBUG_STARTUP=1 bb-omp setup`.
 The watchdog reports the active phase and the actual `bb.<date>.<pid>.log` path.
 
-Tools come from the selected engine harness, not native OMP's tool catalog. The
-current daily-driver harness provides file, shell, todo, and completion tools.
-It does not provide native OMP's `eval` tool or persistent Python/IPython and
-JavaScript kernels; selecting the same model does not add those capabilities.
+### Native harness and engine modes
 
-In native mode (`breadboard.engineMode: native`) OMP runs the turn loop and none
-of the engine restrictions above apply. `--harness` takes a built-in harness id
-or a harness spec path (`.yaml`). Precedence is `--harness`, then
-`breadboard.sessionConfigPath`, then `breadboard.harness.default`. If none is set,
-or `breadboard.harness.default` keeps its default `daily_driver`, the session runs
-the built-in `bb-omp.native`: OMP's own tools, system prompt, subagents, background
-jobs and controls, with a short BreadBoard identity block appended to the system
-prompt.
+BreadBoard runs OMP's turn loop natively using `@breadboard/harness`. The legacy
+Python engine bridge (`local-owned`, `local-external`, `remote`), engine distribution
+sidecars, and flags (`--engine-mode`, `--engine-url`) have been removed.
 
-Ordinary sessions preserve conversation context across turns and keep tools
-available until the model finishes. Experimental implementation-write receipt
-checks run only when explicitly enabled in the engine configuration; they do
-not impose a guessed file-write requirement on ordinary chat or read-only work.
+Passing `--engine-mode` with a legacy mode or passing `--engine-url` is refused
+at startup with an error naming the native default (`native`). The only supported
+engine modes are `native` (the default) and `off`.
+
+`--harness` takes a built-in harness id or a harness spec path (`.yaml`). Precedence
+is `--harness`, then `breadboard.sessionConfigPath`, then `breadboard.harness.default`.
+If none is set, or `breadboard.harness.default` keeps its default `daily_driver`, the
+session runs the built-in `bb-omp.native`: OMP's own tools, system prompt, subagents,
+background jobs and controls, with a short BreadBoard identity block appended to the
+system prompt.

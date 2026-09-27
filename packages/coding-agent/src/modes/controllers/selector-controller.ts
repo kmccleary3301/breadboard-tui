@@ -6,7 +6,6 @@ import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import type { Component, OverlayHandle, ResizeScrollbackMode } from "@oh-my-pi/pi-tui";
 import { Loader, Spacer, setTuiTight, Text } from "@oh-my-pi/pi-tui";
-
 import {
 	getAgentDbPath,
 	getAgentDir,
@@ -21,16 +20,12 @@ import {
 	resolveAdvisorConfigEditPath,
 	saveWatchdogConfigFile,
 } from "../../advisor";
-import { authenticateProvider } from "../../breadboard/provider-auth-login";
-import { type AuthCredentialView, ProviderAuthError, type ProviderAuthPort } from "../../breadboard/provider-auth-port";
-import { nativeControlRestriction, nativeSettingRestriction } from "../../breadboard/native-control-policy";
 import { reset as resetCapabilities } from "../../capability";
 import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
 import { formatLoginIdentity } from "../../cli/oauth-terminal";
 import { resolveAdvisorRoleSelection, resolveModelRoleValue } from "../../config/model-resolver";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
-import { getUi, SETTINGS_SCHEMA, type SettingPath } from "../../config/settings-schema";
 import { getRoleInfo } from "../../config/model-roles";
 import { settings } from "../../config/settings";
 import { createSettingsHost } from "../../config/settings-ui";
@@ -47,7 +42,6 @@ import {
 import {
 	getAvailableThemes,
 	getSymbolTheme,
-	isValidSymbolPreset,
 	previewTheme,
 	setColorBlindMode,
 	setMarkdownMermaidRendering,
@@ -56,13 +50,8 @@ import {
 	theme,
 } from "@oh-my-pi/pi-tui/theme";
 import type { AgentHubOpenOptions, InteractiveModeContext } from "../../modes/types";
-import { BREADBOARD_PRODUCT_IDENTITY } from "../../product-identity";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
-import type {
-	OAuthLoginIdentity,
-	ResetCreditAccountStatus,
-	ResetCreditRedeemOutcome,
-} from "../../session/auth-storage";
+import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome } from "../../session/auth-storage";
 import {
 	createForeignSessionStore,
 	foreignSessionInfoToSessionInfo,
@@ -119,13 +108,13 @@ import { createExtensionDashboardRuntime } from "../components/extensions/dashbo
 import { HistorySearchComponent } from "@oh-my-pi/pi-tui/overlays/history-search";
 import type { LoginDialogComponent as LoginDialogComponentType } from "@oh-my-pi/pi-tui/overlays/login-dialog";
 import type { LogoutAccountSelectorComponent as LogoutAccountSelectorComponentType } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
-import type { ModelHubComponent as ModelHubComponentType, ModelRoleSelectionScope } from "@oh-my-pi/pi-tui/overlays/model-hub";
+import type {
+	ModelHubComponent as ModelHubComponentType,
+	ModelRoleSelectionScope,
+} from "@oh-my-pi/pi-tui/overlays/model-hub";
 import { createModelBrowserSource } from "../model-browser-source";
 import type { ModelPickerComponent as ModelPickerComponentType } from "@oh-my-pi/pi-tui/overlays/model-picker";
 import type { OAuthSelectorComponent as OAuthSelectorComponentType } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
-import type {
-	BreadboardProviderAuthSelectorComponent as BreadboardProviderAuthSelectorComponentType,
-} from "@oh-my-pi/pi-tui/overlays/breadboard-provider-auth-selector";
 import { PluginSelectorComponent } from "@oh-my-pi/pi-tui/overlays/plugin-selector";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import { type ResetUsageAccount, ResetUsageSelectorComponent } from "@oh-my-pi/pi-tui/overlays/reset-usage-selector";
@@ -162,7 +151,6 @@ interface ProviderAuthUiModules {
 	LoginDialogComponent: typeof LoginDialogComponentType;
 	LogoutAccountSelectorComponent: typeof LogoutAccountSelectorComponentType;
 	OAuthSelectorComponent: typeof OAuthSelectorComponentType;
-	BreadboardProviderAuthSelectorComponent: typeof BreadboardProviderAuthSelectorComponentType;
 }
 
 /** Synchronous first-use boundary for provider auth catalog and dialog components. */
@@ -174,8 +162,6 @@ function loadProviderAuthUi(): ProviderAuthUiModules {
 		LogoutAccountSelectorComponent: require("@oh-my-pi/pi-tui/overlays/logout-account-selector.js")
 			.LogoutAccountSelectorComponent,
 		OAuthSelectorComponent: require("@oh-my-pi/pi-tui/overlays/oauth-selector.js").OAuthSelectorComponent,
-		BreadboardProviderAuthSelectorComponent: require("@oh-my-pi/pi-tui/overlays/breadboard-provider-auth-selector.js")
-			.BreadboardProviderAuthSelectorComponent,
 	};
 }
 
@@ -191,19 +177,11 @@ function loadProviderToggles(): ProviderToggleModules {
 }
 
 export class SelectorController {
-	constructor(
-		private ctx: InteractiveModeContext,
-		private readonly providerAuthPort?: ProviderAuthPort,
-	) {}
+	constructor(private ctx: InteractiveModeContext) {}
 	/**
 	 * Mount a primary fullscreen menu through the one polished modal path shared
 	 * by Settings, Model Hub, and Agent Hub.
 	 */
-	/** Partial controller contexts (settings and command callers) may have no session: not native-owned. */
-	get #nativeOwnsTurns(): boolean {
-		return this.ctx.session?.mainStreamOwnsTurnLifecycle === true;
-	}
-
 	#showFullscreenMenu(component: Component): OverlayHandle {
 		const handle = this.ctx.ui.showOverlay(component, {
 			anchor: "bottom-center",
@@ -298,11 +276,9 @@ export class SelectorController {
 					settings: createSettingsHost(),
 					plugins: createPluginSettingsHost(getProjectDir()),
 					model: this.ctx.session.model,
-					composerPreviewStatus: this.ctx.statusLine,
-					harness: this.ctx.harnessPort?.current() ?? null,
 					imageBudget: this.ctx.ui.imageBudget,
 					requestRender: () => this.ctx.ui.requestRender(),
-					mainStreamOwnsTurnLifecycle: this.#nativeOwnsTurns,
+					composerPreviewStatus: this.ctx.statusLine,
 				},
 				{
 					onChange: (id, value) => this.handleSettingChange(id, value),
@@ -326,7 +302,6 @@ export class SelectorController {
 							transparent: settings.get("statusLine.transparent"),
 							compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 							contextLine: settings.get("statusLine.contextLine"),
-							breadboard: settings.get("statusLine.breadboard"),
 							...previewSettings,
 						});
 						this.ctx.ui.requestRender();
@@ -356,7 +331,6 @@ export class SelectorController {
 							showHookStatus: settings.get("statusLine.showHookStatus"),
 							sessionAccent: settings.get("statusLine.sessionAccent"),
 							transparent: settings.get("statusLine.transparent"),
-							breadboard: settings.get("statusLine.breadboard"),
 							compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 							contextLine: settings.get("statusLine.contextLine"),
 						});
@@ -528,11 +502,6 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
-		const restriction = nativeControlRestriction("native-tools", this.#nativeOwnsTurns);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		const dashboard = await ExtensionDashboard.create({
 			runtime: createExtensionDashboardRuntime({
 				cwd: getProjectDir(),
@@ -590,11 +559,6 @@ export class SelectorController {
 	 * sidebar, agent rows, and chip strips that dive into the model browser.
 	 */
 	async showAgentsDashboard(): Promise<void> {
-		const restriction = nativeControlRestriction("subagents", this.#nativeOwnsTurns);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		const activeModel = this.ctx.session.model;
 		const activeModelPattern = activeModel ? `${activeModel.provider}/${activeModel.id}` : undefined;
 		const defaultModelPattern = this.ctx.settings.getModelRole("default");
@@ -628,15 +592,6 @@ export class SelectorController {
 	 * This handles side effects and session-specific settings.
 	 */
 	handleSettingChange(id: string, value: unknown): void {
-		// Selector-only ids (autoCompact, discovery.*) are not schema paths.
-		const ui = id in SETTINGS_SCHEMA ? getUi(id as SettingPath) : undefined;
-		const restriction = ui
-			? nativeSettingRestriction(id as SettingPath, ui.group, this.#nativeOwnsTurns)
-			: undefined;
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		// Discovery provider toggles
 		if (id.startsWith("discovery.")) {
 			const providerId = id.replace("discovery.", "");
@@ -650,14 +605,6 @@ export class SelectorController {
 		}
 
 		switch (id) {
-			case "statusLine.breadboard":
-				this.ctx.statusLine.updateSettings({
-					...this.ctx.settings.getGroup("statusLine"),
-					breadboard: this.ctx.settings.get("statusLine.breadboard"),
-				});
-				this.ctx.statusLine.invalidate();
-				this.ctx.ui.requestRender();
-				break;
 			// Session-managed settings (not in SettingsManager)
 			case "autoCompact":
 				this.ctx.session.setAutoCompactionEnabled(value as boolean, true);
@@ -857,8 +804,7 @@ export class SelectorController {
 				break;
 			}
 			case "symbolPreset": {
-				if (typeof value !== "string" || !isValidSymbolPreset(value)) break;
-				setSymbolPreset(value).then(() => {
+				setSymbolPreset(value as "unicode" | "nerd" | "ascii").then(() => {
 					this.ctx.statusLine.invalidate();
 					this.ctx.ui.requestRender();
 					this.ctx.ui.invalidate();
@@ -989,18 +935,12 @@ export class SelectorController {
 		compactFirst: boolean,
 	): Promise<void> {
 		const apply = async () => {
-			const level = this.#nativeOwnsTurns
-				? undefined
-				: (thinkingLevel ?? this.ctx.session.resolveTemporaryModelThinkingLevel(model));
+			const level = thinkingLevel ?? this.ctx.session.resolveTemporaryModelThinkingLevel(model);
 			await this.ctx.session.setModelTemporary(model, level);
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
-			if (this.#nativeOwnsTurns) {
-				this.ctx.showStatus(`Engine model: ${selector}.`);
-			} else {
-				const roleSelectorHint = this.ctx.keybindings.getKeys("app.model.select")[0] ?? "Alt+M";
-				this.ctx.showStatus(`Session-only model: ${selector}. Use ${roleSelectorHint} or /model for roles.`);
-			}
+			const roleSelectorHint = this.ctx.keybindings.getKeys("app.model.select")[0] ?? "Alt+M";
+			this.ctx.showStatus(`Session-only model: ${selector}. Use ${roleSelectorHint} or /model for roles.`);
 		};
 		if (!compactFirst) {
 			await apply();
@@ -1047,11 +987,6 @@ export class SelectorController {
 			this.ctx.session.scopedModels,
 			{
 				onPick: async (model, selector, { overContext }) => {
-					if (this.#nativeOwnsTurns) {
-						await this.#applySessionModel(model, selector, undefined, false);
-						done();
-						return;
-					}
 					try {
 						// Over-context pick: close the picker first so the compaction
 						// loader is visible.
@@ -1078,34 +1013,27 @@ export class SelectorController {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}
 				},
-				onPickTask: this.#nativeOwnsTurns
-					? undefined
-					: (_model, selector) => {
-							// Session-only: layer the Task override onto the runtime settings
-							// layer so it is never persisted, mirroring the session-model pick.
-							this.ctx.settings.override("task.agentModelOverrides", {
-								...this.ctx.settings.get("task.agentModelOverrides"),
-								task: selector,
-							});
-							this.ctx.showStatus(`Task subagent model (session-only): ${selector}. Use /agents to persist.`);
-							done();
-						},
+				onPickTask: (_model, selector) => {
+					// Session-only: layer the Task override onto the runtime settings
+					// layer so it is never persisted, mirroring the session-model pick.
+					this.ctx.settings.override("task.agentModelOverrides", {
+						...this.ctx.settings.get("task.agentModelOverrides"),
+						task: selector,
+					});
+					this.ctx.showStatus(`Task subagent model (session-only): ${selector}. Use /agents to persist.`);
+					done();
+				},
 				onCancel: done,
 			},
 			{
-				mainStreamOwnsTurnLifecycle: this.#nativeOwnsTurns,
 				currentContextTokens,
 				currentSelector,
-				taskModeKeys: this.#nativeOwnsTurns
-					? undefined
-					: this.ctx.keybindings.getKeys("app.model.selectTemporary"),
+				taskModeKeys: this.ctx.keybindings.getKeys("app.model.selectTemporary"),
 				taskModeKeyLabel: this.ctx.keybindings.getDisplayString("app.model.selectTemporary") || "alt+p",
 				taskSelector,
-				quickRoles: this.#nativeOwnsTurns ? undefined : quickRoleCycle?.models,
-				quickRoleOrder: this.#nativeOwnsTurns ? undefined : quickRoleOrder,
-				currentQuickRole: this.#nativeOwnsTurns
-					? undefined
-					: quickRoleCycle?.models[quickRoleCycle.currentIndex]?.role,
+				quickRoles: quickRoleCycle?.models,
+				quickRoleOrder,
+				currentQuickRole: quickRoleCycle?.models[quickRoleCycle.currentIndex]?.role,
 			},
 		);
 		const overlayHandle = this.ctx.ui.showOverlay(picker, {
@@ -1143,23 +1071,7 @@ export class SelectorController {
 			this.ctx.session.modelRegistry,
 			this.ctx.session.scopedModels,
 			{
-				onSelectModel: async (model, selector) => {
-					try {
-						await this.#applySessionModel(model, selector, undefined, false);
-						done();
-					} catch (error) {
-						this.ctx.showError(error instanceof Error ? error.message : String(error));
-					}
-				},
 				onAssign: async (model, role, thinkingLevel, selector, scope?: ModelRoleSelectionScope) => {
-					const restriction = nativeControlRestriction(
-						"model-roles",
-						this.#nativeOwnsTurns,
-					);
-					if (restriction) {
-						this.ctx.showWarning(restriction);
-						return false;
-					}
 					const releaseDefaultMutation = role === "default" ? await this.#acquireDefaultRoleMutation() : undefined;
 					const configuredStorage = this.ctx.settings.get("modelRoleStorage");
 					const targetScope = configuredStorage === "project" ? (scope ?? "project") : "global";
@@ -1246,14 +1158,6 @@ export class SelectorController {
 					}
 				},
 				onUnassign: async (role, scope?: ModelRoleSelectionScope) => {
-					const restriction = nativeControlRestriction(
-						"model-roles",
-						this.#nativeOwnsTurns,
-					);
-					if (restriction) {
-						this.ctx.showWarning(restriction);
-						return;
-					}
 					const releaseDefaultMutation = role === "default" ? await this.#acquireDefaultRoleMutation() : undefined;
 					const configuredStorage = this.ctx.settings.get("modelRoleStorage");
 					const targetScope = configuredStorage === "project" ? (scope ?? "project") : "global";
@@ -1333,14 +1237,6 @@ export class SelectorController {
 					}
 				},
 				onFallbackChainChange: (role, chain) => {
-					const restriction = nativeControlRestriction(
-						"model-roles",
-						this.#nativeOwnsTurns,
-					);
-					if (restriction) {
-						this.ctx.showWarning(restriction);
-						return;
-					}
 					try {
 						const chains = { ...this.ctx.settings.get("retry.fallbackChains") };
 						if (chain.length === 0) {
@@ -1365,14 +1261,6 @@ export class SelectorController {
 					void this.#loginThenReopenModelHub(providerId);
 				},
 				onCycleOrderChange: order => {
-					const restriction = nativeControlRestriction(
-						"model-roles",
-						this.#nativeOwnsTurns,
-					);
-					if (restriction) {
-						this.ctx.showWarning(restriction);
-						return;
-					}
 					try {
 						this.ctx.settings.set("cycleOrder", order);
 						this.ctx.showStatus(
@@ -1385,7 +1273,6 @@ export class SelectorController {
 				onCancel: () => done(),
 			},
 			{
-				mainStreamOwnsTurnLifecycle: this.#nativeOwnsTurns,
 				initialProviderId: hubOptions.initialProviderId,
 			},
 		);
@@ -1488,14 +1375,6 @@ export class SelectorController {
 	}
 
 	showUserMessageSelector(): void {
-		const restriction = nativeControlRestriction(
-			"native-session-transition",
-			this.#nativeOwnsTurns,
-		);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		const entries = this.ctx.sessionManager.getBranch().filter(isTranscriptEntry);
 		if (entries.length === 0) {
 			this.ctx.showStatus("No messages to branch from");
@@ -1682,14 +1561,6 @@ export class SelectorController {
 	}
 
 	showTreeSelector(): void {
-		const restriction = nativeControlRestriction(
-			"native-session-transition",
-			this.#nativeOwnsTurns,
-		);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		const tree = this.ctx.sessionManager.getTree();
 		const realLeafId = this.ctx.sessionManager.getLeafId();
 
@@ -1957,14 +1828,6 @@ export class SelectorController {
 	}
 
 	async showSessionSelector(source?: ForeignSessionSource): Promise<void> {
-		const restriction = nativeControlRestriction(
-			"native-session-transition",
-			this.#nativeOwnsTurns,
-		);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		let sessions: SessionInfo[];
 		let onSelectSession: (session: SessionInfo) => Promise<boolean>;
 		let selectorOptions: SessionSelectorOptions<SessionInfo>;
@@ -2211,13 +2074,16 @@ export class SelectorController {
 	}
 
 	/**
-	 * Run provider login through the BreadBoard broker when configured. Native
-	 * mode retains the existing AuthStorage flow.
+	 * Run the OAuth login flow for `providerId` inside a cancellable
+	 * {@link LoginDialogComponent} that replaces the editor slot. Esc aborts:
+	 * the dialog's abort signal reaches the provider flow, any pending prompt
+	 * rejects, and the editor is restored immediately. Returns true when
+	 * credentials were stored.
 	 */
 	async #handleOAuthLogin(providerId: string): Promise<boolean> {
 		this.ctx.showStatus(`Logging in to ${providerId}…`);
 		const { LoginDialogComponent, PASTE_CODE_LOGIN_PROVIDERS } = loadProviderAuthUi();
-		const useManualInput = !this.providerAuthPort && PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
+		const useManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
 		let restored = false;
 		const restoreEditor = () => {
 			if (restored) return;
@@ -2243,78 +2109,41 @@ export class SelectorController {
 		this.ctx.ui.setFocus(dialog);
 		this.ctx.ui.requestRender();
 		try {
-			let identity: OAuthLoginIdentity | undefined;
-			let brokerAccountLabel: string | undefined;
-			if (this.providerAuthPort) {
-				const credential = await authenticateProvider(this.providerAuthPort, providerId, {
-					signal: dialog.signal,
-					async selectAuthScheme(provider, schemes) {
-						const choices = schemes.map((scheme, index) => `${index + 1}) ${scheme}`).join("  ");
-						const answer = (
-							await dialog.showPrompt(`Choose authentication for ${provider.displayName}: ${choices}`)
-						).trim();
-						const selectedIndex = Number.parseInt(answer, 10) - 1;
-						return schemes[selectedIndex] ?? answer;
-					},
-					async selectOAuthFlow(provider) {
-						const flows = provider.oauthFlows.filter(
-							(flow): flow is "browser" | "device" => flow === "browser" || flow === "device",
-						);
-						if (flows.length <= 1) return flows[0];
-						const choices = flows.map((flow, index) => `${index + 1}) ${flow}`).join("  ");
-						const answer = (await dialog.showPrompt(`Choose OAuth flow: ${choices}`)).trim();
-						const selectedIndex = Number.parseInt(answer, 10) - 1;
-						const selectedByName = answer === "browser" || answer === "device" ? answer : undefined;
-						return (
-							flows[selectedIndex] ??
-							(selectedByName && flows.includes(selectedByName) ? selectedByName : undefined)
-						);
-					},
-					showAuthorization(session) {
-						const instructions = [
-							session.instructions,
-							session.userCode ? `Code: ${session.userCode}` : undefined,
-						]
-							.filter((line): line is string => Boolean(line))
-							.join("\n");
-						if (session.authorizeUrl) {
-							dialog.showAuth(session.authorizeUrl, instructions || undefined);
-							return;
-						}
-						if (instructions) dialog.showProgress(instructions);
-					},
-					prompt(input) {
-						return dialog.showPrompt(input.message, input.placeholder, { secret: input.secret });
-					},
-					showProgress(message) {
-						dialog.showProgress(message);
-					},
-				});
-				brokerAccountLabel = credential.accountLabel;
-			} else {
-				identity = await this.ctx.session.modelRegistry.authStorage.oauth.login(providerId as OAuthProvider, {
-					signal: dialog.signal,
-					onBrowserSession: captureBrowserSession,
-					onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
-						dialog.showAuth(info.url, info.instructions, info.launchUrl);
-					},
-					onPrompt: prompt => dialog.showPrompt(prompt),
-					onProgress: (message: string) => {
-						dialog.showProgress(message);
-					},
-					onManualCodeInput: useManualInput
-						? signal => dialog.showManualInput(MANUAL_LOGIN_PROMPT, signal)
-						: undefined,
-				});
-			}
-			if (!this.providerAuthPort) {
-				await this.ctx.session.modelRegistry.refreshProvider(providerId, "online");
-			}
+			const identity = await this.ctx.session.modelRegistry.authStorage.oauth.login(providerId as OAuthProvider, {
+				signal: dialog.signal,
+				onBrowserSession: captureBrowserSession,
+				onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
+					// The dialog renders the full URL (SSH-safe copy target) and
+					// opens the browser best-effort.
+					dialog.showAuth(info.url, info.instructions, info.launchUrl);
+				},
+				onPrompt: prompt => dialog.showPrompt(prompt),
+				onProgress: (message: string) => {
+					dialog.showProgress(message);
+				},
+				// Paste-code providers (e.g. Codex) may need the user to paste the
+				// fallback redirect URL when the loopback callback can't complete
+				// (headless/remote/Windows). Mount a focused input in the dialog so
+				// the paste lands somewhere the OAuth flow consumes — the hidden
+				// editor's `/login <url>` path is unreachable while the dialog holds
+				// focus (#5339).
+				onManualCodeInput: useManualInput
+					? signal => dialog.showManualInput(MANUAL_LOGIN_PROMPT, signal)
+					: undefined,
+			});
+			// Scope the post-login refresh to the just-authenticated provider with an
+			// `online` strategy: the default all-provider `online-if-uncached` reuses
+			// a fresh authoritative cache row (e.g. an empty result fetched before
+			// login), so newly persisted credentials would never re-run discovery and
+			// models would stay unavailable in-session (#5780). Unrelated providers
+			// are left untouched. `refreshProvider` swallows discovery failures, so
+			// awaiting cannot reject the login.
+			await this.ctx.session.modelRegistry.refreshProvider(providerId, "online");
 			const block = new TranscriptBlock();
 			// Name the account (and Anthropic organization) that was stored so a
 			// login that lands on an unintended account/subscription is visible
 			// immediately instead of silently replacing an existing registration.
-			const who = brokerAccountLabel ? ` as ${brokerAccountLabel}` : formatLoginIdentity(identity);
+			const who = formatLoginIdentity(identity);
 			block.addChild(
 				new Text(
 					theme.fg(
@@ -2325,59 +2154,19 @@ export class SelectorController {
 					0,
 				),
 			);
-			block.addChild(
-				new Text(
-					theme.fg(
-						"dim",
-						this.providerAuthPort
-							? `Credentials managed by ${BREADBOARD_PRODUCT_IDENTITY.displayName} auth broker`
-							: "Credentials saved to the selected auth store",
-					),
-					1,
-					0,
-				),
-			);
+			block.addChild(new Text(theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`), 1, 0));
 			this.ctx.present(block);
 			return true;
 		} catch (error: unknown) {
 			if (dialog.signal.aborted) {
+				// User-cancelled: the dialog already restored the editor and
+				// surfaced "Login cancelled".
 				return false;
 			}
-			if (error instanceof ProviderAuthError) {
-				this.ctx.showError(`Login failed: ${error.message} ${error.nextAction}`);
-			} else {
-				this.ctx.showError(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
-			}
+			this.ctx.showError(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
 			return false;
 		} finally {
 			restoreEditor();
-		}
-	}
-
-	#showProviderAuthError(operation: string, error: unknown): void {
-		if (error instanceof ProviderAuthError) {
-			this.ctx.showError(`${operation} failed: ${error.message} ${error.nextAction}`);
-			return;
-		}
-		this.ctx.showError(`${operation} failed: ${error instanceof Error ? error.message : String(error)}`);
-	}
-
-	async #handleProviderLogout(credential: AuthCredentialView): Promise<void> {
-		if (!this.providerAuthPort)
-			throw new Error(`${BREADBOARD_PRODUCT_IDENTITY.displayName} provider auth port is not configured`);
-		try {
-			const result = await this.providerAuthPort.logout({ credentialRef: credential.credentialRef });
-			if (!result.ok || result.outcome === "no_op") {
-				this.ctx.showStatus(`Logout skipped: ${credential.accountLabel} is no longer active.`);
-				return;
-			}
-			this.ctx.showStatus(`Successfully logged out ${credential.accountLabel} from ${credential.providerId}`);
-		} catch (error) {
-			if (error instanceof ProviderAuthError) {
-				this.ctx.showError(`Logout failed: ${error.message} ${error.nextAction}`);
-				return;
-			}
-			throw error;
 		}
 	}
 
@@ -2407,7 +2196,7 @@ export class SelectorController {
 					0,
 				),
 			);
-			block.addChild(new Text(theme.fg("dim", "Credential removed from the selected auth store"), 1, 0));
+			block.addChild(new Text(theme.fg("dim", `Credential removed from ${getAgentDbPath()}`), 1, 0));
 			const remainingSource = authStorage.keys.describe(providerId, this.ctx.session.sessionId);
 			if (remainingSource) {
 				block.addChild(
@@ -2421,52 +2210,6 @@ export class SelectorController {
 	}
 
 	async #showOAuthLogoutAccountSelector(providerId: string): Promise<void> {
-		const { getOAuthProviders, LogoutAccountSelectorComponent } = loadProviderAuthUi();
-		if (this.providerAuthPort) {
-			const loaded = await Promise.all([
-				this.providerAuthPort.listProviders(),
-				this.providerAuthPort.listCredentials(providerId),
-			]).catch(error => {
-				this.#showProviderAuthError("Account lookup", error);
-				return undefined;
-			});
-			if (!loaded) return;
-			const [providers, credentials] = loaded;
-			const activeCredentials = credentials.filter(credential => credential.status === "active");
-			if (activeCredentials.length === 0) {
-				this.ctx.showStatus(`No stored ${BREADBOARD_PRODUCT_IDENTITY.displayName} credentials for ${providerId}.`);
-				return;
-			}
-			const accounts = activeCredentials.map(
-				(credential, index) =>
-					({
-						credentialId: index,
-						provider: credential.providerId,
-						label: credential.accountLabel,
-						detail: [credential.alias, credential.status, credential.source].filter(Boolean).join(" · "),
-						type: credential.credentialKind === "api_key" ? "api_key" : "oauth",
-						active: credential.status === "active",
-					}) satisfies LogoutAccount,
-			);
-			const provider = providers.find(candidate => candidate.providerId === providerId);
-			this.showSelector(done => {
-				const selector = new LogoutAccountSelectorComponent(
-					provider?.displayName ?? providerId,
-					accounts,
-					account => {
-						done();
-						const credential = activeCredentials[account.credentialId];
-						if (credential) void this.#handleProviderLogout(credential);
-					},
-					() => {
-						done();
-						this.ctx.ui.requestRender();
-					},
-				);
-				return { component: selector, focus: selector };
-			});
-			return;
-		}
 		const authStorage = this.ctx.session.modelRegistry.authStorage;
 		try {
 			await authStorage.credentials.reload();
@@ -2476,6 +2219,7 @@ export class SelectorController {
 			);
 			return;
 		}
+		const { getOAuthProviders, LogoutAccountSelectorComponent } = loadProviderAuthUi();
 		const provider = getOAuthProviders().find(candidate => candidate.id === providerId);
 		const accounts = toLogoutAccounts(providerId, authStorage.credentials.list(providerId), {
 			activeIdentity: authStorage.oauth.identity(providerId, this.ctx.session.sessionId),
@@ -2504,243 +2248,35 @@ export class SelectorController {
 			return { component: selector, focus: selector };
 		});
 	}
-	async #handleProviderRevoke(credential: AuthCredentialView): Promise<void> {
-		if (!this.providerAuthPort) return;
-		const confirmed = await this.ctx.showHookConfirm(
-			`Revoke ${BREADBOARD_PRODUCT_IDENTITY.displayName} credential`,
-			`Permanently revoke ${credential.accountLabel} for ${credential.providerId}? This is distinct from logout and cannot be undone.`,
-		);
-		if (!confirmed) {
-			this.ctx.showStatus("Credential revoke cancelled.");
-			return;
-		}
-		try {
-			const result = await this.providerAuthPort.revoke({ credentialRef: credential.credentialRef });
-			if (result.outcome === "no_op") {
-				this.ctx.showStatus(`${credential.accountLabel} was already revoked.`);
-				return;
-			}
-			this.ctx.showStatus(`Revoked ${credential.accountLabel} for ${credential.providerId}.`);
-		} catch (error) {
-			if (error instanceof ProviderAuthError) {
-				this.ctx.showError(`Revoke failed: ${error.message} ${error.nextAction}`);
-				return;
-			}
-			this.ctx.showError(`Revoke failed: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	async #showProviderRevokeAccountSelector(providerId: string): Promise<void> {
-		if (!this.providerAuthPort) {
-			this.ctx.showStatus(`Credential revoke requires ${BREADBOARD_PRODUCT_IDENTITY.displayName} product mode.`);
-			return;
-		}
-		const loaded = await Promise.all([
-			this.providerAuthPort.listProviders(),
-			this.providerAuthPort.listCredentials(providerId),
-		]).catch(error => {
-			this.#showProviderAuthError("Credential lookup", error);
-			return undefined;
-		});
-		if (!loaded) return;
-		const [providers, credentials] = loaded;
-		const revocableCredentials = credentials.filter(credential => credential.status !== "revoked");
-		if (revocableCredentials.length === 0) {
-			this.ctx.showStatus(`No revocable ${BREADBOARD_PRODUCT_IDENTITY.displayName} credentials for ${providerId}.`);
-			return;
-		}
-		const accounts = revocableCredentials.map(
-			(credential, index) =>
-				({
-					credentialId: index,
-					provider: credential.providerId,
-					label: credential.accountLabel,
-					detail: [credential.alias, credential.status, credential.source].filter(Boolean).join(" · "),
-					type: credential.credentialKind === "api_key" ? "api_key" : "oauth",
-					active: credential.status === "active",
-				}) satisfies LogoutAccount,
-		);
-		const provider = providers.find(candidate => candidate.providerId === providerId);
-		const { LogoutAccountSelectorComponent } = loadProviderAuthUi();
-		this.showSelector(done => {
-			const selector = new LogoutAccountSelectorComponent(
-				provider?.displayName ?? providerId,
-				accounts,
-				account => {
-					done();
-					const credential = revocableCredentials[account.credentialId];
-					if (credential) void this.#handleProviderRevoke(credential);
-				},
-				() => {
-					done();
-					this.ctx.ui.requestRender();
-				},
-				"revoke",
-			);
-			return { component: selector, focus: selector };
-		});
-	}
-
-	async showProviderRevokeSelector(providerId?: string): Promise<void> {
-		const providerAuthPort = this.providerAuthPort;
-		if (!providerAuthPort) {
-			this.ctx.showStatus(`Credential revoke requires ${BREADBOARD_PRODUCT_IDENTITY.displayName} product mode.`);
-			return;
-		}
-		if (providerId) {
-			const providers = await providerAuthPort.listProviders().catch(error => {
-				this.#showProviderAuthError("Provider lookup", error);
-				return undefined;
-			});
-			if (!providers) return;
-			const provider = providers.find(
-				candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
-			);
-			if (!provider) {
-				this.ctx.showError(`Unknown ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider: ${providerId}`);
-				return;
-			}
-			await this.#showProviderRevokeAccountSelector(provider.providerId);
-			return;
-		}
-		const credentials = await providerAuthPort.listCredentials().catch(error => {
-			this.#showProviderAuthError("Credential lookup", error);
-			return undefined;
-		});
-		if (!credentials) return;
-		if (!credentials.some(credential => credential.status !== "revoked")) {
-			this.ctx.showStatus(`No revocable ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider credentials.`);
-			return;
-		}
-		const { BreadboardProviderAuthSelectorComponent } = loadProviderAuthUi();
-		this.showSelector(done => {
-			const selector = new BreadboardProviderAuthSelectorComponent(
-				"revoke",
-				providerAuthPort,
-				selectedProviderId => {
-					selector.stopValidation();
-					done();
-					void this.#showProviderRevokeAccountSelector(selectedProviderId);
-				},
-				() => {
-					selector.stopValidation();
-					done();
-					this.ctx.ui.requestRender();
-				},
-				{ requestRender: () => this.ctx.ui.requestRender() },
-			);
-			return { component: selector, focus: selector };
-		});
-	}
 
 	async showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
-		const { getOAuthProviders, OAuthSelectorComponent, BreadboardProviderAuthSelectorComponent } = loadProviderAuthUi();
-		const providerAuthPort = this.providerAuthPort;
 		if (providerId) {
-			let selectedProviderId = providerId;
-			if (providerAuthPort) {
-				if (mode === "login") {
-					await this.#handleOAuthLogin(providerId);
-					return;
-				}
-				try {
-					const providers = await providerAuthPort.listProviders();
-					const provider = providers.find(
-						candidate => candidate.providerId === providerId || candidate.aliases.includes(providerId),
-					);
-					if (!provider) {
-						this.ctx.showError(`Unknown ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider: ${providerId}`);
-						return;
-					}
-					selectedProviderId = provider.providerId;
-				} catch (error) {
-					if (error instanceof ProviderAuthError) {
-						this.ctx.showError(`Provider lookup failed: ${error.message} ${error.nextAction}`);
-						return;
-					}
-					throw error;
-				}
-			} else if (!getOAuthProviders().some(provider => provider.id === providerId)) {
-				this.ctx.showError(`Unknown OAuth provider: ${providerId}`);
-				return;
-			}
 			if (mode === "login") {
-				await this.#handleOAuthLogin(selectedProviderId);
+				await this.#handleOAuthLogin(providerId);
 			} else {
-				await this.#showOAuthLogoutAccountSelector(selectedProviderId);
+				await this.#showOAuthLogoutAccountSelector(providerId);
 			}
 			return;
 		}
 
+		const { getOAuthProviders, OAuthSelectorComponent } = loadProviderAuthUi();
 		if (mode === "logout") {
-			if (providerAuthPort) {
-				try {
-					const credentials = await providerAuthPort.listCredentials();
-					if (!credentials.some(credential => credential.status === "active")) {
-						this.ctx.showStatus(
-							`No stored ${BREADBOARD_PRODUCT_IDENTITY.displayName} provider credentials to log out.`,
-						);
-						return;
-					}
-				} catch (error) {
-					if (error instanceof ProviderAuthError) {
-						this.ctx.showError(`Account lookup failed: ${error.message} ${error.nextAction}`);
-						return;
-					}
-					throw error;
-				}
-			} else {
-				await this.#refreshOAuthProviderAuthState();
-				const oauthProviders = getOAuthProviders();
-				const loggedInProviders = oauthProviders.filter(provider =>
-					this.ctx.session.modelRegistry.authStorage.credentials.has(provider.id),
-				);
-				if (loggedInProviders.length === 0) {
-					this.ctx.showStatus(
-						"No stored provider credentials to log out. Remove env or config auth at its source.",
-					);
-					return;
-				}
+			await this.#refreshOAuthProviderAuthState();
+			const oauthProviders = getOAuthProviders();
+			const loggedInProviders = oauthProviders.filter(provider =>
+				this.ctx.session.modelRegistry.authStorage.credentials.has(provider.id),
+			);
+			if (loggedInProviders.length === 0) {
+				this.ctx.showStatus("No stored provider credentials to log out. Remove env or config auth at its source.");
+				return;
 			}
 		}
 
 		this.showSelector(done => {
-			if (providerAuthPort) {
-				const selector = new BreadboardProviderAuthSelectorComponent(
-					mode,
-					providerAuthPort,
-					async selectedProviderId => {
-						selector.stopValidation();
-						done();
-						if (mode === "login") {
-							await this.#handleOAuthLogin(selectedProviderId);
-						} else {
-							await this.#showOAuthLogoutAccountSelector(selectedProviderId);
-						}
-					},
-					() => {
-						selector.stopValidation();
-						done();
-						this.ctx.ui.requestRender();
-					},
-					{
-						disabledProviders: settings.get("disabledProviders"),
-						validateAuth: async selectedProviderId => {
-							const credentials = await providerAuthPort.listCredentials(selectedProviderId);
-							return credentials.some(credential => credential.status === "active");
-						},
-						requestRender: () => {
-							this.ctx.ui.requestRender();
-						},
-					},
-				);
-				return { component: selector, focus: selector };
-			}
-
 			const selector = new OAuthSelectorComponent(
 				mode,
 				this.ctx.session.modelRegistry.authStorage,
-				async selectedProviderId => {
+				async (selectedProviderId: string) => {
 					selector.stopValidation();
 					done();
 					if (mode === "login") {
@@ -2756,7 +2292,7 @@ export class SelectorController {
 				},
 				{
 					disabledProviders: settings.get("disabledProviders"),
-					validateAuth: async selectedProviderId => {
+					validateAuth: async (selectedProviderId: string) => {
 						const apiKey = await this.ctx.session.modelRegistry.getApiKeyForProvider(
 							selectedProviderId,
 							this.ctx.session.sessionId,
@@ -2773,12 +2309,6 @@ export class SelectorController {
 	}
 
 	async showSessionPinSelector(): Promise<void> {
-		if (this.providerAuthPort) {
-			this.ctx.showStatus(
-				`${BREADBOARD_PRODUCT_IDENTITY.displayName} credentials are bound when a product session starts. Start a new session to use a different account.`,
-			);
-			return;
-		}
 		const session = this.ctx.session;
 		if (session.isStreaming) {
 			this.ctx.showStatus("Cannot pin an account while the session is streaming.");
@@ -2944,14 +2474,11 @@ export class SelectorController {
 				registry: this.ctx.collabGuest?.agentRegistry,
 				remote: this.ctx.collabGuest?.hubRemote,
 				sessionFile: this.ctx.sessionManager.getSessionFile() ?? null,
-				harnessPort: this.ctx.harnessPort,
-				mainStreamOwnsTurnLifecycle: this.#nativeOwnsTurns,
 			}),
 			observers,
 			hubKeys,
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
 			initialSection: options?.initialSection,
-			initialHarnessPanel: options?.initialHarnessPanel,
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
 			remote: this.ctx.collabGuest?.hubRemote,

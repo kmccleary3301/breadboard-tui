@@ -132,8 +132,7 @@ describe("BreadBoard product entrypoint", () => {
 
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toContain("~/.omp/agent");
-		expect(result.stdout).toContain("--engine-mode");
-		expect(result.stdout).toContain("--engine-url");
+		expect(result.stdout).toContain("--harness");
 		expect(result.stdout).not.toContain("~/.breadboard");
 		expect(await Bun.file(productRoot).exists()).toBe(false);
 	});

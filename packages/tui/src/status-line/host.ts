@@ -2,7 +2,7 @@ import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Tool, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import type { CompactionBoundaries } from "./context-usage";
-import type { BreadboardComposerActivity, HarnessSnapshot, StatusLineSettings } from "./types";
+import type { HarnessSnapshot, StatusLineSettings } from "./types";
 
 export interface StatusAccountIdentity {
 	accountId?: string;
@@ -31,7 +31,6 @@ export interface StatusLineSession {
 	agent?: { state?: { tools?: readonly Pick<Tool, "name" | "description" | "parameters">[] }; tokenizer?: unknown };
 	skills?: readonly unknown[];
 	compactionSpeculation?: "idle" | "running" | "armed";
-	mainStreamOwnsTurnLifecycle?: boolean;
 	sessionManager: {
 		getSessionName(): string | undefined;
 		getSessionId(): string;
@@ -92,8 +91,6 @@ export interface StatusLineHost<TSession extends StatusLineSession = StatusLineS
 	limitMatchesActiveAccount(report: UsageReport, limit: UsageLimit, identity: StatusAccountIdentity): boolean;
 	computeCompactionBoundaries(session: TSession, contextWindow: number, model?: Model): CompactionBoundaries | null;
 	getHarness?(session: TSession): HarnessSnapshot | null;
-	getBreadboardActivity?(session: TSession): BreadboardComposerActivity | null;
-	isBreadboardOwned?(session: TSession): boolean;
 	getIdentityMark?(): string | undefined;
 	getLongRunBudgets?(session: TSession): { totalCostUsd?: number; totalTokens?: number } | null;
 }

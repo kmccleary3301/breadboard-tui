@@ -1,7 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+### Removed
 
+- Retired the Python engine bridge, SDK client (`@breadboard/sdk`), and engine attach modes (`local-owned`, `local-external`, `remote`). The product executes its turn loop directly through the native TypeScript runtime and native harness package (`@breadboard/harness`).
+- Configured bridge requests via CLI flags (`--engine-mode`, `--engine-url`), environment variables (`BREADBOARD_ENGINE_MODE`, `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`), or profile settings now explicitly refuse launch with a clear error pointing to the native default (`native`). The only supported engine modes are `native` and `off`.
+- Removed bridge lifecycle supervisor, engine distribution selection/installer, OMP auth gateway, verified Darwin spawn, shared-engine worker/client protocol, and the `engine` subcommand.
 ### Added
 
 - Added BreadBoard Balanced, Quiet, and Detailed information layouts, with shared live/setup previews and width-aware priority for actionable state.

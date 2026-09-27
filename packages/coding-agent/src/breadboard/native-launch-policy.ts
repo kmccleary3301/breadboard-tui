@@ -13,11 +13,11 @@ export type NativeLaunchPolicy =
  * the session.
  */
 export function resolveNativeLaunchPolicy(
-	parsed: Pick<Args, "engineMode" | "engineUrl">,
+	parsed: Pick<Args, "engineMode">,
 	surface: NativeLaunchSurface,
 ): NativeLaunchPolicy {
 	const ompLoop = parsed.engineMode === undefined || parsed.engineMode === "off" || parsed.engineMode === "native";
-	if (ompLoop && parsed.engineUrl === undefined) {
+	if (ompLoop) {
 		return { kind: "native" };
 	}
 	return {

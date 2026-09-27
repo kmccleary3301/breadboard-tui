@@ -1,5 +1,5 @@
 import { matchesKey, visibleWidth } from "@oh-my-pi/pi-tui";
-import { detectSensitiveValues } from "@breadboard/sdk/session";
+import { detectSensitiveValues } from "@breadboard/harness";
 import type { HarnessProvenance, HarnessSnapshot } from "../../../breadboard/harness-port";
 import { theme } from "@oh-my-pi/pi-tui/theme/theme";
 import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/chrome/overlay-box";

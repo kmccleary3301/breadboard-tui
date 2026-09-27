@@ -3,7 +3,7 @@ import type { PresetDef, StatusLinePreset } from "./types";
 
 export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	"bb-balanced": {
-		leftSegments: ["bb_activity", "vim", "model", "harness", "bb_policy"],
+		leftSegments: ["vim", "model", "harness", "bb_policy"],
 		rightSegments: ["path", "git", "context_pct"],
 		separator: "pipe",
 		segmentOptions: {
@@ -15,7 +15,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 		},
 	},
 	"bb-quiet": {
-		leftSegments: ["bb_activity", "vim", "model", "bb_policy"],
+		leftSegments: ["vim", "model", "bb_policy"],
 		rightSegments: ["path", "context_pct"],
 		separator: "pipe",
 		segmentOptions: {
@@ -25,7 +25,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 		},
 	},
 	"bb-detailed": {
-		leftSegments: ["bb_activity", "vim", "model", "harness", "bb_policy", "longrun"],
+		leftSegments: ["vim", "model", "harness", "bb_policy", "longrun"],
 		rightSegments: ["path", "git", "context_pct", "token_in", "token_out"],
 		separator: "pipe",
 		segmentOptions: {

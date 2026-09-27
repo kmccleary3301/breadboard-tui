@@ -1,5 +1,5 @@
 import type { CommandMetadata } from "@oh-my-pi/pi-utils/cli";
-import { ACTIVE_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
+import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 
 export const acpHelp = {
 	description: `Run ${ACTIVE_PRODUCT_IDENTITY.displayName} as an ACP (Agent Client Protocol) server over stdio`,
@@ -53,10 +53,6 @@ export const configHelp = { description: "Manage configuration settings" } satis
 
 export const dryBalanceHelp = {
 	description: "Dry-run OAuth account balancing across random session ids",
-} satisfies CommandMetadata;
-
-export const engineHelp = {
-	description: `Manage the governed ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine lifecycle`,
 } satisfies CommandMetadata;
 
 export const researchHelp = {

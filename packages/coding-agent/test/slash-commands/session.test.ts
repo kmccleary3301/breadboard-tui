@@ -1,13 +1,11 @@
 import { describe, expect, it, vi } from "bun:test";
-import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
+import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 
 function createRuntimeHarness(options?: {
 	handleSessionCommand?: InteractiveModeContext["handleSessionCommand"];
 	handleSessionDeleteCommand?: InteractiveModeContext["handleSessionDeleteCommand"];
 	showSessionPinSelector?: InteractiveModeContext["showSessionPinSelector"];
-	usesBroker?: boolean;
 }) {
 	const setText = vi.fn();
 	const handleSessionCommand =
@@ -26,27 +24,19 @@ function createRuntimeHarness(options?: {
 			return;
 		});
 
-	const ctx = createInteractiveModeContext({
-		editor: { setText },
-		handleSessionCommand,
-		handleSessionDeleteCommand,
-		usesProviderAuthBroker: () => options?.usesBroker === true,
-		session: {
-			async listCurrentProviderOAuthAccounts() {
-				throw new Error("product pin must not read native accounts");
-			},
-			pinCurrentProviderOAuthAccount() {
-				throw new Error("product pin must not mutate native session pinning");
-			},
-		},
-		showSessionPinSelector,
-	});
 	return {
 		setText,
 		handleSessionCommand,
 		handleSessionDeleteCommand,
 		showSessionPinSelector,
-		runtime: { ctx },
+		runtime: {
+			ctx: {
+				editor: { setText } as unknown as InteractiveModeContext["editor"],
+				handleSessionCommand,
+				handleSessionDeleteCommand,
+				showSessionPinSelector,
+			} as InteractiveModeContext,
+		},
 	};
 }
 
@@ -93,17 +83,6 @@ describe("/session slash command", () => {
 
 		deferred.resolve();
 		expect(await execution).toBe(true);
-		expect(harness.setText).toHaveBeenCalledWith("");
-	});
-
-	it("routes explicit product account pins through the immutable-session guard", async () => {
-		const showSessionPinSelector = vi.fn(async () => {});
-		const harness = createRuntimeHarness({ showSessionPinSelector, usesBroker: true });
-
-		const handled = await executeBuiltinSlashCommand("/session pin work", harness.runtime);
-
-		expect(handled).toBe(true);
-		expect(showSessionPinSelector).toHaveBeenCalledTimes(1);
 		expect(harness.setText).toHaveBeenCalledWith("");
 	});
 

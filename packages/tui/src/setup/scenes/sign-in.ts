@@ -11,45 +11,12 @@ import { type SgrMouseEvent } from "../../mouse";
 import { wrapTextWithAnsi } from "../../utils";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import { OAuthSelectorComponent } from "../../overlays/oauth-selector";
-import {
-	BreadboardProviderAuthSelectorComponent,
-	type ProviderAuthReadPort,
-} from "../../overlays/breadboard-provider-auth-selector";
-import { getProductIdentity } from "../../product-identity";
 import { theme } from "../../theme/theme";
 import type { SetupSceneHost, SetupTab } from "./types";
-
-const UNAVAILABLE_PROVIDER_SOURCE: ProviderAuthReadPort = Object.freeze({
-	listProvidersSync: () => [],
-	listCredentialsSync: () => [],
-	async listProviders() {
-		return [];
-	},
-	async listCredentials() {
-		return [];
-	},
-});
-
-interface ProviderAuthFailure {
-	readonly code: string;
-	readonly message: string;
-	readonly nextAction: string;
-}
-
-function isProviderAuthFailure(error: unknown): error is ProviderAuthFailure {
-	if (typeof error !== "object" || error === null) return false;
-	const candidate = error as { code?: unknown; message?: unknown; nextAction?: unknown };
-	return (
-		typeof candidate.code === "string" &&
-		typeof candidate.message === "string" &&
-		typeof candidate.nextAction === "string"
-	);
-}
 
 function loginUrlLink(url: string): string {
 	return `\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`;
 }
-
 
 function loginCopyHint(): string {
 	return theme.fg("dim", "(clipboard copy attempted; Alt+C retries)");
@@ -88,11 +55,6 @@ class CopyablePromptInput implements Component, Focusable {
 		this.#input.handleInput(data);
 	}
 
-	clear(): void {
-		this.#input.setValue("");
-		this.#input.mask = false;
-	}
-
 	invalidate(): void {
 		this.#input.invalidate();
 	}
@@ -113,9 +75,8 @@ export class SignInTab implements SetupTab {
 	readonly id = "sign-in";
 	readonly label = "Sign in";
 
-	/** Undefined when the product has neither a credential broker nor a native store to sign in to. */
-	#authStorage: AuthStorage | undefined;
-	#selector: OAuthSelectorComponent | BreadboardProviderAuthSelectorComponent;
+	#authStorage: AuthStorage;
+	#selector: OAuthSelectorComponent;
 	#statusLines: string[] = [];
 	#authUrl: string | undefined;
 	#authLaunchUrl: string | undefined;
@@ -156,10 +117,6 @@ export class SignInTab implements SetupTab {
 
 	handleInput(data: string): void {
 		if (this.#loggingInProvider) {
-			if (this.#prompt) {
-				this.#prompt.input.handleInput(data);
-				return;
-			}
 			if (this.#authUrl && (matchesKey(data, "alt+c") || (data === "c" && !this.#prompt))) {
 				void this.#copyAuthUrl();
 				return;
@@ -183,22 +140,7 @@ export class SignInTab implements SetupTab {
 		// this panel, so on short screens the rows go to the provider list
 		// instead (17 = full selector: 4 chrome above, 10 rows, 3 below).
 		let intro: Container | undefined;
-		if (this.#loggingInProvider === undefined && this.#providerSetupUnavailable) {
-			const identity = this.#host.ctx.identity ?? getProductIdentity();
-			intro = new Container();
-			intro.addChild(new Text(theme.fg("error", `${identity.displayName} provider setup is unavailable.`), 0, 0));
-			intro.addChild(
-				new Text(
-					theme.fg(
-						"dim",
-						`Press Esc to continue; retry with \`${identity.cliName} setup\` when the auth broker is ready.`,
-					),
-					0,
-					0,
-				),
-			);
-			intro.addChild(new Spacer(1));
-		} else if (this.#loggingInProvider === undefined && (maxLines === undefined || maxLines >= 17 + 2)) {
+		if (this.#loggingInProvider === undefined && (maxLines === undefined || maxLines >= 17 + 2)) {
 			intro = new Container();
 			intro.addChild(
 				new Text(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), 0, 0),
@@ -264,42 +206,10 @@ export class SignInTab implements SetupTab {
 		return this.#step.render(width);
 	}
 
-	get #providerSetupUnavailable(): boolean {
-		return !this.#host.ctx.providerAuth && !this.#authStorage;
-	}
-
-	#createSelector(): OAuthSelectorComponent | BreadboardProviderAuthSelectorComponent {
-		const providerAuth = this.#host.ctx.providerAuth;
-		if (providerAuth) {
-			return new BreadboardProviderAuthSelectorComponent(
-				"login",
-				providerAuth,
-				providerId => {
-					void this.#login(providerId);
-				},
-				() => this.#host.finish("skipped"),
-				{
-					requestRender: () => this.#host.requestRender(),
-					disabledProviders: this.#host.ctx.disabledProviders,
-					validateAuth: async providerId =>
-						(await providerAuth.listCredentials(providerId)).some(credential => credential.status === "active"),
-				},
-			);
-		}
-		if (this.#authStorage) {
-			return new OAuthSelectorComponent(
-				"login",
-				this.#authStorage,
-				providerId => {
-					void this.#login(providerId);
-				},
-				() => this.#host.finish("skipped"),
-				{ requestRender: () => this.#host.requestRender(), disabledProviders: this.#host.ctx.disabledProviders },
-			);
-		}
-		return new BreadboardProviderAuthSelectorComponent(
+	#createSelector(): OAuthSelectorComponent {
+		return new OAuthSelectorComponent(
 			"login",
-			UNAVAILABLE_PROVIDER_SOURCE,
+			this.#authStorage,
 			providerId => {
 				void this.#login(providerId);
 			},
@@ -310,99 +220,57 @@ export class SignInTab implements SetupTab {
 
 	async #login(providerId: string): Promise<void> {
 		if (this.#loggingInProvider || this.#disposed) return;
-		const providerAuth = this.#host.ctx.providerAuth;
-		const useManualInput = !providerAuth && PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
+		const useManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
 		this.#selector.stopValidation();
 		this.#loggingInProvider = providerId;
-		this.#statusLines = [theme.fg("dim", providerAuth ? "Starting authentication flow…" : "Starting OAuth flow…")];
+		this.#statusLines = [theme.fg("dim", "Starting OAuth flow…")];
 		this.#authUrl = undefined;
 		this.#authLaunchUrl = undefined;
 		this.#loginAbort = new AbortController();
 		this.#host.restoreFocus();
 		this.#host.requestRender();
 		try {
-			let accountLabel: string | undefined;
-			if (providerAuth) {
-				const result = await providerAuth.authenticate(providerId, {
-					signal: this.#loginAbort.signal,
-					selectAuthScheme: async (provider, schemes) => {
-						const choices = schemes.map((scheme, index) => `${index + 1}) ${scheme}`).join("  ");
-						const answer = (
-							await this.#showPrompt({
-								message: `Choose authentication for ${provider.displayName}: ${choices}`,
-							})
-						).trim();
-						return schemes[Number.parseInt(answer, 10) - 1] ?? answer;
-					},
-					selectOAuthFlow: async provider => {
-						const flows = provider.oauthFlows.filter(
-							(flow): flow is "browser" | "device" => flow === "browser" || flow === "device",
-						);
-						if (flows.length <= 1) return flows[0];
-						const choices = flows.map((flow, index) => `${index + 1}) ${flow}`).join("  ");
-						const answer = (await this.#showPrompt({ message: `Choose OAuth flow: ${choices}` })).trim();
-						const selectedByName = answer === "browser" || answer === "device" ? answer : undefined;
-						return flows[Number.parseInt(answer, 10) - 1] ?? selectedByName;
-					},
-					showAuthorization: session => {
-						this.#statusLines = [];
-						if (session.instructions) this.#statusLines.push(theme.fg("warning", session.instructions));
-						if (session.userCode) this.#statusLines.push(theme.fg("warning", `Code: ${session.userCode}`));
-						if (session.authorizeUrl) {
-							this.#authUrl = session.authorizeUrl;
-							void this.#copyAuthUrl();
-							this.#host.ctx.openInBrowser(session.authorizeUrl);
-						}
-						this.#host.requestRender();
-					},
-					prompt: input => this.#showPrompt(input),
-					showProgress: message => {
-						this.#statusLines.push(theme.fg("dim", message));
-						this.#host.requestRender();
-					},
-				});
-				accountLabel = result.accountLabel;
-			} else {
-				const authStorage = this.#authStorage;
-				if (!authStorage) {
-					const { displayName } = this.#host.ctx.identity ?? getProductIdentity();
-					throw new Error(`${displayName} provider setup is unavailable`);
-				}
-				const identity = await authStorage.oauth.login(providerId as OAuthProvider, {
-					signal: this.#loginAbort.signal,
-					onBrowserSession: (request, signal) => this.#host.ctx.captureBrowserSession(request, signal),
-					onAuth: info => {
-						this.#authUrl = info.url;
-						this.#authLaunchUrl = info.launchUrl && info.launchUrl !== info.url ? info.launchUrl : undefined;
-						this.#statusLines = [];
-						if (info.instructions) this.#statusLines.push(theme.fg("warning", info.instructions));
-						if (useManualInput) {
-							this.#statusLines.push(theme.fg("dim", "Paste the returned code or redirect URL when prompted."));
-						}
-						void this.#copyAuthUrl();
-						this.#host.ctx.openInBrowser(info.url);
-						this.#host.requestRender();
-					},
-					onPrompt: prompt => this.#showPrompt(prompt),
-					onProgress: message => {
-						this.#statusLines.push(theme.fg("dim", message));
-						this.#host.requestRender();
-					},
-					onManualCodeInput: signal =>
-						this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }, signal),
-				});
-				accountLabel = identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined;
-				await this.#host.ctx.refreshProvider(providerId);
-			}
+			await this.#authStorage.oauth.login(providerId as OAuthProvider, {
+				signal: this.#loginAbort.signal,
+				onBrowserSession: (request, signal) => this.#host.ctx.captureBrowserSession(request, signal),
+				onAuth: info => {
+					// Store the full authorization URL as the primary copy/display
+					// target: it works from any machine, including SSH boxes where
+					// the OMP-hosted `launchUrl` would resolve against the user's
+					// local browser and fail. The wizard render uses
+					// `wrapTextWithAnsi`, so long URLs wrap across lines rather
+					// than getting truncated — the RFC 7636 §4.3 PKCE-downgrade
+					// bug that motivated `launchUrl` is unreachable through this
+					// surface. `launchUrl` is still surfaced as an optional local
+					// shortcut for wide-terminal local users.
+					this.#authUrl = info.url;
+					this.#authLaunchUrl = info.launchUrl && info.launchUrl !== info.url ? info.launchUrl : undefined;
+					this.#statusLines = [];
+					if (info.instructions) {
+						this.#statusLines.push(theme.fg("warning", info.instructions));
+					}
+					if (useManualInput) {
+						this.#statusLines.push(theme.fg("dim", "Paste the returned code or redirect URL when prompted."));
+					}
+					void this.#copyAuthUrl();
+					this.#host.ctx.openInBrowser(info.url);
+					this.#host.requestRender();
+				},
+				onPrompt: prompt => this.#showPrompt(prompt),
+				onProgress: message => {
+					this.#statusLines.push(theme.fg("dim", message));
+					this.#host.requestRender();
+				},
+				onManualCodeInput: signal =>
+					this.#showPrompt({ message: "Paste the authorization code (or full redirect URL):" }, signal),
+			});
+			// Provider-scoped online refresh so the just-persisted credential re-runs
+			// discovery instead of reusing a fresh authoritative cache row (#5780).
+			await this.#host.ctx.refreshProvider(providerId);
 			if (this.#disposed) return;
-			const account = accountLabel ? ` as ${accountLabel}` : "";
-			const brokerName = this.#host.ctx.identity?.displayName ?? "auth";
 			this.#statusLines = [
-				theme.fg("success", `${theme.status.success} Signed in to ${providerId}${account}`),
-				theme.fg(
-					"dim",
-					providerAuth ? `Credentials managed by ${brokerName} auth broker` : `Credentials saved to ${getAgentDbPath()}`,
-				),
+				theme.fg("success", `${theme.status.success} Signed in to ${providerId}`),
+				theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`),
 			];
 			this.#authUrl = undefined;
 			this.#authLaunchUrl = undefined;
@@ -416,20 +284,17 @@ export class SignInTab implements SetupTab {
 			if (this.#disposed) return;
 			if (this.#loginAbort?.signal.aborted) {
 				this.#statusLines = [theme.fg("dim", "Login cancelled.")];
-			} else if (isProviderAuthFailure(error)) {
-				this.#statusLines = [
-					theme.fg("error", `Login failed [${error.code}]: ${error.message}`),
-					theme.fg("dim", error.nextAction),
-				];
+				this.#authUrl = undefined;
+				this.#authLaunchUrl = undefined;
 			} else {
 				const message = error instanceof Error ? error.message : String(error);
 				this.#statusLines = [
 					theme.fg("error", `Login failed: ${message}`),
 					theme.fg("dim", "Choose another provider or press Esc to continue."),
 				];
+				this.#authUrl = undefined;
+				this.#authLaunchUrl = undefined;
 			}
-			this.#authUrl = undefined;
-			this.#authLaunchUrl = undefined;
 			this.#loggingInProvider = undefined;
 			this.#loginAbort = undefined;
 			this.#host.restoreFocus();
@@ -447,6 +312,7 @@ export class SignInTab implements SetupTab {
 		}
 		this.#host.requestRender();
 	}
+
 	#showPrompt(prompt: OAuthPrompt, signal?: AbortSignal): Promise<string> {
 		this.#resolvePrompt("");
 		if (signal?.aborted) {
@@ -470,12 +336,10 @@ export class SignInTab implements SetupTab {
 			this.#promptAbortCleanup = () => signal.removeEventListener("abort", onAbort);
 		}
 		input.onSubmit = value => {
-			focusInput.clear();
 			this.#resolvePrompt(value);
 		};
 		input.onEscape = () => {
 			this.#loginAbort?.abort();
-			focusInput.clear();
 			this.#resolvePrompt("");
 		};
 		this.#host.setFocus(focusInput);

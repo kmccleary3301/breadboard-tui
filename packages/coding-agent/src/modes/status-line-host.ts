@@ -50,7 +50,6 @@ export function createStatusLineHost(
 		calculateTokensPerSecond,
 		getIdentityMark: () =>
 			identity.id === OMP_PRODUCT_IDENTITY.id ? theme.icon.omp : identity.compactLogo[theme.getSymbolPreset()],
-		isBreadboardOwned: session => identity.id === "breadboard" || session.mainStreamOwnsTurnLifecycle === true,
 		limitMatchesActiveAccount,
 		computeCompactionBoundaries: (session, contextWindow, model) => {
 			const source = session.settings;

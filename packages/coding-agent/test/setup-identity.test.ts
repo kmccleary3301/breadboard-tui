@@ -3,7 +3,8 @@ import * as path from "node:path";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ALL_SCENES, createSetupHost, type SetupWizardContext } from "@oh-my-pi/pi-coding-agent/modes/setup";
+import { ALL_SCENES, createSetupHost } from "@oh-my-pi/pi-coding-agent/modes/setup";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
 	OMP_PRODUCT_IDENTITY,
@@ -147,7 +148,7 @@ describe("setup identity renderers", () => {
 	});
 });
 
-function wizardContext(rows: number): SetupWizardContext {
+function wizardContext(rows: number): InteractiveModeContext {
 	const settings = Settings.isolated();
 	return {
 		ui: {
@@ -157,29 +158,28 @@ function wizardContext(rows: number): SetupWizardContext {
 			invalidate: () => {},
 		} as unknown as TUI,
 		settings,
-		modelRegistry: {
-			authStorage: {
-				has: () => false,
-				hasAuth: () => false,
-				getCredentialOrigin: () => undefined,
-			} as unknown as AuthStorage,
-			getAvailable: () => [],
-			getAll: () => [],
-			refresh: async () => {},
-			refreshProvider: async () => {},
-		} as unknown as ModelRegistry,
-		modelSelection: {
-			mode: "default",
-			currentModel: undefined,
-			availableModels: () => [],
-			refresh: async () => {},
-			select: async () => {},
+		session: {
+			model: undefined,
+			modelRegistry: {
+				authStorage: {
+					has: () => false,
+					hasAuth: () => false,
+					getCredentialOrigin: () => undefined,
+				} as unknown as AuthStorage,
+				getAvailable: () => [],
+				getAll: () => [],
+				refresh: async () => {},
+				refreshProvider: async () => {},
+			} as unknown as ModelRegistry,
+			setModel: async () => {},
 		},
 		openInBrowser: () => {},
-	};
+		playWelcomeIntro: () => {},
+		showError: () => {},
+	} as unknown as InteractiveModeContext;
 }
 
-function identityHost(ctx: SetupWizardContext, identity: ProductIdentity): SetupHost {
+function identityHost(ctx: InteractiveModeContext, identity: ProductIdentity): SetupHost {
 	return { ...createSetupHost(ctx), identity };
 }
 
@@ -234,35 +234,7 @@ describe("SetupWizardComponent identity boundary", () => {
 });
 
 function modelHost(identity: ProductIdentity): SetupSceneHost {
-	const settings = Settings.isolated();
-	const ctx: SetupWizardContext = {
-		settings,
-		ui: {
-			terminal: { rows: 30 },
-			requestRender: () => {},
-			setFocus: () => {},
-			invalidate: () => {},
-		} as unknown as TUI,
-		modelRegistry: {
-			authStorage: {
-				has: () => false,
-				hasAuth: () => false,
-				getCredentialOrigin: () => undefined,
-			} as unknown as AuthStorage,
-			getAvailable: () => [],
-			getAll: () => [],
-			refresh: async () => {},
-			refreshProvider: async () => {},
-		} as unknown as ModelRegistry,
-		modelSelection: {
-			mode: "default",
-			currentModel: undefined,
-			availableModels: () => [],
-			refresh: async () => {},
-			select: async () => {},
-		},
-		openInBrowser: () => {},
-	};
+	const ctx = wizardContext(30);
 	return {
 		ctx: identityHost(ctx, identity),
 		requestRender: () => {},

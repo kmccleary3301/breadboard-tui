@@ -9,11 +9,6 @@ import { describe, expect, it, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	createBreadboardStartupForkPolicy,
-	resolveBreadboardSessionTarget,
-} from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
-import { BreadboardSessionTransitionError } from "@oh-my-pi/pi-coding-agent/breadboard/session-binding";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createSessionManager, SessionResolutionError, writeStartupNotice } from "@oh-my-pi/pi-coding-agent/main";
@@ -55,7 +50,7 @@ function buildForkArgs(fork: string, noSession = false, sessionDir?: string): Ar
 	};
 }
 
-const stubSettings = { get: () => undefined, getRaw: () => undefined } as unknown as Settings;
+const stubSettings = { get: () => undefined } as unknown as Settings;
 
 const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);
 const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);
@@ -375,155 +370,5 @@ describe("createSessionManager — missing session (#2084)", () => {
 			name: "SessionResolutionError",
 			message: "--continue requires session persistence",
 		});
-	});
-
-	it("rejects product startup forks without forcing installed artifact resolution", () => {
-		const selectedLocalOwned = {
-			get: () => undefined,
-			getRaw: (key: string) => (key === "breadboard" ? { engineMode: "local-owned" } : undefined),
-		} as unknown as Settings;
-		const cases: Array<{
-			readonly parsed: Pick<Args, "engineMode" | "engineUrl">;
-			readonly settings: Settings;
-		}> = [
-			{ parsed: { engineMode: "local-owned" }, settings: stubSettings },
-			{ parsed: {}, settings: selectedLocalOwned },
-		];
-		for (const testCase of cases) {
-			const policy = createBreadboardStartupForkPolicy(testCase.parsed, testCase.settings, os.tmpdir(), true, true);
-			let thrown: unknown;
-			try {
-				policy();
-			} catch (error) {
-				thrown = error;
-			}
-			expect(thrown).toBeInstanceOf(BreadboardSessionTransitionError);
-			expect(thrown).toMatchObject({ code: "unsupported_resume_transition" });
-		}
-	});
-
-	it("allows default product native mode startup fork", () => {
-		const policy = createBreadboardStartupForkPolicy({}, stubSettings, os.tmpdir(), true, true);
-		expect(policy).not.toThrow();
-	});
-});
-
-describe("resolveBreadboardSessionTarget", () => {
-	const workspace = "/canonical/project";
-	const binding = (overrides: Record<string, unknown> = {}) => ({
-		schemaVersion: "breadboard.session-binding.v4",
-		sessionId: "bb-session",
-		previousSessionId: null,
-		replayConfigurationDigest: "sha256:replay",
-		cursor: { eventId: "event-1", sequence: 1 },
-		ownedSubmissions: [],
-		...overrides,
-	});
-	const manager = (...bindings: unknown[]) => ({
-		getBranch: () =>
-			bindings.map(data => ({
-				type: "custom" as const,
-				customType: "breadboard.session-binding",
-				data,
-			})),
-	});
-
-	it("creates a default-profile session with the canonical workspace", () => {
-		expect(resolveBreadboardSessionTarget({}, undefined, undefined, workspace, true)).toEqual({
-			kind: "create",
-			request: { permissionMode: "configured", workspace },
-		});
-	});
-
-	it("preserves an explicit session config path with the canonical workspace", () => {
-		const configPath = "/profiles/daily_driver.v1.yaml";
-		expect(resolveBreadboardSessionTarget({}, undefined, configPath, workspace, true)).toEqual({
-			kind: "create",
-			request: { configPath, permissionMode: "configured", workspace },
-		});
-	});
-
-	it("keeps the YAML config path and adds a sibling lock id when present", async () => {
-		const root = await fsp.mkdtemp(path.join(os.tmpdir(), "bb-harness-lock-"));
-		try {
-			const harnessPath = path.join(root, "agent_configs/v2/daily_driver.v1.yaml");
-			await fsp.mkdir(path.dirname(harnessPath), { recursive: true });
-			await fsp.writeFile(harnessPath, "profile: {}\n");
-			await fsp.writeFile(`${harnessPath.slice(0, -5)}.lock.json`, "{}\n");
-			expect(
-				resolveBreadboardSessionTarget({}, undefined, "agent_configs/v2/daily_driver.v1.yaml", root, true),
-			).toEqual({
-				kind: "create",
-				request: {
-					configPath: "agent_configs/v2/daily_driver.v1.yaml",
-					lockId: "agent_configs/v2/daily_driver.v1.lock.json",
-					permissionMode: "configured",
-					workspace: root,
-				},
-			});
-		} finally {
-			await fsp.rm(root, { recursive: true, force: true });
-		}
-	});
-
-	it("keeps native explicit-engine creation invalid without a selected config", () => {
-		let thrown: unknown;
-		try {
-			resolveBreadboardSessionTarget({}, undefined, undefined, workspace, false);
-		} catch (error) {
-			thrown = error;
-		}
-		expect(thrown).toMatchObject({
-			code: "invalid_session_config",
-			field: "sessionConfigPath",
-		});
-	});
-
-	it("attaches the durable binding for resume and continue before create logic", () => {
-		const sessionManager = manager(binding());
-		const parsedCases: Pick<Args, "continue" | "resume">[] = [
-			{ resume: true },
-			{ resume: "session-file" },
-			{ continue: true },
-		];
-		for (const parsed of parsedCases) {
-			expect(resolveBreadboardSessionTarget(parsed, sessionManager, undefined, workspace, true)).toEqual({
-				kind: "attach",
-				sessionId: "bb-session",
-			});
-		}
-	});
-
-	it("rejects colliding or stale durable bindings", () => {
-		expect(() =>
-			resolveBreadboardSessionTarget(
-				{ resume: true },
-				manager(binding(), binding({ sessionId: "other-session" })),
-				undefined,
-				workspace,
-				true,
-			),
-		).toThrow("conflicts with the active transcript");
-		expect(() =>
-			resolveBreadboardSessionTarget(
-				{ resume: true },
-				manager(binding(), binding({ cursor: { eventId: null, sequence: 0 } })),
-				undefined,
-				workspace,
-				true,
-			),
-		).toThrow("conflicts with the active transcript");
-	});
-
-	it("rejects malformed durable bindings instead of creating a new session", () => {
-		expect(() =>
-			resolveBreadboardSessionTarget(
-				{ continue: true },
-				manager({ schemaVersion: "breadboard.session-binding.v4" }),
-				undefined,
-				workspace,
-				true,
-			),
-		).toThrow("malformed or incompatible");
 	});
 });

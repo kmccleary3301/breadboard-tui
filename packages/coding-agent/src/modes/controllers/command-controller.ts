@@ -12,8 +12,6 @@ import {
 } from "@oh-my-pi/pi-ai";
 import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, logger, Snowflake, sanitizeText } from "@oh-my-pi/pi-utils";
-import { BreadboardSessionTransitionError } from "../../breadboard/session-binding";
-import { nativeControlRestriction } from "../../breadboard/native-control-policy";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type BashResult, isPersistentShellCdCommand } from "../../exec/bash-executor";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
@@ -1053,14 +1051,6 @@ export class CommandController {
 	}
 
 	async #runNewSessionFlow(options?: NewSessionOptions, label: string = "New session started"): Promise<boolean> {
-		const restriction = nativeControlRestriction(
-			"native-session-transition",
-			this.ctx.session.mainStreamOwnsTurnLifecycle,
-		);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return false;
-		}
 		this.ctx.clearTransientSessionUi();
 
 		if (this.ctx.session.isCompacting) {
@@ -1069,15 +1059,7 @@ export class CommandController {
 				await Bun.sleep(10);
 			}
 		}
-		try {
-			if (!(await this.ctx.session.newSession(options))) return false;
-		} catch (error) {
-			if (error instanceof BreadboardSessionTransitionError) {
-				this.ctx.showWarning(error.message);
-				return false;
-			}
-			throw error;
-		}
+		if (!(await this.ctx.session.newSession(options))) return false;
 		// A focused subagent view keeps its own history: return to the main session
 		// first so the transcript below cannot rebuild from the subagent's surviving
 		// conversation, then drop any turn-scoped anchors (coalescing timers,

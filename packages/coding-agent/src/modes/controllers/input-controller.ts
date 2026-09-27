@@ -38,7 +38,6 @@ import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-tui/prompt/composer";
 import { pickRecentFocusableAgentId } from "./session-focus-controller";
-import { nativeCommandRestriction, nativeControlRestriction } from "../../breadboard/native-control-policy";
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { parseSlashCommand, parseSubcommand } from "../../slash-commands/helpers/parse";
 import { getTinyLocalModelSpec, isTinyLocalModelKey } from "../../tiny/models";
@@ -353,7 +352,6 @@ export class InputController {
 	}
 
 	#abortStreamingTurn(): void {
-		if (this.ctx.session.mainStreamOwnsTurnLifecycle) this.ctx.eventController.markBreadboardCancelling();
 		const loader = this.ctx.loadingAnimation;
 		if (loader) {
 			loader.stop();
@@ -709,11 +707,7 @@ export class InputController {
 		this.registerExtensionShortcuts();
 		const planModeKeys = this.ctx.keybindings.getKeys("app.plan.toggle");
 		for (const key of planModeKeys) {
-			this.ctx.editor.setCustomKeyHandler(key, () => {
-				const restriction = nativeControlRestriction("plan", this.ctx.session.mainStreamOwnsTurnLifecycle);
-				if (restriction) this.ctx.showWarning(restriction);
-				else void this.ctx.handlePlanModeCommand();
-			});
+			this.ctx.editor.setCustomKeyHandler(key, () => void this.ctx.handlePlanModeCommand());
 		}
 
 		for (const key of this.ctx.keybindings.getKeys("app.session.new")) {
@@ -729,21 +723,13 @@ export class InputController {
 			this.ctx.editor.setCustomKeyHandler(key, () => this.ctx.showSessionSelector());
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.message.followUp")) {
-			this.ctx.editor.setCustomKeyHandler(key, () => {
-				const restriction = nativeCommandRestriction("followUp", this.ctx.session.mainStreamOwnsTurnLifecycle);
-				if (restriction) this.ctx.showWarning(restriction);
-				else void this.handleFollowUp();
-			});
+			this.ctx.editor.setCustomKeyHandler(key, () => void this.handleFollowUp());
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.stt.toggle")) {
 			this.ctx.editor.setCustomKeyHandler(key, () => void this.ctx.handleSTTToggle());
 		}
 		for (const key of this.ctx.keybindings.getKeys("app.live.toggle")) {
-			this.ctx.editor.setCustomKeyHandler(key, () => {
-				const restriction = nativeCommandRestriction("live", this.ctx.session.mainStreamOwnsTurnLifecycle);
-				if (restriction) this.ctx.showWarning(restriction);
-				else void this.ctx.handleLiveCommand();
-			});
+			this.ctx.editor.setCustomKeyHandler(key, () => void this.ctx.handleLiveCommand());
 		}
 		// Hold the space bar to push-to-talk: the editor recognizes the auto-repeat burst, tracks
 		// the spam back out, and toggles STT on hold start / release. Gated on `stt.enabled` so a
@@ -1553,11 +1539,6 @@ export class InputController {
 	}
 
 	handleDequeue(): void {
-		const restriction = nativeCommandRestriction("queue", this.ctx.session.mainStreamOwnsTurnLifecycle);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		const popped = this.#popLastQueuedMessage();
 		if (!popped) {
 			this.ctx.showStatus("No queued messages to restore");
@@ -1638,11 +1619,6 @@ export class InputController {
 	}
 
 	async handleRetry(): Promise<void> {
-		const restriction = nativeCommandRestriction("retry", this.ctx.session.mainStreamOwnsTurnLifecycle);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		if (this.ctx.collabGuest) {
 			this.ctx.showStatus("/retry is host-only during a collab session");
 			return;
@@ -1777,11 +1753,6 @@ export class InputController {
 
 	/** Send editor text as a follow-up message (queued behind current stream). */
 	async handleFollowUp(): Promise<void> {
-		const restriction = nativeCommandRestriction("followUp", this.ctx.session.mainStreamOwnsTurnLifecycle);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		let text = this.#compactDraftImages(this.ctx.editor.getExpandedText().trim());
 		const images = this.ctx.editor.pendingImages.length > 0 ? [...this.ctx.editor.pendingImages] : undefined;
 		const imageLinks =
@@ -2485,11 +2456,6 @@ export class InputController {
 	}
 
 	cycleThinkingLevel(): void {
-		const restriction = nativeControlRestriction("thinking", this.ctx.session.mainStreamOwnsTurnLifecycle);
-		if (restriction) {
-			this.ctx.showWarning(restriction);
-			return;
-		}
 		if (this.ctx.focusedAgentId) {
 			this.ctx.showStatus("Model/thinking apply to the main session — press ←← to return first");
 			return;
@@ -2509,17 +2475,6 @@ export class InputController {
 			return;
 		}
 		try {
-			if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
-				const result = await this.ctx.session.cycleModel(direction);
-				if (!result) {
-					this.ctx.showStatus("Only one engine model available");
-					return;
-				}
-				this.ctx.statusLine.invalidate();
-				this.ctx.updateEditorBorderColor();
-				this.ctx.showStatus(`Model set to ${result.model.provider}/${result.model.id}.`);
-				return;
-			}
 			const cycleOrder = settings.get("cycleOrder");
 			const result = await this.ctx.session.cycleRoleModels(cycleOrder, direction);
 			if (!result) {

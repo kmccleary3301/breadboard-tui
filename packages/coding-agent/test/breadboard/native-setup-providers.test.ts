@@ -31,7 +31,7 @@ describe("native setup credential store", () => {
 		const rawArgs = ["--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-tools", "--no-lsp"];
 		let args: Parameters<NonNullable<RunInteractiveMode>> | undefined;
 		await runRootCommand(parseArgs(rawArgs), rawArgs, {
-			settings: Settings.isolated({ "breadboard.engineMode": "native" }),
+			settings: Settings.isolated(),
 			forceSetupWizard: true,
 			discoverAuthStorage: discover,
 			runInteractiveMode: async (...received) => {
