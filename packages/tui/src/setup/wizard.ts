@@ -46,10 +46,7 @@ function rebuildScenes(): void {
 	}
 }
 
-export function registerSetupScene(
-	scene: SetupScene,
-	options?: { before?: string; after?: string },
-): () => void {
+export function registerSetupScene(scene: SetupScene, options?: { before?: string; after?: string }): () => void {
 	const entry: RegisteredSetupScene = { scene, options };
 	registeredScenes.push(entry);
 	rebuildScenes();

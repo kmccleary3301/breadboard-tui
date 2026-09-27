@@ -197,7 +197,6 @@ export interface SettingsHost {
 	validateProviderLimits(value: unknown): Record<string, number>;
 }
 
-
 /** Primitive value displayed by a settings control. */
 export type SettingsDisplayValue = boolean | string;
 

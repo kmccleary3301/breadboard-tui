@@ -1,4 +1,7 @@
-import { type ComposerPreviewStatusSource, ComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
+import {
+	type ComposerPreviewStatusSource,
+	ComposerShapePreview,
+} from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import {
 	getAllSettingDefs,
 	registerSettingCustomEditor,

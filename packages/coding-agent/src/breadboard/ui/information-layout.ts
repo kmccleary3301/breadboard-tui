@@ -9,7 +9,10 @@ import {
 	theme,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
-import { type ComposerPreviewStatusSource, renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
+import {
+	type ComposerPreviewStatusSource,
+	renderComposerShapePreview,
+} from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import type { ComposerShape } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/wizard";
 import type { StatusLinePreset } from "@oh-my-pi/pi-tui/status-line/types";
