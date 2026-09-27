@@ -11,7 +11,6 @@ export interface BreadboardComposerActivity {
 	readonly kind: "working" | "tool" | "approval" | "cancelling" | "error";
 	readonly label: string;
 }
-
 export interface HarnessSnapshot {
 	readonly harnessId: string;
 	readonly name: string;
@@ -114,11 +113,6 @@ export interface SegmentContext {
 	identityMark?: string;
 	/** Active BreadBoard harness identity, when this session is running on BreadBoard. */
 	harness?: HarnessSnapshot | null;
-	/** Engine-owned turns must not expose native reasoning, billing, or compaction state. */
-	breadboardOwned?: boolean;
-	breadboardActivity?: BreadboardComposerActivity | null;
-	/** Running background jobs while the open turn is not streaming (pending async wake). */
-	breadboardBackgroundWait?: number;
 	options: StatusLineSegmentOptions;
 	/** Render the model segment's thinking level as a compact leading glyph. */
 	compactThinkingLevel: boolean;

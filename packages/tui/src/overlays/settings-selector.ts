@@ -704,8 +704,6 @@ export interface SettingsRuntimeContext {
 	harness?: SettingsBreadboardContext["harness"];
 	/** Optional BreadBoard host seam; native policy stays in coding-agent. */
 	breadboard?: SettingsBreadboardContext;
-	/** Effective session ownership used to hide native groups that cannot affect the engine. */
-	mainStreamOwnsTurnLifecycle?: boolean;
 	/** Live status renderer for composer-shape previews (the session's status line). */
 	composerPreviewStatus?: ComposerPreviewStatusSource;
 	/** Product labels for the composer selector; supplied by the host. */

@@ -8,7 +8,6 @@ import {
 	type AgentTool,
 	AppendOnlyContextManager,
 	filterProviderReplayMessages,
-	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type {
@@ -398,9 +397,9 @@ export interface CreateAgentSessionOptions {
 	modelRegistry?: ModelRegistry;
 	/**
 	 * Request credential resolver. Defaults to the model registry's normal
-	 * session-affine resolver when no `mainStreamFn` is supplied. When an
-	 * external main stream is supplied, that transport owns primary-stream
-	 * authentication unless this callback is explicitly provided.
+	 * session-affine resolver. Security scans use this narrow seam to keep one
+	 * durable OAuth row pinned for the operation without changing ordinary
+	 * provider routing.
 	 */
 	getApiKey?: AgentOptions["getApiKey"];
 	/**
@@ -481,24 +480,6 @@ export interface CreateAgentSessionOptions {
 	providerPromptCacheKeySource?: "explicit" | "fork";
 	/** Absolute wall-clock deadline in Unix epoch milliseconds. */
 	deadline?: number;
-	/**
-	 * Optional transport for the primary Agent loop only. When supplied, this
-	 * external main stream owns primary-stream authentication; the SDK neither
-	 * requires a native primary credential nor supplies its default resolver.
-	 * An explicit {@link getApiKey} is still used. Side-channel, advisor, title,
-	 * and compaction requests retain OMP's native settings-aware streams.
-	 */
-	mainStreamFn?: StreamFn;
-	/**
-	 * The main stream runs complete logical tasks, rather than individual model
-	 * requests. Its terminal result bypasses native retries, compaction and
-	 * post-turn continuations. Explicit subsequent prompts remain supported.
-	 * Defaults to false, including for externally authenticated transports.
-	 */
-	mainStreamOwnsTurnLifecycle?: boolean;
-	/** Commit a concrete model to the external owner before publishing local model state. */
-	mainStreamSelectModel?: (model: Model) => Promise<void>;
-
 	/** Custom tools to register (in addition to built-in tools). Accepts both CustomTool and ToolDefinition. */
 	customTools?: (CustomTool | ToolDefinition)[];
 	/** Inline extensions (merged with discovery). */
@@ -1399,22 +1380,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	if (options.systemPromptTemplate !== undefined && options.customSystemPrompt !== undefined) {
 		throw new Error("systemPromptTemplate cannot be combined with a literal custom system prompt");
 	}
-	const externalTurnLifecycle = options.mainStreamOwnsTurnLifecycle === true;
-	if (externalTurnLifecycle) {
-		if (options.prewalk !== undefined) {
-			throw new Error(
-				"BreadBoard owns turns; native prewalk has no BreadBoard handoff route in this session, so it cannot run here.",
-			);
-		}
-		if (options.planYolo !== undefined) {
-			throw new Error(
-				"BreadBoard owns turns; no BreadBoard plan/proposal route is exposed for native plan mode, so it cannot run here.",
-			);
-		}
-		if (options.thinkingLevel !== undefined) {
-			throw new Error("BreadBoard owns turns; native thinking control is unavailable.");
-		}
-	}
 	const cwd = options.cwd ?? getProjectDir();
 	const agentDir = options.agentDir ?? getAgentDir();
 	const eventBus = options.eventBus ?? new EventBus();
@@ -1539,9 +1504,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		logger.time("sessionManager", () =>
 			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
 		);
-	const configuredDirs = externalTurnLifecycle
-		? []
-		: (options.additionalDirectories ?? settings.get("workspace.additionalDirectories"));
+	const configuredDirs = options.additionalDirectories
+		? options.additionalDirectories
+		: settings.get("workspace.additionalDirectories");
 	if (configuredDirs.length > 0) {
 		// Merge with any roots restored from the session header (resume/fork), not replace.
 		const existing = sessionManager.getAdditionalDirectories();
@@ -1706,7 +1671,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// role reclaim so the final model's own defaults aren't masked by an earlier
 	// fallback model's.
 	const pickInitialThinkingLevel = (selectedModel: Model | undefined): ConfiguredThinkingLevel | undefined => {
-		if (externalTurnLifecycle) return undefined;
 		let level = options.thinkingLevel;
 		if (level === undefined && hasExistingSession && hasThinkingEntry) {
 			level =
@@ -1827,15 +1791,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 	let agent: Agent;
 	const effectiveGetApiKey: CreateAgentSessionOptions["getApiKey"] =
-		options.getApiKey ??
-		(options.mainStreamFn === undefined
-			? requestModel => modelRegistry.resolver(requestModel, agent.sessionId)
-			: undefined);
+		options.getApiKey ?? (requestModel => modelRegistry.resolver(requestModel, agent.sessionId));
 	let session!: AgentSession;
 	let hasSession = false;
 	let hasRegistered = false;
 	const restrictToolNames = options.restrictToolNames === true;
-	const enableLsp = !externalTurnLifecycle && (options.enableLsp ?? !restrictToolNames);
+	const enableLsp = options.enableLsp ?? !restrictToolNames;
 	const lspReadOnly = options.lspReadOnly ?? restrictToolNames;
 	const asyncMaxJobs = Math.min(100, Math.max(1, settings.get("async.maxJobs") ?? 100));
 	// Only the first top-level session in a process owns an AsyncJobManager.
@@ -2123,7 +2084,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		});
 
 		// Restricted sessions cannot inherit or discover MCP capabilities.
-		const enableMCP = !externalTurnLifecycle && !restrictToolNames && (options.enableMCP ?? true);
+		const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
 		let mcpManager: MCPManager | undefined = enableMCP ? options.mcpManager : undefined;
 		toolSession.mcpManager = mcpManager;
 		toolSession.enableMCP = enableMCP;
@@ -3347,8 +3308,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					setActiveRules(nextActiveRules);
 				}
 			}
-			const memoryBackend =
-				restrictToolNames || externalTurnLifecycle ? undefined : await resolveMemoryBackend(settings);
+			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);
 			const memoryInstructions = memoryBackend
 				? await memoryBackend.buildDeveloperInstructions(agentDir, settings, session)
 				: undefined;
@@ -3781,7 +3741,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			blobBroker,
 		);
 		const codeModeState: { namespacesInfo?: unknown } = {};
-		const primaryStreamFn = options.mainStreamFn ?? settingsAwareStreamFn;
+		const primaryStreamFn = settingsAwareStreamFn;
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
 			const maxTimeout = settings.get("tools.maxTimeout");
@@ -3852,7 +3812,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 				}
 				const externalThinking =
-					!externalTurnLifecycle &&
 					settings.get("externalThinking") &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
@@ -4039,9 +3998,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			skillsReloadable: options.skills === undefined,
 			skillsSettings: settings.getGroup("skills"),
 			modelRegistry,
-			mainStreamManagesAuth: options.mainStreamFn !== undefined,
-			mainStreamOwnsTurnLifecycle: options.mainStreamOwnsTurnLifecycle,
-			mainStreamSelectModel: options.mainStreamSelectModel,
 			rebindModelAfterDiscovery: options.model === undefined || options.rebindModelAfterDiscovery === true,
 			toolRegistry,
 			reconcileBrowserMcpFilter: mcpManager
@@ -4415,10 +4371,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const runAutoLearnCapture = createAutoLearnCaptureRunner({
 			sourceAgent: agent,
 			captureTools: autoLearnCaptureTools,
-			getApiKey:
-				options.mainStreamFn === undefined && options.getApiKey
-					? options.getApiKey
-					: requestModel => modelRegistry.resolver(requestModel, agent.sessionId),
+			getApiKey: options.getApiKey ?? (requestModel => modelRegistry.resolver(requestModel, agent.sessionId)),
 			onPayload,
 			onResponse,
 			createAgent: captureOptions => {
@@ -4493,9 +4446,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// mid-session enable fire a nudge pointing at tools the session never built.
 		// Activation is therefore a session-start decision for BOTH the controller
 		// and the tools; the fire-time re-check in `#onAgentEnd` still handles a
-		// mid-session DISABLE. The subscription lives for the session's lifetime; the
 		// reference is intentionally discarded (the listener retains it).
-		if (!restrictToolNames && !externalTurnLifecycle) {
+		if (!restrictToolNames) {
 			if (settings.get("autolearn.enabled") && taskDepth === 0) {
 				await logger.time("startMemoryStartupTask", startMemoryBackend);
 				new AutoLearnController({

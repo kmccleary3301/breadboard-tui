@@ -62,15 +62,18 @@ afterEach(async () => {
 	directory.removeSync();
 	resetSettingsForTest();
 });
-function session(messages: AgentMessage[], model = pricedModel): AgentSession {
+function session(
+	messages: AgentMessage[],
+	model = pricedModel,
+	thinkingLevel?: Agent["state"]["thinkingLevel"],
+): AgentSession {
 	const current = new AgentSession({
 		agent: new Agent({
-			initialState: { model, messages, tools: [], systemPrompt: [], thinkingLevel: ThinkingLevel.High },
+			initialState: { model, messages, tools: [], systemPrompt: [], thinkingLevel },
 		}),
 		sessionManager: SessionManager.inMemory(directory.path()),
 		settings: Settings.isolated({ "compaction.enabled": false }),
 		modelRegistry: new ModelRegistry(auth),
-		mainStreamOwnsTurnLifecycle: true,
 	});
 	sessions.push(current);
 	return current;
@@ -84,23 +87,13 @@ describe("BreadBoard composer metrics", () => {
 		);
 		expect(metrics.spend).toEqual({ sessionUsd: 0.005, turnUsd: 0.005, estimated: true });
 	});
-	it("does not invent a bill or native effort for Codex subscription usage", () => {
+	it("does not invent a bill for Codex subscription usage", () => {
 		const codex = { ...pricedModel, provider: "openai-codex" };
 		const metrics = readBreadboardComposerMetrics(
 			session([user, assistant("turn-1", codex, usage(1_000, 2_000))], codex),
 			null,
 		);
 		expect(metrics.spend).toBeNull();
-		expect(metrics.effort).toBeNull();
-	});
-	it("deduplicates projection receipts without presenting an incomplete session total", () => {
-		const unknown = { ...pricedModel, id: "unknown-model" };
-		const current = assistant("turn-2", pricedModel, usage(1_000, 2_000));
-		const metrics = readBreadboardComposerMetrics(
-			session([user, assistant("turn-1", unknown, usage(1_000, 1_000)), user, current, { ...current }]),
-			null,
-		);
-		expect(metrics.spend).toEqual({ sessionUsd: null, turnUsd: 0.005, estimated: true });
 	});
 	it("requires verified model and harness identity before showing configured effort", () => {
 		const harness: HarnessSnapshot = {
@@ -129,7 +122,7 @@ describe("BreadBoard composer metrics", () => {
 				],
 			},
 		};
-		const current = session([user]);
+		const current = session([user], pricedModel, undefined);
 		expect(readBreadboardComposerMetrics(current, harness).effort).toBe(ThinkingLevel.High);
 		expect(readBreadboardComposerMetrics(current, { ...harness, harnessId: "different" }).effort).toBeNull();
 		expect(readBreadboardComposerMetrics(current, { ...harness, verifiedIdentity: null }).effort).toBeNull();

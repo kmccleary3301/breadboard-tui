@@ -9,7 +9,7 @@ import { addKeyAliases, canonicalKeyId } from "../keybindings";
 import { type KeyId, parseKey } from "../keys";
 import type { Component, TUI } from "../tui";
 import { type ThemeColor, theme } from "../theme/theme";
-import { buildBrowserItems, buildSessionModelScope, ModelBrowser, sortModelItems, type ModelBrowserItem } from "./model-browser";
+import { buildSessionModelScope, ModelBrowser, type ModelBrowserItem } from "./model-browser";
 import type { ModelBrowserRegistry, ModelBrowserSource } from "./model-browser";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import type { ScopedModelItem } from "./model-hub";
@@ -32,10 +32,10 @@ export interface ModelPickerRegistry extends ModelBrowserRegistry {
 export interface ModelPickerCallbacks {
 	/**
 	 * A model was chosen for a session-only switch. `selector` is `provider/id`.
-	 * In the native picker, `overContext` is true when the session transcript
-	 * exceeds the model's context window — the host must compact before switching.
+	 * `overContext` is true when the session transcript exceeds the model's
+	 * context window — the host must compact before switching.
 	 */
-	onPick: (model: Model, selector: string, meta: { overContext: boolean }) => void | Promise<void>;
+	onPick: (model: Model, selector: string, meta: { overContext: boolean }) => void;
 	/** A configured ctrl+p quick role was chosen. */
 	onPickRole?: (entry: ResolvedRoleModel) => void;
 	/**
@@ -48,9 +48,7 @@ export interface ModelPickerCallbacks {
 }
 
 export interface ModelPickerOptions {
-	/** Whether an external host stream owns model selection and native controls. Defaults to false. */
-	mainStreamOwnsTurnLifecycle?: boolean;
-	/** Session token count; native models with smaller windows are grayed and compact-first on pick. */
+	/** Session token count; models with smaller context windows are grayed and compact-first on pick. */
 	currentContextTokens?: number;
 	/** `provider/id` of the session's active model; highlighted and preselected. */
 	currentSelector?: string;
@@ -78,11 +76,9 @@ const MIN_VISIBLE = 5;
 const HEIGHT_FRACTION = 0.4;
 
 const STATUS_HINT = "Session-only switch — role models stay unchanged";
-const EXTERNAL_STATUS_HINT = "Engine model switch — selected model stays with this session";
 const QUICK_ROLE_STATUS_HINT = "Quick role switch — applies its model and thinking for this session";
 const TASK_STATUS_HINT = "Task subagent switch — spawned task agents use this model (session-only)";
 const FOOTER_HINT = "↑/↓ models · Enter use for this session · type to search · @ quick roles · Esc close";
-const EXTERNAL_FOOTER_HINT = "↑/↓ models · Enter use for this session · type to search · Esc close";
 const QUICK_ROLE_FOOTER_HINT = "↑/↓ roles · Enter apply role model · type to search · Esc close";
 const TASK_FOOTER_HINT = "↑/↓ models · Enter use for Task subagents · type to search · Esc close";
 
@@ -96,11 +92,8 @@ export class ModelPickerComponent implements Component {
 	#settings: ModelBrowserSource;
 	#registry: ModelPickerRegistry;
 	#scopedModels: ReadonlyArray<ScopedModelItem>;
-	#mainStreamOwnsTurnLifecycle: boolean;
 	#browser: ModelBrowser;
 	#configError: string | undefined;
-	#selectionPending = false;
-	#selectionError: string | undefined;
 	#currentSelector: string | undefined;
 	#currentQuickRoleSelector: string | undefined;
 	#modelItems: ModelBrowserItem[] = [];
@@ -124,25 +117,21 @@ export class ModelPickerComponent implements Component {
 		this.#settings = settings;
 		this.#registry = registry;
 		this.#scopedModels = scopedModels;
-		this.#mainStreamOwnsTurnLifecycle = options.mainStreamOwnsTurnLifecycle === true;
 		this.#currentSelector = options.currentSelector;
-		this.#currentQuickRoleSelector =
-			!this.#mainStreamOwnsTurnLifecycle && options.currentQuickRole ? `@${options.currentQuickRole}` : undefined;
-		this.#taskSelector = this.#mainStreamOwnsTurnLifecycle ? undefined : options.taskSelector;
+		this.#currentQuickRoleSelector = options.currentQuickRole ? `@${options.currentQuickRole}` : undefined;
+		this.#taskSelector = options.taskSelector;
 		this.#taskModeKeyLabel = options.taskModeKeyLabel ?? "alt+p";
-		if (!this.#mainStreamOwnsTurnLifecycle && callbacks.onPickTask) {
+		if (callbacks.onPickTask) {
 			for (const key of options.taskModeKeys ?? []) addKeyAliases(this.#taskMatchKeys, key);
 		}
-		this.#quickRoleItems = this.#mainStreamOwnsTurnLifecycle
-			? []
-			: this.#buildQuickRoleItems(
-					options.quickRoles ?? [],
-					options.quickRoleOrder ?? options.quickRoles?.map(entry => entry.role) ?? [],
-				);
+		this.#quickRoleItems = this.#buildQuickRoleItems(
+			options.quickRoles ?? [],
+			options.quickRoleOrder ?? options.quickRoles?.map(entry => entry.role) ?? [],
+		);
 
 		this.#browser = new ModelBrowser(settings, {
 			currentContextTokens: options.currentContextTokens,
-			markOverContext: !this.#mainStreamOwnsTurnLifecycle,
+			markOverContext: true,
 			emptyText: () => (this.#roleMode ? "  No quick roles in the Ctrl+P cycle" : undefined),
 		});
 		this.#browser.onActivate = item => {
@@ -155,38 +144,7 @@ export class ModelPickerComponent implements Component {
 				callbacks.onPickTask?.(item.model, item.selector);
 				return;
 			}
-			const overContext = this.#browser.isOverContext(item);
-			if (!this.#mainStreamOwnsTurnLifecycle) {
-				callbacks.onPick(item.model, item.selector, { overContext });
-				return;
-			}
-			if (this.#selectionPending) return;
-			this.#selectionPending = true;
-			this.#selectionError = undefined;
-			this.#tui.requestRender();
-			try {
-				const result = callbacks.onPick(item.model, item.selector, { overContext: false });
-				if (result === undefined) {
-					this.#selectionPending = false;
-					this.#tui.requestRender();
-					return;
-				}
-				Promise.resolve(result).then(
-					() => {
-						this.#selectionPending = false;
-						this.#tui.requestRender();
-					},
-					error => {
-						this.#selectionPending = false;
-						this.#selectionError = error instanceof Error ? error.message : String(error);
-						this.#tui.requestRender();
-					},
-				);
-			} catch (error) {
-				this.#selectionPending = false;
-				this.#selectionError = error instanceof Error ? error.message : String(error);
-				this.#tui.requestRender();
-			}
+			callbacks.onPick(item.model, item.selector, { overContext: this.#browser.isOverContext(item) });
 		};
 		this.#browser.onCancel = () => callbacks.onCancel();
 		this.#browser.onQueryChange = query => this.#syncItemsForQuery(query);
@@ -202,7 +160,7 @@ export class ModelPickerComponent implements Component {
 		// Reconcile with cached discovery state in the background. A --models
 		// scope is registry-independent, so the offline reload would only repeat
 		// the synchronous hydration above.
-		if (!this.#mainStreamOwnsTurnLifecycle && this.#scopedModels.length === 0) {
+		if (this.#scopedModels.length === 0) {
 			this.#registry
 				.refresh("offline")
 				.then(() => this.#syncFromRegistryState())
@@ -217,25 +175,16 @@ export class ModelPickerComponent implements Component {
 
 	/** Rebuild model items and role chips from the registry's in-memory state. */
 	#syncFromRegistryState(): void {
-		if (this.#mainStreamOwnsTurnLifecycle) {
-			this.#configError = undefined;
-			this.#modelItems = buildBrowserItems(this.#scopedModels.map(scoped => scoped.model));
-			sortModelItems(this.#modelItems, { mruOrder: this.#settings.mruOrder });
-			this.#browser.setRoles({});
-			this.#browser.setMruOrder(this.#settings.mruOrder);
-			this.#browser.setPerfStats(this.#settings.modelPerf);
-		} else {
-			const scope = buildSessionModelScope(
-				this.#settings,
-				this.#registry,
-				this.#scopedModels.map(scoped => scoped.model),
-			);
-			this.#configError = scope.error;
-			this.#modelItems = scope.items;
-			this.#browser.setRoles(scope.roles);
-			this.#browser.setMruOrder(scope.mruOrder);
-			this.#browser.setPerfStats(this.#settings.modelPerf);
-		}
+		const scope = buildSessionModelScope(
+			this.#settings,
+			this.#registry,
+			this.#scopedModels.map(s => s.model),
+		);
+		this.#configError = scope.error;
+		this.#modelItems = scope.items;
+		this.#browser.setRoles(scope.roles);
+		this.#browser.setMruOrder(scope.mruOrder);
+		this.#browser.setPerfStats(this.#settings.modelPerf);
 		this.#syncItemsForQuery(this.#browser.query, true);
 	}
 
@@ -262,13 +211,13 @@ export class ModelPickerComponent implements Component {
 
 	/** Switch browser content only when a leading `@` changes the search mode. */
 	#syncItemsForQuery(query: string, refresh = false): void {
-		const roleMode = !this.#mainStreamOwnsTurnLifecycle && query.startsWith("@") && !this.#taskMode;
+		const roleMode = query.startsWith("@") && !this.#taskMode;
 		const modeChanged = roleMode !== this.#roleMode;
 		if (!modeChanged && !refresh) return;
 
 		this.#roleMode = roleMode;
 		this.#browser.setShowProvider(!roleMode);
-		this.#browser.setMarkOverContext(!this.#mainStreamOwnsTurnLifecycle && !roleMode && !this.#taskMode);
+		this.#browser.setMarkOverContext(!roleMode && !this.#taskMode);
 		this.#browser.setPreserveQueryOrder(roleMode);
 		const currentSelector = roleMode
 			? this.#currentQuickRoleSelector
@@ -311,33 +260,14 @@ export class ModelPickerComponent implements Component {
 		this.#browser.setMaxVisible(Math.max(MIN_VISIBLE, listBudget));
 
 		const inner = Math.max(1, width - 4);
-		const status = this.#selectionError
-			? theme.fg("error", ` ${this.#selectionError}`)
-			: this.#selectionPending
-				? theme.fg("warning", " Engine model selection pending…")
-				: this.#configError
-					? theme.fg("error", ` ${this.#configError}`)
-					: this.#taskMode
-						? theme.fg("error", ` ${TASK_STATUS_HINT}`)
-						: theme.fg(
-								"muted",
-								` ${
-									this.#roleMode
-										? QUICK_ROLE_STATUS_HINT
-										: this.#mainStreamOwnsTurnLifecycle
-											? EXTERNAL_STATUS_HINT
-											: STATUS_HINT
-								}`,
-							);
+		const status = this.#configError
+			? theme.fg("error", ` ${this.#configError}`)
+			: this.#taskMode
+				? theme.fg("error", ` ${TASK_STATUS_HINT}`)
+				: theme.fg("muted", ` ${this.#roleMode ? QUICK_ROLE_STATUS_HINT : STATUS_HINT}`);
 
 		const borderColor: ThemeColor | undefined = this.#taskMode ? "error" : undefined;
-		let footer = this.#taskMode
-			? TASK_FOOTER_HINT
-			: this.#roleMode
-				? QUICK_ROLE_FOOTER_HINT
-				: this.#mainStreamOwnsTurnLifecycle
-					? EXTERNAL_FOOTER_HINT
-					: FOOTER_HINT;
+		let footer = this.#taskMode ? TASK_FOOTER_HINT : this.#roleMode ? QUICK_ROLE_FOOTER_HINT : FOOTER_HINT;
 		if (this.#taskMatchKeys.size > 0 && !this.#roleMode) {
 			footer += ` · ${this.#taskModeKeyLabel} ${this.#taskMode ? "session model" : "task model"}`;
 		}

@@ -99,7 +99,6 @@ interface HubHarness {
 	onAssign: ReturnType<typeof vi.fn>;
 	onUnassign: ReturnType<typeof vi.fn>;
 	onLoginRequest: ReturnType<typeof vi.fn>;
-	onSelectModel: Mock<(model: Model, selector: string) => void>;
 	onCancel: ReturnType<typeof vi.fn>;
 	onFallbackChainChange: Mock<(role: string, chain: string[]) => void>;
 }
@@ -124,7 +123,6 @@ function createHub(options: {
 	const onUnassign = vi.fn();
 	const onLoginRequest = vi.fn();
 	const onCancel = vi.fn();
-	const onSelectModel = vi.fn();
 	// Mirror the controller: persist chain edits so the hub's re-read sees them.
 	const onFallbackChainChange = vi.fn((role: string, chain: string[]) => {
 		const chains = { ...settings.get("retry.fallbackChains") };
@@ -135,7 +133,6 @@ function createHub(options: {
 		}
 		settings.override("retry.fallbackChains", chains);
 	});
-	const hubOptions: ModelHubOptions = options.hub ?? { mainStreamOwnsTurnLifecycle: false };
 	const hub = new ModelHubComponent(
 		ui,
 		createModelBrowserSource(settings),
@@ -144,20 +141,19 @@ function createHub(options: {
 		{
 			onAssign: options.callbacks?.onAssign ?? onAssign,
 			onUnassign: options.callbacks?.onUnassign ?? onUnassign,
-			onSelectModel: options.callbacks?.onSelectModel ?? onSelectModel,
 			onLoginRequest: options.callbacks?.onLoginRequest ?? onLoginRequest,
 			onCycleOrderChange: options.callbacks?.onCycleOrderChange,
 			onFallbackChainChange: options.callbacks?.onFallbackChainChange ?? onFallbackChainChange,
 			onCancel: options.callbacks?.onCancel ?? onCancel,
 		},
-		hubOptions,
+		options.hub,
 	);
-	return { hub, onAssign, onUnassign, onLoginRequest, onCancel, onFallbackChainChange, onSelectModel };
+	openHubs.push(hub);
+	return { hub, onAssign, onUnassign, onLoginRequest, onCancel, onFallbackChainChange };
 }
 
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
-
 const LEFT = "\x1b[D";
 const ALT_RIGHT = "\x1b[1;3C";
 /** What macOS terminals (ghostty, Terminal.app, iTerm) emit for Option+→. */
@@ -165,34 +161,6 @@ const OPTION_RIGHT_MAC = "\x1bf";
 const ESC = "\x1b";
 
 describe("ModelHub", () => {
-	test("external hub never falls back to native models or role controls", () => {
-		const native = makeModel("native", "native-only");
-		const settings = Settings.isolated({ modelRoles: { default: "native/native-only", smol: "native/native-only" } });
-		const { hub } = createHub({
-			models: [native],
-			settings,
-			hub: { mainStreamOwnsTurnLifecycle: true },
-		});
-
-		const rendered = normalize(hub.render(220));
-		expect(rendered).not.toContain("native-only");
-		expect(rendered).not.toContain("Roles");
-		expect(rendered).not.toContain("assign roles");
-		expect(rendered).not.toContain("thinking");
-	});
-
-	test("external hub activates only an engine-scoped model through its owner callback", () => {
-		const engine = makeModel("engine", "engine-model");
-		const { hub, onSelectModel } = createHub({
-			models: [engine],
-			scoped: true,
-			hub: { mainStreamOwnsTurnLifecycle: true },
-		});
-
-		hub.handleInput("\x1b[C"); // focus the model list
-		hub.handleInput("\n");
-		expect(onSelectModel).toHaveBeenCalledWith(engine, "engine/engine-model");
-	});
 	beforeAll(async () => {
 		testTheme = await getThemeByName("dark");
 		if (!testTheme) {

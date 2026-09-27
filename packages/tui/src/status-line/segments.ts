@@ -20,7 +20,7 @@ import { formatMetric } from "../components/metric";
 import { formatBillingSummary } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
-import { renderBreadboardActivity, renderBreadboardPolicy } from "./breadboard-presentation";
+import { renderBreadboardPolicy } from "./breadboard-presentation";
 import type { HarnessSnapshot, RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
@@ -257,7 +257,7 @@ const modelSegment: StatusLineSegment = {
 		// Resolve the current thinking-level display ("◉ xhigh", "⟳ auto", …)
 		// when the model supports thinking and the segment isn't hiding it.
 		let thinkingDisplay = "";
-		if (!ctx.breadboardOwned && opts.showThinkingLevel !== false && state.model?.thinking) {
+		if (opts.showThinkingLevel !== false && state.model?.thinking) {
 			if (ctx.session.isAutoThinking) {
 				// Pending (no turn classified yet / classifying) shows a symbol-theme
 				// question-box marker; once resolved it shows `<level>`.
@@ -289,7 +289,7 @@ const modelSegment: StatusLineSegment = {
 		// theme.fg resets only the fg, so the spans are concatenated (not
 		// nested) to keep each color intact.
 		let tail = "";
-		if (!ctx.breadboardOwned && ctx.session.isFastModeActive() && theme.icon.fast) {
+		if (ctx.session.isFastModeActive() && theme.icon.fast) {
 			tail += ` ${theme.icon.fast}`;
 		}
 		if (!compact && thinkingDisplay) {
@@ -305,7 +305,7 @@ const modelSegment: StatusLineSegment = {
 		// `/advisor status`.
 		// Optional chaining: lightweight session doubles (test mocks) that don't
 		// implement getAdvisorStatusOverview skip the badge instead of crashing.
-		const advisorStats = ctx.breadboardOwned ? undefined : ctx.session.getAdvisorStatusOverview?.();
+		const advisorStats = ctx.session.getAdvisorStatusOverview?.();
 		if (advisorStats?.configured && advisorStats.advisors.length > 0) {
 			const statuses = advisorStats.advisors.map(a => a.status);
 			const badgeColor = statuses.includes("error")
@@ -593,7 +593,6 @@ const tokenRateSegment: StatusLineSegment = {
 const costSegment: StatusLineSegment = {
 	id: "cost",
 	render(ctx) {
-		if (ctx.breadboardOwned) return { content: "", visible: false };
 		const { cost, premiumRequests } = ctx.usageStats;
 		const advisorCost = ctx.session.getAdvisorCost?.() ?? 0;
 		const state = ctx.session.state;
@@ -638,16 +637,6 @@ const contextPctSegment: StatusLineSegment = {
 			return { content: "", visible: false };
 		}
 		const color = getContextUsageThemeColor(getContextUsageLevel(pct ?? 0, window));
-		if (ctx.breadboardOwned) {
-			if (pct === null || !window || ctx.startupPlaceholder) return { content: "", visible: false };
-			return {
-				content: theme.fg(
-					getContextUsageThemeColor(getContextUsageLevel(pct, window)),
-					`ctx ~${Math.round(pct)}% / ${formatNumber(window)}`,
-				),
-				visible: true,
-			};
-		}
 		// Async-compaction indicator: pulse the auto icon while a background
 		// speculation runs, hold it in accent once a result is armed.
 		let autoIcon = "";
@@ -983,20 +972,6 @@ const longrunSegment: StatusLineSegment = {
 	},
 };
 
-const breadboardActivitySegment: StatusLineSegment = {
-	id: "bb_activity",
-	render(ctx) {
-		if (ctx.startupPlaceholder) return { content: "", visible: false };
-		const content = renderBreadboardActivity(
-			ctx.breadboardActivity,
-			ctx.turnElapsedMs,
-			Math.max(1, Math.min(36, ctx.width - 2)),
-			ctx.breadboardBackgroundWait,
-		);
-		return { content, visible: content.length > 0 };
-	},
-};
-
 const breadboardPolicySegment: StatusLineSegment = {
 	id: "bb_policy",
 	render(ctx) {
@@ -1035,7 +1010,6 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	vim: vimSegment,
 	harness: harnessSegment,
 	longrun: longrunSegment,
-	bb_activity: breadboardActivitySegment,
 	bb_policy: breadboardPolicySegment,
 };
 

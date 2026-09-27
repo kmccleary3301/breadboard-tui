@@ -22,7 +22,6 @@ import { createUsageRowBlock, turnElapsedMs } from "@oh-my-pi/pi-tui/overlays/us
 import { getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
-import type { BreadboardComposerActivity } from "@oh-my-pi/pi-tui/status-line/types";
 import { ACTIVE_PRODUCT_IDENTITY } from "../../product-identity";
 import idleRecapPrompt from "../../prompts/system/recap-user.md" with { type: "text" };
 import type { AgentSessionEvent } from "../../session/agent-session";
@@ -115,13 +114,6 @@ export class EventController {
 	#renderedCustomMessages = new Set<string>();
 	#lastIntent: string | undefined = undefined;
 	#backgroundTaskCallIds = new Set<string>();
-	/** Active BreadBoard tool calls, retained so overlapping completions can restore the
-	 * truthful foreground activity instead of clearing a newer call. */
-	#breadboardToolActivities = new Map<string, string>();
-	/** Number of active BreadBoard permission requests, including overlapping prompts. */
-	#breadboardApprovalCount = 0;
-	/** Explicit operator cancellation remains visible until the authoritative agent_end. */
-	#breadboardCancelling = false;
 	/** Tool calls whose approval prompt drove the title into `attention`; cleared
 	 *  at their tool_execution_end so the title returns to `working`. */
 	#approvalAttentionToolCallIds = new Set<string>();
@@ -340,64 +332,6 @@ export class EventController {
 			},
 			goal_updated: async () => {},
 		} satisfies AgentSessionEventHandlers;
-	}
-
-	#setBreadboardActivity(activity: BreadboardComposerActivity | null): void {
-		if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
-			this.ctx.statusLine.setBreadboardActivity(activity);
-		}
-	}
-
-	/** Mark an operator interrupt without changing any input or transport behavior. */
-	markBreadboardCancelling(): void {
-		this.#breadboardCancelling = true;
-		this.#setBreadboardActivity({ kind: "cancelling", label: "Cancelling" });
-		this.ctx.ui.requestRender();
-	}
-
-	/** Mark an actual BreadBoard permission request from the engine bridge. */
-	markBreadboardApproval(): void {
-		this.#breadboardApprovalCount++;
-		this.#setBreadboardActivity({ kind: "approval", label: "Approval required" });
-		this.ctx.ui.requestRender();
-	}
-
-	/** Resolve one actual BreadBoard permission request. */
-	resolveBreadboardApproval(): void {
-		this.#breadboardApprovalCount = Math.max(0, this.#breadboardApprovalCount - 1);
-		this.#syncBreadboardActivity();
-		this.ctx.ui.requestRender();
-	}
-
-	/** Clear activity state when a session is replaced or transient UI is torn down. */
-	clearBreadboardActivity(): void {
-		this.#breadboardCancelling = false;
-		this.#breadboardToolActivities.clear();
-		this.#breadboardApprovalCount = 0;
-		this.#approvalAttentionToolCallIds.clear();
-		this.#setBreadboardActivity(null);
-	}
-
-	#syncBreadboardActivity(): void {
-		if (this.#breadboardCancelling) {
-			this.#setBreadboardActivity({ kind: "cancelling", label: "Cancelling" });
-			return;
-		}
-		if (this.#breadboardApprovalCount > 0) {
-			this.#setBreadboardActivity({ kind: "approval", label: "Approval required" });
-			return;
-		}
-		let latestTool: string | undefined;
-		for (const label of this.#breadboardToolActivities.values()) latestTool = label;
-		if (latestTool !== undefined) {
-			this.#setBreadboardActivity({ kind: "tool", label: `Running ${latestTool}` });
-			return;
-		}
-		this.#setBreadboardActivity(
-			this.ctx.viewSession.isStreaming
-				? ({ kind: "working", label: "Working" } satisfies BreadboardComposerActivity)
-				: null,
-		);
 	}
 
 	/** Rearm idle compaction after a live idle setting changes. */
@@ -986,10 +920,6 @@ export class EventController {
 		this.ctx.clearPinnedError();
 		this.#cancelIdleCompaction();
 		this.#cancelIdleRecap();
-		this.#breadboardCancelling = false;
-		this.#breadboardToolActivities.clear();
-		this.#breadboardApprovalCount = 0;
-		this.#setBreadboardActivity({ kind: "working", label: "Working" });
 		this.ctx.statusLine.markActivityStart();
 		this.#setTerminalProgress(true);
 		this.ctx.ensureLoadingAnimation();
@@ -1286,9 +1216,6 @@ export class EventController {
 	async #handleNotice(event: Extract<AgentSessionEvent, { type: "notice" }>): Promise<void> {
 		const message = event.source ? `${event.source}: ${event.message}` : event.message;
 		if (event.level === "error") {
-			if (!this.#breadboardCancelling && this.#approvalAttentionToolCallIds.size === 0) {
-				this.#setBreadboardActivity({ kind: "error", label: `Error: ${message}` });
-			}
 			this.ctx.showError(message);
 		} else {
 			this.ctx.showStatus(message);
@@ -1548,23 +1475,6 @@ export class EventController {
 				if (mode === "assistant" || mode === "all") vocalizer.flush();
 			}
 		}
-		if (
-			event.message.role === "assistant" &&
-			event.message.responseId?.startsWith("breadboard:e4:") &&
-			!this.ctx.streamingComponent &&
-			(assistantHasVisibleContent(event.message) || Boolean(event.message.errorMessage))
-		) {
-			// The BreadBoard bridge can interleave durable projected tool messages
-			// inside the model stream's open assistant message. Their paired
-			// message_end clears the single streaming slot, so the outer stream may
-			// later deliver its visible final message_end without a live component.
-			// Recover at the display boundary instead of silently dropping that
-			// terminal answer; the normal completion path below still owns layout,
-			// finalization, usage, and error presentation.
-			this.ctx.streamingComponent = createAssistantMessageComponent(this.ctx);
-			this.ctx.streamingMessage = event.message;
-			this.ctx.chatContainer.addChild(this.ctx.streamingComponent);
-		}
 		if (this.ctx.streamingComponent && event.message.role === "assistant") {
 			this.ctx.streamingMessage = event.message;
 			this.#streamingReveal.stop();
@@ -1714,15 +1624,6 @@ export class EventController {
 				this.#pinnedErrorMessage = event.message;
 				this.#restorePinnedErrorInline = !recoverableEmptyOutput;
 				if (!recoverableEmptyOutput) this.ctx.showPinnedError(event.message.errorMessage);
-				if (event.message.stopReason === "error") {
-					const detail = event.message.errorMessage?.trim();
-					if (!this.#breadboardCancelling && this.#approvalAttentionToolCallIds.size === 0) {
-						this.#setBreadboardActivity({
-							kind: "error",
-							label: detail ? `Error: ${detail}` : "Error",
-						});
-					}
-				}
 			}
 			this.ctx.statusLine.invalidate();
 			this.ctx.ui.requestRender();
@@ -1736,12 +1637,10 @@ export class EventController {
 		const tool = this.ctx.viewSession.getToolByName(event.toolName);
 		const renderToolName = toolRenderName(event.toolName, tool);
 		const needsApproval = renderToolName === "ask" || this.#toolWillPromptForApproval(renderToolName, event.args);
-		this.#breadboardToolActivities.set(event.toolCallId, renderToolName);
 		if (needsApproval) {
 			this.#approvalAttentionToolCallIds.add(event.toolCallId);
 			setTerminalTitleState("attention");
 		}
-		this.#syncBreadboardActivity();
 		this.#resolveDisplaceablePoll(renderToolName);
 		if (!this.ctx.pendingTools.has(event.toolCallId)) {
 			const stale = this.#priorTurnToolComponents.get(event.toolCallId);
@@ -1928,13 +1827,11 @@ export class EventController {
 	}
 
 	async #handleToolExecutionEnd(event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>): Promise<void> {
-		this.#breadboardToolActivities.delete(event.toolCallId);
 		// `createAbortedToolResult` emits start/end after an error/aborted
 		// assistant message. The matching card was deliberately retracted at
 		// message_end; consume the completion instead of recreating/updating UI.
 		if (this.#retractedToolCallIds.delete(event.toolCallId)) {
 			this.#approvalAttentionToolCallIds.delete(event.toolCallId);
-			this.#syncBreadboardActivity();
 			return;
 		}
 		this.#executionStartedCallIds.delete(event.toolCallId);
@@ -1969,7 +1866,6 @@ export class EventController {
 		) {
 			setTerminalTitleState("working");
 		}
-		this.#syncBreadboardActivity();
 		if (event.toolName === "read") {
 			if (this.#inlineReadToolImages(event.toolCallId, event.result)) {
 				const component = this.ctx.pendingTools.get(event.toolCallId);
@@ -2148,11 +2044,6 @@ export class EventController {
 
 	async #finishAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {
 		this.#setTerminalProgress(false);
-		this.#breadboardCancelling = false;
-		this.#breadboardToolActivities.clear();
-		this.#breadboardApprovalCount = 0;
-		this.#approvalAttentionToolCallIds.clear();
-		this.#setBreadboardActivity(null);
 		this.ctx.statusLine.markActivityEnd();
 		this.#lastAgentEndAt = Date.now();
 		this.#streamingReveal.stop();

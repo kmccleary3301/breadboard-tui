@@ -29,51 +29,6 @@ export interface SetupModelSelection {
 	readonly mode?: "default" | "session";
 	readonly currentModel: Model | undefined;
 }
-export interface SetupAuthProviderView {
-	readonly providerId: string;
-	readonly displayName: string;
-	readonly supportTier: "core" | "unsupported";
-	readonly authOwner: "broker" | "provider";
-	readonly available: boolean;
-	readonly availabilityReason?: "provider_managed" | "missing_auth" | "unsupported" | null;
-	readonly authSchemes: readonly ("api_key" | "oauth2")[];
-	readonly loginAvailable: boolean;
-	readonly oauthFlows: readonly ("browser" | "device")[];
-}
-
-export interface SetupAuthCredentialView {
-	readonly providerId: string;
-	readonly status: "active" | "disabled" | "revoked" | "reauthorization_required" | "quarantined";
-}
-
-export interface SetupProviderAuthPort {
-	listProviders(): Promise<ReadonlyArray<SetupAuthProviderView>>;
-	listCredentials(providerId?: string): Promise<ReadonlyArray<SetupAuthCredentialView>>;
-	listProvidersSync?(): ReadonlyArray<SetupAuthProviderView>;
-	listCredentialsSync?(providerId?: string): ReadonlyArray<SetupAuthCredentialView>;
-	authenticate(
-		providerId: string,
-		options: {
-			signal: AbortSignal;
-			selectAuthScheme?: (
-				provider: Pick<SetupAuthProviderView, "displayName">,
-				schemes: readonly string[],
-			) => Promise<string | undefined>;
-			selectOAuthFlow?: (
-				provider: Pick<SetupAuthProviderView, "displayName"> & { readonly oauthFlows: readonly string[] },
-			) => Promise<"browser" | "device" | undefined>;
-			showAuthorization(session: {
-				authorizeUrl?: string;
-				instructions?: string;
-				userCode?: string;
-			}): void;
-			prompt(input: { message: string; placeholder?: string; secret?: boolean }): Promise<string>;
-			showProgress(message: string): void;
-		},
-	): Promise<{ accountLabel?: string }>;
-}
-
-
 /** Application-owned preferences and effects consumed by setup scenes. */
 export interface SetupHost extends SetupUiHost {
 	readonly settings: SetupSettingsHost;
@@ -86,9 +41,7 @@ export interface SetupHost extends SetupUiHost {
 	readonly colorBlindMode: boolean;
 	readonly webSearchOrder: readonly string[];
 	readonly disabledProviders: readonly string[];
-	/** Native credential store; undefined when the product has no store and no broker is bound. */
-	readonly authStorage?: AuthStorage;
-	readonly providerAuth?: SetupProviderAuthPort;
+	readonly authStorage: AuthStorage;
 	readonly modelSource: ModelBrowserSource;
 	getModels(): { available: Model[]; all: Model[]; current: Model | undefined };
 	refreshModels(): Promise<void>;

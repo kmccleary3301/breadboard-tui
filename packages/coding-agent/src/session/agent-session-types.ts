@@ -239,12 +239,6 @@ export interface AgentSessionConfig {
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
 	/** Stream wrapper for side-channel requests. */
 	sideStreamFn?: StreamFn;
-	/** Whether an externally supplied main stream owns primary-prompt authentication. Defaults to false. */
-	mainStreamManagesAuth?: boolean;
-	/** Selects the primary model through an externally owned main stream before native state changes. */
-	mainStreamSelectModel?: (model: Model) => Promise<void>;
-	/** Whether the main stream owns completion and recovery of logical turns. Defaults to false. */
-	mainStreamOwnsTurnLifecycle?: boolean;
 	/** Stream wrapper for advisor requests. */
 	advisorStreamFn?: StreamFn;
 	/** Prefer websocket transport for OpenAI Codex requests when supported. */

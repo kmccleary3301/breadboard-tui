@@ -99,11 +99,9 @@ describe("component escape bindings", () => {
 			[{ model, thinkingLevel: "off" }],
 			{
 				onAssign: () => {},
-				onSelectModel: () => {},
 				onUnassign: () => {},
 				onCancel,
 			},
-			{ mainStreamOwnsTurnLifecycle: false },
 		);
 
 		hub.handleInput("\x1b");

@@ -2429,7 +2429,7 @@ export async function runRootCommand(
 			// empty (issue #9220). Fire-and-forget: the prompt must never block on the
 			// background pass.
 			const configuredScope = parsedArgs.models ?? settingsInstance.get("enabledModels");
-			if (isInteractive && configuredScope.length > 0 && !session.mainStreamOwnsTurnLifecycle) {
+			if (isInteractive && configuredScope.length > 0) {
 				void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(error =>
 					logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
 				);

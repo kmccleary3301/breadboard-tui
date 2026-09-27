@@ -3,20 +3,6 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
-const E4_PROJECTION_RECEIPT_PREFIX = "breadboard:e4:";
-
-function breadboardProjectionEventId(message: unknown): string | undefined {
-	if (!message || typeof message !== "object") return undefined;
-	if ("responseId" in message && typeof message.responseId === "string") {
-		if (message.responseId.startsWith(E4_PROJECTION_RECEIPT_PREFIX)) {
-			return message.responseId.slice(E4_PROJECTION_RECEIPT_PREFIX.length) || undefined;
-		}
-	}
-	if (!("details" in message) || !message.details || typeof message.details !== "object") return undefined;
-	if (!("breadboardProjectionEventId" in message.details)) return undefined;
-	const eventId = message.details.breadboardProjectionEventId;
-	return typeof eventId === "string" && eventId ? eventId : undefined;
-}
 import { lockValue } from "./harness-lock-view";
 import type { HarnessSnapshot } from "./harness-port";
 function isBreadboardProviderFreeModel(model: { provider: string }): boolean {
@@ -121,7 +107,6 @@ function readSpend(session: AgentSession): BreadboardComposerSpend | null {
 	const messages = session.agent.state.messages;
 	let turnStart = messages.length;
 	while (turnStart > 0 && messages[turnStart - 1]?.role !== "user") turnStart--;
-	const seen = new Set<string>();
 	let sessionUsd = 0;
 	let turnUsd = 0;
 	let hasPrice = false;
@@ -131,11 +116,6 @@ function readSpend(session: AgentSession): BreadboardComposerSpend | null {
 	for (let index = 0; index < messages.length; index++) {
 		const message = messages[index];
 		if (message?.role !== "assistant") continue;
-		const projectionId = breadboardProjectionEventId(message);
-		if (projectionId) {
-			if (seen.has(projectionId)) continue;
-			seen.add(projectionId);
-		}
 		const usd = messageSpend(session, message);
 		const inCurrentTurn = index >= turnStart;
 		if (usd === null) {
@@ -177,7 +157,7 @@ export function readBreadboardComposerMetrics(
 	}
 	const effort = readHarnessEffort(session, harness);
 	return {
-		effort: effort ?? (session.mainStreamOwnsTurnLifecycle ? null : session.thinkingLevel),
+		effort: effort ?? session.thinkingLevel ?? null,
 		spend: cached.spend,
 	};
 }

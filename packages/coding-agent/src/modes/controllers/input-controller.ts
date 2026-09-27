@@ -352,7 +352,6 @@ export class InputController {
 	}
 
 	#abortStreamingTurn(): void {
-		if (this.ctx.session.mainStreamOwnsTurnLifecycle) this.ctx.eventController.markBreadboardCancelling();
 		const loader = this.ctx.loadingAnimation;
 		if (loader) {
 			loader.stop();
@@ -2476,17 +2475,6 @@ export class InputController {
 			return;
 		}
 		try {
-			if (this.ctx.session.mainStreamOwnsTurnLifecycle) {
-				const result = await this.ctx.session.cycleModel(direction);
-				if (!result) {
-					this.ctx.showStatus("Only one engine model available");
-					return;
-				}
-				this.ctx.statusLine.invalidate();
-				this.ctx.updateEditorBorderColor();
-				this.ctx.showStatus(`Model set to ${result.model.provider}/${result.model.id}.`);
-				return;
-			}
 			const cycleOrder = settings.get("cycleOrder");
 			const result = await this.ctx.session.cycleRoleModels(cycleOrder, direction);
 			if (!result) {

@@ -31,7 +31,6 @@ export function createAgentHubRuntime(
 		settings?: Settings;
 		sessionFile?: string | null;
 		harnessPort?: HarnessPort;
-		mainStreamOwnsTurnLifecycle?: boolean;
 	} = {},
 ): Pick<
 	AgentHubDeps<AgentRef>,

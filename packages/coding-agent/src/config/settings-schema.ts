@@ -280,7 +280,6 @@ export const STATUS_LINE_SEGMENT_IDS = [
 	"vim",
 	"harness",
 	"longrun",
-	"bb_activity",
 	"bb_policy",
 ] as const;
 

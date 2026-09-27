@@ -40,7 +40,6 @@ import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
 import { isBreadboardPreset, renderBreadboardStatusLine, renderBreadboardStatusRows } from "./breadboard-presentation";
-import { resolveBreadboardFields } from "./breadboard-fields";
 import type {
 	BreadboardComposerActivity,
 	CollabStatus,
@@ -639,9 +638,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#gitEnabled(): boolean {
 		return this.host.gitEnabled();
 	}
-	#isBreadboardOwned(): boolean {
-		return this.host.isBreadboardOwned?.(this.session) ?? false;
-	}
 	/** Background jobs counted exactly as the stock job badge counts them. */
 	#runningBackgroundJobCount(): number {
 		return (
@@ -978,7 +974,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	}
 
 	setBreadboardActivity(activity: BreadboardComposerActivity | null | undefined): void {
-		if (this.#breadboardActivity?.kind === activity?.kind && this.#breadboardActivity?.label === activity?.label) return;
+		if (this.#breadboardActivity?.kind === activity?.kind && this.#breadboardActivity?.label === activity?.label)
+			return;
 		this.#breadboardActivity = activity ?? null;
 		this.#invalidateStatusLineRenderCache();
 	}
@@ -1735,10 +1732,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				this.#usageStartTimer = null;
 			}
 		}
-		if (
-			(this.#usageInFlight && this.#usageInFlightContextKey === usageContextKey) ||
-			this.#usageStartTimer !== null
-		)
+		if ((this.#usageInFlight && this.#usageInFlightContextKey === usageContextKey) || this.#usageStartTimer !== null)
 			return;
 		if (this.#usageFetchedAt > 0 && now - this.#usageFetchedAt < 5 * 60_000) return;
 		if (!this.host.canFetchUsageReports(session)) return;
@@ -2218,10 +2212,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		previewTitle?: string,
 	): SegmentContext {
 		const state = this.session.state;
-		const breadboardOwned = this.#isBreadboardOwned();
-
 		// Trigger background fetch (5-min TTL); render uses cached value.
-		if (!breadboardOwned) this.refreshUsageInBackground();
+		this.refreshUsageInBackground();
 
 		// Get usage statistics
 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
@@ -2283,9 +2275,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			previewTitle,
 			identityMark: this.host.getIdentityMark?.(),
 			harness: this.#harness ?? this.host.getHarness?.(this.session) ?? null,
-			breadboardOwned,
-			breadboardActivity: this.#breadboardActivity ?? this.host.getBreadboardActivity?.(this.session) ?? null,
-			breadboardBackgroundWait: turnElapsedMs !== null && !this.session.isStreaming ? this.#runningBackgroundJobCount() : 0,
 			activeRepo: activeRepoCache.activeRepo,
 			width,
 			options: segmentOptions ?? {},
@@ -2304,8 +2293,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			stream: this.#streamStatus,
 			recording: this.#recording,
 			collab: this.#collabStatus,
-			autoCompactEnabled: !breadboardOwned && this.#autoCompactEnabled,
-			compactionSpeculation: breadboardOwned ? "idle" : compactionSpeculation,
+			autoCompactEnabled: this.#autoCompactEnabled,
+			compactionSpeculation,
 			usageStats,
 			contextPercent,
 			contextTokens,
@@ -2364,7 +2353,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			leftSegments,
 			rightSegments,
 			separator: this.#settings.separator ?? presetDef.separator,
-			contextLine: this.#isBreadboardOwned() ? "off" : this.#settings.contextLine,
+			contextLine: this.#settings.contextLine,
 			segmentOptions: mergedSegmentOptions,
 		};
 	}
@@ -2644,7 +2633,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		nowMs: number,
 	): { content: string; overflow?: string } {
 		const effectiveSettings = this.#resolveSettings();
-		if (!this.#isBreadboardOwned()) this.#syncPricingTimer();
+		this.#syncPricingTimer();
 		const placeholders = options?.placeholders === true;
 		const plain = layout !== "box" && layout !== "band";
 		const includePath =
@@ -2667,15 +2656,23 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: true } : liveCtx;
 		if (isBreadboardPreset(effectiveSettings.preset)) {
 			const snapshot = {
-				modelName: placeholders ? "Connecting" : (ctx.session.state.model?.name ?? ctx.session.state.model?.id ?? "No model"),
-				workspace: ctx.worktree ? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}` : path.basename(getProjectDir()),
+				modelName: placeholders
+					? "Connecting"
+					: (ctx.session.state.model?.name ?? ctx.session.state.model?.id ?? "No model"),
+				workspace: ctx.worktree
+					? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
+					: path.basename(getProjectDir()),
 				workspacePath: getProjectDir(),
 				sessionName: ctx.session.sessionManager.getSessionName() ?? previewTitle,
 				harness: ctx.harness,
 				branch: ctx.git.branch,
-				activity: placeholders ? null : ctx.breadboardActivity,
+				activity: placeholders ? null : this.#breadboardActivity,
 				elapsedMs: placeholders ? null : ctx.turnElapsedMs,
-				backgroundWait: placeholders ? 0 : ctx.breadboardBackgroundWait,
+				backgroundWait: placeholders
+					? 0
+					: ctx.turnElapsedMs !== null && !this.session.isStreaming
+						? this.#runningBackgroundJobCount()
+						: 0,
 				context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
 				inputTokens: placeholders ? undefined : ctx.usageStats.input,
 				outputTokens: placeholders ? undefined : ctx.usageStats.output,
@@ -2935,7 +2932,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		// `session_name`, emptying the default preset's right group) the gauge
 		// runs to the border edge instead of disappearing, so embedded context
 		// labels don't fall back to a context chip until the session is titled.
-		return { content: leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup };
+		return {
+			content: leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup,
+		};
 	}
 
 	/**
@@ -3217,7 +3216,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const lines: string[] = [];
 		const autocompleteActive = this.#autocompleteActiveProbe?.() === true;
 		if (isBreadboardPreset(this.#resolveSettings().preset) && this.#topAttachment !== "none" && !autocompleteActive) {
-			const layout = this.#topAttachment === "top-border" ? "box" : this.#topAttachment === "top-band" ? "band" : "plain-right";
+			const layout =
+				this.#topAttachment === "top-border" ? "box" : this.#topAttachment === "top-band" ? "band" : "plain-right";
 			const overflow = this.renderOverflowBar(width, this.#topBorderWidth(width), layout);
 			if (overflow) {
 				if (this.#standaloneGap) lines.push("");
