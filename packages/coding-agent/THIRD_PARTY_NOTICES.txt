@@ -2,7 +2,6 @@ BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE
 
 Generated deterministically by scripts/generate-third-party-notices.ts.
 The file sections below preserve every tracked LICENSE/NOTICE text in the source tree.
-The bundled BreadBoard SDK archive contains no LICENSE/NOTICE member; this bundle makes no license assertion for that component.
 
 ===== BEGIN LICENSE =====
 SHA-256: 16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63
@@ -1050,13 +1049,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ===== END python/robomp/LICENSE =====
-
-===== BEGIN BUNDLED COMPONENT PROVENANCE =====
-Package: @breadboard/sdk@0.4.0
-Artifact: packages/coding-agent/vendor/breadboard-sdk-0.4.0.tgz
-Artifact SHA-256: 1466b739a1eb16418a749187746b61433586eecb898a234ba5f6fbb76f957bf4
-Provenance: packages/coding-agent/breadboard-sdk-provenance.json
-Provenance SHA-256: 47766fd130c7f2fbcf9db7b4ba1607fc846657d42e8b28afb50c7c20aa012f31
-License assertion: none; archive inspection found no LICENSE/NOTICE member.
-===== END BUNDLED COMPONENT PROVENANCE =====
 

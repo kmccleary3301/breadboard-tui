@@ -8,11 +8,6 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
-import { loadBuildEngineDistribution } from "../packages/coding-agent/scripts/prepare-installed-engine-sidecar";
-import {
-	type EngineDistributionTarget,
-	INSTALLED_ENGINE_SUPPORTED_TARGET,
-} from "../packages/coding-agent/src/breadboard/lifecycle/installed-engine-manifest";
 import { BREADBOARD_DISTRIBUTION_POLICY, formatBreadboardVersion } from "../packages/utils/src/product-distribution";
 
 const ARCHIVE_SCHEMA = "bb.product_archive.v1" as const;
@@ -20,19 +15,28 @@ const INSTALL_SCHEMA = "bb.product_install_manifest.v1" as const;
 const PROVENANCE_SCHEMA = "bb.product_provenance.v1" as const;
 const ARCHIVE_ROOT_PATTERN = /^bb-darwin-arm64-[0-9A-Za-z.-]+$/;
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/;
-const PRODUCT_TARGET = INSTALLED_ENGINE_SUPPORTED_TARGET;
 const PRODUCT_BINARY_NAME = "bb";
 const PRODUCT_NATIVE_ADDON_NAME = "pi_natives.darwin-arm64.node";
 
-function targetKey(target: EngineDistributionTarget = PRODUCT_TARGET): string {
+export interface ProductReleaseTarget {
+	readonly platform: "darwin";
+	readonly architecture: "arm64";
+}
+
+export const PRODUCT_TARGET: ProductReleaseTarget = Object.freeze({
+	platform: "darwin",
+	architecture: "arm64",
+});
+
+function targetKey(target: ProductReleaseTarget = PRODUCT_TARGET): string {
 	return `${target.platform}-${target.architecture}`;
 }
 
 const execFileAsync = promisify(execFile);
+
 export interface ProductReleaseOptions {
 	readonly binaryPath: string;
 	readonly nativeAddonPath: string;
-	readonly engineDistributionRoot: string;
 	readonly outputRoot: string;
 	readonly productVersion: string;
 	readonly developmentEvidence: boolean;
@@ -45,7 +49,7 @@ export interface ProductArchiveReceipt {
 	readonly classification: "release-candidate" | "development-evidence";
 	readonly archivePath: string;
 	readonly archiveSha256: `sha256:${string}`;
-	readonly target: EngineDistributionTarget;
+	readonly target: ProductReleaseTarget;
 	readonly entries: readonly string[];
 	readonly legal: { readonly posture: "release-ready" | "unsigned-development"; readonly inputsPresent: boolean };
 }
@@ -208,32 +212,8 @@ export async function buildProductRelease(options: ProductReleaseOptions): Promi
 	const distributionTargetKey = targetKey(target);
 	const binary = await sealedFile(options.binaryPath);
 	const addon = await sealedFile(options.nativeAddonPath);
-	const distribution = await loadBuildEngineDistribution(options.engineDistributionRoot);
-	if (distribution.manifest.productVersion !== options.productVersion) {
-		fail(
-			`engine product version ${distribution.manifest.productVersion} does not match requested ${options.productVersion}`,
-		);
-	}
-	if (
-		distribution.manifest.engine.interfaceVersion !== BREADBOARD_DISTRIBUTION_POLICY.sdkVersion ||
-		distribution.manifest.engine.interfaceRange !== BREADBOARD_DISTRIBUTION_POLICY.engineApiRange
-	) {
-		fail(
-			`engine interface ${distribution.manifest.engine.interfaceVersion} (${distribution.manifest.engine.interfaceRange}) does not match current distribution policy ${BREADBOARD_DISTRIBUTION_POLICY.sdkVersion} (${BREADBOARD_DISTRIBUTION_POLICY.engineApiRange})`,
-		);
-	}
 	await verifyProductBinaryVersion(binary, options.productVersion);
-	if (
-		distribution.manifest.target.platform !== target.platform ||
-		distribution.manifest.target.architecture !== target.architecture
-	) {
-		fail(`engine target ${targetKey(distribution.manifest.target)} does not match host ${distributionTargetKey}`);
-	}
-	if (!options.developmentEvidence && distribution.trustRoot.signature.kind !== "release-envelope") {
-		fail(
-			"release candidate requires an independently trusted engine release envelope; use --development-evidence for unsigned local evidence",
-		);
-	}
+
 	if (!options.developmentEvidence && (!options.licensePath || !options.noticesPath)) {
 		fail(
 			"release candidate requires explicit license and third-party notices inputs; use --development-evidence for local evidence only",
@@ -246,24 +226,10 @@ export async function buildProductRelease(options: ProductReleaseOptions): Promi
 	} as const;
 	const rootName = `${BREADBOARD_DISTRIBUTION_POLICY.productName}-${distributionTargetKey}-${options.productVersion}`;
 	if (!ARCHIVE_ROOT_PATTERN.test(rootName)) fail(`invalid release archive root name: ${rootName}`);
-	const distributionName = distribution.manifest.distributionId.slice("sha256:".length);
-	const engineDirectory = `engine/${distributionName}`;
-	const bundle = await sealedFile(distribution.bundlePath);
-	if (
-		bundle.byteLength !== distribution.manifest.engine.runtimeBundle.sizeBytes ||
-		sha256(bundle) !== distribution.manifest.engine.runtimeBundle.sha256
-	) {
-		fail("engine runtime bundle changed before archive sealing");
-	}
+
 	const entries = new Map<string, Buffer>();
 	entries.set(`${rootName}/${PRODUCT_BINARY_NAME}`, binary);
 	entries.set(`${rootName}/native/${PRODUCT_NATIVE_ADDON_NAME}`, addon);
-	entries.set(`${rootName}/${engineDirectory}/${basename(distribution.manifestPath)}`, distribution.manifestBytes);
-	entries.set(`${rootName}/${engineDirectory}/${basename(distribution.bundlePath)}`, bundle);
-	entries.set(
-		`${rootName}/engine/${distributionName}.trust.json`,
-		Buffer.from(`${JSON.stringify(distribution.trustRoot)}\n`),
-	);
 	if (options.licensePath) entries.set(`${rootName}/LICENSE`, await sealedFile(options.licensePath));
 	if (options.noticesPath) entries.set(`${rootName}/THIRD_PARTY_NOTICES.txt`, await sealedFile(options.noticesPath));
 	const provenance = {
@@ -271,13 +237,6 @@ export async function buildProductRelease(options: ProductReleaseOptions): Promi
 		productVersion: options.productVersion,
 		target,
 		productSource: source,
-		engine: {
-			distributionId: distribution.manifest.distributionId,
-			backendCommit: distribution.manifest.provenance.sourceCommit,
-			backendTree: distribution.manifest.provenance.sourceTree,
-			dependencyLockSha256: distribution.manifest.provenance.dependencyLockSha256,
-			buildRecipeSha256: distribution.manifest.provenance.buildRecipeSha256,
-		},
 		legal,
 	} as const;
 	entries.set(`${rootName}/provenance.v1.json`, Buffer.from(`${JSON.stringify(provenance)}\n`));
@@ -292,11 +251,6 @@ export async function buildProductRelease(options: ProductReleaseOptions): Promi
 			path: `native/${PRODUCT_NATIVE_ADDON_NAME}`,
 			sizeBytes: addon.byteLength,
 			sha256: sha256(addon),
-		},
-		engine: {
-			distributionId: distribution.manifest.distributionId,
-			manifestPath: `${engineDirectory}/${basename(distribution.manifestPath)}`,
-			bundlePath: `${engineDirectory}/${basename(distribution.bundlePath)}`,
 		},
 		legal,
 		classification: options.developmentEvidence ? "development-evidence" : "release-candidate",
@@ -345,7 +299,6 @@ if (import.meta.main) {
 	const receipt = await buildProductRelease({
 		binaryPath: Bun.env.BB_BINARY_PATH ?? fail("BB_BINARY_PATH is required"),
 		nativeAddonPath: Bun.env.BB_NATIVE_ADDON_PATH ?? fail("BB_NATIVE_ADDON_PATH is required"),
-		engineDistributionRoot: Bun.env.BB_ENGINE_DISTRIBUTION_ROOT ?? fail("BB_ENGINE_DISTRIBUTION_ROOT is required"),
 		outputRoot: Bun.env.BB_RELEASE_OUTPUT_ROOT ?? join(process.cwd(), "dist", "release"),
 		productVersion: Bun.env.BB_PRODUCT_VERSION ?? fail("BB_PRODUCT_VERSION is required"),
 		developmentEvidence,
