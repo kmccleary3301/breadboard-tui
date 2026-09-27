@@ -1,17 +1,23 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "bun:test";
-import type { PublicResult } from "@breadboard/sdk";
-import type { BreadboardClient, SessionSummary } from "@breadboard/sdk/engine";
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import type { HarnessSnapshot } from "../../src/breadboard/harness-port";
-import { TempDir } from "@oh-my-pi/pi-utils";
-import { Settings, resetSettingsForTest } from "../../src/config/settings";
-import { rejectBreadboardSessionTransition } from "../../src/breadboard/runtime";
+import { Settings } from "../../src/config/settings";
 import { initTheme } from "@oh-my-pi/pi-tui/theme/theme";
-import type { InteractiveModeContext } from "../../src/modes/types";
-import { InteractiveMode } from "../../src/modes/interactive-mode";
-import { SessionManager } from "../../src/session/session-manager";
-import type { AgentSession } from "../../src/session/agent-session";
 import { executeHarnessSlashCommand } from "../../src/slash-commands/harness";
-
+interface PublicResult {
+	readonly schema_version: string;
+	readonly ok: boolean;
+	readonly status: string;
+	readonly command: readonly unknown[];
+	readonly record_refs: readonly unknown[];
+	readonly hashes: Readonly<Record<string, string>>;
+	readonly stage_outcomes: readonly unknown[];
+	readonly warnings: readonly unknown[];
+	readonly next_actions: readonly unknown[];
+	readonly error: { readonly error_code?: string; readonly message?: string } | null;
+	readonly exit_code: number;
+	readonly data: Readonly<Record<string, unknown>>;
+}
+type BreadboardClient = any;
 const result = (data: Readonly<Record<string, unknown>>): PublicResult => ({
 	schema_version: "bb.cli.result.v1",
 	ok: true,
@@ -27,258 +33,10 @@ const result = (data: Readonly<Record<string, unknown>>): PublicResult => ({
 	data,
 });
 
-const failure = (message: string): PublicResult => ({
-	schema_version: "bb.cli.result.v1",
-	ok: false,
-	status: "error",
-	command: [],
-	record_refs: [],
-	hashes: {},
-	stage_outcomes: [],
-	warnings: [],
-	next_actions: [],
-	error: { error_code: "invalid_harness", message },
-	exit_code: 2,
-	data: {},
-});
-function clientFor(calls: string[], validation = result({}), lock = result({ graph_hash: "sha256:daily-lock" })) {
-	return {
-		getHarness: async (id: string) => {
-			calls.push(`get:${id}`);
-			return result({
-				path: "agent_configs/daily_driver.v1.yaml",
-				definition: { profile: { name: "daily_driver" } },
-			});
-		},
-		validateHarness: async (id: string) => {
-			calls.push(`validate:${id}`);
-			return validation;
-		},
-		lockHarness: async (id: string) => {
-			calls.push(`lock:${id}`);
-			return lock;
-		},
-		explainHarness: async (id: string) => {
-			calls.push(`explain:${id}`);
-			return result({ fields: [] });
-		},
-		getHarnessLock: async (id: string) => {
-			calls.push(`getLock:${id}`);
-			return result({ lock: { graph_hash: "sha256:daily-lock", source_layers: [] } });
-		},
-		getSession: async (id: string) => {
-			calls.push(`session:${id}`);
-			return {
-				session_id: id,
-				status: "running",
-				generation_id: "generation-1",
-				trajectory_segment_id: "segment-1",
-				lineage: null,
-				effective_lock_hash: "sha256:daily-lock",
-				mode: "coding",
-			} satisfies SessionSummary;
-		},
-	} as BreadboardClient;
-}
-
-function runtimeFor(startHarnessSession: (harnessId: string) => Promise<boolean>) {
-	const showStatus = vi.fn();
-	const runtime = {
-		ctx: {
-			settings: Settings.isolated(),
-			harnessPort: undefined,
-			startHarnessSession,
-			showStatus,
-		} as unknown as InteractiveModeContext,
-	};
-	return { runtime, showStatus };
-}
-
-async function modeFor(
-	client: BreadboardClient,
-	newSessionResult = true,
-	switchHarnessSession: (
-		configPath: string,
-		lockId: string,
-		transition: () => Promise<boolean>,
-	) => Promise<boolean> = (_configPath, _lockId, transition) => transition(),
-) {
-	const tempDir = TempDir.createSync("@pi-harness-use-");
-	await Settings.init({ inMemory: true, cwd: tempDir.path() });
-	const sessionManager = SessionManager.inMemory(tempDir.path());
-	const newSession = vi.fn(async () => newSessionResult);
-	const session = {
-		sessionManager,
-		settings: Settings.isolated(),
-		agent: { state: { tools: [] }, metadataForProvider: () => undefined },
-		customCommands: [],
-		skills: [],
-		autoCompactionEnabled: true,
-		messages: [],
-		systemPrompt: [],
-		state: { model: undefined },
-		model: undefined,
-		thinkingLevel: undefined,
-		newSession,
-		get isStreaming() {
-			return false;
-		},
-	} as unknown as AgentSession;
-	const mode = new InteractiveMode(
-		session,
-		"test",
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		client,
-		"daily_driver",
-		undefined,
-		switchHarnessSession,
-		() => "engine-session-1",
-	);
-	return { mode, newSession, sessionManager, tempDir };
-}
-
-function transcript(mode: InteractiveMode): string {
-	return Bun.stripANSI(mode.chatContainer.render(120).join("\n"));
-}
-
 beforeAll(async () => {
 	await initTheme(false);
 });
 
-describe("/harness use", () => {
-	test("validates, locks, and starts a new harness-bound OMP session", async () => {
-		const calls: string[] = [];
-		const switchHarnessSession = vi.fn(
-			async (_configPath: string, _lockId: string, transition: () => Promise<boolean>) => transition(),
-		);
-		const { mode, newSession, tempDir } = await modeFor(clientFor(calls), true, switchHarnessSession);
-
-		try {
-			expect(await executeHarnessSlashCommand("/harness use daily_driver", { ctx: mode })).toBe(true);
-			expect(calls.slice(0, 3)).toEqual([
-				"get:agent_configs/v2/daily_driver.yaml",
-				"validate:agent_configs/daily_driver.v1.yaml",
-				"lock:agent_configs/daily_driver.v1.yaml",
-			]);
-			expect(calls).toHaveLength(7);
-			expect(calls).toContain("get:agent_configs/daily_driver.v1.yaml");
-			expect(calls).toContain("explain:agent_configs/daily_driver.v1.yaml");
-			expect(calls).toContain("getLock:agent_configs/daily_driver.v1.lock.json");
-			expect(switchHarnessSession).toHaveBeenCalledWith(
-				"agent_configs/daily_driver.v1.yaml",
-				"agent_configs/daily_driver.v1.lock.json",
-				expect.any(Function),
-			);
-			expect(newSession).toHaveBeenCalledWith({
-				parentSession: expect.any(String),
-				configPath: "agent_configs/daily_driver.v1.lock.json",
-				transition: "harnessSwitch",
-			});
-			expect(transcript(mode)).toContain("Harness daily_driver is now active with lock hash sha256:daily-lock.");
-		} finally {
-			mode.stop();
-			tempDir.removeSync();
-		}
-	});
-
-	test("keeps the old OMP binding when the session transition is cancelled", async () => {
-		const calls: string[] = [];
-		const switchHarnessSession = vi.fn(
-			async (_configPath: string, _lockId: string, transition: () => Promise<boolean>) => transition(),
-		);
-		const { mode, newSession, sessionManager, tempDir } = await modeFor(
-			clientFor(calls),
-			false,
-			switchHarnessSession,
-		);
-		const oldSessionId = sessionManager.getSessionId();
-
-		try {
-			expect(await mode.startHarnessSession("daily_driver")).toBe(false);
-			expect(sessionManager.getSessionId()).toBe(oldSessionId);
-			expect(newSession).toHaveBeenCalledWith({
-				parentSession: expect.any(String),
-				configPath: "agent_configs/daily_driver.v1.lock.json",
-				transition: "harnessSwitch",
-			});
-			expect(transcript(mode)).not.toContain("is now active");
-		} finally {
-			mode.stop();
-			tempDir.removeSync();
-		}
-	});
-
-	test("shows the engine validation error and does not attempt a lock", async () => {
-		const calls: string[] = [];
-		const { mode, newSession, tempDir } = await modeFor(
-			clientFor(calls, failure("Harness definition has no supported modes")),
-		);
-
-		try {
-			expect(await mode.startHarnessSession("daily_driver")).toBe(false);
-			expect(calls).toEqual([
-				"get:agent_configs/v2/daily_driver.yaml",
-				"validate:agent_configs/daily_driver.v1.yaml",
-			]);
-			expect(newSession).not.toHaveBeenCalled();
-			expect(transcript(mode)).toContain("Harness definition has no supported modes");
-		} finally {
-			mode.stop();
-			tempDir.removeSync();
-		}
-	});
-
-	test("shows the engine lock error without changing the current session", async () => {
-		const calls: string[] = [];
-		const { mode, newSession, tempDir } = await modeFor(
-			clientFor(calls, result({}), failure("Unable to write harness lock")),
-		);
-
-		try {
-			expect(await mode.startHarnessSession("daily_driver")).toBe(false);
-			expect(calls).toEqual([
-				"get:agent_configs/v2/daily_driver.yaml",
-				"validate:agent_configs/daily_driver.v1.yaml",
-				"lock:agent_configs/daily_driver.v1.yaml",
-			]);
-			expect(newSession).not.toHaveBeenCalled();
-			expect(transcript(mode)).toContain("Unable to write harness lock");
-		} finally {
-			mode.stop();
-			tempDir.removeSync();
-		}
-	});
-});
-test("admits only harness switches through the BreadBoard transition guard", () => {
-	expect(() => rejectBreadboardSessionTransition({ reason: "harnessSwitch" })).not.toThrow();
-	for (const plan of [
-		{ reason: "new" },
-		{ reason: "fork" },
-		{ reason: "resume", targetSessionFile: "resume.jsonl" },
-		{ reason: "handoff" },
-	] as const) {
-		expect(() => rejectBreadboardSessionTransition(plan)).toThrow();
-	}
-});
-
-test("/harness use --here explains why an in-process switch is rejected", async () => {
-	const startHarnessSession = vi.fn(async () => true);
-	const harness = runtimeFor(startHarnessSession);
-
-	expect(await executeHarnessSlashCommand("/harness use --here", harness.runtime)).toBe(true);
-	expect(startHarnessSession).not.toHaveBeenCalled();
-	expect(harness.showStatus).toHaveBeenCalledWith(
-		"A BreadBoard session is pinned to its engine session and lock; an in-process harness switch is not possible.",
-	);
-});
 test("/harness list prints names and paths and marks the verified active harness", async () => {
 	const showStatus = vi.fn();
 	const listHarnessChoices = vi.fn(async () => [

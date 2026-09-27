@@ -242,16 +242,7 @@ describe("live completion surface", () => {
 		// Real top-level flags from launch's static `flags` table. Flags with a
 		// short char render as `{-r,--resume}`, so only assert the bracket form for
 		// the long-only ones and check the char-paired form separately.
-		for (const flag of [
-			"--model",
-			"--thinking",
-			"--mode",
-			"--approval-mode",
-			"--tools",
-			"--no-tools",
-			"--engine-mode",
-			"--engine-url",
-		]) {
+		for (const flag of ["--model", "--thinking", "--mode", "--approval-mode", "--tools", "--no-tools"]) {
 			expect(stdout).toContain(`${flag}[`);
 		}
 		expect(stdout).toContain("{-r,--resume}");

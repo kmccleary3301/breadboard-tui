@@ -11,23 +11,18 @@ This repository is the canonical source and release authority for the BreadBoard
 | TUI source and `bb` binary | This repository |
 | Engine and canonical SDK source | [`kmccleary3301/breadboard`](https://github.com/kmccleary3301/breadboard) |
 | Upstream TUI spine | [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi) |
-
-The engine seam is the pinned `@breadboard/sdk` package. Direct imports from the BreadBoard engine repository and runtime filesystem coupling are prohibited. `packages/coding-agent/breadboard-sdk-provenance.json` records the SDK artifact hash, backend commit and tree, and compatible contract identity.
+The product runs directly on the native TypeScript turn loop and native harness package (`@breadboard/harness`). The Python engine bridge, SDK client, and attach modes have been retired.
 
 Current product identity:
 
 - BreadBoard: `0.1.0-rc.7`
-- OMP: `18.2.11` (`e4151593ace2781d1dc2f06d760301f88af3e9dc`)
-- `@breadboard/sdk`: `0.4.0`
-- SDK engine API range: `>=0.4.0 <0.5.0`
-
+- OMP: `18.3.0`
 
 ## Daily-driver engine
 
-The product defaults to the native `bb-omp.native` harness when no engine mode is configured. To
-select a Python bridge explicitly, set `breadboard.engineMode` in the profile, pass
-`--engine-mode <local-owned|local-external|remote|off>`, or set `BREADBOARD_ENGINE_MODE`.
+The product defaults to the native `bb-omp.native` harness. An explicit harness spec can be selected via `--harness <path.yaml>`, `breadboard.sessionConfigPath`, or `breadboard.harness.default`.
 
+Legacy engine bridge modes (`local-owned`, `local-external`, `remote`) and flags (`--engine-mode`, `--engine-url`) have been removed. Any attempt to request an engine bridge via CLI, environment (`BREADBOARD_ENGINE_MODE`, `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`), or profile settings will refuse to launch with an explicit error naming the native default (`native`). The only supported engine modes are `native` and `off`.
 Generate the candidate launcher with a per-workspace native profile root. The launcher copies the
 matching R39 profile into that root, runs the one-shot product migration, and records a source
 checksum marker; it never mutates the R39 root:

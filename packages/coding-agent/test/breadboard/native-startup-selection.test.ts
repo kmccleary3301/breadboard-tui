@@ -6,16 +6,15 @@
 import { describe, expect, it } from "bun:test";
 import * as os from "node:os";
 import { resolveNativeLaunchPolicy } from "@oh-my-pi/pi-coding-agent/breadboard/native-launch-policy";
-import { resolveNativeHarnessSpec, startupBreadboardEngineOwnsTurns } from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
+import {
+	resolveNativeHarnessSpec,
+	startupBreadboardEngineOwnsTurns,
+} from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 
 const WORKSPACE = os.tmpdir();
 
-function settingsWith(values: {
-	engineMode?: string;
-	sessionConfigPath?: string;
-	harnessDefault?: string;
-}): Settings {
+function settingsWith(values: { engineMode?: string; sessionConfigPath?: string; harnessDefault?: string }): Settings {
 	return Settings.isolated({
 		...(values.engineMode === undefined ? {} : { "breadboard.engineMode": values.engineMode }),
 		...(values.sessionConfigPath === undefined ? {} : { "breadboard.sessionConfigPath": values.sessionConfigPath }),
@@ -34,7 +33,7 @@ describe("native startup selection", () => {
 		const native = settingsWith({ engineMode: "native" });
 		expect(startupBreadboardEngineOwnsTurns({}, native, WORKSPACE, true)).toBe(false);
 		expect(startupBreadboardEngineOwnsTurns({ engineMode: "off" }, native, WORKSPACE, true)).toBe(false);
-		expect(startupBreadboardEngineOwnsTurns({ engineMode: "local-owned" }, native, WORKSPACE, true)).toBe(true);
+		expect(() => startupBreadboardEngineOwnsTurns({ engineMode: "local-owned" }, native, WORKSPACE, true)).toThrow();
 	});
 
 	it("opens print and protocol surfaces in native mode and refuses them for engine modes", () => {
@@ -60,13 +59,25 @@ describe("native startup selection", () => {
 
 	it("returns no spec outside native mode and defaults native mode to bb-omp.native", () => {
 		expect(resolveNativeHarnessSpec({ engineMode: "off" }, settingsWith({}), WORKSPACE, false)).toBeUndefined();
-		expect(resolveNativeHarnessSpec({}, settingsWith({ engineMode: "native" }), WORKSPACE, true)).toBe("bb-omp.native");
-		expect(resolveNativeHarnessSpec({ harness: "bb-omp.native" }, settingsWith({ engineMode: "native" }), WORKSPACE, true)).toBe(
+		expect(resolveNativeHarnessSpec({}, settingsWith({ engineMode: "native" }), WORKSPACE, true)).toBe(
 			"bb-omp.native",
 		);
+		expect(
+			resolveNativeHarnessSpec(
+				{ harness: "bb-omp.native" },
+				settingsWith({ engineMode: "native" }),
+				WORKSPACE,
+				true,
+			),
+		).toBe("bb-omp.native");
 		// Other engine catalog ids name Python harnesses; native mode has no engine to resolve them.
 		expect(() =>
-			resolveNativeHarnessSpec({ harness: "research_agent" }, settingsWith({ engineMode: "native" }), WORKSPACE, true),
+			resolveNativeHarnessSpec(
+				{ harness: "research_agent" },
+				settingsWith({ engineMode: "native" }),
+				WORKSPACE,
+				true,
+			),
 		).toThrow(/native mode runs a built-in harness \(bb-omp\.native\) or a harness spec/);
 	});
 });

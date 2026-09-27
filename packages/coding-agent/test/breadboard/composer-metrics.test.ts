@@ -109,7 +109,7 @@ describe("BreadBoard composer metrics", () => {
 			lockHash: "hash",
 			verifiedIdentity: { harnessId: "harness", lockHash: "hash" },
 			generation: "generation",
-			mode: "local-owned",
+			mode: "native",
 			loadedAt: 1,
 			provenance: {},
 			lock: {

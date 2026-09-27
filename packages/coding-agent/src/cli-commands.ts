@@ -33,7 +33,6 @@ const ALL_COMMANDS: CommandEntry[] = [
 			return loadLaunchHelp();
 		},
 	},
-	{ name: "engine", load: () => import("./commands/engine").then(m => m.default), help: commandHelp.engineHelp },
 	{ name: "research", load: () => import("./commands/research").then(m => m.default), help: commandHelp.researchHelp },
 	{
 		name: "acp",

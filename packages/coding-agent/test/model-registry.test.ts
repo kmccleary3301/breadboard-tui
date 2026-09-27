@@ -9,7 +9,6 @@ import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resolveMaxContextWindow } from "@oh-my-pi/pi-catalog/compat/context-window";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
-import { createBreadboardProviderFreeModel } from "@oh-my-pi/pi-coding-agent/breadboard/provider-free-model";
 import { fingerprintStaticModels } from "@oh-my-pi/pi-catalog/model-manager";
 import * as catalogModels from "@oh-my-pi/pi-catalog/models";
 import { calculateUsageCost, getBundledModels } from "@oh-my-pi/pi-catalog/models";
@@ -538,17 +537,6 @@ describe("ModelRegistry", () => {
 				if (originalOpenAiKey === undefined) delete Bun.env.OPENAI_API_KEY;
 				else Bun.env.OPENAI_API_KEY = originalOpenAiKey;
 			}
-		});
-		test("authorizes only trusted BreadBoard provider-free model instances", async () => {
-			const registry = new ModelRegistry(authStorage, modelsJsonPath);
-			const providerFree = createBreadboardProviderFreeModel("cli_mock/reference");
-			if (providerFree === undefined) throw new Error("expected provider-free model");
-			const lookalike = { ...providerFree };
-
-			expect(registry.hasConfiguredAuth(providerFree)).toBe(true);
-			await expect(registry.getApiKey(providerFree)).resolves.toBeTruthy();
-			expect(registry.hasConfiguredAuth(lookalike)).toBe(false);
-			await expect(registry.getApiKey(lookalike)).resolves.toBeUndefined();
 		});
 		test("zhipu-coding-plan glm-5.2 chat resolves the zhipu credential with model-scoped hints", async () => {
 			const registry = new ModelRegistry(authStorage, modelsJsonPath);

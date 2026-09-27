@@ -3,10 +3,25 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
-import { breadboardProjectionEventId } from "./e4-agent-stream";
+const E4_PROJECTION_RECEIPT_PREFIX = "breadboard:e4:";
+
+function breadboardProjectionEventId(message: unknown): string | undefined {
+	if (!message || typeof message !== "object") return undefined;
+	if ("responseId" in message && typeof message.responseId === "string") {
+		if (message.responseId.startsWith(E4_PROJECTION_RECEIPT_PREFIX)) {
+			return message.responseId.slice(E4_PROJECTION_RECEIPT_PREFIX.length) || undefined;
+		}
+	}
+	if (!("details" in message) || !message.details || typeof message.details !== "object") return undefined;
+	if (!("breadboardProjectionEventId" in message.details)) return undefined;
+	const eventId = message.details.breadboardProjectionEventId;
+	return typeof eventId === "string" && eventId ? eventId : undefined;
+}
 import { lockValue } from "./harness-lock-view";
 import type { HarnessSnapshot } from "./harness-port";
-import { isBreadboardProviderFreeModel } from "./provider-free-model";
+function isBreadboardProviderFreeModel(model: { provider: string }): boolean {
+	return ["mock", "cli_mock", "smoke", "replay"].includes(model.provider);
+}
 
 export interface BreadboardComposerSpend {
 	readonly sessionUsd: number | null;

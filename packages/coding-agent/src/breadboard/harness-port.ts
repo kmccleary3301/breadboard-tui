@@ -1,5 +1,3 @@
-import type { BreadboardClient } from "@breadboard/sdk/engine";
-
 /**
  * Harness exposure contract shared by the harness hub and lock-derived palette (bb-ewnk.4) and the
  * BreadBoard settings tab, status segment and welcome identity (bb-ewnk.5).
@@ -67,10 +65,13 @@ export interface HarnessPort {
 	readonly setSessionRole?: (role: string, model?: string) => Promise<void>;
 	/** Apply a live engine model override to the bound session. */
 	readonly setSessionModel?: (model: string) => Promise<void>;
-	readonly controlClient?: Pick<
-		BreadboardClient,
-		"getHarness" | "validateHarness" | "explainHarness" | "lockHarness" | "getHarnessLock"
-	>;
+	readonly controlClient?: {
+		getHarness?(id: string): Promise<unknown>;
+		validateHarness?(id: string): Promise<unknown>;
+		explainHarness?(id: string): Promise<unknown>;
+		lockHarness?(id: string): Promise<unknown>;
+		getHarnessLock?(id: string): Promise<unknown>;
+	};
 	readonly setSessionSkills?: (skills: readonly string[]) => Promise<void>;
 	/**
 	 * List harness definitions from the current BreadBoard engine workspace.

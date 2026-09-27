@@ -24,30 +24,20 @@ import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { type LoadedNativeHarness, loadNativeHarness } from "@breadboard/harness";
-import type { BreadboardClient } from "@breadboard/sdk/engine";
-import type { ProviderAuthPort } from "./breadboard/provider-auth-port";
 import type { HarnessPort } from "./breadboard/harness-port";
 import { createNativeHarnessPort } from "./breadboard/native-harness-port";
 import { applyNativeHarnessSessionOptions } from "./breadboard/native-harness-session";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
-import { nativeControlRestriction, nativeStartupRestriction } from "./breadboard/native-control-policy";
-import { resolveBreadboardOmpAgentDir } from "./breadboard/omp-auth-gateway";
 import {
 	applyCliApiKeyOverride,
-	BreadboardLifecycleStartupError,
 	BreadboardProductApiKeyError,
-	createBreadboardPermissionHandler,
-	createBreadboardStartupForkPolicy,
 	formatBreadboardStartupError,
 	type PreparedBreadboardRuntime,
 	prepareBreadboardRuntime,
-	prepareBreadboardSetup,
-	rejectBreadboardSessionTransition,
 	resolveNativeHarnessSpec,
 	resolveNativeSurfaceEngineSelection,
 	startupBreadboardEngineOwnsTurns,
 } from "./breadboard/runtime";
-import { BreadboardSessionTransitionError } from "./breadboard/session-binding";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
@@ -94,9 +84,7 @@ import type { PrintModeOptions } from "./modes/print-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
 import type * as SetupWizardModule from "./modes/setup";
-import type { SetupScene, SetupWizardContext } from "./modes/setup";
-import { ProcessTerminal, TUI } from "@oh-my-pi/pi-tui";
-import { openPath } from "./utils/open";
+import type { SetupScene } from "./modes/setup";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
 import {
 	applyStartupComposerPreferences,
@@ -641,27 +629,13 @@ async function runInteractiveMode(
 	joinLink?: string,
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
-	breadboard?: {
-		readonly bindPermissionActivity?: (observer: (pending: boolean) => void) => void;
-		readonly providerAuth?: ProviderAuthPort;
-		readonly nativeAuthStorage?: AuthStorage;
-		readonly close: () => Promise<void>;
-		readonly harnessClient?: BreadboardClient;
-		readonly harnessId?: string;
-		readonly setSessionModel?: (model: string) => Promise<void>;
-		readonly switchHarnessSession?: (
-			configPath: string,
-			lockId: string,
-			transition: () => Promise<boolean>,
-		) => Promise<boolean>;
-		readonly sessionId: () => string;
-	},
+	_breadboard?: never,
 	/** Native mode: the harness hub, palette and status read the session's loaded lock. */
 	nativeHarnessPort?: HarnessPort,
 	/** Native mode with a shared credential vault: the store setup and /login sign in to. */
 	nativeVaultAuthStorage?: AuthStorage,
 ): Promise<void> {
-	const nativeAuthStorage = breadboard?.nativeAuthStorage ?? nativeVaultAuthStorage;
+	const nativeAuthStorage = nativeVaultAuthStorage;
 	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
 	let mode: InteractiveMode;
 	try {
@@ -674,21 +648,17 @@ async function runInteractiveMode(
 			mcpManager,
 			eventBus,
 			startupLease?.composer,
-			breadboard?.providerAuth,
+			undefined,
 			subagentEventBus,
-			breadboard?.close,
-			breadboard?.harnessClient,
-			breadboard?.harnessId,
-			breadboard?.setSessionModel,
-			breadboard?.switchHarnessSession,
-			breadboard?.sessionId,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
 			nativeAuthStorage,
 			nativeHarnessPort,
 		);
-		breadboard?.bindPermissionActivity?.(pending => {
-			if (pending) mode.eventController.markBreadboardApproval();
-			else mode.eventController.resolveBreadboardApproval();
-		});
 		startupLease?.adopt();
 	} catch (error) {
 		startupLease?.dispose();
@@ -710,17 +680,12 @@ async function runInteractiveMode(
 				? await import("./modes/setup")
 				: undefined;
 		setupScenes = setupWizard
-			? await setupWizard.selectSetupScenes(
-					storedSetupVersion,
-					setupWizard.ALL_SCENES,
-					mode,
-					{
-						resuming,
-						isTTY: process.stdin.isTTY && process.stdout.isTTY,
-						setupWizardEnabled: settings.get("startup.setupWizard"),
-						force: forceSetupWizard,
-					},
-				)
+			? await setupWizard.selectSetupScenes(storedSetupVersion, setupWizard.ALL_SCENES, mode, {
+					resuming,
+					isTTY: process.stdin.isTTY && process.stdout.isTTY,
+					setupWizardEnabled: settings.get("startup.setupWizard"),
+					force: forceSetupWizard,
+				})
 			: [];
 		playStartupSplash = showStartupSplash && setupScenes.length === 0;
 
@@ -739,10 +704,7 @@ async function runInteractiveMode(
 		}
 
 		if (setupWizard && setupScenes.length > 0) {
-			await setupWizard.runSetupWizard(mode, setupScenes, {
-				providerAuthPort: breadboard?.providerAuth,
-				nativeAuthStorage,
-			});
+			await setupWizard.runSetupWizard(mode, setupScenes);
 		}
 
 		// Consume failures immediately, but defer any banner until the transcript is stable.
@@ -1172,10 +1134,9 @@ export async function createSessionManager(
 	cwd: string,
 	activeSettings: Settings = settings,
 	askToMoveSession: SessionPrompt = promptMoveSession,
-	options: { nativeFlagOwnership?: "preliminary" | "resolved"; beforeFork?: () => void } = {},
+	options: { nativeFlagOwnership?: "preliminary" | "resolved" } = {},
 ): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
-		options.beforeFork?.();
 		if (parsed.noSession) {
 			throw new SessionResolutionError("--fork requires session persistence");
 		}
@@ -1335,8 +1296,6 @@ export async function buildSessionOptions(
 		parsed.cwd ?? getProjectDir(),
 		IS_BREADBOARD_PRODUCT,
 	);
-	const restriction = nativeStartupRestriction(parsed, externalTurnLifecycle);
-	if (restriction) throw new Error(restriction);
 	const options: CreateAgentSessionOptions = {
 		cwd: parsed.cwd ?? getProjectDir(),
 		autoApprove: parsed.autoApprove ?? false,
@@ -1433,10 +1392,6 @@ export async function buildSessionOptions(
 			settings: activeSettings,
 			preferences: modelMatchPreferences,
 		});
-		const thinkingRestriction = nativeControlRestriction("thinking", externalTurnLifecycle);
-		if (resolved.thinkingLevel !== undefined && thinkingRestriction) {
-			throw new Error(`--model: ${thinkingRestriction}`);
-		}
 		if (resolved.warning) {
 			process.stderr.write(`${chalk.yellow(`Warning: ${resolved.warning}`)}\n`);
 		}
@@ -1757,7 +1712,6 @@ interface RunRootCommandDependencies {
 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
 	runInteractiveMode?: typeof runInteractiveMode;
 	prepareBreadboardRuntime?: typeof prepareBreadboardRuntime;
-	prepareBreadboardSetup?: typeof prepareBreadboardSetup;
 	settings?: Settings;
 	forceSetupWizard?: boolean;
 }
@@ -1871,10 +1825,7 @@ export async function runRootCommand(
 		// Account routing must use the effective settings, including `--config` and
 		// `PI_CONFIG_FILES` overlays, rather than independently re-reading only the
 		// main config file during auth discovery.
-		const ompAgentDir = resolveBreadboardOmpAgentDir(process.env.BREADBOARD_OMP_AGENT_DIR);
-		if (ompAgentDir !== undefined && !isInteractive) {
-			throw new Error("BREADBOARD_OMP_AGENT_DIR requires interactive BreadBoard execution");
-		}
+		const ompAgentDir = process.env.BREADBOARD_OMP_AGENT_DIR;
 		const settingsPromise = deps.settings
 			? Promise.resolve(deps.settings)
 			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
@@ -1900,8 +1851,6 @@ export async function runRootCommand(
 			cwd,
 			IS_BREADBOARD_PRODUCT,
 		);
-		const startupRestriction = nativeStartupRestriction(parsedArgs, breadboardProductModeSelected);
-		if (startupRestriction) throw new Error(startupRestriction);
 		if (parsedArgs.approvalMode) {
 			// Runtime override (not persisted): every settings.get("tools.approvalMode") downstream
 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
@@ -1953,125 +1902,6 @@ export async function runRootCommand(
 
 		// Initialize discovery system with settings for provider persistence
 		logger.time("initializeWithSettings", initializeWithSettings, settingsInstance);
-
-		if (deps.forceSetupWizard === true && breadboardProductModeSelected) {
-			const restriction = nativeStartupRestriction(parsedArgs, true);
-			if (restriction) throw new Error(restriction);
-			stopPendingStartupComposer();
-			const setupWizard = await logger.time("setup:load", () => import("./modes/setup"));
-			await logger.time(
-				"setup:initTheme",
-				initTheme,
-				isInteractive,
-				settingsInstance.get("symbolPreset"),
-				settingsInstance.get("colorBlindMode"),
-				settingsInstance.isConfigured("theme.dark") ? settingsInstance.get("theme.dark") : undefined,
-				settingsInstance.isConfigured("theme.light") ? settingsInstance.get("theme.light") : undefined,
-			);
-			const ui = new TUI(new ProcessTerminal());
-			let preparation: ReturnType<typeof prepareBreadboardSetup> | undefined;
-			let signalled = false;
-			let cleanupPromise: Promise<void> | undefined;
-			const cleanup = (): Promise<void> => {
-				cleanupPromise ??= (async () => {
-					try {
-						ui.stop();
-					} finally {
-						try {
-							await (await preparation)?.close();
-						} finally {
-							stopThemeWatcher();
-						}
-					}
-				})();
-				return cleanupPromise;
-			};
-			const onSignal = (exitCode: number) => {
-				signalled = true;
-				stopStartupWatchdog();
-				void cleanup().then(
-					() => process.exit(exitCode),
-					error => {
-						logger.error("BreadBoard setup cleanup failed", { error });
-						process.exit(1);
-					},
-				);
-			};
-			const onInterrupt = () => onSignal(130);
-			const onTerminate = () => onSignal(143);
-			process.on("SIGINT", onInterrupt);
-			process.on("SIGTERM", onTerminate);
-			try {
-				preparation = logger.time("prepareBreadboardSetup", () =>
-					(deps.prepareBreadboardSetup ?? prepareBreadboardSetup)(parsedArgs, modelRegistry, settingsInstance, {
-						ompAgentDir,
-						nativeAuthStorage: authStorage,
-					}),
-				);
-				const preparedSetup = await preparation;
-				if (signalled) return;
-				if (!preparedSetup) throw new Error("BreadBoard setup requires an enabled engine");
-				const catalogModels = [...preparedSetup.models];
-				const requestedModel = resolveCliModel({
-					cliProvider: parsedArgs.provider,
-					cliModel: parsedArgs.model,
-					modelRegistry: { getAll: () => catalogModels, getAvailable: () => catalogModels },
-					settings: settingsInstance,
-					preferences: getModelMatchPreferences(settingsInstance),
-				});
-				if (requestedModel.error) throw new Error(requestedModel.error);
-				const thinkingRestriction = nativeControlRestriction("thinking", true);
-				if (requestedModel.thinkingLevel !== undefined && thinkingRestriction) {
-					throw new Error(`--model: ${thinkingRestriction}`);
-				}
-				if (requestedModel.warning) logger.warn(requestedModel.warning);
-				stopStartupWatchdog();
-				logger.endTiming();
-				ui.start();
-				const standaloneCtx: SetupWizardContext = {
-					ui,
-					settings: settingsInstance,
-					modelRegistry,
-					modelSelection: {
-						mode: "default",
-						get currentModel() {
-							if (requestedModel.model) return requestedModel.model;
-							return resolveModelRoleValue(settingsInstance.getModelRole("default"), [...preparedSetup.models], {
-								settings: settingsInstance,
-								matchPreferences: getModelMatchPreferences(settingsInstance),
-							}).model;
-						},
-						availableModels: () => preparedSetup.models,
-						refresh: async () => {
-							await modelRegistry.refresh("online-if-uncached");
-							await preparedSetup.refreshModels();
-						},
-						select: async (_model, selector) => {
-							if (settingsInstance.get("modelRoleStorage") === "project") {
-								settingsInstance.setProjectModelRole("default", selector);
-							} else {
-								settingsInstance.setModelRole("default", selector);
-							}
-							await settingsInstance.flush();
-						},
-					},
-					openInBrowser: openPath,
-				};
-				await setupWizard.runSetupWizard(standaloneCtx, setupWizard.ALL_SCENES, {
-					providerAuthPort: preparedSetup.providerAuth,
-					nativeAuthStorage: preparedSetup.nativeAuthStorage ?? authStorage,
-					playWelcomeIntro: false,
-				});
-				return;
-			} finally {
-				try {
-					await cleanup();
-				} finally {
-					process.removeListener("SIGINT", onInterrupt);
-					process.removeListener("SIGTERM", onTerminate);
-				}
-			}
-		}
 
 		// Apply model role overrides from CLI args or env vars (ephemeral, not persisted)
 		const smolModel = parsedArgs.smol ?? $env.PI_SMOL_MODEL;
@@ -2227,19 +2057,12 @@ export async function runRootCommand(
 					cwd,
 					settingsInstance,
 					promptMoveSession,
-					{
-						nativeFlagOwnership: "preliminary",
-						beforeFork: createBreadboardStartupForkPolicy(parsedArgs, settingsInstance, cwd, isInteractive),
-					},
+					{ nativeFlagOwnership: "preliminary" },
 				);
 			}
 		} catch (error: unknown) {
 			if (error instanceof SessionResolutionError) {
 				exitForSessionResolutionError(error);
-			}
-			if (error instanceof BreadboardSessionTransitionError) {
-				process.stderr.write(`BreadBoard session transition error [${error.code}]: ${error.message}\n`);
-				process.exit(1);
 			}
 			throw error;
 		}
@@ -2414,7 +2237,6 @@ export async function runRootCommand(
 				);
 				process.exit(1);
 			}
-
 		}
 
 		const createAgentSessionImpl = deps.createAgentSession ?? createAgentSession;
@@ -2533,67 +2355,19 @@ export async function runRootCommand(
 					)
 				: undefined;
 
-			let breadboardAgentSession: AgentSession | undefined = undefined;
-			let breadboardUIContext: ExtensionUIContext | undefined;
-			let breadboardPermissionActivity: ((pending: boolean) => void) | undefined;
-			const breadboardPermissionHandler = createBreadboardPermissionHandler(
-				() => breadboardUIContext,
-				pending => breadboardPermissionActivity?.(pending),
-			);
 			if (isInteractive) {
 				try {
 					preparedBreadboardRuntime = await logger.time(
 						"prepareBreadboardRuntime",
 						deps.prepareBreadboardRuntime ?? prepareBreadboardRuntime,
 						parsedArgs,
-						async (event, idempotencyKey) => {
-							const agentSession = breadboardAgentSession;
-							if (!agentSession) {
-								throw new Error("BreadBoard emitted an agent event before AgentSession activation");
-							}
-							await agentSession.agent.emitExternalEventAndWait(event, idempotencyKey);
-						},
-						{
-							modelRegistry,
-							nativeAuthStorage: authStorage,
-							ompAgentDir,
-							requestPermission: breadboardPermissionHandler,
-							selectedModel: parsedArgs.model ? sessionOptions.model : undefined,
-						},
 						settingsInstance,
-						sessionManager,
-						idempotencyKey => {
-							const agentSession = breadboardAgentSession;
-							if (!agentSession) {
-								throw new Error("BreadBoard released an agent event before AgentSession activation");
-							}
-							agentSession.agent.releaseExternalEvent(idempotencyKey);
-						},
+						cwd,
 					);
-					if (preparedBreadboardRuntime !== null) {
-						sessionOptions.mainStreamFn = preparedBreadboardRuntime.stream;
-						sessionOptions.mainStreamOwnsTurnLifecycle = true;
-						const runtime = preparedBreadboardRuntime;
-						sessionOptions.mainStreamSelectModel = model =>
-							runtime.setSessionModel(`${model.provider}/${model.id}`);
-						sessionOptions.model = preparedBreadboardRuntime.model;
-						sessionOptions.scopedModels = preparedBreadboardRuntime.models.map(model => ({ model }));
-					}
 				} catch (error) {
-					if (error instanceof BreadboardLifecycleStartupError) {
-						process.exitCode = 1;
-						stopStartupWatchdog();
-						stopThemeWatcher();
-						return;
-					}
-					const message =
-						formatBreadboardStartupError(error) ??
-						`BreadBoard lifecycle failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`;
-					process.stderr.write(`${message}\n`);
-					process.exitCode = 1;
 					stopStartupWatchdog();
-					stopThemeWatcher();
-					return;
+					process.stderr.write(`${chalk.red(formatBreadboardStartupError(error))}\n`);
+					process.exit(1);
 				}
 			}
 
@@ -2610,42 +2384,6 @@ export async function runRootCommand(
 				subagentEventBus,
 				preloadedExtensions: extensionsResult,
 			});
-			breadboardAgentSession = session;
-			if (preparedBreadboardRuntime) {
-				session.setSessionTransitionGuard(rejectBreadboardSessionTransition);
-				try {
-					await preparedBreadboardRuntime.activate(session.sessionManager);
-				} catch (error) {
-					try {
-						await session.dispose();
-					} catch (cleanupError) {
-						logger.warn("AgentSession cleanup after BreadBoard activation failure failed", {
-							error: String(cleanupError),
-						});
-					}
-					await preparedBreadboardRuntime.close();
-					const message = formatBreadboardStartupError(error);
-					if (error instanceof BreadboardLifecycleStartupError || message) {
-						if (message) process.stderr.write(`${message}\n`);
-						process.exitCode = 1;
-						stopStartupWatchdog();
-						stopThemeWatcher();
-						return;
-					}
-					throw error;
-				}
-			}
-			// The bridge must observe and admit turns even when no extension UI
-			// context is installed (for example OMP_SKIP_SETUP=1). The callback
-			// below remains an idempotent compatibility path for extension hosts.
-			if (isInteractive) preparedBreadboardRuntime?.start();
-			const setInteractiveToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean): void => {
-				breadboardUIContext = hasUI ? uiContext : undefined;
-				if (!hasUI) breadboardPermissionActivity = undefined;
-				setToolUIContext(uiContext, hasUI);
-				if (hasUI) preparedBreadboardRuntime?.start();
-			};
-
 			try {
 				validateToolNames(initialArgs.tools, session.getAllToolNames());
 			} catch (error) {
@@ -2744,9 +2482,7 @@ export async function runRootCommand(
 					}
 				}
 				const startupLease = takeStartupComposerLease();
-				const breadboardRuntime = preparedBreadboardRuntime;
 				try {
-					const switchHarnessSession = breadboardRuntime?.switchHarnessSession;
 					stopStartupWatchdog();
 					logger.endTiming();
 					await (deps.runInteractiveMode ?? runInteractiveMode)(
@@ -2756,7 +2492,7 @@ export async function runRootCommand(
 						notifs,
 						versionCheckPromise,
 						initialArgs.messages,
-						setInteractiveToolUIContext,
+						setToolUIContext,
 						lspServers,
 						mcpManager,
 						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
@@ -2769,37 +2505,11 @@ export async function runRootCommand(
 						parsedArgs.join,
 						startBackgroundModelDiscovery,
 						startupLease,
-						breadboardRuntime
-							? {
-									bindPermissionActivity: observer => {
-										breadboardPermissionActivity = observer;
-									},
-									providerAuth: breadboardRuntime.providerAuth,
-									nativeAuthStorage: breadboardRuntime.nativeAuthStorage,
-									close: breadboardRuntime.close,
-									harnessClient: breadboardRuntime.harnessClient,
-									harnessId: breadboardRuntime.harnessId,
-									setSessionModel: breadboardRuntime.setSessionModel,
-									switchHarnessSession: switchHarnessSession
-										? async (configPath, lockId, transition) => {
-												const switched = await switchHarnessSession(configPath, lockId, transition);
-												if (switched) {
-													session.setScopedModels(breadboardRuntime.models.map(model => ({ model })));
-													await session.setModelTemporary(breadboardRuntime.model);
-												}
-												return switched;
-											}
-										: undefined,
-									sessionId: () => breadboardRuntime.sessionId,
-								}
-							: undefined,
+						undefined,
 						nativeHarness ? createNativeHarnessPort(nativeHarness) : undefined,
-						// Product builds sign in only through a broker or an explicitly shared vault,
-						// never into the per-workspace private store.
-						!breadboardRuntime && ompAgentDir !== undefined ? authStorage : undefined,
+						ompAgentDir !== undefined ? authStorage : undefined,
 					);
 				} finally {
-					breadboardPermissionActivity = undefined;
 					startupLease?.dispose();
 				}
 			} else {

@@ -37,13 +37,13 @@ import {
 	COMPUTER_WORKER_ARG,
 	DAEMON_BROKER_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
-	SHARED_ENGINE_WORKER_ARG,
 	STATS_ACTIVITY_WORKER_ARG,
 	TERMINAL_OUTPUT_WORKER_ARG,
 } from "./cli/worker-selectors";
 import type * as JsProcessEntry from "./eval/js/process-entry";
 import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
 import { parseStartupPrepaintArgs } from "./startup-prepaint-args";
+import { detectBridgeRefusal, formatBridgeRefusal } from "./breadboard/bridge-refusal";
 
 if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
 	process.stderr.write(
@@ -120,10 +120,7 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
  */
 async function runSmokeTest(): Promise<void> {
 	const noticeBundle = await Bun.file(new URL(noticeBundlePath, import.meta.url)).text();
-	if (
-		!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n") ||
-		!noticeBundle.includes("Package: @breadboard/sdk@0.4.0")
-	) {
+	if (!noticeBundle.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n")) {
 		throw new Error("distribution notice bundle is missing or malformed");
 	}
 	const { smokeTestSyncWorker, startServer } = await import("@oh-my-pi/omp-stats");
@@ -271,11 +268,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === BLOB_BROKER_WORKER_ARG) {
 		const { startBlobBrokerFromEnvironment } = await import("./blob-broker/server");
 		await startBlobBrokerFromEnvironment();
-		return true;
-	}
-	if (arg === SHARED_ENGINE_WORKER_ARG) {
-		const { startSharedBreadboardEngineFromEnvironment } = await import("./breadboard/shared-engine-worker");
-		await startSharedBreadboardEngineFromEnvironment();
 		return true;
 	}
 	return false;
@@ -457,6 +449,13 @@ export async function runCli(argv: string[], options: { readonly processEntry?: 
 	try {
 		const extracted = extractProfileFlags(resolvedArgv);
 		resolvedArgv = extracted.argv;
+		const refusal = detectBridgeRefusal({ argv: resolvedArgv, environment: process.env });
+		if (refusal) {
+			process.stderr.write(`${formatBridgeRefusal(refusal.source, refusal.value)}\n`);
+			process.exitCode = 2;
+			if (isProcessEntry) process.exit(2);
+			return;
+		}
 		if (extracted.profile !== undefined) {
 			setProfile(extracted.profile);
 		} else {

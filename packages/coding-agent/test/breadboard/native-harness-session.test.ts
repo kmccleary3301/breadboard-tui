@@ -24,7 +24,8 @@ import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
 const R39_FIXTURE = path.resolve(import.meta.dir, "../../../breadboard-harness/test/native/fixtures/r39-workspace");
 const R39_SPEC = ".breadboard/bb-omp/r39/bb-omp.harness.yaml";
-const GUARD_ONE_OPEN = "Outstanding todos must be completed or canceled before finishing. Pending items: write the test";
+const GUARD_ONE_OPEN =
+	"Outstanding todos must be completed or canceled before finishing. Pending items: write the test";
 
 let modelRegistry: ModelRegistry;
 const tempDirs: string[] = [];
@@ -47,9 +48,18 @@ afterAll(() => {
 
 async function nativeSession(
 	responses: MockResponse[],
-	options: { autoApprove?: boolean; extensions?: ExtensionFactory[]; specPath?: string; editMode?: "hashline" | "replace" } = {},
+	options: {
+		autoApprove?: boolean;
+		extensions?: ExtensionFactory[];
+		specPath?: string;
+		editMode?: "hashline" | "replace";
+	} = {},
 	configureHarness?: (harness: LoadedNativeHarness) => LoadedNativeHarness,
-): Promise<{ session: AgentSession; harness: LoadedNativeHarness; calls: ReturnType<typeof createMockModel>["calls"] }> {
+): Promise<{
+	session: AgentSession;
+	harness: LoadedNativeHarness;
+	calls: ReturnType<typeof createMockModel>["calls"];
+}> {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), `bb-native-session-${Snowflake.next()}-`));
 	tempDirs.push(root);
 	const cwd = fs.realpathSync(root);
@@ -153,14 +163,12 @@ function configureStagedHarness(harness: LoadedNativeHarness, planTurnLimit = 1)
 						],
 					};
 				}
-				if (entry.path === "loop.sequence") return { ...entry, value: [{ mode: "plan", if: "features.plan" }, { mode: "build" }] };
+				if (entry.path === "loop.sequence")
+					return { ...entry, value: [{ mode: "plan", if: "features.plan" }, { mode: "build" }] };
 				return value;
 			})
 		: [];
-	effectiveValues.push(
-		{ path: "features.plan", value: true },
-		{ path: "loop.plan_turn_limit", value: planTurnLimit },
-	);
+	effectiveValues.push({ path: "features.plan", value: true }, { path: "loop.plan_turn_limit", value: planTurnLimit });
 	const lock = { ...harness.lock, effective_values: effectiveValues };
 	return {
 		...harness,
@@ -171,7 +179,6 @@ function configureStagedHarness(harness: LoadedNativeHarness, planTurnLimit = 1)
 		registeredToolSurface: { mode: "registered", native: [...planPack.native, ...buildPack.native], textInvoked: [] },
 	};
 }
-
 
 describe("native harness session", () => {
 	it("sends exactly the harness function tools and schemas under the compiled system prompt", async () => {
@@ -286,7 +293,12 @@ describe("native harness session", () => {
 				{
 					content: [
 						...(todoWrite.content ?? []),
-						{ type: "toolCall", id: "read-1", name: "read_file", arguments: { path: "prompts/daily_driver_system.md" } },
+						{
+							type: "toolCall",
+							id: "read-1",
+							name: "read_file",
+							arguments: { path: "prompts/daily_driver_system.md" },
+						},
 					],
 					stopReason: "toolUse",
 				},
@@ -317,7 +329,12 @@ describe("native harness session", () => {
 							type: "text",
 							text: '<TOOL_CALL> TodoWrite(todos=[{"content":"closed work","status":"completed"}]) </TOOL_CALL>',
 						},
-						{ type: "toolCall", id: "read-1", name: "read_file", arguments: { path: "prompts/daily_driver_system.md" } },
+						{
+							type: "toolCall",
+							id: "read-1",
+							name: "read_file",
+							arguments: { path: "prompts/daily_driver_system.md" },
+						},
 					],
 					stopReason: "toolUse",
 				},
@@ -340,13 +357,17 @@ describe("native harness session", () => {
 	});
 });
 
-type OmpSessionKind = "stock" | "bb-omp.native" | "bridge";
+type OmpSessionKind = "stock" | "bb-omp.native";
 
 /** One OMP session per kind over the same settings and workspace: stock OMP, native mode on `bb-omp.native`, or a bridge-owned stream. */
 async function ompSession(
 	kind: OmpSessionKind,
 	responses: MockResponse[] = [],
-): Promise<{ session: AgentSession; harness?: LoadedNativeHarness; calls: ReturnType<typeof createMockModel>["calls"] }> {
+): Promise<{
+	session: AgentSession;
+	harness?: LoadedNativeHarness;
+	calls: ReturnType<typeof createMockModel>["calls"];
+}> {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), `bb-omp-native-${Snowflake.next()}-`));
 	tempDirs.push(root);
 	const cwd = fs.realpathSync(root);
@@ -374,13 +395,9 @@ async function ompSession(
 		harness = await loadNativeHarness({ specPath: "bb-omp.native", workspaceRoot: cwd });
 		applyNativeHarnessSessionOptions(options, harness, settings, { approvalSelected: false });
 	}
-	if (kind === "bridge") {
-		options.mainStreamOwnsTurnLifecycle = true;
-		options.mainStreamFn = mock.stream;
-	}
 	const { session } = await createAgentSession(options);
 	sessions.push(session);
-	if (kind !== "bridge") vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
+	vi.spyOn(session.agent, "streamFn").mockImplementation(mock.stream);
 	return { session, harness, calls: mock.calls };
 }
 
@@ -391,9 +408,13 @@ describe("bb-omp.native session", () => {
 		const native = await ompSession("bb-omp.native", [done]);
 		expect(native.harness?.hostSurface).toBe(true);
 		expect(native.session.getActiveToolNames()).toEqual(stock.session.getActiveToolNames());
-		expect(native.session.getActiveToolNames()).toEqual(expect.arrayContaining(["bash", "eval", "task", "read", "edit"]));
+		expect(native.session.getActiveToolNames()).toEqual(
+			expect.arrayContaining(["bash", "eval", "task", "read", "edit"]),
+		);
 		expect(native.session.settings.get("todo.enabled")).toBe(stock.session.settings.get("todo.enabled"));
-		expect(native.session.settings.get("tools.intentTracing")).toBe(stock.session.settings.get("tools.intentTracing"));
+		expect(native.session.settings.get("tools.intentTracing")).toBe(
+			stock.session.settings.get("tools.intentTracing"),
+		);
 
 		for (const { session } of [stock, native]) {
 			await session.prompt("hello");
@@ -405,39 +426,6 @@ describe("bb-omp.native session", () => {
 		const identity = native.harness?.systemPrompt ?? "";
 		expect(identity).toStartWith("# BreadBoard");
 		expect(nativeRequest?.systemPrompt).toEqual([...(stockRequest?.systemPrompt ?? []), identity]);
-	});
-
-	it("lifts every OMP control that a bridge-owned session restricts", async () => {
-		const native = (await ompSession("bb-omp.native")).session;
-		const bridge = (await ompSession("bridge")).session;
-		expect(native.mainStreamOwnsTurnLifecycle).toBe(false);
-		expect(bridge.mainStreamOwnsTurnLifecycle).toBe(true);
-		const model = native.model;
-		if (model === undefined) throw new Error("the fixture session has a model");
-		const controls: ReadonlyArray<readonly [string, (session: AgentSession) => unknown]> = [
-			["advisor", session => session.setAdvisorEnabled(true)],
-			["compaction", session => session.setAutoCompactionEnabled(false)],
-			["plan", session => session.setPlanReferencePath("plan.md")],
-			["automation", session => session.followUp("continue after this turn")],
-			["prewalk", session => session.armPrewalk(model)],
-			["thinking", session => session.setThinkingLevel("auto")],
-			["context", session => session.dropImages()],
-			["provider-state", session => session.pinCurrentProviderOAuthAccount(1)],
-			["model-roles", session => session.setModel(model)],
-			["native-session-transition", session => session.newSession()],
-		];
-		for (const [control, run] of controls) {
-			const attempt = async (session: AgentSession): Promise<unknown> => {
-				try {
-					await run(session);
-					return undefined;
-				} catch (error) {
-					return error;
-				}
-			};
-			expect({ control, error: String(await attempt(native)) }).toEqual({ control, error: "undefined" });
-			expect({ control, error: String(await attempt(bridge)) }).toEqual({ control, error: expect.stringMatching(/BreadBoard/) });
-		}
 	});
 });
 

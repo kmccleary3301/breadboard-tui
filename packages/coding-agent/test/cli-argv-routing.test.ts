@@ -209,13 +209,7 @@ describe("BreadBoard engine flags preserve native launch parsing", () => {
 		expect(parsed.messages).toEqual(["local-owned", "hello"]);
 	});
 
-	test("strips launch engine flags from the engine subcommand and forwards them to ACP", () => {
-		expect(resolveCliArgv(["--engine-mode", "off", "engine", "status"])).toEqual({
-			argv: ["engine", "status"],
-		});
-		expect(resolveCliArgv(["--engine-url=http://127.0.0.1:9099", "engine", "status"])).toEqual({
-			argv: ["engine", "status"],
-		});
+	test("forwards launch engine flags to ACP", () => {
 		expect(resolveCliArgv(["--engine-mode", "off", "acp"])).toEqual({
 			argv: ["acp", "--engine-mode", "off"],
 		});

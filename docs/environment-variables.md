@@ -133,14 +133,17 @@ When the broker is enabled, the local SQLite credential store is bypassed and al
 
 The gateway has no dedicated env vars — it inherits `OMP_AUTH_BROKER_*`. Its own inbound bearer token lives at `<config-dir>/auth-gateway.token` and is managed via `omp auth-gateway token`.
 
-### BreadBoard shared OMP authentication
+### BreadBoard shared OMP authentication and environment variables
 
 `BREADBOARD_OMP_AGENT_DIR` selects an existing absolute OMP agent directory containing `agent.db`. BreadBoard keeps its own sessions and settings directory, but uses the selected OMP auth store and native provider refresh/account selection. It does not copy credentials. A missing directory or database is an error.
 
-This mode requires an attached local-owned BreadBoard engine. The TUI starts an authenticated loopback inference gateway and closes it on shutdown or failed startup. BreadBoard still executes tools, enforces permissions and owns session state. Available gateway models use exact `provider/model` identifiers, such as `openai-codex/gpt-5.5`. Gateway failure does not fall back to a direct or paid provider.
+### Retired bridge environment variables
 
-The TUI sends its short-lived gateway URL and bearer through the verified inherited bootstrap descriptor. The engine keeps them in memory, not its startup environment, command line or files. `BREADBOARD_OMP_GATEWAY_URL` and `BREADBOARD_OMP_GATEWAY_TOKEN` are rejected legacy environment inputs. Native subscription credentials remain in OMP.
+The Python engine bridge and attach modes have been retired:
 
+- `BREADBOARD_ENGINE_MODE`: Legacy bridge modes (`local-owned`, `local-external`, `remote`) are refused at startup with an error naming the native default (`native`). Only `native` (the default) and `off` are supported.
+- `BREADBOARD_API_URL`: Legacy engine URL variable. Setting it refuses launch.
+- `BREADBOARD_ENGINE_ARTIFACT`: Legacy engine artifact variable. Setting it refuses launch.
 ---
 
 ## 2) Provider-specific runtime configuration

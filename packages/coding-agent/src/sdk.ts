@@ -154,7 +154,6 @@ import {
 	obfuscateProviderContext,
 	type SecretObfuscator,
 } from "./secrets";
-import { nativeControlRestriction } from "./breadboard/native-control-policy";
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
 import {
 	discoverAuthStorage as discoverAuthStorageFromConfig,
@@ -1402,18 +1401,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	}
 	const cwd = options.cwd ?? getProjectDir();
 	const agentDir = options.agentDir ?? getAgentDir();
-	const externalTurnLifecycle = options.mainStreamOwnsTurnLifecycle === true;
-	if (externalTurnLifecycle) {
-		if (options.prewalk !== undefined) {
-			throw new Error(nativeControlRestriction("prewalk", true));
-		}
-		if (options.planYolo !== undefined) {
-			throw new Error(nativeControlRestriction("plan", true));
-		}
-		if (options.thinkingLevel !== undefined) {
-			throw new Error(nativeControlRestriction("thinking", true));
-		}
-	}
 	const eventBus = options.eventBus ?? new EventBus();
 	const subagentEventBus = options.subagentEventBus ?? new EventBus();
 
@@ -1536,9 +1523,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		logger.time("sessionManager", () =>
 			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
 		);
-	const configuredDirs = externalTurnLifecycle
-		? []
-		: (options.additionalDirectories ?? settings.get("workspace.additionalDirectories"));
+	const configuredDirs = options.additionalDirectories
+		? options.additionalDirectories
+		: settings.get("workspace.additionalDirectories");
 	if (configuredDirs.length > 0) {
 		// Merge with any roots restored from the session header (resume/fork), not replace.
 		const existing = sessionManager.getAdditionalDirectories();
@@ -1703,7 +1690,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// role reclaim so the final model's own defaults aren't masked by an earlier
 	// fallback model's.
 	const pickInitialThinkingLevel = (selectedModel: Model | undefined): ConfiguredThinkingLevel | undefined => {
-		if (externalTurnLifecycle) return undefined;
 		let level = options.thinkingLevel;
 		if (level === undefined && hasExistingSession && hasThinkingEntry) {
 			level =
@@ -1832,7 +1818,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	let hasSession = false;
 	let hasRegistered = false;
 	const restrictToolNames = options.restrictToolNames === true;
-	const enableLsp = !externalTurnLifecycle && (options.enableLsp ?? !restrictToolNames);
+	const enableLsp = options.enableLsp ?? !restrictToolNames;
 	const lspReadOnly = options.lspReadOnly ?? restrictToolNames;
 	const asyncMaxJobs = Math.min(100, Math.max(1, settings.get("async.maxJobs") ?? 100));
 	// Only the first top-level session in a process owns an AsyncJobManager.
@@ -2120,7 +2106,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		});
 
 		// Restricted sessions cannot inherit or discover MCP capabilities.
-		const enableMCP = !externalTurnLifecycle && !restrictToolNames && (options.enableMCP ?? true);
+		const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
 		let mcpManager: MCPManager | undefined = enableMCP ? options.mcpManager : undefined;
 		toolSession.mcpManager = mcpManager;
 		toolSession.enableMCP = enableMCP;
@@ -3344,8 +3330,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					setActiveRules(nextActiveRules);
 				}
 			}
-			const memoryBackend =
-				restrictToolNames || externalTurnLifecycle ? undefined : await resolveMemoryBackend(settings);
+			const memoryBackend = restrictToolNames ? undefined : await resolveMemoryBackend(settings);
 			const memoryInstructions = memoryBackend
 				? await memoryBackend.buildDeveloperInstructions(agentDir, settings, session)
 				: undefined;
@@ -3716,7 +3701,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// reminder rides on the first user turn so open-weight providers keep
 			// their tool-schema prefix cache (#7404).
 			return dateCwdReminder
-				? dateCwdReminder.transform(transformed, formatLocalCalendarDate(), normalizePromptPath(sessionManager.getCwd()))
+				? dateCwdReminder.transform(
+						transformed,
+						formatLocalCalendarDate(),
+						normalizePromptPath(sessionManager.getCwd()),
+					)
 				: transformed;
 		};
 		const onPayload = async (payload: unknown, model?: Model, signal?: AbortSignal) => {
@@ -3845,7 +3834,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 				}
 				const externalThinking =
-					!externalTurnLifecycle &&
 					settings.get("externalThinking") &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
@@ -4488,7 +4476,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// and the tools; the fire-time re-check in `#onAgentEnd` still handles a
 		// mid-session DISABLE. The subscription lives for the session's lifetime; the
 		// reference is intentionally discarded (the listener retains it).
-		if (!restrictToolNames && !externalTurnLifecycle) {
+		if (!restrictToolNames) {
 			if (settings.get("autolearn.enabled") && taskDepth === 0) {
 				await logger.time("startMemoryStartupTask", startMemoryBackend);
 				new AutoLearnController({

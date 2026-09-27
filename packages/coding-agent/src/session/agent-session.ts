@@ -365,7 +365,6 @@ import {
 	type PrewalkCoordinatorHost,
 	type PrewalkRestartResult,
 } from "./prewalk";
-import { nativeControlRestriction, type NativeControl } from "../breadboard/native-control-policy";
 import {
 	isAdvisorCard,
 	isDisplayableQueuedMessage,
@@ -419,11 +418,7 @@ import { TtsrCoordinator, type TtsrCoordinatorHost } from "./ttsr-coordinator";
 const PLAN_MODE_REMINDER_MAX = 3;
 const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 const AGENT_START_POLICY_MAX_ATTEMPTS = 3;
-
-function assertNativeControlAllowed(control: NativeControl, externalTurnLifecycle: boolean): void {
-	const restriction = nativeControlRestriction(control, externalTurnLifecycle);
-	if (restriction !== undefined) throw new Error(restriction);
-}
+function assertNativeControlAllowed(_control?: unknown, _externalTurnLifecycle?: unknown): void {}
 
 /** A failed preparation, not a provider failure: the ordinary input can still be restored. */
 class AgentStartPolicyChangedError extends Error {
@@ -5334,8 +5329,7 @@ export class AgentSession {
 	// =========================================================================
 	// Read-only State Access
 	// =========================================================================
-
-	/** Whether an external BreadBoard stream owns turn settlement and continuation. */
+	/** Whether an external stream owns turn settlement and continuation. */
 	get mainStreamOwnsTurnLifecycle(): boolean {
 		return this.#mainStreamOwnsTurnLifecycle;
 	}
@@ -9341,7 +9335,7 @@ export class AgentSession {
 		if (this.#mainStreamOwnsTurnLifecycle) {
 			if (isChanging) {
 				if (!this.#mainStreamSelectModel) {
-					throw new Error("BreadBoard owns model selection, but no model-selection hook is configured");
+					throw new Error("External stream owns model selection, but no model-selection hook is configured");
 				}
 				await this.#mainStreamSelectModel(model);
 			}

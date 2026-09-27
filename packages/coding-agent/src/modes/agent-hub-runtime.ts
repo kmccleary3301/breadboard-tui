@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import type { AgentHubDeps, AgentHubRemote, AgentHubViewFactory } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import type { AgentTranscriptSource } from "@oh-my-pi/pi-tui/overlays/agent-transcript-viewer";
-import { nativeControlRestriction } from "../breadboard/native-control-policy";
 import type { HarnessPort, HarnessSnapshot } from "../breadboard/harness-port";
 import { AgentActivityIndex } from "../activity";
 import { getRoleInfo } from "../config/model-roles";
@@ -79,6 +78,6 @@ export function createAgentHubRuntime(
 		loadPersisted: shouldContinue => registerPersistedSubagents(registry, options.sessionFile, { shouldContinue }),
 		getRoleInfo: options.settings ? role => getRoleInfo(role, options.settings!) : undefined,
 		viewFactory,
-		nativeMutationRestriction: () => nativeControlRestriction("subagents", options.mainStreamOwnsTurnLifecycle === true),
+		nativeMutationRestriction: () => undefined,
 	};
 }

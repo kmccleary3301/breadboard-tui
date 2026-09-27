@@ -476,9 +476,8 @@ class Journey:
         env = runner.exact_environment(
             self.roots["home"], self.roots["config"], self.roots["agent"], self.roots["temp"]
         )
-        engine_args = ["--engine-mode", "local-owned", "--engine-url", self.engine_endpoint] if self.engine_endpoint else []
         self.child = runner.PtyChild(
-            [str(self.options.bb), *engine_args] + (["--model", model] if model is not None else []),
+            [str(self.options.bb)] + (["--model", model] if model is not None else []),
             self.roots["workspace"],
             env,
             rows=self.options.rows,

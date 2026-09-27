@@ -12,7 +12,7 @@ import {
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, AuthStorage, ImageContent, Message, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, AuthStorage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { execReplace } from "@oh-my-pi/pi-natives";
 import type {
@@ -58,12 +58,8 @@ import {
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import type { BreadboardClient } from "@breadboard/sdk/engine";
 import { reset as resetCapabilities } from "../capability";
-import type { ProviderAuthPort } from "../breadboard/provider-auth-port";
-import { createHarnessPort, requireHarnessResultData, resolveHarness } from "../breadboard/harness-port-client";
 import type { HarnessPort } from "../breadboard/harness-port";
-import { resolveBreadboardBackendModel } from "../breadboard/runtime";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
 import { CollabController } from "../collab/controller";
@@ -138,7 +134,6 @@ import type { SessionContext } from "../session/session-context";
 import { getRecentSessions } from "../session/session-listing";
 import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
-import { nativeCommandAvailabilityRestriction } from "../breadboard/native-control-policy";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
@@ -1046,8 +1041,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
 	harnessPort: HarnessPort | undefined;
-	#harnessClient?: BreadboardClient;
-	#switchHarnessSession?: (configPath: string, lockId: string, transition: () => Promise<boolean>) => Promise<boolean>;
 	#streamPublisher: StreamPublisher | undefined;
 	#recorder: SessionRecorder | undefined;
 	#recorderStarting = false;
@@ -1281,10 +1274,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		mcpManager?: MCPManager,
 		eventBus?: EventBus,
 		composer?: Composer,
-		private readonly providerAuthPort?: ProviderAuthPort,
+		private readonly providerAuthPort?: unknown,
 		subagentEventBus?: EventBus,
 		private readonly beforeSessionDispose?: () => Promise<void>,
-		harnessClient?: BreadboardClient,
+		harnessClient?: unknown,
 		harnessId?: string,
 		setSessionModel?: (model: string) => Promise<void>,
 		switchHarnessSession?: (
@@ -1299,29 +1292,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
 		this.settings = session.settings;
-		this.#harnessClient = harnessClient;
-		this.#switchHarnessSession = switchHarnessSession;
-		const setHarnessSessionModel = setSessionModel
-			? async (selector: string): Promise<void> => {
-					const selected = resolveBreadboardBackendModel(selector, {
-						getAll: () => this.session.scopedModels.map(entry => entry.model),
-					});
-					const thinkingLevel = this.session.mainStreamOwnsTurnLifecycle
-						? undefined
-						: this.session.resolveTemporaryModelThinkingLevel(selected);
-					await this.session.setModelTemporary(selected, thinkingLevel);
-				}
-			: undefined;
-		this.harnessPort =
-			nativeHarnessPort ??
-			(harnessClient && harnessId && breadboardSessionId
-				? createHarnessPort({
-						client: harnessClient,
-						sessionId: breadboardSessionId,
-						harnessId,
-						setSessionModel: setHarnessSessionModel,
-					})
-				: undefined);
+		this.harnessPort = nativeHarnessPort;
 		const preferences = {
 			quiet: settings.get("startup.quiet"),
 			composerShape: settings.get("composer.shape") ?? "band",
@@ -1545,7 +1516,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController = new CommandController(this);
 		this.#todoCommandController = new TodoCommandController(this);
 		this.#liveCommandController = new LiveCommandController(this);
-		this.#selectorController = new SelectorController(this, providerAuthPort);
+		this.#selectorController = new SelectorController(this);
 		this.#focusController = new SessionFocusController(this);
 		this.#inputController = new InputController(this);
 		this.collabController = new CollabController(this);
@@ -2095,13 +2066,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		const dynamicCommands = new Map(
-			harnessCommandsAsSlashCommands(snapshot, readHarnessPaletteSettings(this.settings))
-				.filter(
-					command =>
-						nativeCommandAvailabilityRestriction(command.name, this.session.mainStreamOwnsTurnLifecycle) ===
-						undefined,
-				)
-				.map(command => [command.name, command]),
+			harnessCommandsAsSlashCommands(snapshot, readHarnessPaletteSettings(this.settings)).map(command => [
+				command.name,
+				command,
+			]),
 		);
 		const namesToReplace = new Set<string>([
 			...HARNESS_PALETTE_BASE_NAMES,
@@ -6916,49 +6884,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	handleHandoffCommand(customInstructions?: string): Promise<void> {
 		return this.#commandController.handleHandoffCommand(customInstructions);
 	}
-	async startHarnessSession(harnessId: string): Promise<boolean> {
-		if (!this.#harnessClient || !this.harnessPort || !this.#switchHarnessSession) {
-			this.showError("BreadBoard harness switching is unavailable in this session.");
-			return false;
-		}
-
-		try {
-			const resolvedHarness = await resolveHarness(this.#harnessClient, harnessId);
-			requireHarnessResultData(await this.#harnessClient.validateHarness(resolvedHarness.id), "harness.validate");
-			const lockResult = await this.#harnessClient.lockHarness(resolvedHarness.id);
-			const lockData = requireHarnessResultData(lockResult, "harness.lock");
-			const lockHashCandidate = lockData.graph_hash ?? lockResult.hashes.graph;
-			if (typeof lockHashCandidate !== "string" || !lockHashCandidate.trim()) {
-				throw new Error("BreadBoard harness.lock response missing graph_hash");
-			}
-			const lockPathCandidate = lockData.path;
-			const lockId =
-				typeof lockPathCandidate === "string" && lockPathCandidate.trim()
-					? lockPathCandidate
-					: resolvedHarness.id.endsWith(".yaml")
-						? `${resolvedHarness.id.slice(0, -5)}.lock.json`
-						: resolvedHarness.id.endsWith(".yml")
-							? `${resolvedHarness.id.slice(0, -4)}.lock.json`
-							: `${resolvedHarness.id}.lock.json`;
-			const configPath = resolvedHarness.id;
-			await this.sessionManager.ensureOnDisk();
-			const parentSession = this.sessionManager.getSessionFile() ?? this.sessionManager.getSessionId();
-			const switched = await this.#switchHarnessSession(configPath, lockId, () =>
-				this.session.newSession({
-					parentSession,
-					configPath: lockId,
-					transition: "harnessSwitch",
-				}),
-			);
-			if (!switched) return false;
-			this.harnessPort.setHarnessId?.(resolvedHarness.id);
-			await this.harnessPort.refresh("harness-use");
-			this.showStatus(`Harness ${resolvedHarness.name} is now active with lock hash ${lockHashCandidate}.`);
-			return true;
-		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
-			return false;
-		}
+	async startHarnessSession(_harnessId: string): Promise<boolean> {
+		this.showError("BreadBoard harness switching requires an attached engine, which was removed.");
+		return false;
 	}
 
 	handleShakeCommand(mode: ShakeMode): Promise<void> {
@@ -7043,12 +6971,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
 		return this.#selectorController.showOAuthSelector(mode, providerId);
 	}
-	usesProviderAuthBroker(): boolean {
-		return this.providerAuthPort !== undefined;
-	}
-	showProviderRevokeSelector(providerId?: string): Promise<void> {
-		return this.#selectorController.showProviderRevokeSelector(providerId);
-	}
 
 	showSessionPinSelector(): Promise<void> {
 		return this.#selectorController.showSessionPinSelector();
@@ -7057,13 +6979,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	showResetUsageSelector(): Promise<void> {
 		return this.#selectorController.showResetUsageSelector();
 	}
-
 	async showProviderSetup(): Promise<void> {
 		const { runProviderSetupWizard } = await import("./setup");
-		await runProviderSetupWizard(this, {
-			providerAuthPort: this.providerAuthPort,
-			nativeAuthStorage: this.nativeAuthStorage,
-		});
+		await runProviderSetupWizard(this);
 	}
 
 	showHookConfirm(title: string, message: string): Promise<boolean> {

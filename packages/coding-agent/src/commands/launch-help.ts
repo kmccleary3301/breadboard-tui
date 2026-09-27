@@ -2,8 +2,7 @@ import { Args, type CommandMetadata, Flags } from "@oh-my-pi/pi-utils/cli";
 import { APP_NAME, CONFIG_DIR_NAME, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 import { CLI_THINKING_LEVELS } from "@oh-my-pi/pi-tui/thinking";
 import { SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
-import { ACTIVE_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
-import { nativeStartupFlagRestriction } from "../breadboard/native-control-policy";
+import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
 
 const PRODUCT_NAME = ACTIVE_PRODUCT_IDENTITY.shortDisplayName;
 
@@ -18,13 +17,6 @@ export const launchHelp = {
 		}),
 	},
 	flags: {
-		"engine-mode": Flags.string({
-			description: `${BREADBOARD_PRODUCT_IDENTITY.displayName} engine mode`,
-			options: ["local-owned", "local-external", "remote", "off"],
-		}),
-		"engine-url": Flags.string({
-			description: `Exact ${BREADBOARD_PRODUCT_IDENTITY.displayName} engine endpoint URL`,
-		}),
 		harness: Flags.string({ description: "BreadBoard harness name or definition path" }),
 		model: Flags.string({
 			description: 'Model to use (fuzzy match: "opus", "gpt-5.2", or "openai/gpt-5.2")',
@@ -135,16 +127,6 @@ export const launchHelp = {
 } satisfies CommandMetadata;
 
 if (IS_BREADBOARD_PRODUCT) {
-	// Help is rendered before settings pick the engine mode. Only the Python engine modes
-	// (local-owned, local-external, remote) own the turn loop and refuse these flags.
-	for (const [name, flag] of Object.entries(launchHelp.flags)) {
-		const restriction = nativeStartupFlagRestriction(`--${name}`, true);
-		if (restriction) flag.description = `${flag.description}. Python engine modes refuse it: ${restriction}`;
-	}
-	launchHelp.flags["approval-mode"].description =
-		"Override tools.approvalMode for this session (always-ask|write|yolo); Python engine modes accept only yolo and take other policies from the harness";
-	launchHelp.flags["no-session"].description =
-		"Do not save the session transcript; Python engine modes keep their engine journals";
 	launchHelp.examples = [
 		`# Interactive mode in the selected workspace\n  ${APP_NAME}`,
 		`# Choose a harness and an engine model\n  ${APP_NAME} --harness path/to/config.yaml --model provider/model`,

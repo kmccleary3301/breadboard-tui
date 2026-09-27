@@ -1,9 +1,6 @@
 import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
 import { NativeHarnessReloadError } from "@breadboard/harness";
-import type { PublicResult } from "@breadboard/sdk";
-import type { BreadboardClient } from "@breadboard/sdk/engine";
 import type { HarnessCommandSpec, HarnessSnapshot } from "../breadboard/harness-port";
-import { resolveHarnessId } from "../breadboard/harness-port-client";
 import type { Settings } from "../config/settings";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
 import { parseSlashCommand, parseSubcommand } from "./helpers/parse";
@@ -15,10 +12,41 @@ export interface HarnessPaletteSettings {
 }
 
 type PublicData = Readonly<Record<string, unknown>>;
-type HarnessControlClient = Pick<
-	BreadboardClient,
-	"getHarness" | "validateHarness" | "explainHarness" | "lockHarness" | "getHarnessLock"
->;
+interface PublicResult {
+	readonly ok: boolean;
+	readonly status: string;
+	readonly data: PublicData;
+	readonly error?: { readonly message?: string };
+	readonly exit_code?: number;
+}
+
+interface HarnessControlClient {
+	getHarness(id: string): Promise<PublicResult>;
+	validateHarness(id: string): Promise<PublicResult>;
+	explainHarness(id: string): Promise<PublicResult>;
+	lockHarness(id: string): Promise<PublicResult>;
+	getHarnessLock(id: string): Promise<PublicResult>;
+}
+
+async function resolveHarnessId(client: HarnessControlClient, requested: string): Promise<string> {
+	const candidates =
+		requested.includes("/") || /\.(?:yaml|yml|json)$/u.test(requested)
+			? [requested]
+			: [`agent_configs/v2/${requested}.yaml`, `agent_configs/${requested}.yaml`, `${requested}.yaml`, requested];
+	for (const candidate of candidates) {
+		try {
+			const res = await client.getHarness(candidate);
+			if (res && res.ok !== false) return candidate;
+		} catch (error: unknown) {
+			const status =
+				typeof error === "object" && error !== null && "status" in error
+					? (error as { status: unknown }).status
+					: undefined;
+			if (status !== 404) throw error;
+		}
+	}
+	return requested;
+}
 
 const LOCK_COMMANDS = [
 	["mode", "modes"],
@@ -258,7 +286,7 @@ async function harnessList(runtime: TuiSlashCommandRuntime, directory?: string):
 }
 
 function controlClient(runtime: TuiSlashCommandRuntime): HarnessControlClient | undefined {
-	return runtime.ctx.harnessPort?.controlClient;
+	return runtime.ctx.harnessPort?.controlClient as HarnessControlClient | undefined;
 }
 
 function resultData(result: PublicResult, operation: string): PublicData {
@@ -503,7 +531,9 @@ export async function executeHarnessSlashCommand(
 			try {
 				const next = await port.reloadNativeHarness();
 				runtime.ctx.showStatus(
-					next === null ? "Harness reload produced no snapshot." : `Harness reloaded at generation ${next.generation}.`,
+					next === null
+						? "Harness reload produced no snapshot."
+						: `Harness reloaded at generation ${next.generation}.`,
 				);
 			} catch (error) {
 				if (error instanceof NativeHarnessReloadError) {
@@ -511,7 +541,9 @@ export async function executeHarnessSlashCommand(
 						`Harness reload rejected [${error.code}] at generation ${error.generation}: ${error.message}`,
 					);
 				} else {
-					runtime.ctx.showStatus(`Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`);
+					runtime.ctx.showStatus(
+						`Harness reload rejected: ${error instanceof Error ? error.message : String(error)}`,
+					);
 				}
 			}
 			return true;

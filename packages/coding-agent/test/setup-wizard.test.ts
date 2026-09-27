@@ -6,7 +6,6 @@ import { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	ALL_SCENES,
-	createInteractiveSetupContext,
 	createSetupHost,
 	CURRENT_SETUP_VERSION,
 	markSetupWizardComplete,
@@ -14,7 +13,6 @@ import {
 	type SetupScene,
 	type SetupSceneHost,
 	type SetupSceneResult,
-	type SetupWizardContext,
 	selectSetupScenes,
 } from "@oh-my-pi/pi-coding-agent/modes/setup";
 import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/providers";
@@ -124,9 +122,7 @@ describe("setup wizard scene selection", () => {
 		setTerminalGlyphProtocol(true);
 		try {
 			const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
-			expect(scenes.map(scene => scene.id)).toEqual(
-				productSceneIds().filter(id => id !== "glyph-mode"),
-			);
+			expect(scenes.map(scene => scene.id)).toEqual(productSceneIds().filter(id => id !== "glyph-mode"));
 		} finally {
 			setTerminalGlyphProtocol(false);
 		}
@@ -224,82 +220,6 @@ describe("setup wizard model selection", () => {
 		expect(settings.getProjectModelRole("default")).toBe("spark/minimax-m3");
 		expect(settings.getGlobalModelRole("default")).toBeUndefined();
 	});
-	it("uses the session-scoped model selection seam for engine-owned contexts", async () => {
-		const setModelTemporary = mock(async (_model: Model) => {});
-		const ctx = {
-			settings: Settings.isolated(),
-			ui: { terminal: { rows: 24 }, setFocus: () => {}, requestRender: () => {}, invalidate: () => {} },
-			openInBrowser: () => {},
-			playWelcomeIntro: () => {},
-			session: {
-				mainStreamOwnsTurnLifecycle: true,
-				model: CUSTOM_MODEL,
-				scopedModels: [{ model: CUSTOM_MODEL }],
-				modelRegistry: {
-					getAvailable: () => [CUSTOM_MODEL],
-					getAll: () => [CUSTOM_MODEL],
-					refresh: async () => {},
-					refreshProvider: async () => {},
-				},
-				setModelTemporary,
-			},
-		} as unknown as InteractiveModeContext;
-		const setup = createInteractiveSetupContext(ctx);
-		expect(setup.modelSelection.mode).toBe("session");
-		expect(setup.modelSelection.availableModels()).toEqual([CUSTOM_MODEL]);
-		await setup.modelSelection.select(CUSTOM_MODEL, "spark/minimax-m3");
-		expect(setModelTemporary).toHaveBeenCalledWith(CUSTOM_MODEL);
-	});
-
-	it("accepts a standalone SetupWizardContext without an interactive session", async () => {
-		const settings = Settings.isolated({ setupVersion: 0 });
-		let component: SetupWizardComponent | undefined;
-		const context: SetupWizardContext = {
-			settings,
-			ui: {
-				terminal: { rows: 24 },
-				showOverlay: (next: SetupWizardComponent) => {
-					component = next;
-					return { hide: () => {} };
-				},
-				setFocus: () => {},
-				requestRender: () => {},
-				invalidate: () => {},
-			} as unknown as SetupWizardContext["ui"],
-			modelRegistry: {
-				authStorage: { has: () => false, hasAuth: () => false, getCredentialOrigin: () => undefined },
-				getAvailable: () => [],
-				getAll: () => [],
-				refresh: async () => {},
-				refreshProvider: async () => {},
-			} as unknown as SetupWizardContext["modelRegistry"],
-			modelSelection: {
-				mode: "default",
-				currentModel: undefined,
-				availableModels: () => [],
-				refresh: async () => {},
-				select: async () => {},
-			},
-			openInBrowser: () => {},
-		};
-		const scene: SetupScene = {
-			id: "standalone",
-			title: "Standalone",
-			minVersion: 1,
-			mount: host => ({
-				title: "Standalone",
-				onMount: () => host.finish("done"),
-				render: () => [],
-				invalidate: () => {},
-			}),
-		};
-		const pending = runSetupWizard(context, [scene], { markComplete: false, playWelcomeIntro: false });
-		component?.handleInput?.("\n");
-		component?.handleInput?.("\n");
-		await pending;
-		expect(settings.get("setupVersion")).toBe(0);
-	});
-
 });
 describe("setup wizard persistence", () => {
 	it("marks the current setup version complete", async () => {
