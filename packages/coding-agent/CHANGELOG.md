@@ -7,6 +7,7 @@
 - Built-in research harnesses `claude_code`, `codex`, `opencode`, `oh_my_opencode`, `pi` and `oh_my_pi`. They use OMP's write and replacement-edit schemas and require write approval for file mutations.
 - `/harness reload` recompiles the workspace harness spec and applies the next generation at the next turn boundary, or reports why the new spec was rejected.
 - `NativeRpcTransport` in `@breadboard/harness` drives `bb` sessions from TypeScript over OMP's RPC mode, with harness selection and approval handling.
+- With `BREADBOARD_OMP_AGENT_DIR` set, print, JSON and RPC modes use the shared OMP auth store, like interactive sessions. Before, they refused to start.
 - BreadBoard Balanced, Quiet and Detailed information layouts, with shared live and setup previews and width-aware priority for actionable state.
 - Per-field BreadBoard composer customization with staged Apply/Cancel, a live preview and a layout-only reset. Shape and glyph preferences are independent.
 - An Emoji glyph preset alongside Unicode, Nerd Font and ASCII.

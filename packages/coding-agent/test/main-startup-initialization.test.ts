@@ -99,23 +99,23 @@ describe("runRootCommand — startup early exits", () => {
 	});
 });
 
-it("rejects shared subscription auth in print mode before opening the credential store", async () => {
-	using ompDir = TempDir.createSync("@bb-shared-auth-admission-");
+it("print mode reads credentials from the shared OMP store", async () => {
+	using ompDir = TempDir.createSync("@bb-shared-auth-print-");
 	fs.writeFileSync(path.join(ompDir.path(), "agent.db"), "");
 	const previous = process.env.BREADBOARD_OMP_AGENT_DIR;
 	process.env.BREADBOARD_OMP_AGENT_DIR = ompDir.path();
-	let discoverCalls = 0;
+	const discovered: (string | undefined)[] = [];
 	try {
 		const args = ["--print", "do not run inference"];
 		await expect(
 			runRootCommand(parseArgs(args), args, {
-				discoverAuthStorage: async () => {
-					discoverCalls += 1;
-					throw new Error("unexpected credential-store discovery");
+				discoverAuthStorage: async agentDir => {
+					discovered.push(agentDir);
+					throw new Error("stop after credential-store discovery");
 				},
 			}),
-		).rejects.toBeInstanceOf(Error);
-		expect(discoverCalls).toBe(0);
+		).rejects.toThrow("stop after credential-store discovery");
+		expect(discovered).toEqual([fs.realpathSync(ompDir.path())]);
 	} finally {
 		if (previous === undefined) delete process.env.BREADBOARD_OMP_AGENT_DIR;
 		else process.env.BREADBOARD_OMP_AGENT_DIR = previous;
