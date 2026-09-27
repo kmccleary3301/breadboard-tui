@@ -243,9 +243,6 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.alias = args[++i];
 		} else if (arg.startsWith("--alias=")) {
 			result.alias = arg.slice("--alias=".length);
-		} else if (arg === "--harness" || arg.startsWith("--harness=")) {
-			if (arg.startsWith("--harness=")) result.harness = arg.slice("--harness=".length);
-			else if (i + 1 < args.length && !args[i + 1].startsWith("-")) result.harness = args[++i];
 		} else if (arg === "--engine-mode" || arg.startsWith("--engine-mode=")) {
 			if (arg.startsWith("--engine-mode=")) result.engineMode = arg.slice("--engine-mode=".length);
 			else if (i + 1 < args.length && !args[i + 1].startsWith("-")) result.engineMode = args[++i];
