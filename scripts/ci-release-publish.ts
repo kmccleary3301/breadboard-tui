@@ -177,7 +177,6 @@ export const packages: PublishPackage[] = [
 		dir: "packages/coding-agent",
 		kind: "typescript",
 		publishBin: { omp: "dist/cli.js" },
-		publishBundledDependencies: ["@breadboard/sdk"],
 	},
 ];
 

@@ -3,7 +3,6 @@
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { compileCodingAgent } from "./compile-binary";
-import { loadBuildEngineDistribution, stageInstalledEngineSidecar } from "./prepare-installed-engine-sidecar";
 
 const packageDir = path.join(import.meta.dir, "..");
 const repoRoot = path.join(packageDir, "..", "..");
@@ -17,7 +16,6 @@ export interface CrossBuild {
 }
 
 export type BinaryProduct = "bb" | "omp";
-export const BREADBOARD_ENGINE_DISTRIBUTION_ROOT_ENV = "BREADBOARD_ENGINE_DISTRIBUTION_ROOT";
 
 /** Resolve the local binary product, defaulting to the BreadBoard release candidate. */
 export function resolveBinaryProduct(value: string | undefined): BinaryProduct {
@@ -87,32 +85,13 @@ async function runCommand(
 async function main(): Promise<void> {
 	const product = resolveBinaryProduct(Bun.env.BUILD_PRODUCT);
 	const crossBuild = resolveCrossBuild(Bun.env.CROSS_TARGET);
-const shouldAdhocSign =
+	const shouldAdhocSign =
 		process.platform === "darwin" &&
 		(!crossBuild || crossBuild.platform === "darwin") &&
 		Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
 	const outName = crossBuild ? `${product}-${crossBuild.id}` : product;
 	const entrypointName = product === "bb" ? "bb.ts" : "omp.ts";
 	const outputPath = path.join(packageDir, "dist", outName);
-	const engineDistribution = await (async () => {
-		if (product !== "bb") return undefined;
-		const distributionRoot = Bun.env[BREADBOARD_ENGINE_DISTRIBUTION_ROOT_ENV];
-		if (!distributionRoot) {
-			throw new Error(`${BREADBOARD_ENGINE_DISTRIBUTION_ROOT_ENV} is required to build a complete bb artifact`);
-		}
-		const distribution = await loadBuildEngineDistribution(distributionRoot);
-		const targetPlatform = crossBuild?.platform ?? process.platform;
-		const targetArchitecture = crossBuild?.arch ?? process.arch;
-		if (
-			distribution.manifest.target.platform !== targetPlatform ||
-			distribution.manifest.target.architecture !== targetArchitecture
-		) {
-			throw new Error(
-				`bb engine distribution target ${distribution.manifest.target.platform}/${distribution.manifest.target.architecture} does not match ${targetPlatform}/${targetArchitecture}`,
-			);
-		}
-		return distribution;
-	})();
 	// Generate inside the try so the finally always restores generated placeholders
 	// (stats client archive, docs index) even on failure.
 	try {
@@ -135,7 +114,6 @@ const shouldAdhocSign =
 				target: crossBuild?.target,
 				executablePath: Bun.env.BUN_COMPILE_EXECUTABLE_PATH || undefined,
 				skipBuiltinCodesign: shouldAdhocSign,
-				breadboardEngineTrustRoot: engineDistribution?.trustRoot,
 			});
 
 			if (shouldAdhocSign) {
@@ -149,7 +127,6 @@ const shouldAdhocSign =
 					outputPath,
 				]);
 			}
-			if (engineDistribution) await stageInstalledEngineSidecar(outputPath, engineDistribution);
 		} finally {
 			await runCommand(["bun", "--cwd=../natives", "run", "gen:native:reset"]);
 		}

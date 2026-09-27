@@ -4,15 +4,16 @@ import { dlopen, FFIType, ptr, read } from "bun:ffi";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
-import { openPinnedDirectory } from "../packages/coding-agent/src/breadboard/lifecycle/darwin-pinned-directory";
-import {
-	ENGINE_DISTRIBUTION_MANIFEST_FILENAME,
-	type EngineDistributionManifest,
-	type EngineDistributionTrustRoot,
-	INSTALLED_ENGINE_SUPPORTED_TARGET,
-	parseTrustedEngineDistributionManifest,
-} from "../packages/coding-agent/src/breadboard/lifecycle/installed-engine-manifest";
+import { dirname, join, resolve } from "node:path";
+export interface ProductReleaseTarget {
+	readonly platform: "darwin";
+	readonly architecture: "arm64";
+}
+
+export const PRODUCT_TARGET: ProductReleaseTarget = Object.freeze({
+	platform: "darwin",
+	architecture: "arm64",
+});
 import { BREADBOARD_DISTRIBUTION_POLICY } from "../packages/utils/src/product-distribution";
 import { isRecord } from "../packages/utils/src/type-guards";
 
@@ -21,7 +22,6 @@ const ARCHIVE_SCHEMA = "bb.product_archive.v1";
 const ROOT = /^bb-darwin-arm64-[0-9A-Za-z.-]+$/;
 const HEX = /^[0-9a-f]{64}$/;
 const O_NOFOLLOW = constants.O_NOFOLLOW;
-const PRODUCT_TARGET = INSTALLED_ENGINE_SUPPORTED_TARGET;
 const PRODUCT_BINARY_PATH = "bb";
 const PRODUCT_NATIVE_ADDON_PATH = "native/pi_natives.darwin-arm64.node";
 const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
@@ -58,26 +58,38 @@ interface VerifiedRoot {
 	readonly rootName: string;
 	readonly productVersion: string;
 	readonly treeSha256: Digest;
-	readonly engineDirectory: string;
 	readonly manifest: Record<string, unknown>;
 }
 
 export function targetKey(target = PRODUCT_TARGET): string {
 	return `${target.platform}-${target.architecture}`;
 }
+async function chmodTreeForRemoval(root: string): Promise<void> {
+	await chmod(root, 0o700).catch(() => undefined);
+	const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		const child = join(root, entry.name);
+		if (entry.isDirectory()) {
+			await chmodTreeForRemoval(child);
+		} else {
+			await chmod(child, 0o600).catch(() => undefined);
+		}
+	}
+	await chmod(root, 0o700).catch(() => undefined);
+}
+
 export async function removePinnedDirectoryTree(
 	path: string,
 	expected?: { readonly device: number | bigint; readonly inode: number | bigint },
 ): Promise<void> {
-	const parent = await openPinnedDirectory(dirname(path));
-	try {
-		await parent.removeDirectoryTree(
-			basename(path),
-			expected === undefined ? undefined : { dev: BigInt(expected.device), ino: BigInt(expected.inode) },
-		);
-	} finally {
-		await parent.close();
+	if (expected !== undefined) {
+		const stat = await lstat(path).catch(() => undefined);
+		if (stat && (stat.dev !== Number(expected.device) || stat.ino !== Number(expected.inode))) {
+			throw new Error("directory identity changed before removal");
+		}
 	}
+	await chmodTreeForRemoval(path);
+	await rm(path, { recursive: true, force: true });
 }
 
 function fail(message: string, cause?: unknown): never {
@@ -388,57 +400,8 @@ export async function verifyProductRoot(root: string, rootName: string): Promise
 		if (identity.sizeBytes !== item.sizeBytes || item.sha256 !== `sha256:${identity.sha256}`)
 			fail("install manifest content identity mismatch");
 	}
-	const engine = manifestRecord(manifest.engine, "install manifest engine identity is invalid");
-	if (typeof engine.distributionId !== "string" || !engine.distributionId.startsWith("sha256:")) {
-		fail("install manifest engine identity is invalid");
-	}
-	const engineDirectory = `engine/${engine.distributionId.slice("sha256:".length)}`;
-	if (
-		!safeRelativePath(engine.manifestPath) ||
-		!safeRelativePath(engine.bundlePath) ||
-		engine.manifestPath !== `${engineDirectory}/${ENGINE_DISTRIBUTION_MANIFEST_FILENAME}`
-	) {
-		fail("install manifest engine paths are invalid");
-	}
-	const engineManifestBytes = await privateRegular(join(root, engine.manifestPath));
-	const trustFiles = files.filter(file => file.startsWith("engine/") && file.endsWith(".trust.json"));
-	const expectedTrustPath = `engine/${engine.distributionId.slice("sha256:".length)}.trust.json`;
-	if (trustFiles.length !== 1 || trustFiles[0] !== expectedTrustPath)
-		fail("archive must contain exactly one detached engine trust root");
-	const trustFile = trustFiles[0];
-	if (trustFile === undefined) fail("archive trust root is missing");
-	let trustRoot: EngineDistributionTrustRoot;
-	try {
-		trustRoot = JSON.parse((await privateRegular(join(root, trustFile))).toString("utf8"));
-	} catch (error) {
-		fail("engine trust root is not JSON", error);
-	}
-	let engineManifest: EngineDistributionManifest;
-	try {
-		engineManifest = parseTrustedEngineDistributionManifest(engineManifestBytes, trustRoot);
-	} catch (error) {
-		fail("engine manifest trust verification failed", error);
-	}
-	if (
-		engineManifest.productVersion !== manifest.productVersion ||
-		engineManifest.target.platform !== PRODUCT_TARGET.platform ||
-		engineManifest.target.architecture !== PRODUCT_TARGET.architecture ||
-		engineManifest.distributionId !== engine.distributionId ||
-		engine.bundlePath !== `${engineDirectory}/${engineManifest.engine.runtimeBundle.path}`
-	) {
-		fail("install manifest engine identity mismatch");
-	}
-	const bundleIdentity = await hashPrivateRegular(join(root, engine.bundlePath));
-	if (
-		bundleIdentity.sizeBytes !== engineManifest.engine.runtimeBundle.sizeBytes ||
-		`sha256:${bundleIdentity.sha256}` !== engineManifest.engine.runtimeBundle.sha256
-	) {
-		fail("engine runtime bundle identity mismatch");
-	}
 	const legal = manifestRecord(manifest.legal, "install manifest legal posture is invalid");
 	if (manifest.classification === "release-candidate") {
-		if (engineManifest.signature.kind !== "release-envelope")
-			fail("release candidate has no trusted engine release envelope");
 		if (
 			legal.posture !== "release-ready" ||
 			legal.inputsPresent !== true ||
@@ -446,11 +409,7 @@ export async function verifyProductRoot(root: string, rootName: string): Promise
 			!files.includes("THIRD_PARTY_NOTICES.txt")
 		)
 			fail("release candidate is missing legal inputs");
-	} else if (
-		manifest.classification !== "development-evidence" ||
-		engineManifest.signature.kind !== "unsigned-development" ||
-		legal.posture !== "unsigned-development"
-	) {
+	} else if (manifest.classification !== "development-evidence" || legal.posture !== "unsigned-development") {
 		fail("archive classification is invalid");
 	}
 	return {
@@ -458,7 +417,6 @@ export async function verifyProductRoot(root: string, rootName: string): Promise
 		productVersion: manifest.productVersion,
 		manifest,
 		treeSha256: `sha256:${sha256(checksumsBytes)}`,
-		engineDirectory,
 	};
 }
 export function requireInstallableTrust(
@@ -583,8 +541,6 @@ async function installProductArchiveBytes(
 		const source = join(staged.payloadRoot, staged.verified.rootName);
 		const destination = join(destinationPath, staged.verified.rootName);
 		await chmod(join(source, PRODUCT_BINARY_PATH), 0o500);
-		await chmod(join(source, staged.verified.engineDirectory), 0o500);
-		await chmod(join(source, "engine"), 0o500);
 		await chmod(join(source, "native"), 0o500);
 		await chmod(source, 0o700);
 		await syncTree(source);

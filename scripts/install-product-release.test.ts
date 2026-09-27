@@ -1,29 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import {
-	chmod,
-	lstat,
-	mkdir,
-	mkdtemp,
-	readdir,
-	readFile,
-	realpath,
-	rename,
-	symlink,
-	writeFile,
-} from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ENGINE_RUNTIME_BUNDLE_SCHEMA } from "../packages/coding-agent/src/breadboard/lifecycle/engine-runtime-bundle";
-import {
-	canonicalEngineDistributionManifest,
-	createEngineDistributionManifest,
-	ENGINE_DISTRIBUTION_PATH_STRATEGY,
-	ENGINE_DISTRIBUTION_TRUST_SCHEMA,
-	type EngineDistributionManifestPayload,
-	INSTALLED_ENGINE_SUPPORTED_TARGET,
-} from "../packages/coding-agent/src/breadboard/lifecycle/installed-engine-manifest";
-import { removePinnedDirectoryTree } from "../packages/coding-agent/src/breadboard/lifecycle/pinned-directory";
-import { BREADBOARD_DISTRIBUTION_POLICY } from "../packages/utils/src/product-distribution";
+import { PRODUCT_TARGET, removePinnedDirectoryTree, targetKey as productTargetKey } from "./product-archive";
 import {
 	installManagedProductArchive,
 	installProductArchive,
@@ -36,7 +15,6 @@ import {
 } from "./install-product-release";
 import { openProductArchive } from "./product-archive";
 
-const PRODUCT_TARGET = INSTALLED_ENGINE_SUPPORTED_TARGET;
 const ALLOW_UNSIGNED = Object.freeze({ allowUnsignedDevelopment: true });
 const NATIVE_ADDON_PATH = "native/pi_natives.darwin-arm64.node";
 
@@ -52,7 +30,7 @@ async function makeArchive(
 	parent: string,
 	version: string,
 	variant = version,
-	engineVersion = version,
+	_engineVersion = version,
 	nativeAddonPath = NATIVE_ADDON_PATH,
 ): Promise<string> {
 	const target = PRODUCT_TARGET;
@@ -60,71 +38,9 @@ async function makeArchive(
 	const rootName = `bb-${targetKey}-${version}`;
 	const buildRoot = join(parent, `build-${variant}`);
 	const root = join(buildRoot, rootName);
-	const bundle = Buffer.from(`engine-${variant}`);
-	const executable = Buffer.from(`python-${variant}`);
-	const payload: EngineDistributionManifestPayload = {
-		productVersion: engineVersion,
-		pathStrategy: ENGINE_DISTRIBUTION_PATH_STRATEGY,
-		target,
-		engine: {
-			runtimeBundle: {
-				schemaVersion: ENGINE_RUNTIME_BUNDLE_SCHEMA,
-				path: "breadboard-engine-runtime.v1.bundle",
-				sizeBytes: bundle.byteLength,
-				sha256: `sha256:${sha256(bundle)}`,
-			},
-			executablePath: "payload/venv/bin/python",
-			argv: ["-I", "-m", "breadboard_engine.api.cli_bridge.server"],
-			executableSizeBytes: executable.byteLength,
-			executableSha256: `sha256:${sha256(executable)}`,
-			engineSourceSha256: `sha256:${sha256("engine-source")}`,
-			servedBackendCommit: "a".repeat(40),
-			servedBackendTree: "b".repeat(40),
-			interfaceVersion: BREADBOARD_DISTRIBUTION_POLICY.sdkVersion,
-			interfaceRange: BREADBOARD_DISTRIBUTION_POLICY.engineApiRange,
-		},
-		profile: {
-			profileId: "daily_driver.v1",
-			definitionRef: "agent_configs/templates/daily_driver.v1.yaml",
-			schemaVersion: "bb.harness_definition.v1",
-			sourceSha256: `sha256:${sha256("profile-source")}`,
-			effectiveLockSchemaVersion: "bb.effective_config_graph.v1",
-			effectiveLockSha256: `sha256:${sha256("profile-lock")}`,
-		},
-		provenance: {
-			sourceRepository: "https://example.invalid/current-breadboard",
-			sourceCommit: "a".repeat(40),
-			sourceTree: "b".repeat(40),
-			buildRecipeSha256: `sha256:${sha256("build-recipe")}`,
-			dependencyLockSha256: `sha256:${sha256("dependency-lock")}`,
-		},
-		signature: { kind: "unsigned-development" },
-	};
-	const engineManifest = createEngineDistributionManifest(payload);
-	const engineManifestBytes = canonicalEngineDistributionManifest(engineManifest);
-	const trustRoot = {
-		schemaVersion: ENGINE_DISTRIBUTION_TRUST_SCHEMA,
-		distributionId: engineManifest.distributionId,
-		expectedManifestSha256: `sha256:${sha256(engineManifestBytes)}`,
-		productVersion: engineVersion,
-		target,
-		interfaceRange: payload.engine.interfaceRange,
-		profile: {
-			profileId: payload.profile.profileId,
-			effectiveLockSha256: payload.profile.effectiveLockSha256,
-		},
-		signature: { kind: "unsigned-development" as const },
-	};
-	const distributionName = engineManifest.distributionId.slice("sha256:".length);
 	const files = new Map<string, Buffer>([
 		["bb", Buffer.from(`binary-${variant}`)],
 		[nativeAddonPath, Buffer.from(`addon-${variant}`)],
-		[`engine/${distributionName}/breadboard-engine-runtime.v1.bundle`, bundle],
-		[`engine/${distributionName}/breadboard-engine-manifest.v1.json`, Buffer.from(engineManifestBytes)],
-		[
-			`engine/${engineManifest.distributionId.slice("sha256:".length)}.trust.json`,
-			Buffer.from(`${JSON.stringify(trustRoot)}\n`),
-		],
 		["LICENSE", Buffer.from("development license")],
 		["THIRD_PARTY_NOTICES.txt", Buffer.from("development notices")],
 	]);
@@ -145,11 +61,6 @@ async function makeArchive(
 			path: nativeAddonPath,
 			sizeBytes: files.get(nativeAddonPath)?.byteLength,
 			sha256: `sha256:${sha256(files.get(nativeAddonPath) as Buffer)}`,
-		},
-		engine: {
-			distributionId: engineManifest.distributionId,
-			manifestPath: `engine/${distributionName}/breadboard-engine-manifest.v1.json`,
-			bundlePath: `engine/${distributionName}/breadboard-engine-runtime.v1.bundle`,
 		},
 		legal: { posture: "unsigned-development", inputsPresent: false },
 		classification: "development-evidence",
@@ -258,13 +169,8 @@ describe("managed product lifecycle", () => {
 			expect(installed.active.version).toBe("1.0.0");
 			const productRoot = join(destination, installed.active.rootName);
 			expect((await lstat(productRoot)).mode & 0o777).toBe(0o700);
-			const engineRoot = join(productRoot, "engine");
-			expect((await lstat(engineRoot)).mode & 0o777).toBe(0o500);
-			const engineDistribution = (await readdir(engineRoot, { withFileTypes: true })).find(entry =>
-				entry.isDirectory(),
-			);
-			if (!engineDistribution) throw new Error("expected an installed engine distribution");
-			expect((await lstat(join(engineRoot, engineDistribution.name))).mode & 0o777).toBe(0o500);
+			expect(await Bun.file(join(productRoot, "engine")).exists()).toBeFalse();
+			expect((await lstat(join(productRoot, "native"))).mode & 0o777).toBe(0o500);
 			const firstRevision = join(destination, PRODUCT_LIFECYCLE_STATE_DIRECTORY, "revisions", "revision-1.json");
 			expect((await lstat(firstRevision)).mode & 0o777).toBe(0o400);
 			const updated = await updateManagedProductArchive(setup.archives.b, destination, ALLOW_UNSIGNED);
@@ -472,7 +378,7 @@ describe("managed product lifecycle", () => {
 		}
 	});
 
-	test("rejects build metadata excluded by the engine product-version contract", async () => {
+	test("rejects build metadata excluded by the product-version contract", async () => {
 		const root = await mkdtemp(join(await realpath("/tmp"), "bb-product-lifecycle-build-metadata-"));
 		const destination = join(root, "destination");
 		try {

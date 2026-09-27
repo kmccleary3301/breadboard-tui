@@ -3,8 +3,6 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { gunzipSync } from "node:zlib";
-import { readTarNoticeMembers } from "./generate-third-party-notices";
 import { classifyPath, loadSyncPolicy, matchesPolicyPattern, type SyncPolicy } from "./inspect-upstream-sync";
 
 export const POLICY_PATH = path.resolve(import.meta.dir, "p31", "upstream-sync-policy.json");
@@ -56,15 +54,15 @@ export interface DeltaPolicy extends SyncPolicy {
 
 interface DistributionPolicy {
 	readonly packageRoot: string;
-	readonly packageName: string;
-	readonly packageVersion: string;
-	readonly artifactPath: string;
-	readonly provenancePath: string;
+	readonly packageName?: string;
+	readonly packageVersion?: string;
+	readonly artifactPath?: string;
+	readonly provenancePath?: string;
 	readonly packageLicensePath: string;
 	readonly noticeBundlePath: string;
 	readonly noticeManifestPath: string;
-	readonly expectedSdkDependency: string;
-	readonly expectedSdkLicenseAssertion: string;
+	readonly expectedSdkDependency?: string;
+	readonly expectedSdkLicenseAssertion?: string;
 }
 
 export interface ManifestPathEntry {
@@ -313,18 +311,7 @@ function validatePolicy(raw: unknown): asserts raw is DeltaPolicy {
 			throw new Error(`adapters.${field} must be a non-empty string array`);
 		}
 	}
-	for (const field of [
-		"packageRoot",
-		"packageName",
-		"packageVersion",
-		"artifactPath",
-		"provenancePath",
-		"packageLicensePath",
-		"noticeBundlePath",
-		"noticeManifestPath",
-		"expectedSdkDependency",
-		"expectedSdkLicenseAssertion",
-	] as const)
+	for (const field of ["packageRoot", "packageLicensePath", "noticeBundlePath", "noticeManifestPath"] as const)
 		assertString(raw.distribution[field], `distribution.${field}`);
 }
 
@@ -602,76 +589,12 @@ function sha256(bytes: Uint8Array | string): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-function sha512Base64(bytes: Uint8Array): string {
-	return createHash("sha512").update(bytes).digest("base64");
-}
-
-function tarString(bytes: Uint8Array, offset: number, length: number): string {
-	const field = bytes.subarray(offset, offset + length);
-	const nul = field.indexOf(0);
-	return new TextDecoder().decode(nul === -1 ? field : field.subarray(0, nul));
-}
-
-function tarSize(bytes: Uint8Array, offset: number, length: number): number {
-	const value = tarString(bytes, offset, length).trim();
-	if (!/^[0-7]+$/.test(value)) throw new Error("bundled SDK tar member has an invalid size");
-	return Number.parseInt(value, 8);
-}
-
-function readTarMember(archiveBytes: Uint8Array, wantedPath: string): Uint8Array | undefined {
-	const tarBytes = new Uint8Array(gunzipSync(archiveBytes));
-	for (let offset = 0; offset + 512 <= tarBytes.byteLength;) {
-		const header = tarBytes.subarray(offset, offset + 512);
-		if (header.every(byte => byte === 0)) return undefined;
-		const name = tarString(header, 0, 100);
-		const prefix = tarString(header, 345, 155);
-		const memberPath = prefix ? `${prefix}/${name}` : name;
-		const size = tarSize(header, 124, 12);
-		const dataStart = offset + 512;
-		const dataEnd = dataStart + size;
-		if (dataEnd > tarBytes.byteLength) throw new Error("bundled SDK tar member is truncated");
-		if (memberPath === wantedPath && (header[156] === 0 || header[156] === 48))
-			return tarBytes.slice(dataStart, dataEnd);
-		offset = dataStart + Math.ceil(size / 512) * 512;
-	}
-	return undefined;
-}
-
 function assertEqual(actual: unknown, expected: unknown, detail: string): void {
 	if (actual !== expected) throw new Error(`${detail}: expected ${String(expected)}, observed ${String(actual)}`);
 }
 
 async function verifyDistribution(repoRoot: string, policy: DeltaPolicy): Promise<void> {
 	const distribution = policy.distribution;
-	const packageRoot = path.resolve(repoRoot, distribution.packageRoot);
-	const packageJson = JSON.parse(await Bun.file(path.join(packageRoot, "package.json")).text()) as Record<
-		string,
-		unknown
-	>;
-	const dependencies = isRecord(packageJson.dependencies) ? packageJson.dependencies : {};
-	assertEqual(dependencies["@breadboard/sdk"], distribution.expectedSdkDependency, "@breadboard/sdk dependency");
-	const artifactBytes = new Uint8Array(
-		await Bun.file(path.resolve(repoRoot, distribution.artifactPath)).arrayBuffer(),
-	);
-	const provenanceBytes = new Uint8Array(
-		await Bun.file(path.resolve(repoRoot, distribution.provenancePath)).arrayBuffer(),
-	);
-	const provenance = JSON.parse(new TextDecoder().decode(provenanceBytes)) as Record<string, unknown>;
-	assertEqual(provenance.schemaVersion, "p30.breadboard-sdk-provenance.v1", "SDK provenance schema");
-	assertEqual(provenance.packageName, distribution.packageName, "SDK provenance package name");
-	assertEqual(provenance.packageVersion, distribution.packageVersion, "SDK provenance package version");
-	assertEqual(provenance.artifactPath, "./vendor/breadboard-sdk-0.4.0.tgz", "SDK provenance artifact path");
-	assertEqual(provenance.artifactSha256, sha256(artifactBytes), "SDK artifact sha256");
-	assertEqual(provenance.artifactSha512Base64, sha512Base64(artifactBytes), "SDK artifact sha512");
-	assertEqual(provenance.artifactSizeBytes, artifactBytes.byteLength, "SDK artifact byte size");
-	const packageMember = readTarMember(artifactBytes, "package/package.json");
-	if (!packageMember) throw new Error("SDK tarball is missing package/package.json");
-	const sdkPackage = JSON.parse(new TextDecoder().decode(packageMember)) as Record<string, unknown>;
-	assertEqual(sdkPackage.name, distribution.packageName, "SDK tarball package name");
-	assertEqual(sdkPackage.version, distribution.packageVersion, "SDK tarball package version");
-	assertString(sdkPackage.main, "SDK tarball main");
-	assertString(sdkPackage.types, "SDK tarball types");
-	if (!isRecord(sdkPackage.exports)) throw new Error("SDK tarball package exports are missing");
 	const licenseBytes = new Uint8Array(
 		await Bun.file(path.resolve(repoRoot, distribution.packageLicensePath)).arrayBuffer(),
 	);
@@ -679,7 +602,7 @@ async function verifyDistribution(repoRoot: string, policy: DeltaPolicy): Promis
 	const noticeManifest = JSON.parse(
 		await Bun.file(path.resolve(repoRoot, distribution.noticeManifestPath)).text(),
 	) as Record<string, unknown>;
-	if (!isRecord(noticeManifest.bundle) || !isRecord(noticeManifest.packageLicense) || !isRecord(noticeManifest.sdk))
+	if (!isRecord(noticeManifest.bundle) || !isRecord(noticeManifest.packageLicense))
 		throw new Error("third-party notice manifest is incomplete");
 	const bundleBytes = new Uint8Array(
 		await Bun.file(path.resolve(repoRoot, distribution.noticeBundlePath)).arrayBuffer(),
@@ -687,20 +610,9 @@ async function verifyDistribution(repoRoot: string, policy: DeltaPolicy): Promis
 	assertEqual(noticeManifest.bundle.sha256, sha256(bundleBytes), "notice bundle sha256");
 	assertEqual(noticeManifest.bundle.bytes, bundleBytes.byteLength, "notice bundle byte size");
 	assertEqual(noticeManifest.packageLicense.sha256, sha256(licenseBytes), "package license sha256");
-	assertEqual(noticeManifest.sdk.artifactSha256, sha256(artifactBytes), "notice SDK artifact sha256");
-	assertEqual(noticeManifest.sdk.provenanceSha256, sha256(provenanceBytes), "notice provenance sha256");
-	assertEqual(noticeManifest.sdk.licenseAssertion, distribution.expectedSdkLicenseAssertion, "SDK license assertion");
 	const noticeText = new TextDecoder().decode(bundleBytes);
 	if (!noticeText.startsWith("BREADBOARD / OMP DISTRIBUTION NOTICE BUNDLE\n"))
 		throw new Error("notice bundle header is invalid");
-	if (!noticeText.includes(`Package: ${distribution.packageName}@${distribution.packageVersion}`))
-		throw new Error("notice bundle lacks SDK package provenance");
-	const archiveNoticeMembers = readTarNoticeMembers(artifactBytes);
-	assertEqual(
-		noticeManifest.sdk.licenseNoticeMemberPresent,
-		archiveNoticeMembers.length > 0,
-		"SDK notice member presence",
-	);
 	const check = Bun.spawnSync(["bun", "scripts/generate-third-party-notices.ts", "--check"], {
 		cwd: repoRoot,
 		stdout: "pipe",

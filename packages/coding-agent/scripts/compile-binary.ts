@@ -1,4 +1,3 @@
-import type { EngineDistributionTrustRoot } from "../src/breadboard/lifecycle/installed-engine-manifest";
 // Deep import: the pi-utils barrel loads the host native addon, which is
 // absent on cross-compiling release runners.
 import { USER_AGENT } from "@oh-my-pi/pi-utils/dirs";
@@ -27,8 +26,6 @@ export interface CodingAgentCompileOptions {
 	readonly minifyIdentifiers?: boolean;
 	/** Disable Bun's built-in Darwin signing before the caller re-signs. */
 	readonly skipBuiltinCodesign?: boolean;
-	/** Build-verified trust embedded only in a complete BreadBoard product binary. */
-	readonly breadboardEngineTrustRoot?: EngineDistributionTrustRoot;
 }
 
 /**
@@ -49,12 +46,8 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 				"process.env.PI_COMPILED": JSON.stringify("true"),
 				"process.env.PI_TINY_TRANSFORMERS_VERSION": JSON.stringify(options.transformersVersion),
 				"process.env.PI_DOCS_EMBED": JSON.stringify((await buildDocsIndexPayload()).payload),
-				__BREADBOARD_ENGINE_TRUST_ROOT_JSON__:
-					options.breadboardEngineTrustRoot === undefined
-						? "undefined"
-						: JSON.stringify(JSON.stringify(options.breadboardEngineTrustRoot)),
 			},
-// Bun 1.4 bytecode leaves import.meta.resolve in CommonJS output.
+			// Bun 1.4 bytecode leaves import.meta.resolve in CommonJS output.
 			// Precompiled bytecode skips parsing the ~20 MB bundle at boot:
 			// `omp --version` 256 ms -> 30 ms on M4 Max (+52 MB binary).
 			// Keep import.meta.resolve in bundled dependencies valid under bytecode.
