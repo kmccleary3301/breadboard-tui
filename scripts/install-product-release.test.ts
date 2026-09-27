@@ -1,17 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import {
-	chmod,
-	lstat,
-	mkdir,
-	mkdtemp,
-	readdir,
-	readFile,
-	realpath,
-	rename,
-	symlink,
-	writeFile,
-} from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PRODUCT_TARGET, removePinnedDirectoryTree, targetKey as productTargetKey } from "./product-archive";
 import {

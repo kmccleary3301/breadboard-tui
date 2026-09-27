@@ -4,7 +4,7 @@ import { dlopen, FFIType, ptr, read } from "bun:ffi";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 export interface ProductReleaseTarget {
 	readonly platform: "darwin";
 	readonly architecture: "arm64";
@@ -409,10 +409,7 @@ export async function verifyProductRoot(root: string, rootName: string): Promise
 			!files.includes("THIRD_PARTY_NOTICES.txt")
 		)
 			fail("release candidate is missing legal inputs");
-	} else if (
-		manifest.classification !== "development-evidence" ||
-		legal.posture !== "unsigned-development"
-	) {
+	} else if (manifest.classification !== "development-evidence" || legal.posture !== "unsigned-development") {
 		fail("archive classification is invalid");
 	}
 	return {
