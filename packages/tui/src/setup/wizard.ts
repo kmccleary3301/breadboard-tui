@@ -5,7 +5,6 @@ import { composerSetupScene } from "./scenes/composer";
 import { glyphSetupScene } from "./scenes/glyph";
 import { modelSetupScene } from "./scenes/model";
 import { providersSetupScene } from "./scenes/providers";
-import { informationLayoutSetupScene } from "./scenes/information-layout";
 import { themeSetupScene } from "./scenes/theme";
 import type { SetupScene } from "./scenes/types";
 import { SetupWizardComponent } from "./wizard-overlay";
@@ -13,15 +12,66 @@ import { SetupWizardComponent } from "./wizard-overlay";
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
 
-/** Ordered onboarding scenes with independent version gates. */
-export const ALL_SCENES = [
+/** Upstream built-in onboarding scenes. */
+export const BUILTIN_SETUP_SCENES: readonly SetupScene[] = [
 	providersSetupScene,
 	modelSetupScene,
-	informationLayoutSetupScene,
 	glyphSetupScene,
 	composerSetupScene,
 	themeSetupScene,
-] as const satisfies readonly SetupScene[];
+];
+
+interface RegisteredSetupScene {
+	scene: SetupScene;
+	options?: { before?: string; after?: string };
+}
+
+const registeredScenes: RegisteredSetupScene[] = [];
+const sceneList: SetupScene[] = [...BUILTIN_SETUP_SCENES];
+
+function rebuildScenes(): void {
+	sceneList.length = 0;
+	sceneList.push(...BUILTIN_SETUP_SCENES);
+	for (const reg of registeredScenes) {
+		let insertIndex = sceneList.length;
+		if (reg.options?.before) {
+			const idx = sceneList.findIndex(s => s.id === reg.options!.before);
+			if (idx >= 0) insertIndex = idx;
+		} else if (reg.options?.after) {
+			const idx = sceneList.findIndex(s => s.id === reg.options!.after);
+			if (idx >= 0) insertIndex = idx + 1;
+		}
+		sceneList.splice(insertIndex, 0, reg.scene);
+	}
+}
+
+export function registerSetupScene(
+	scene: SetupScene,
+	options?: { before?: string; after?: string },
+): () => void {
+	const entry: RegisteredSetupScene = { scene, options };
+	registeredScenes.push(entry);
+	rebuildScenes();
+	return () => {
+		const idx = registeredScenes.indexOf(entry);
+		if (idx >= 0) {
+			registeredScenes.splice(idx, 1);
+			rebuildScenes();
+		}
+	};
+}
+
+export function resetSetupScenes(): void {
+	registeredScenes.length = 0;
+	rebuildScenes();
+}
+
+export function getSetupScenes(): readonly SetupScene[] {
+	return [...sceneList];
+}
+
+/** Ordered onboarding scenes with independent version gates. */
+export const ALL_SCENES: readonly SetupScene[] = sceneList;
 
 /** Environment and invocation gates for onboarding scene selection. */
 export interface SetupSceneSelectionOptions {

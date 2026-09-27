@@ -50,6 +50,10 @@ export const BREADBOARD_PRODUCT_IDENTITY: ProductIdentity = Object.freeze({
 	welcomeGreeting: "Welcome!",
 	setupWordmark: "BreadBoard",
 	composerFrameLabel: "Framed Rules",
+	composerShapeLabels: Object.freeze({
+		band: "Status Band",
+		box: "Rounded Box (Default)",
+	}),
 	setupModelEmptyText: "No additional models discovered; BreadBoard's provider-free default remains available.",
 	logoArt: BREADBOARD_LOGO,
 	compactLogo: Object.freeze({ unicode: "ƁB", nerd: "bb", emoji: "🍞", ascii: "bb" }),

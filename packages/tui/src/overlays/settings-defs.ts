@@ -1,24 +1,7 @@
 /** Schema-independent display definitions for the settings overlay. */
 import type { SymbolKey } from "../theme/symbols";
 
-export type SettingTab =
-	| "appearance"
-	| "model"
-	| "interaction"
-	| "context"
-	| "memory"
-	| "files"
-	| "shell"
-	| "tools"
-	| "tasks"
-	| "providers"
-	| "breadboard";
-
-/** Tab display metadata - icon is resolved via theme.symbol() */
-export type TabMetadata = { label: string; icon: Extract<SymbolKey, `tab.${string}`> | `tab.${string}` };
-
-/** Ordered list of tabs for UI rendering */
-export const SETTING_TABS: SettingTab[] = [
+export const BUILTIN_SETTING_TABS = [
 	"appearance",
 	"model",
 	"interaction",
@@ -29,11 +12,15 @@ export const SETTING_TABS: SettingTab[] = [
 	"tools",
 	"tasks",
 	"providers",
-	"breadboard",
-];
+] as const;
 
-/** Tab display metadata - icon is a symbol key from theme.ts (tab.*) */
-export const TAB_METADATA: Record<SettingTab, TabMetadata> = {
+export type BuiltinSettingTab = (typeof BUILTIN_SETTING_TABS)[number];
+export type SettingTab = BuiltinSettingTab | (string & {});
+
+/** Tab display metadata - icon is resolved via theme.symbol() */
+export type TabMetadata = { label: string; icon: Extract<SymbolKey, `tab.${string}`> | `tab.${string}` };
+
+export const BUILTIN_TAB_METADATA: Record<BuiltinSettingTab, TabMetadata> = {
 	appearance: { label: "Appearance", icon: "tab.appearance" },
 	model: { label: "Model", icon: "tab.model" },
 	interaction: { label: "Interaction", icon: "tab.interaction" },
@@ -44,15 +31,9 @@ export const TAB_METADATA: Record<SettingTab, TabMetadata> = {
 	tools: { label: "Tools", icon: "tab.tools" },
 	tasks: { label: "Tasks", icon: "tab.tasks" },
 	providers: { label: "Providers", icon: "tab.providers" },
-	breadboard: { label: "BreadBoard", icon: "tab.breadboard" },
 };
 
-/**
- * Ordered section groups per tab. Settings declare their section via `ui.group`;
- * the settings UI renders groups in this order with a heading row between them.
- * Ungrouped settings render first, before any section heading.
- */
-export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
+export const BUILTIN_TAB_GROUPS: Record<BuiltinSettingTab, readonly string[]> = {
 	appearance: ["Theme", "Composer", "Status Line", "Display", "Images"],
 	model: ["Thinking", "Sampling", "Prompt", "Retry & Fallback", "Advisor", "Prewalk", "Vision"],
 	interaction: [
@@ -87,8 +68,83 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	],
 	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
 	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
-	breadboard: ["Harness", "Engine", "Providers", "Subagents"],
 };
+
+export interface SettingsTabRegistration {
+	readonly id: string;
+	readonly label: string;
+	readonly icon: Extract<SymbolKey, `tab.${string}`> | `tab.${string}`;
+	readonly sections: readonly string[];
+	readonly itemProvider?: (entries: readonly SettingsDisplayEntry[]) => SettingDef[];
+	readonly getItems?: (entries: readonly SettingsDisplayEntry[]) => SettingDef[];
+}
+
+const customTabs = new Map<string, SettingsTabRegistration>();
+const activeTabs: SettingTab[] = [...BUILTIN_SETTING_TABS];
+
+/** Ordered list of tabs for UI rendering */
+export const SETTING_TABS: SettingTab[] = activeTabs;
+export const TAB_METADATA: Record<string, TabMetadata> = { ...BUILTIN_TAB_METADATA };
+export const TAB_GROUPS: Record<string, readonly string[]> = { ...BUILTIN_TAB_GROUPS };
+
+function rebuildSettingsTabs(): void {
+	activeTabs.length = 0;
+	activeTabs.push(...BUILTIN_SETTING_TABS);
+	for (const key of Object.keys(TAB_METADATA)) {
+		if (!BUILTIN_SETTING_TABS.includes(key as BuiltinSettingTab)) delete TAB_METADATA[key];
+	}
+	for (const key of Object.keys(TAB_GROUPS)) {
+		if (!BUILTIN_SETTING_TABS.includes(key as BuiltinSettingTab)) delete TAB_GROUPS[key];
+	}
+	for (const [id, tab] of customTabs) {
+		activeTabs.push(id);
+		TAB_METADATA[id] = { label: tab.label, icon: tab.icon };
+		TAB_GROUPS[id] = tab.sections;
+	}
+}
+
+export function registerSettingsTab(registration: SettingsTabRegistration): () => void {
+	customTabs.set(registration.id, registration);
+	rebuildSettingsTabs();
+	return () => {
+		if (customTabs.get(registration.id) === registration) {
+			customTabs.delete(registration.id);
+			rebuildSettingsTabs();
+		}
+	};
+}
+
+export function resetSettingsTabs(): void {
+	customTabs.clear();
+	rebuildSettingsTabs();
+}
+
+export function getSettingTabs(): readonly SettingTab[] {
+	return [...activeTabs];
+}
+
+export interface SettingsCustomEditorContext {
+	readonly def: SettingDef;
+	readonly currentValue: unknown;
+	readonly done: (value?: unknown) => void;
+	readonly context: unknown;
+	readonly callbacks: unknown;
+}
+
+export type SettingsCustomEditorFactory = (ctx: SettingsCustomEditorContext) => unknown;
+
+const customSettingEditors = new Map<string, SettingsCustomEditorFactory>();
+
+export function registerSettingCustomEditor(path: string, factory: SettingsCustomEditorFactory): () => void {
+	customSettingEditors.set(path, factory);
+	return () => {
+		if (customSettingEditors.get(path) === factory) customSettingEditors.delete(path);
+	};
+}
+
+export function getSettingCustomEditor(path: string): SettingsCustomEditorFactory | undefined {
+	return customSettingEditors.get(path);
+}
 
 /** Submenu choice metadata. */
 export type SubmenuOption<V extends string = string> = {
@@ -141,14 +197,6 @@ export interface SettingsHost {
 	validateProviderLimits(value: unknown): Record<string, number>;
 }
 
-/** Optional host-owned BreadBoard settings policy and runtime values. */
-export interface SettingsBreadboardContext {
-	readonly enabled?: boolean;
-	readonly teamSize?: number | null;
-	readonly harness?: { readonly lock?: Readonly<Record<string, unknown>> | null } | null;
-	readonly nativeSettingRestriction?: (path: string, group: string | undefined) => string | undefined;
-	readonly nativeSettingsGroupRestriction?: (group: string) => string | undefined;
-}
 
 /** Primitive value displayed by a settings control. */
 export type SettingsDisplayValue = boolean | string;
@@ -313,8 +361,16 @@ export function getAllSettingDefs(entries: readonly SettingsDisplayEntry[]): Set
 
 /** Get settings ordered by their tab's section layout. */
 export function getSettingsForTab(entries: readonly SettingsDisplayEntry[], tab: SettingTab): SettingDef[] {
-	const defs = getAllSettingDefs(entries).filter(def => def.tab === tab);
-	const order = TAB_GROUPS[tab];
+	const custom = customTabs.get(tab);
+	let defs: SettingDef[];
+	if (custom?.itemProvider) {
+		defs = [...custom.itemProvider(entries)];
+	} else if (custom?.getItems) {
+		defs = [...custom.getItems(entries)];
+	} else {
+		defs = getAllSettingDefs(entries).filter(def => def.tab === tab);
+	}
+	const order = TAB_GROUPS[tab] ?? custom?.sections ?? [];
 	const rank = (def: SettingDef): number => {
 		if (!def.group) return -1;
 		const index = order.indexOf(def.group);

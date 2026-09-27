@@ -263,3 +263,16 @@ export function isBreadboardFieldKey(value: string): value is BreadboardFieldKey
 			return false;
 	}
 }
+
+export function assertBreadboardFieldSettings(value: unknown): asserts value is Partial<BreadboardFieldSettings> {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error("statusLine.breadboard must be an object of field choices.");
+	}
+	for (const [key, choice] of Object.entries(value)) {
+		const field = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
+		if (!field) throw new Error(`Unknown BreadBoard information field: ${key}`);
+		if (!field.options.some(option => option.value === choice)) {
+			throw new Error(`Invalid BreadBoard information choice for ${key}: ${String(choice)}`);
+		}
+	}
+}

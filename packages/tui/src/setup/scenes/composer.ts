@@ -7,10 +7,17 @@ import type { ComposerShape } from "../../overlays/composer-shape-registry";
 import { type ComposerPreviewStatusSource, renderComposerShapePreview } from "../../overlays/composer-shape-preview";
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
 import { getProductIdentity, type ProductIdentity } from "../../product-identity";
-import { isBreadboardPreset } from "../../overlays/settings-breadboard-shim";
-import type { StatusLinePreset } from "../../status-line/types";
-import { getSelectListTheme, theme } from "../../theme/theme";
-import { createBreadboardPreviewStatusSource, previewSnapshot } from "./information-layout";
+export type ComposerPreviewStatusFactory = (host: SetupSceneHost) => ComposerPreviewStatusSource | undefined;
+
+let previewStatusFactory: ComposerPreviewStatusFactory | undefined;
+
+export function registerComposerPreviewStatusFactory(factory: ComposerPreviewStatusFactory): () => void {
+	previewStatusFactory = factory;
+	return () => {
+		if (previewStatusFactory === factory) previewStatusFactory = undefined;
+	};
+}
+
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 class ComposerSceneController implements SetupSceneController {
@@ -41,13 +48,10 @@ class ComposerSceneController implements SetupSceneController {
 		const initialShape = this.#shapes.includes(configuredShape) ? configuredShape : "band";
 		this.#currentShape = initialShape;
 		const initialIndex = Math.max(0, this.#shapes.indexOf(initialShape));
-		// Without a live session status line, BreadBoard presets preview through a synthetic snapshot.
-		const configuredPreset = host.ctx.settings.get<StatusLinePreset | undefined>("statusLine.preset");
 		this.#previewStatus =
 			host.ctx.statusLine ??
-			(this.#identity.id === "breadboard" && isBreadboardPreset(configuredPreset) && configuredPreset
-				? createBreadboardPreviewStatusSource(previewSnapshot(host), configuredPreset)
-				: undefined);
+			(this.#identity.createPreviewStatus?.(host) as ComposerPreviewStatusSource | undefined) ??
+			previewStatusFactory?.(host);
 
 		const selectListTheme = getSelectListTheme();
 		this.#selectList = new SelectList(this.#items, this.#items.length, selectListTheme);
