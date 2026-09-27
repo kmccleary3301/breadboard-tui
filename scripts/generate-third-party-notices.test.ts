@@ -26,6 +26,9 @@ describe("distribution notice bundle", () => {
 		expect(manifest.bundle.sha256).toBe(sha256(bundle));
 		expect(bundle).toContain("===== BEGIN LICENSE =====");
 		expect(bundle).toContain("===== BEGIN crates/pi-natives/src/fonts/Silver.LICENSE =====");
+		// Upstream's dependency aggregates cover code compiled into the bb binary and addon.
+		expect(bundle).toContain("===== BEGIN THIRD-PARTY-NOTICES.txt =====");
+		expect(bundle).toContain("===== BEGIN packages/natives/THIRD-PARTY-NOTICES.txt =====");
 		expect(await Bun.file(path.join(packageRoot, "LICENSE")).text()).toBe(
 			await Bun.file(path.join(repoRoot, "LICENSE")).text(),
 		);

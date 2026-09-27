@@ -3,8 +3,8 @@
   "generator": "scripts/generate-third-party-notices.ts",
   "bundle": {
     "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "sha256": "902ecde1000c5bc85384b922a5c2e068ebda5acff67bd75666fd4ce25d09353f",
-    "bytes": 51904
+    "sha256": "33d8bfe092a79c0596ba3a69b92736abf1c705409e7e495fcdd7a19bf6b1ae04",
+    "bytes": 3281837
   },
   "packageLicense": {
     "path": "packages/coding-agent/LICENSE",
@@ -15,6 +15,11 @@
       "path": "LICENSE",
       "sha256": "16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63",
       "bytes": 1144
+    },
+    {
+      "path": "THIRD-PARTY-NOTICES.txt",
+      "sha256": "83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7",
+      "bytes": 1076433
     },
     {
       "path": "crates/pi-ast/LICENSE",
@@ -117,6 +122,11 @@
       "bytes": 1144
     },
     {
+      "path": "packages/coding-agent/src/tools/browser/relay/extension-assets/THIRD-PARTY-NOTICES.txt",
+      "sha256": "83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7",
+      "bytes": 1076433
+    },
+    {
       "path": "packages/mnemopi/LICENSE",
       "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
       "bytes": 1111
@@ -125,6 +135,11 @@
       "path": "packages/natives/LICENSE",
       "sha256": "90179611795093ae17d4a6bc6e06da450a8e54bbeb147a065b4127e1e4b407a7",
       "bytes": 1111
+    },
+    {
+      "path": "packages/natives/THIRD-PARTY-NOTICES.txt",
+      "sha256": "83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7",
+      "bytes": 1076433
     },
     {
       "path": "packages/omptype/LICENSE",

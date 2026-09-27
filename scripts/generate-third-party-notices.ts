@@ -41,7 +41,13 @@ async function trackedNoticePaths(): Promise<string[]> {
 		.filter(filePath => !GENERATED_PATHS.has(filePath))
 		.filter(filePath => {
 			const name = path.basename(filePath).toUpperCase();
-			return name.startsWith("LICENSE") || name.startsWith("NOTICE") || name.endsWith(".LICENSE");
+			return (
+				name.startsWith("LICENSE") ||
+				name.startsWith("NOTICE") ||
+				name.startsWith("THIRD-PARTY-NOTICES") ||
+				name.startsWith("THIRD_PARTY_NOTICES") ||
+				name.endsWith(".LICENSE")
+			);
 		})
 		.sort();
 }
