@@ -29,8 +29,6 @@ export interface ProductIdentity {
 	readonly composerFrameLabel: string;
 	/** Optional overrides for composer shape option labels (e.g. { band: "Status Band", box: "Rounded Box (Default)" }). */
 	readonly composerShapeLabels?: Readonly<Record<string, string>>;
-	/** Optional preview status-source factory for the composer setup scene. */
-	readonly createPreviewStatus?: (host: unknown) => unknown;
 	/** Product-specific model remediation; native setup keeps its generic empty state. */
 	readonly setupModelEmptyText?: string;
 	readonly logoArt: readonly string[];

@@ -8,6 +8,9 @@ import { type ComposerPreviewStatusSource, renderComposerShapePreview } from "..
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
 import { getProductIdentity, type ProductIdentity } from "../../product-identity";
 import { getSelectListTheme, theme } from "../../theme/theme";
+import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
+
+/** Builds the composer preview status line when the host has no live one. */
 export type ComposerPreviewStatusFactory = (host: SetupSceneHost) => ComposerPreviewStatusSource | undefined;
 
 let previewStatusFactory: ComposerPreviewStatusFactory | undefined;
@@ -18,8 +21,6 @@ export function registerComposerPreviewStatusFactory(factory: ComposerPreviewSta
 		if (previewStatusFactory === factory) previewStatusFactory = undefined;
 	};
 }
-
-import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 class ComposerSceneController implements SetupSceneController {
 	title = "Choose composer shape";
@@ -49,10 +50,7 @@ class ComposerSceneController implements SetupSceneController {
 		const initialShape = this.#shapes.includes(configuredShape) ? configuredShape : "band";
 		this.#currentShape = initialShape;
 		const initialIndex = Math.max(0, this.#shapes.indexOf(initialShape));
-		this.#previewStatus =
-			host.ctx.statusLine ??
-			(this.#identity.createPreviewStatus?.(host) as ComposerPreviewStatusSource | undefined) ??
-			previewStatusFactory?.(host);
+		this.#previewStatus = host.ctx.statusLine ?? previewStatusFactory?.(host);
 
 		const selectListTheme = getSelectListTheme();
 		this.#selectList = new SelectList(this.#items, this.#items.length, selectListTheme);

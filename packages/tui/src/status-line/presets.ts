@@ -1,7 +1,6 @@
 import { CUSTOM_STATUS_LINE_DEFAULTS } from "./schema";
 import type { PresetDef, SegmentContext, StatusLinePreset, StatusLineSegmentOptions } from "./types";
 import type { StatusLineSession } from "./host";
-import type { ComposerPreviewStatusSource } from "../overlays/composer-shape-preview";
 
 export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	default: {
@@ -124,7 +123,6 @@ export interface StatusLinePresetRegistration {
 	readonly supportsTopAttachment?: boolean;
 	readonly render?: (context: StatusLinePresetRenderContext) => { content: string; overflow?: string };
 	readonly renderRows?: (context: StatusLinePresetRenderContext) => { top: string; bottom: string };
-	readonly createPreviewStatus?: (host: unknown) => ComposerPreviewStatusSource | undefined;
 }
 
 const customPresets = new Map<string, StatusLinePresetRegistration>();
