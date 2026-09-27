@@ -1,4 +1,3 @@
-import type { StatusLinePreset } from "./schema";
 
 export const BREADBOARD_FIELD_KEYS = [
 	"folder",
@@ -163,7 +162,7 @@ const DETAILED_FIELDS: ResolvedBreadboardFieldSettings = {
 	elapsed: "shown",
 };
 
-function presetFields(preset: StatusLinePreset): ResolvedBreadboardFieldSettings {
+function presetFields(preset: string): ResolvedBreadboardFieldSettings {
 	if (preset === "bb-quiet") return QUIET_FIELDS;
 	if (preset === "bb-detailed") return DETAILED_FIELDS;
 	return BALANCED_FIELDS;

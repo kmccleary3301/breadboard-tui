@@ -20,7 +20,6 @@ import { formatMetric } from "../components/metric";
 import { formatBillingSummary } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
-import { renderBreadboardPolicy } from "./breadboard-presentation";
 import type { HarnessSnapshot, RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
@@ -50,25 +49,6 @@ function statusValue(ctx: SegmentContext, value: string): string {
 	return ctx.startupPlaceholder ? STARTUP_PLACEHOLDER : value;
 }
 
-function longRunBudgets(lock: HarnessSnapshot["lock"]): { totalCostUsd?: number; totalTokens?: number } | undefined {
-	if (!lock || !Array.isArray(lock.effective_values)) return undefined;
-	const values = lock.effective_values as readonly unknown[];
-	const valueAt = (path: string): unknown => {
-		for (const entry of values) {
-			if (!entry || typeof entry !== "object") continue;
-			const record = entry as Record<string, unknown>;
-			if (record.path === path) return record.value;
-		}
-		return undefined;
-	};
-	if (valueAt("long_running.enabled") !== true) return undefined;
-	const budgets: { totalCostUsd?: number; totalTokens?: number } = {};
-	const cost = valueAt("long_running.budgets.total_cost_usd");
-	if (typeof cost === "number" && Number.isFinite(cost) && cost > 0) budgets.totalCostUsd = cost;
-	const tokens = valueAt("long_running.budgets.total_tokens");
-	if (typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0) budgets.totalTokens = tokens;
-	return budgets;
-}
 /**
  * Hash-derived accent ANSI for the session title (or preview stand-in title).
  * Undefined when `statusLine.sessionAccent` is off or the session is unnamed,
@@ -943,42 +923,8 @@ const usageSegment: StatusLineSegment = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-const harnessSegment: StatusLineSegment = {
-	id: "harness",
-	render(ctx) {
-		const harness = ctx.harness;
-		if (!harness) return { content: "", visible: false };
-		const options = ctx.options.harness;
-		const name = options?.showGeneration === false ? harness.name.replace(/\.(?:harness|ya?ml)$/u, "") : harness.name;
-		const parts = [truncateToWidth(sanitizeStatusText(name), options?.maxLength ?? TRUNCATE_LENGTHS.SHORT)];
-		if (harness.mode) parts.push(truncateToWidth(sanitizeStatusText(harness.mode), TRUNCATE_LENGTHS.SHORT));
-		if (options?.showGeneration !== false && harness.generation) {
-			const generation = sanitizeStatusText(harness.generation);
-			parts.push(`g${generation.startsWith("sha256:") ? generation.slice(7, 15) : generation.slice(0, 8)}`);
-		}
-		return { content: theme.fg("accent", parts.join(" · ")), visible: true };
-	},
-};
 
-const longrunSegment: StatusLineSegment = {
-	id: "longrun",
-	render(ctx) {
-		const budgets = ctx.longRun ?? longRunBudgets(ctx.harness?.lock ?? null);
-		if (!budgets) return { content: "", visible: false };
-		const caps: string[] = [];
-		if (budgets.totalCostUsd !== undefined) caps.push(`$${budgets.totalCostUsd.toFixed(2)}`);
-		if (budgets.totalTokens !== undefined) caps.push(`${formatNumber(budgets.totalTokens)} tok`);
-		return { content: theme.fg("muted", caps.length ? `longrun ≤ ${caps.join(" · ")}` : "longrun"), visible: true };
-	},
-};
 
-const breadboardPolicySegment: StatusLineSegment = {
-	id: "bb_policy",
-	render(ctx) {
-		const content = renderBreadboardPolicy(ctx.harness);
-		return { content, visible: content.length > 0 };
-	},
-};
 
 export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	pi: piSegment,
@@ -1008,13 +954,23 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	collab: collabSegment,
 	stream: streamSegment,
 	vim: vimSegment,
-	harness: harnessSegment,
-	longrun: longrunSegment,
-	bb_policy: breadboardPolicySegment,
 };
 
-export function renderSegment(id: StatusLineSegmentId, ctx: SegmentContext): RenderedSegment {
-	const segment = SEGMENTS[id];
+const customSegments = new Map<string, StatusLineSegment>();
+
+export function registerStatusLineSegment(segment: StatusLineSegment): () => void {
+	customSegments.set(segment.id, segment);
+	return () => {
+		customSegments.delete(segment.id);
+	};
+}
+
+export function getStatusLineSegment(id: string): StatusLineSegment | undefined {
+	return customSegments.get(id) ?? SEGMENTS[id as StatusLineSegmentId];
+}
+
+export function renderSegment(id: StatusLineSegmentId | string, ctx: SegmentContext): RenderedSegment {
+	const segment = getStatusLineSegment(id);
 	if (!segment) {
 		return { content: "", visible: false };
 	}

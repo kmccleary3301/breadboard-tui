@@ -1,56 +1,11 @@
 import { CUSTOM_STATUS_LINE_DEFAULTS } from "./schema";
-import type { PresetDef, StatusLinePreset } from "./types";
+import type { PresetDef, SegmentContext, StatusLinePreset, StatusLineSegmentOptions } from "./types";
+import type { StatusLineSession } from "./host";
+import type { ComposerPreviewStatusSource } from "../overlays/composer-shape-preview";
 
 export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
-	"bb-balanced": {
-		leftSegments: ["vim", "model", "harness", "bb_policy"],
-		rightSegments: ["path", "git", "context_pct"],
-		separator: "pipe",
-		segmentOptions: {
-			model: { showThinkingLevel: false },
-			harness: { showGeneration: false, maxLength: 24 },
-			path: { abbreviate: true, maxLength: 24 },
-			git: { showBranch: true, showStaged: false, showUnstaged: false, showUntracked: false },
-			context_pct: { minPercent: 50 },
-		},
-	},
-	"bb-quiet": {
-		leftSegments: ["vim", "model", "bb_policy"],
-		rightSegments: ["path", "context_pct"],
-		separator: "pipe",
-		segmentOptions: {
-			model: { showThinkingLevel: false },
-			path: { abbreviate: true, maxLength: 20 },
-			context_pct: { minPercent: 75 },
-		},
-	},
-	"bb-detailed": {
-		leftSegments: ["vim", "model", "harness", "bb_policy", "longrun"],
-		rightSegments: ["path", "git", "context_pct", "token_in", "token_out"],
-		separator: "pipe",
-		segmentOptions: {
-			model: { showThinkingLevel: false },
-			harness: { showGeneration: true, maxLength: 28 },
-			path: { abbreviate: true, maxLength: 28 },
-			git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
-		},
-	},
 	default: {
-		leftSegments: [
-			"pi",
-			"vim",
-			"model",
-			"mode",
-			"collab",
-			"stream",
-			"harness",
-			"longrun",
-			"path",
-			"git",
-			"pr",
-			"context_pct",
-			"cost",
-		],
+		leftSegments: ["pi", "vim", "model", "mode", "collab", "stream", "path", "git", "pr", "context_pct", "cost"],
 		rightSegments: ["session_name"],
 		separator: "powerline-thin",
 		segmentOptions: {
@@ -149,6 +104,65 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	},
 };
 
-export function getPreset(name: StatusLinePreset): PresetDef {
-	return STATUS_LINE_PRESETS[name] ?? STATUS_LINE_PRESETS.default;
+export interface StatusLinePresetRenderContext {
+	readonly session: StatusLineSession;
+	readonly ctx: SegmentContext;
+	readonly width: number;
+	readonly layout: "box" | "band" | "plain-right" | "plain-left" | "standalone";
+	readonly preset: string;
+	readonly options: StatusLineSegmentOptions;
+	readonly config?: unknown;
+	readonly customActivity?: unknown;
+	readonly placeholders?: boolean;
+	readonly previewTitle?: string;
+	readonly backgroundWait?: number;
+}
+
+export interface StatusLinePresetRegistration {
+	readonly name: string;
+	readonly def?: PresetDef;
+	readonly supportsTopAttachment?: boolean;
+	readonly render?: (context: StatusLinePresetRenderContext) => { content: string; overflow?: string };
+	readonly renderRows?: (context: StatusLinePresetRenderContext) => { top: string; bottom: string };
+	readonly createPreviewStatus?: (host: unknown) => ComposerPreviewStatusSource | undefined;
+}
+
+const customPresets = new Map<string, StatusLinePresetRegistration>();
+
+export function registerStatusLinePreset(registration: StatusLinePresetRegistration): () => void {
+	customPresets.set(registration.name, registration);
+	return () => {
+		customPresets.delete(registration.name);
+	};
+}
+
+export function getStatusLinePreset(name: string | undefined): StatusLinePresetRegistration | undefined {
+	if (!name) return undefined;
+	const custom = customPresets.get(name);
+	if (custom) return custom;
+	const builtin = STATUS_LINE_PRESETS[name as StatusLinePreset];
+	if (builtin) {
+		return {
+			name,
+			def: builtin,
+		};
+	}
+	return undefined;
+}
+
+export function getAllStatusLinePresets(): readonly StatusLinePresetRegistration[] {
+	const builtins = Object.entries(STATUS_LINE_PRESETS).map(([name, def]) => ({ name, def }));
+	return [...builtins, ...customPresets.values()];
+}
+
+export function isStatusLineTopAttachmentSupported(preset: string | undefined): boolean {
+	if (!preset) return false;
+	const reg = getStatusLinePreset(preset);
+	return reg?.supportsTopAttachment === true;
+}
+
+export function getPreset(name: StatusLinePreset | string): PresetDef {
+	const custom = customPresets.get(name);
+	if (custom?.def) return custom.def;
+	return STATUS_LINE_PRESETS[name as StatusLinePreset] ?? STATUS_LINE_PRESETS.default;
 }

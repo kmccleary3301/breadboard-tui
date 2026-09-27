@@ -1,16 +1,10 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { SessionState } from "@oh-my-pi/pi-wire";
 import type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "./schema";
-import type { BreadboardFieldSettings } from "./breadboard-fields";
 import type { ActiveRepoContext, StatusLineSession } from "./host";
 import type { LoopConditionConfig, LoopLimitRuntime } from "./loop";
 
 export type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle };
-
-export interface BreadboardComposerActivity {
-	readonly kind: "working" | "tool" | "approval" | "cancelling" | "error";
-	readonly label: string;
-}
 export interface HarnessSnapshot {
 	readonly harnessId: string;
 	readonly name: string;
@@ -61,9 +55,9 @@ export interface StatusLineSegmentOptions {
 }
 
 export interface StatusLineSettings {
-	preset?: StatusLinePreset;
-	leftSegments?: StatusLineSegmentId[];
-	rightSegments?: StatusLineSegmentId[];
+	preset?: StatusLinePreset | string;
+	leftSegments?: (StatusLineSegmentId | string)[];
+	rightSegments?: (StatusLineSegmentId | string)[];
 	separator?: StatusLineSeparatorStyle;
 	segmentOptions?: StatusLineSegmentOptions;
 	showHookStatus?: boolean;
@@ -78,8 +72,9 @@ export interface StatusLineSettings {
 	 *  usage. `embedded` moves configured context segments into the annotated
 	 *  gauge as percentage and window labels. Box composer only. */
 	contextLine?: ContextLineMode;
-	/** Per-field BreadBoard information choices; omitted means canonical defaults. */
-	breadboard?: Partial<BreadboardFieldSettings>;
+	/** Per-preset custom configuration; omitted means canonical defaults. */
+	presetConfig?: unknown;
+	breadboard?: unknown;
 }
 
 export type EffectiveStatusLineSettings = Required<
@@ -111,7 +106,7 @@ export interface SegmentContext {
 	width: number;
 	/** Active product mark for the stable `pi` segment id. */
 	identityMark?: string;
-	/** Active BreadBoard harness identity, when this session is running on BreadBoard. */
+	/** Active harness identity, when running with an active harness. */
 	harness?: HarnessSnapshot | null;
 	options: StatusLineSegmentOptions;
 	/** Render the model segment's thinking level as a compact leading glyph. */
@@ -223,16 +218,14 @@ export interface SegmentContext {
 			unavailableReason?: string;
 		};
 	} | null;
-	longRun?: { totalCostUsd?: number; totalTokens?: number } | null;
 }
 
 export interface RenderedSegment {
 	content: string; // The segment text (may include ANSI color codes)
 	visible: boolean; // Whether to render (e.g., git hidden when not in repo)
 }
-
 export interface StatusLineSegment {
-	id: StatusLineSegmentId;
+	id: StatusLineSegmentId | string;
 	render(ctx: SegmentContext): RenderedSegment;
 }
 

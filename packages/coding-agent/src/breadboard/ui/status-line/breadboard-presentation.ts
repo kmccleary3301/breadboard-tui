@@ -1,13 +1,17 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
-import type { HarnessSnapshot } from "./types";
-import { thinkingLevelGlyph } from "../render/render-utils";
-import { sanitizeStatusText } from "../chrome/shared";
-import { type ThemeColor, theme } from "../theme/theme";
+import type { HarnessSnapshot } from "@oh-my-pi/pi-tui/status-line/types";
+import { thinkingLevelGlyph } from "@oh-my-pi/pi-tui/render/render-utils";
+import { sanitizeStatusText } from "@oh-my-pi/pi-tui/chrome/shared";
+import { type ThemeColor, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import { type BreadboardFieldSettings, resolveBreadboardFields } from "./breadboard-fields";
-import { getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
-import type { BreadboardComposerActivity, StatusLinePreset } from "./types";
+import { getContextUsageLevel, getContextUsageThemeColor } from "@oh-my-pi/pi-tui/chrome/context-thresholds";
+
+export interface BreadboardComposerActivity {
+	readonly kind: "working" | "tool" | "approval" | "cancelling" | "error";
+	readonly label: string;
+}
 
 export interface BreadboardStatusSnapshot {
 	readonly modelName: string;
@@ -38,7 +42,7 @@ export interface BreadboardStatusRows {
 	readonly bottom: string;
 }
 
-export function isBreadboardPreset(preset: StatusLinePreset | undefined): boolean {
+export function isBreadboardPreset(preset: string | undefined): boolean {
 	return preset === "bb-balanced" || preset === "bb-quiet" || preset === "bb-detailed";
 }
 

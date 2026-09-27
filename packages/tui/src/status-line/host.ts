@@ -92,7 +92,6 @@ export interface StatusLineHost<TSession extends StatusLineSession = StatusLineS
 	computeCompactionBoundaries(session: TSession, contextWindow: number, model?: Model): CompactionBoundaries | null;
 	getHarness?(session: TSession): HarnessSnapshot | null;
 	getIdentityMark?(): string | undefined;
-	getLongRunBudgets?(session: TSession): { totalCostUsd?: number; totalTokens?: number } | null;
 }
 
 export interface FooterHost {
