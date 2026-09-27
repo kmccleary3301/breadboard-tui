@@ -136,7 +136,7 @@ export function resetStatusLinePresets(): void {
 export function registerStatusLinePreset(registration: StatusLinePresetRegistration): () => void {
 	customPresets.set(registration.name, registration);
 	return () => {
-		customPresets.delete(registration.name);
+		if (customPresets.get(registration.name) === registration) customPresets.delete(registration.name);
 	};
 }
 

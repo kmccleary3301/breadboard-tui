@@ -787,7 +787,11 @@ export class Theme {
 	 * Get spinner frames by type.
 	 */
 	getSpinnerFrames(type: SpinnerType = "status"): string[] {
-		return this.#spinnerFramesOverrides[type] ?? (SPINNER_FRAMES as Record<string, Record<SpinnerType, string[]>>)[this.symbolPreset]?.[type] ?? SPINNER_FRAMES.unicode[type];
+		return (
+			this.#spinnerFramesOverrides[type] ??
+			(SPINNER_FRAMES as Record<string, Record<SpinnerType, string[]>>)[this.symbolPreset]?.[type] ??
+			SPINNER_FRAMES.unicode[type]
+		);
 	}
 
 	/**

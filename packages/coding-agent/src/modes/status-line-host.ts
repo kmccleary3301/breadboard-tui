@@ -49,7 +49,10 @@ export function createStatusLineHost(
 			github.run(cwd, ["pr", "view", "--json", "number,url"], AbortSignal.timeout(GH_COMMAND_TIMEOUT_MS)),
 		calculateTokensPerSecond,
 		getIdentityMark: () =>
-			identity.id === OMP_PRODUCT_IDENTITY.id ? theme.icon.omp : identity.compactLogo[theme.getSymbolPreset()],
+			identity.id === OMP_PRODUCT_IDENTITY.id
+				? theme.icon.omp
+				: ((identity.compactLogo as Record<string, string>)[theme.getSymbolPreset()] ??
+					identity.compactLogo.unicode),
 		limitMatchesActiveAccount,
 		computeCompactionBoundaries: (session, contextWindow, model) => {
 			const source = session.settings;

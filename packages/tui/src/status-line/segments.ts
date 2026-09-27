@@ -963,7 +963,7 @@ export function resetStatusLineSegments(): void {
 export function registerStatusLineSegment(segment: StatusLineSegment): () => void {
 	customSegments.set(segment.id, segment);
 	return () => {
-		customSegments.delete(segment.id);
+		if (customSegments.get(segment.id) === segment) customSegments.delete(segment.id);
 	};
 }
 

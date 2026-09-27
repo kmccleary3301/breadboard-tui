@@ -26,7 +26,7 @@ const REGISTERED_BUILTIN_THEMES = new Map<string, ThemeJson>();
 export function registerBuiltinTheme(name: string, themeJson: ThemeJson): () => void {
 	REGISTERED_BUILTIN_THEMES.set(name, themeJson);
 	return () => {
-		REGISTERED_BUILTIN_THEMES.delete(name);
+		if (REGISTERED_BUILTIN_THEMES.get(name) === themeJson) REGISTERED_BUILTIN_THEMES.delete(name);
 	};
 }
 

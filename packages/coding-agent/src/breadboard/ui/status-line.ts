@@ -42,17 +42,12 @@ function buildBreadboardSnapshot(context: StatusLinePresetRenderContext): Breadb
 	};
 }
 
-let registered = false;
-
-export function registerBreadboardStatusLine(): void {
-	if (registered) return;
-	registered = true;
-
-	registerStatusLineSegment(harnessSegment);
-	registerStatusLineSegment(breadboardPolicySegment);
+/** Register the bb status-line segments and presets; returns a handle that removes them. */
+export function registerBreadboardStatusLine(): () => void {
+	const unregisters = [registerStatusLineSegment(harnessSegment), registerStatusLineSegment(breadboardPolicySegment)];
 
 	for (const [name, def] of Object.entries(BREADBOARD_STATUS_LINE_PRESETS)) {
-		registerStatusLinePreset({
+		const unregisterPreset = registerStatusLinePreset({
 			name,
 			def,
 			supportsTopAttachment: true,
@@ -84,5 +79,9 @@ export function registerBreadboardStatusLine(): void {
 				return { top: rows.top, bottom: rows.bottom };
 			},
 		});
+		unregisters.push(unregisterPreset);
 	}
+	return () => {
+		for (const unregister of unregisters.reverse()) unregister();
+	};
 }

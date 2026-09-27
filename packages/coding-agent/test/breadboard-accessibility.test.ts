@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
+import { registerBreadboardThemes } from "../src/breadboard/ui/themes";
 import { relativeLuminance } from "@oh-my-pi/pi-utils";
 import { resolveVarRefs } from "@oh-my-pi/pi-tui/theme/color";
 import { loadTheme, loadThemeJson } from "@oh-my-pi/pi-tui/theme/loader";
@@ -79,6 +80,9 @@ async function resolvedExportColor(themeName: string, token: "pageBg"): Promise<
 }
 
 describe("BreadBoard accessibility palette", () => {
+	beforeAll(() => {
+		registerBreadboardThemes();
+	});
 	for (const themeName of ["breadboard", "breadboard-light"]) {
 		it(`${themeName} keeps normal text roles at WCAG AA contrast`, async () => {
 			const [activeTheme, pageBackground] = await Promise.all([

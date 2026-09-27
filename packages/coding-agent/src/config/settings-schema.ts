@@ -819,7 +819,7 @@ export const SETTINGS_SCHEMA = {
 
 	symbolPreset: {
 		type: "enum",
-		values: ["unicode", "nerd", "emoji", "ascii"] as const satisfies readonly SymbolPreset[],
+		values: ["unicode", "nerd", "emoji", "ascii"] as const as readonly SymbolPreset[],
 		default: "unicode",
 		ui: {
 			tab: "appearance",
