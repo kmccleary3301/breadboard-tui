@@ -13,25 +13,30 @@ import type { BreadboardFieldSettings } from "./status-line/breadboard-fields";
 
 function buildBreadboardSnapshot(context: StatusLinePresetRenderContext): BreadboardStatusSnapshot {
 	const { ctx, session, placeholders, previewTitle, backgroundWait } = context;
+	const customSnapshot = (ctx as any)?.snapshot as BreadboardStatusSnapshot | undefined;
+	if (customSnapshot) {
+		return customSnapshot;
+	}
+	const s = session as any;
 	return {
 		modelName: placeholders
 			? "Connecting"
-			: (session.state.model?.name ?? session.state.model?.id ?? "No model"),
-		workspace: ctx.worktree
+			: (s?.state?.model?.name ?? s?.state?.model?.id ?? s?.model?.name ?? s?.model?.id ?? "No model"),
+		workspace: ctx?.worktree
 			? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
 			: path.basename(getProjectDir()),
 		workspacePath: getProjectDir(),
-		sessionName: session.sessionManager.getSessionName() ?? previewTitle,
-		harness: ctx.harness,
-		branch: ctx.git.branch,
+		sessionName: s?.sessionManager?.getSessionName?.() ?? previewTitle,
+		harness: ctx?.harness,
+		branch: ctx?.git?.branch,
 		activity: placeholders ? null : undefined,
-		elapsedMs: placeholders ? null : ctx.turnElapsedMs,
-		backgroundWait: placeholders ? 0 : backgroundWait ?? 0,
-		context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
-		inputTokens: placeholders ? undefined : ctx.usageStats.input,
-		outputTokens: placeholders ? undefined : ctx.usageStats.output,
+		elapsedMs: placeholders ? null : ctx?.turnElapsedMs,
+		backgroundWait: placeholders ? 0 : (backgroundWait ?? 0),
+		context: placeholders ? null : { tokens: ctx?.contextTokens ?? 0, capacity: ctx?.contextWindow ?? 0 },
+		inputTokens: placeholders ? undefined : ctx?.usageStats?.input,
+		outputTokens: placeholders ? undefined : ctx?.usageStats?.output,
 		vim:
-			ctx.vim && ctx.vim.display !== "none"
+			ctx?.vim && ctx.vim.display !== "none"
 				? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
 				: undefined,
 	};
@@ -53,22 +58,27 @@ export function registerBreadboardStatusLine(): void {
 			supportsTopAttachment: true,
 			render(context) {
 				const snapshot = buildBreadboardSnapshot(context);
+				const layout = context.layout === "standalone" ? "box" : context.layout;
 				const content = renderBreadboardStatusLine(
 					snapshot,
 					name,
 					context.width,
-					context.layout,
+					layout,
 					context.config as Partial<BreadboardFieldSettings> | undefined,
 				);
 				return { content };
 			},
 			renderRows(context) {
 				const snapshot = buildBreadboardSnapshot(context);
+				const layout =
+					context.layout === "box" || context.layout === "band" || context.layout === "plain-right"
+						? context.layout
+						: "box";
 				const rows = renderBreadboardStatusRows(
 					snapshot,
 					name,
 					context.width,
-					context.layout,
+					layout,
 					context.config as Partial<BreadboardFieldSettings> | undefined,
 				);
 				return { top: rows.top, bottom: rows.bottom };

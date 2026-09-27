@@ -1,4 +1,3 @@
-
 export const BREADBOARD_FIELD_KEYS = [
 	"folder",
 	"session",
@@ -170,7 +169,7 @@ function presetFields(preset: string): ResolvedBreadboardFieldSettings {
 
 /** Resolve persisted choices against a layout preset without retaining `preset` values. */
 export function resolveBreadboardFields(
-	preset: StatusLinePreset,
+	preset: string = "bb-balanced",
 	overrides?: Partial<BreadboardFieldSettings>,
 ): ResolvedBreadboardFieldSettings {
 	const defaults = presetFields(preset);

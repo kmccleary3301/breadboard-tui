@@ -7,7 +7,7 @@ import type { ComposerShape } from "../../overlays/composer-shape-registry";
 import { type ComposerPreviewStatusSource, renderComposerShapePreview } from "../../overlays/composer-shape-preview";
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
 import { getProductIdentity, type ProductIdentity } from "../../product-identity";
-import { isBreadboardPreset } from "../../status-line/breadboard-presentation";
+import { isBreadboardPreset } from "../../overlays/settings-breadboard-shim";
 import type { StatusLinePreset } from "../../status-line/types";
 import { getSelectListTheme, theme } from "../../theme/theme";
 import { createBreadboardPreviewStatusSource, previewSnapshot } from "./information-layout";

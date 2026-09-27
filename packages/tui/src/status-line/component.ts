@@ -36,12 +36,10 @@ import {
 } from "../overlays/codex-reset-fireworks";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
 import { summarizeUsageResetCredits } from "../overlays/usage-display";
-import { getPreset } from "./presets";
+import { getPreset, getStatusLinePreset, isStatusLineTopAttachmentSupported } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
-import { isBreadboardPreset, renderBreadboardStatusLine, renderBreadboardStatusRows } from "./breadboard-presentation";
 import type {
-	BreadboardComposerActivity,
 	CollabStatus,
 	EffectiveStatusLineSettings,
 	HarnessSnapshot,
@@ -402,22 +400,22 @@ const EMPTY_MESSAGES: readonly AgentMessage[] = [];
 const STATUS_USAGE_START_DELAY_MS = 0;
 const STATUS_USAGE_REFRESH_TIMEOUT_MS = 2_000;
 
-function isContextSegment(segment: StatusLineSegmentId): boolean {
+function isContextSegment(segment: StatusLineSegmentId | string): boolean {
 	return segment === "context_pct" || segment === "context_total";
 }
 
-function hasContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
+function hasContextSegment(segments: readonly (StatusLineSegmentId | string)[]): boolean {
 	return segments.includes("context_pct") || segments.includes("context_total");
 }
 
-function hasNonContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
+function hasNonContextSegment(segments: readonly (StatusLineSegmentId | string)[]): boolean {
 	for (const segment of segments) {
 		if (!isContextSegment(segment)) return true;
 	}
 	return false;
 }
 
-function removeContextSegments(parts: string[], segments: StatusLineSegmentId[]): void {
+function removeContextSegments(parts: string[], segments: (StatusLineSegmentId | string)[]): void {
 	let writeIndex = 0;
 	for (let readIndex = 0; readIndex < segments.length; readIndex++) {
 		const segment = segments[readIndex];
@@ -438,18 +436,18 @@ function embeddedContextGaugeMinWidth(percent: number, contextWindow: number): n
 	return formatEmbeddedContextPercent(percent).length + formatNumber(contextWindow).length + 4;
 }
 
-function hasGitSegment(segments: readonly StatusLineSegmentId[]): boolean {
+function hasGitSegment(segments: readonly (StatusLineSegmentId | string)[]): boolean {
 	return segments.includes("git");
 }
 
-function hasPrSegment(segments: readonly StatusLineSegmentId[]): boolean {
+function hasPrSegment(segments: readonly (StatusLineSegmentId | string)[]): boolean {
 	return segments.includes("pr");
 }
-function hasPathSegment(segments: readonly StatusLineSegmentId[]): boolean {
+function hasPathSegment(segments: readonly (StatusLineSegmentId | string)[]): boolean {
 	return segments.includes("path");
 }
 
-function hasGitBackedSegment(segments: readonly StatusLineSegmentId[]): boolean {
+function hasGitBackedSegment(segments: readonly (StatusLineSegmentId | string)[]): boolean {
 	return hasGitSegment(segments) || hasPrSegment(segments);
 }
 
@@ -559,8 +557,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#streamStatus: { viewers: number } | null = null;
 	#recording = false;
 	#harness: HarnessSnapshot | null = null;
-	#breadboardActivity: BreadboardComposerActivity | null = null;
-	#longRunBudgets: { totalCostUsd?: number; totalTokens?: number } | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -970,13 +966,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	}
 	setHarness(harness: HarnessSnapshot | null | undefined): void {
 		this.#harness = harness ?? null;
-		this.#invalidateStatusLineRenderCache();
-	}
-
-	setBreadboardActivity(activity: BreadboardComposerActivity | null | undefined): void {
-		if (this.#breadboardActivity?.kind === activity?.kind && this.#breadboardActivity?.label === activity?.label)
-			return;
-		this.#breadboardActivity = activity ?? null;
 		this.#invalidateStatusLineRenderCache();
 	}
 
@@ -2312,7 +2301,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			},
 			worktree: activeRepoCache.worktree,
 			usage: this.#cachedUsage,
-			longRun: this.#longRunBudgets ?? this.host.getLongRunBudgets?.(this.session) ?? null,
 		};
 	}
 
@@ -2654,39 +2642,37 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			previewTitle,
 		);
 		const ctx: SegmentContext = placeholders ? { ...liveCtx, startupPlaceholder: true } : liveCtx;
-		if (isBreadboardPreset(effectiveSettings.preset)) {
-			const snapshot = {
-				modelName: placeholders
-					? "Connecting"
-					: (ctx.session.state.model?.name ?? ctx.session.state.model?.id ?? "No model"),
-				workspace: ctx.worktree
-					? `${ctx.worktree.projectName}/${ctx.worktree.worktreeName}`
-					: path.basename(getProjectDir()),
-				workspacePath: getProjectDir(),
-				sessionName: ctx.session.sessionManager.getSessionName() ?? previewTitle,
-				harness: ctx.harness,
-				branch: ctx.git.branch,
-				activity: placeholders ? null : this.#breadboardActivity,
-				elapsedMs: placeholders ? null : ctx.turnElapsedMs,
-				backgroundWait: placeholders
-					? 0
-					: ctx.turnElapsedMs !== null && !this.session.isStreaming
-						? this.#runningBackgroundJobCount()
-						: 0,
-				context: placeholders ? null : { tokens: ctx.contextTokens, capacity: ctx.contextWindow },
-				inputTokens: placeholders ? undefined : ctx.usageStats.input,
-				outputTokens: placeholders ? undefined : ctx.usageStats.output,
-				vim:
-					ctx.vim && ctx.vim.display !== "none"
-						? `${ctx.vim.mode}${ctx.vim.pending ? ` ${ctx.vim.pending}` : ""}`
-						: undefined,
-			};
-			const preset = effectiveSettings.preset ?? "bb-balanced";
-			if (layout === "box" || layout === "band" || layout === "plain-right") {
-				const rows = renderBreadboardStatusRows(snapshot, preset, width, layout, effectiveSettings.breadboard);
-				return { content: rows.top, overflow: rows.bottom || undefined };
-			}
-			return { content: renderBreadboardStatusLine(snapshot, preset, width, layout, effectiveSettings.breadboard) };
+		const registeredPreset = getStatusLinePreset(effectiveSettings.preset);
+		if (registeredPreset?.renderRows && (layout === "box" || layout === "band" || layout === "plain-right")) {
+			const rows = registeredPreset.renderRows({
+				session: this.session,
+				ctx,
+				width,
+				layout,
+				preset: effectiveSettings.preset ?? "default",
+				options: effectiveSettings.segmentOptions ?? {},
+				config: effectiveSettings.presetConfig,
+				placeholders,
+				previewTitle,
+				backgroundWait:
+					ctx.turnElapsedMs !== null && !this.session.isStreaming ? this.#runningBackgroundJobCount() : 0,
+			});
+			return { content: rows.top, overflow: rows.bottom || undefined };
+		}
+		if (registeredPreset?.render) {
+			return registeredPreset.render({
+				session: this.session,
+				ctx,
+				width,
+				layout,
+				preset: effectiveSettings.preset ?? "default",
+				options: effectiveSettings.segmentOptions ?? {},
+				config: effectiveSettings.presetConfig,
+				placeholders,
+				previewTitle,
+				backgroundWait:
+					ctx.turnElapsedMs !== null && !this.session.isStreaming ? this.#runningBackgroundJobCount() : 0,
+			});
 		}
 		const separatorDef = plain
 			? { left: "·", right: "·" }
@@ -2710,7 +2696,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 		// Collect visible segment contents
 		const leftParts: string[] = [];
-		const leftSegIds: StatusLineSegmentId[] = [];
+		const leftSegIds: (StatusLineSegmentId | string)[] = [];
 		const leftSegmentIds = layout === "plain-right" ? [] : effectiveSettings.leftSegments;
 		for (const segId of leftSegmentIds) {
 			if (subagentBadge && segId === "subagents") continue;
@@ -2724,7 +2710,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		}
 
 		const rightParts: string[] = [];
-		const rightSegIds: StatusLineSegmentId[] = [];
+		const rightSegIds: (StatusLineSegmentId | string)[] = [];
 		const rightSegmentIds = layout === "plain-left" ? [] : effectiveSettings.rightSegments;
 		for (const segId of rightSegmentIds) {
 			if (subagentBadge && segId === "subagents") continue;
@@ -3167,7 +3153,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		layout: "box" | "band" | "plain-right",
 		previewTitle?: string,
 	): string | undefined {
-		if (!isBreadboardPreset(this.#resolveSettings().preset)) return undefined;
+		if (!isStatusLineTopAttachmentSupported(this.#resolveSettings().preset)) return undefined;
 		const overflow = this.#buildStatusLine(topWidth, layout, previewTitle).overflow;
 		return overflow ? padding(Math.max(0, Math.floor((width - topWidth) / 2))) + overflow : "";
 	}
@@ -3201,7 +3187,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			});
 			if (rule !== undefined) lines.push(rule);
 		}
-		if (isBreadboardPreset(this.#resolveSettings().preset) && attachment !== "none") {
+		if (isStatusLineTopAttachmentSupported(this.#resolveSettings().preset) && attachment !== "none") {
 			const layout = attachment === "top-border" ? "box" : attachment === "top-band" ? "band" : "plain-right";
 			const overflow = this.renderOverflowBar(width, width, layout);
 			if (overflow) lines.push(overflow);
@@ -3215,7 +3201,11 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
 		const autocompleteActive = this.#autocompleteActiveProbe?.() === true;
-		if (isBreadboardPreset(this.#resolveSettings().preset) && this.#topAttachment !== "none" && !autocompleteActive) {
+		if (
+			isStatusLineTopAttachmentSupported(this.#resolveSettings().preset) &&
+			this.#topAttachment !== "none" &&
+			!autocompleteActive
+		) {
 			const layout =
 				this.#topAttachment === "top-border" ? "box" : this.#topAttachment === "top-band" ? "band" : "plain-right";
 			const overflow = this.renderOverflowBar(width, this.#topBorderWidth(width), layout);

@@ -49,7 +49,6 @@ import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
 import { PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 import { getPreset } from "../status-line/presets";
-import { isBreadboardPreset } from "../status-line/breadboard-presentation";
 import {
 	BREADBOARD_FIELD_DEFINITIONS,
 	type BreadboardFieldKey,
@@ -57,7 +56,8 @@ import {
 	DEFAULT_BREADBOARD_FIELD_SETTINGS,
 	isBreadboardFieldKey,
 	updateBreadboardField,
-} from "../status-line/breadboard-fields";
+	isBreadboardPreset,
+} from "./settings-breadboard-shim";
 import { FormField, SelectFormField, TextFormField } from "../components/form";
 import { formTheme } from "../chrome/form-theme";
 
@@ -133,7 +133,7 @@ export class BreadboardCustomizeSubmenu extends Container {
 
 	constructor(
 		initial: BreadboardFieldSettings,
-		private readonly preset: StatusLinePreset,
+		private readonly preset: StatusLinePreset | string,
 		private readonly onPreview: (fields: BreadboardFieldSettings) => void,
 		private readonly onApply: (fields: BreadboardFieldSettings) => void,
 		private readonly onCancel: () => void,
@@ -147,9 +147,9 @@ export class BreadboardCustomizeSubmenu extends Container {
 	}
 
 	showPresets(
-		current: StatusLinePreset,
-		onSelect: (preset: StatusLinePreset) => void,
-		onPreview: (preset: StatusLinePreset) => void,
+		current: StatusLinePreset | string,
+		onSelect: (preset: StatusLinePreset | string) => void,
+		onPreview: (preset: StatusLinePreset | string) => void,
 		onCancel: () => void,
 		presets: ReadonlyArray<SelectItem>,
 	): void {
@@ -711,10 +711,10 @@ export interface SettingsRuntimeContext {
 
 /** Status line settings subset for preview */
 export interface StatusLinePreviewSettings {
-	preset?: StatusLinePreset;
+	preset?: StatusLinePreset | string;
 	contextLine?: ContextLineMode;
-	leftSegments?: StatusLineSegmentId[];
-	rightSegments?: StatusLineSegmentId[];
+	leftSegments?: (StatusLineSegmentId | string)[];
+	rightSegments?: (StatusLineSegmentId | string)[];
 	separator?: StatusLineSeparatorStyle;
 	sessionAccent?: boolean;
 	transparent?: boolean;

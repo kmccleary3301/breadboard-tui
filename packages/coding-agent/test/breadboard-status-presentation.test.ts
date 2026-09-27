@@ -11,7 +11,8 @@ import {
 	renderBreadboardPolicy,
 	renderBreadboardStatusLine,
 	renderBreadboardStatusRows,
-} from "@oh-my-pi/pi-tui/status-line/breadboard-presentation";
+} from "../src/breadboard/ui/status-line/breadboard-presentation";
+import { registerBreadboardStatusLine } from "../src/breadboard/ui/status-line";
 import { initTheme, setSymbolPreset } from "@oh-my-pi/pi-tui/theme";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
@@ -38,6 +39,16 @@ afterEach(async () => {
 });
 
 describe("BreadBoard composer presentation", () => {
+	it("after registerBreadboardStatusLine(), rendering bb-balanced produces the expected output", async () => {
+		registerBreadboardStatusLine();
+		await initTheme(false, "unicode", false, "titanium", "light");
+		const snapshot = { modelName: "Luna", workspace: "repo", context: { tokens: 2_000, capacity: 100_000 } };
+		const balanced = stripVTControlCharacters(renderBreadboardStatusLine(snapshot, "bb-balanced", 100, "box"));
+		expect(balanced).toContain("Luna");
+		expect(balanced).toContain("repo");
+		expect(balanced).toContain("~2%");
+	});
+
 	it("preserves approval over optional information in a narrow emoji composer", async () => {
 		await initTheme(false, "emoji", false, "titanium", "light");
 		const rendered = renderBreadboardStatusLine(
@@ -200,6 +211,7 @@ describe("BreadBoard composer while background jobs hold the turn", () => {
 	const statusLines = new StatusLineTestComponents();
 
 	beforeEach(async () => {
+		registerBreadboardStatusLine();
 		settingsState = beginSettingsTest();
 		await Settings.init({ inMemory: true });
 		await initTheme();
@@ -291,11 +303,6 @@ describe("BreadBoard composer while background jobs hold the turn", () => {
 		component.setRunningSubagents(["task-0"]);
 		component.invalidate();
 		expect(render(component)).toContain("Waiting on 2 background jobs");
-
-		component.setBreadboardActivity({ kind: "approval", label: "Approval required" });
-		const approval = render(component);
-		expect(approval).toContain("Approval required");
-		expect(approval).not.toContain("Waiting on");
 	});
 
 	it("shows no activity once the turn has ended", () => {

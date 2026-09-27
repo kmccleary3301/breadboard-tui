@@ -66,6 +66,7 @@ import { configureReducedMotionReader } from "../utils/reduced-motion";
 import { stringifyYamlConfig } from "@oh-my-pi/pi-utils/yaml-config";
 import { validateAgentServiceTierOverrides } from "./service-tier";
 import { STATUS_LINE_SEGMENT_IDS } from "@oh-my-pi/pi-tui/status-line/schema";
+import { getStatusLineSegment } from "@oh-my-pi/pi-tui/status-line/segments";
 import {
 	type BashInterceptorRule,
 	type GroupPrefix,
@@ -79,7 +80,7 @@ import {
 	BREADBOARD_FIELD_DEFINITIONS,
 	type BreadboardFieldSettings,
 	DEFAULT_BREADBOARD_FIELD_SETTINGS,
-} from "@oh-my-pi/pi-tui/status-line/breadboard-fields";
+} from "../breadboard/ui/status-line/breadboard-fields";
 
 // Re-export types that callers need
 export type * from "./settings-schema";
@@ -92,7 +93,8 @@ function getUnknownStatusLineSegments(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
 	const unknown = new Set<string>();
 	for (const segment of value) {
-		if (!STATUS_LINE_SEGMENT_IDS.some(id => id === segment)) {
+		const segStr = typeof segment === "string" ? segment : String(segment);
+		if (!STATUS_LINE_SEGMENT_IDS.some(id => id === segStr) && getStatusLineSegment(segStr) === undefined) {
 			unknown.add(typeof segment === "string" ? JSON.stringify(segment) : String(segment));
 		}
 	}

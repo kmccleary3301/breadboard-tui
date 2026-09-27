@@ -20,9 +20,9 @@ import {
 	renderBreadboardStatusLine,
 	renderBreadboardStatusRows,
 	type BreadboardStatusSnapshot,
-} from "../../status-line/breadboard-presentation";
-import type { BreadboardComposerActivity } from "../../status-line/types";
-import type { BreadboardFieldSettings } from "../../status-line/breadboard-fields";
+	type BreadboardComposerActivity,
+	type BreadboardFieldSettings,
+} from "../../overlays/settings-breadboard-shim";
 import { getSelectListTheme, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 

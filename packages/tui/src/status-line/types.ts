@@ -74,7 +74,6 @@ export interface StatusLineSettings {
 	contextLine?: ContextLineMode;
 	/** Per-preset custom configuration; omitted means canonical defaults. */
 	presetConfig?: unknown;
-	breadboard?: unknown;
 }
 
 export type EffectiveStatusLineSettings = Required<
@@ -248,8 +247,8 @@ export interface SeparatorDef {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface PresetDef {
-	leftSegments: StatusLineSegmentId[];
-	rightSegments: StatusLineSegmentId[];
+	leftSegments: (StatusLineSegmentId | string)[];
+	rightSegments: (StatusLineSegmentId | string)[];
 	separator: StatusLineSeparatorStyle;
 	segmentOptions?: StatusLineSegmentOptions;
 }

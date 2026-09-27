@@ -111,7 +111,7 @@ interface StatusPart {
 
 function statusParts(
 	snapshot: BreadboardStatusSnapshot,
-	preset: StatusLinePreset,
+	preset: string,
 	overrides?: Partial<BreadboardFieldSettings>,
 ): StatusPart[] {
 	const fields = resolveBreadboardFields(preset, overrides);
@@ -290,7 +290,7 @@ function renderRow(parts: readonly StatusPart[], width: number, rule: boolean): 
 /** Wide bars stay on one edge; constrained bars pack higher-priority fields first across both edges. */
 export function renderBreadboardStatusRows(
 	snapshot: BreadboardStatusSnapshot,
-	preset: StatusLinePreset,
+	preset: string,
 	width: number,
 	layout: "box" | "band" | "plain-right",
 	fields?: Partial<BreadboardFieldSettings>,
@@ -327,7 +327,7 @@ export function renderBreadboardStatusRows(
 /** Detached shapes and legacy segment consumers have one row; they use the same field priorities. */
 export function renderBreadboardStatusLine(
 	snapshot: BreadboardStatusSnapshot,
-	preset: StatusLinePreset,
+	preset: string,
 	width: number,
 	layout: "box" | "band" | "plain-full" | "plain-left" | "plain-right",
 	fields?: Partial<BreadboardFieldSettings>,

@@ -108,7 +108,7 @@ export interface StatusLinePresetRenderContext {
 	readonly session: StatusLineSession;
 	readonly ctx: SegmentContext;
 	readonly width: number;
-	readonly layout: "box" | "band" | "plain-right" | "plain-left" | "standalone";
+	readonly layout: "box" | "band" | "plain-right" | "plain-left" | "plain-full" | "standalone";
 	readonly preset: string;
 	readonly options: StatusLineSegmentOptions;
 	readonly config?: unknown;
@@ -128,6 +128,10 @@ export interface StatusLinePresetRegistration {
 }
 
 const customPresets = new Map<string, StatusLinePresetRegistration>();
+
+export function resetStatusLinePresets(): void {
+	customPresets.clear();
+}
 
 export function registerStatusLinePreset(registration: StatusLinePresetRegistration): () => void {
 	customPresets.set(registration.name, registration);

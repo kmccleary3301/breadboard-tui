@@ -2893,7 +2893,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			segmentOptions: settings.get("statusLine.segmentOptions"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 			contextLine: settings.get("statusLine.contextLine"),
-			breadboard: settings.get("statusLine.breadboard"),
+			presetConfig: settings.get("statusLine.breadboard"),
 		});
 	}
 	syncComposerShape(): void {

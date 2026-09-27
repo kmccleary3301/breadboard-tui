@@ -49,7 +49,7 @@ import {
 import {
 	DEFAULT_BREADBOARD_FIELD_SETTINGS,
 	type BreadboardFieldSettings,
-} from "@oh-my-pi/pi-tui/status-line/breadboard-fields";
+} from "../breadboard/ui/status-line/breadboard-fields";
 
 /** Unified settings schema - single source of truth for all settings.
  *
@@ -139,18 +139,7 @@ export const COMPOSER_SHAPE_VALUES = BUILTIN_COMPOSER_SHAPES.map(shape => shape.
 export type ContextLineMode = "off" | "percentage" | "annotated" | "embedded";
 export const CONTEXT_LINE_MODE_VALUES = ["off", "percentage", "annotated", "embedded"] as const;
 
-export const STATUS_LINE_PRESET_VALUES = [
-	"bb-balanced",
-	"bb-quiet",
-	"bb-detailed",
-	"default",
-	"minimal",
-	"compact",
-	"full",
-	"nerd",
-	"ascii",
-	"custom",
-] as const;
+export const STATUS_LINE_PRESET_VALUES = ["default", "minimal", "compact", "full", "nerd", "ascii", "custom"] as const;
 export type StatusLinePreset = (typeof STATUS_LINE_PRESET_VALUES)[number];
 export const STATUS_LINE_SEPARATOR_VALUES = [
 	"powerline",
@@ -885,19 +874,7 @@ export const SETTINGS_SCHEMA = {
 
 	// Status line
 	"statusLine.preset": {
-		type: "enum",
-		values: [
-			"bb-balanced",
-			"bb-quiet",
-			"bb-detailed",
-			"default",
-			"minimal",
-			"compact",
-			"full",
-			"nerd",
-			"ascii",
-			"custom",
-		] as const,
+		type: "string",
 		default: "default",
 		ui: {
 			tab: "appearance",
@@ -6638,7 +6615,7 @@ export interface ExaSettings {
 }
 
 export interface StatusLineSettings {
-	preset: StatusLinePreset;
+	preset: StatusLinePreset | string;
 	separator: StatusLineSeparatorStyle;
 	showHookStatus: boolean;
 	leftSegments: StatusLineSegmentId[];

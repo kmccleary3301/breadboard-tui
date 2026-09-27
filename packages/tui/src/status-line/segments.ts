@@ -20,7 +20,7 @@ import { formatMetric } from "../components/metric";
 import { formatBillingSummary } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
-import type { HarnessSnapshot, RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
+import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
 
@@ -924,8 +924,6 @@ const usageSegment: StatusLineSegment = {
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-
-
 export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	pi: piSegment,
 	status: statusSegment,
@@ -957,6 +955,10 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 };
 
 const customSegments = new Map<string, StatusLineSegment>();
+
+export function resetStatusLineSegments(): void {
+	customSegments.clear();
+}
 
 export function registerStatusLineSegment(segment: StatusLineSegment): () => void {
 	customSegments.set(segment.id, segment);
