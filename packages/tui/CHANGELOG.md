@@ -5,6 +5,16 @@
 ### Added
 
 - Added opt-in scheduler frame-write timing trailers for controlled PTY measurements through `OMP_TUI_TIMING_NONCE`.
+- Added registration points so a distribution can add its own UI without editing pi-tui. Each one returns a handle that removes only its own entry:
+  - status line: `registerStatusLinePreset` and `registerStatusLineSegment`, with `getStatusLinePreset`, `getAllStatusLinePresets` and `isStatusLineTopAttachmentSupported`;
+  - themes and glyphs: `registerBuiltinTheme`, `registerSymbolPreset`, `registerSymbolOverrides` and `getSymbolPresetInfos`;
+  - settings: `registerSettingsTab`, `getSettingTabs` and `registerSettingCustomEditor`;
+  - setup: `registerSetupScene(scene, { before, after })`, `getSetupScenes` and `registerComposerPreviewStatusFactory`;
+  - product identity: `composerShapeLabels` overrides composer shape labels.
+
+### Removed
+
+- Removed the BreadBoard status-line presets (`bb-balanced`, `bb-quiet`, `bb-detailed`) and their fields, the BreadBoard themes and monochrome glyph overrides, the BreadBoard settings tab and the information-layout setup scene from pi-tui. `bb` registers them from coding-agent, and stock pi-tui shows none of them.
 
 ### Fixed
 

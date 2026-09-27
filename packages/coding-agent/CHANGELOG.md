@@ -8,6 +8,8 @@
 - `/harness reload` recompiles the workspace harness spec and applies the next generation at the next turn boundary, or reports why the new spec was rejected.
 - `NativeRpcTransport` in `@breadboard/harness` drives `bb` sessions from TypeScript over OMP's RPC mode, with harness selection and approval handling.
 - With `BREADBOARD_OMP_AGENT_DIR` set, print, JSON and RPC modes use the shared OMP auth store, like interactive sessions. Before, they refused to start.
+- Added `registerSettingValueNormalizer` and `registerGlobalSettingsMigration` (`config/settings-extensions`). A distribution can use them to validate its own setting values and rewrite its own profile keys; `Settings` has no product-specific branches.
+- `bb` registers its themes, glyph presets, status-line presets, settings tab and setup scene at startup, before the first paint, through the pi-tui registration points.
 - BreadBoard Balanced, Quiet and Detailed information layouts, with shared live and setup previews and width-aware priority for actionable state.
 - Per-field BreadBoard composer customization with staged Apply/Cancel, a live preview and a layout-only reset. Shape and glyph preferences are independent.
 - An Emoji glyph preset alongside Unicode, Nerd Font and ASCII.
