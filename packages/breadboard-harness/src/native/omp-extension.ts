@@ -249,6 +249,19 @@ export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string
 	return delegates;
 }
 
+/**
+ * The prompt-cache retention the lock's Anthropic system cache declaration implies, as Python's
+ * `_build_system_prompt` applies `provider_tools.anthropic.prompt_cache`
+ * (`provider/runtimes/anthropic.py:770-776`): `ttl: 1h` is long retention and any other ephemeral
+ * cache control is short. Undefined when the lock declares no system cache control.
+ */
+export function nativeCacheRetention(harness: LoadedNativeHarness): "long" | "short" | undefined {
+	const prefix = "provider_tools.anthropic.prompt_cache";
+	if (nativeLockValue(harness.lock, `${prefix}.apply_to_system`) === false) return undefined;
+	if (nativeLockValue(harness.lock, `${prefix}.cache_control.type`) !== "ephemeral") return undefined;
+	return nativeLockValue(harness.lock, `${prefix}.cache_control.ttl`) === "1h" ? "long" : "short";
+}
+
 function assistantText(message: AgentMessage): string {
 	if (message.role !== "assistant") return "";
 	return message.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("");

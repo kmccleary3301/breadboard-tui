@@ -3450,7 +3450,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		};
 
 		const toolNamesFromRegistry = Array.from(toolRegistry.keys());
-		const explicitlyRequestedToolNames = options.toolNames ? normalizeToolNames(options.toolNames) : undefined;
+		const explicitlyRequestedToolNames = options.toolNames
+			? normalizeToolNames(options.toolNames, toolRegistry)
+			: undefined;
 		// When `requireYieldTool` is set, the subagent's prompts and idle-reminders demand a
 		// `yield` call to terminate. The tool registry already includes `yield` (see
 		// `createTools`), but an explicit `toolNames` list would otherwise drop it from the

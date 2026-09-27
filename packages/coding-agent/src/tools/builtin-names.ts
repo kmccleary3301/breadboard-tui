@@ -48,12 +48,16 @@ export function normalizeToolName(name: string): string {
 	return LEGACY_BUILTIN_TOOL_NAME_ALIASES.get(lower) ?? (Object.hasOwn(CANONICAL_TOOL_NAMES, lower) ? lower : name);
 }
 
-/** Normalize and deduplicate tool names while preserving first-seen order. */
-export function normalizeToolNames(names: Iterable<string>): string[] {
+/**
+ * Normalize and deduplicate tool names while preserving first-seen order. A name that `registered`
+ * holds exactly as written is a plugin name and stays verbatim, so an extension tool `Bash` is not
+ * replaced by the built-in `bash`.
+ */
+export function normalizeToolNames(names: Iterable<string>, registered?: { has(name: string): boolean }): string[] {
 	const out: string[] = [];
 	const seen = new Set<string>();
 	for (const name of names) {
-		const normalized = normalizeToolName(name);
+		const normalized = registered?.has(name) === true ? name : normalizeToolName(name);
 		if (seen.has(normalized)) continue;
 		seen.add(normalized);
 		out.push(normalized);

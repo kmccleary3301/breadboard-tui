@@ -429,6 +429,20 @@ describe("bb-omp.native session", () => {
 	});
 });
 
+describe("claude_code pack tools", () => {
+	it("sends the pack's Bash, Read and Edit rather than OMP's same-named built-ins", async () => {
+		const done: MockResponse = { content: [{ type: "text", text: "ok" }], stopReason: "stop" };
+		const { session, harness, calls } = await nativeSession([done], { specPath: "claude_code", autoApprove: true });
+		await session.prompt("hello");
+		await session.waitForIdle();
+		const sent = calls[0]?.context.tools ?? [];
+		expect(sent.map(tool => tool.name)).toEqual(harness.toolSurface.native.map(tool => tool.name));
+		const bash = harness.toolSurface.native.find(tool => tool.name === "Bash");
+		expect(sent.find(tool => tool.name === "Bash")?.description).toBe(bash?.description);
+		expect(sent.some(tool => tool.name === "bash")).toBe(false);
+	});
+});
+
 describe("research pack file tools", () => {
 	it("writes the opencode filePath through the host write tool", async () => {
 		const { session, harness } = await nativeSession([], { specPath: "opencode", autoApprove: true });

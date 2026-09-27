@@ -1,4 +1,9 @@
-import { createNativeHarnessExtension, type LoadedNativeHarness, nativeToolDelegates } from "@breadboard/harness";
+import {
+	createNativeHarnessExtension,
+	type LoadedNativeHarness,
+	nativeCacheRetention,
+	nativeToolDelegates,
+} from "@breadboard/harness";
 import type { Settings } from "../config/settings";
 import type { CreateAgentSessionOptions } from "../sdk";
 
@@ -35,4 +40,7 @@ export function applyNativeHarnessSessionOptions(
 	activeSettings.override("todo.enabled", false);
 	// Python sends the compiled tool schemas unchanged; OMP's intent field would add a required `i` property.
 	activeSettings.override("tools.intentTracing", false);
+	// Python caches the system prompt exactly as the harness declares; OMP's default retention depends on the auth type.
+	const cacheRetention = nativeCacheRetention(harness);
+	if (cacheRetention !== undefined) activeSettings.override("providers.cacheRetention", cacheRetention);
 }

@@ -131,6 +131,30 @@
     },
     {
       "env_gate_ids": [],
+      "path": "provider_tools.anthropic.prompt_cache.apply_to_system",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": true,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.anthropic.prompt_cache.cache_control.ttl",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "1h",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
+      "path": "provider_tools.anthropic.prompt_cache.cache_control.type",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": "ephemeral",
+      "value_kind": "string",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "providers.default_model",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": "anthropic/claude-haiku-4-5-20251001",
@@ -196,7 +220,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:d9abdd66bbd193534944e56288952ab6779627bdbd43844e87a91eb776896ede",
+  "graph_hash": "sha256:2c82165f25a03f0a16d1e65cda5bf42f6d2632c0b98ba71017f774d7ad11f14d",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -215,7 +239,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:830069d5fe19e76ba553f6f6b1274988730ffb6a1679f57c76292f656cda000e",
+      "layer_hash": "sha256:b89dbe9bb28ecd045f194e0dd3cce11e7d7609acb2a6c0c2eb08b1fe768e1096",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -246,6 +270,9 @@
       "prompts.packs.base.plan",
       "prompts.packs.base.system",
       "prompts.tool_prompt_mode",
+      "provider_tools.anthropic.prompt_cache.apply_to_system",
+      "provider_tools.anthropic.prompt_cache.cache_control.ttl",
+      "provider_tools.anthropic.prompt_cache.cache_control.type",
       "providers.default_model",
       "providers.models",
       "schema_version",

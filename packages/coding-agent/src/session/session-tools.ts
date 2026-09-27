@@ -935,7 +935,7 @@ export class SessionTools {
 
 	async #applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
 		signal?.throwIfAborted();
-		toolNames = normalizeToolNames(toolNames);
+		toolNames = normalizeToolNames(toolNames, this.#toolRegistry);
 		const codeMode = resolveCodeMode({
 			provider: this.#host.model()?.provider ?? "",
 			toolMode: this.#host.model()?.toolMode,
@@ -1550,7 +1550,7 @@ export class SessionTools {
 	/** Selects enabled tools, ignoring names absent from the registry. */
 	setActiveToolsByName(toolNames: string[]): Promise<void> {
 		return this.runToolRegistryMutation(async () => {
-			const normalized = normalizeToolNames(toolNames);
+			const normalized = normalizeToolNames(toolNames, this.#toolRegistry);
 			// Transport-write eligibility keys off the *current* active set: an ordinary
 			// selection change should not demote `write` unless it is already active.
 			await this.#applyToolPresentation(
@@ -1585,12 +1585,12 @@ export class SessionTools {
 		signal?: AbortSignal,
 	): Promise<void> {
 		return this.runToolRegistryMutation(async () => {
-			const normalized = normalizeToolNames(toolNames);
+			const normalized = normalizeToolNames(toolNames, this.#toolRegistry);
 			// Restoration targets a snapshot, so write eligibility comes from the
 			// *target* set rather than whatever happens to be active mid-rollback.
 			await this.#applyToolPresentation(
 				normalized,
-				new Set(normalizeToolNames(mountedToolNames)),
+				new Set(normalizeToolNames(mountedToolNames, this.#toolRegistry)),
 				normalized.includes("write"),
 				forcePromptRefresh,
 				signal,
