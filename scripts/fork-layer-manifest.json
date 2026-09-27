@@ -372,6 +372,13 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/cli/flag-tables.ts",
+			"class": "manual-review",
+			"rule": "manual-review-boundaries",
+			"owner": "omp-entrypoint",
+			"layer": 2
+		},
+		{
 			"path": "packages/coding-agent/src/cli/help-extra.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
