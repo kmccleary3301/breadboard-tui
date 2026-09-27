@@ -120,9 +120,6 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--add-dir": (result, value) => {
 		result.addDir = [...(result.addDir ?? []), value];
 	},
-	"--harness": (result, value) => {
-		result.harness = value;
-	},
 	"--mode": (result, value) => {
 		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
 			result.mode = value;
