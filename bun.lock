@@ -96,7 +96,6 @@
       "dependencies": {
         "@babel/parser": "catalog:",
         "@breadboard/harness": "catalog:",
-        "@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz",
         "@oh-my-pi/omp-stats": "catalog:",
         "@oh-my-pi/omptype": "catalog:",
         "@oh-my-pi/pi-agent-core": "catalog:",
@@ -120,7 +119,6 @@
         "@opentelemetry/sdk-trace-base": "catalog:",
         "@opentelemetry/sdk-trace-node": "catalog:",
         "axe-core": "4.13.0",
-        "eventsource-parser": "^1.1.2",
         "puppeteer-core": "catalog:",
       },
       "devDependencies": {
@@ -474,8 +472,6 @@
     "@bgotink/kdl": ["@bgotink/kdl@0.4.0", "", {}, "sha512-F0uJCjo5FQvFdcGF5QbYVNfcGiRWlocuzyIdQxottZF2+gu6L2xjMGEu9PIpse2hifAca/19vIospgaETCKxIg=="],
 
     "@breadboard/harness": ["@breadboard/harness@workspace:packages/breadboard-harness"],
-
-    "@breadboard/sdk": ["@breadboard/sdk@./vendor/breadboard-sdk-0.4.0.tgz", { "dependencies": { "eventsource-parser": "^1.1.2" } }, "sha512-tKysZpui+L+aK9RyDWB2jzteESNH6CDCACVSDb/5p2Fmp40M48eFx9rDtZ7d8XqFg1Cc2GHWPNY2V88O79ksfA=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@2.15.0", "", {}, "sha512-DAheWUkVr/SJTWCc+lg9dhY0eN4SaWlf4+bG1KzHeXbnqt0AfB/NX0Z+VunGlM1ki1B4zVvye27MpKh/svySUA=="],
 
@@ -1174,8 +1170,6 @@
     "escalade": ["escalade@3.2.0", "", {}, "sha512-WUj2qlxaQtO4g6Pq5c29GTcWGDyd8itL8zTlipgECz3JesAiiOKotd8JU6otB3PACgG6xkJUyVhboMS+bje/jA=="],
 
     "escape-string-regexp": ["escape-string-regexp@4.0.0", "", {}, "sha512-TtpcNJ3XAzx3Gq8sWRzJaVajRs0uVxA2YAkdb1jm2YkPz4G6egUFAyA3n5vtEIZefPk5Wa4UXbKuS5fKkJWdgA=="],
-
-    "eventsource-parser": ["eventsource-parser@1.1.2", "", {}, "sha512-v0eOBUbiaFojBu2s2NPBfYUoRR9GjcDNvCXVaqEf5vVfpIAh9f8RCo4vXTP8c63QRKCFwoLpMpTdPwwhEKVgzA=="],
 
     "exit": ["exit@0.1.2", "", {}, "sha512-Zk/eNKV2zbjpKzrsQ+n1G6poVbErQxJ0LBOJXaKZ1EViLzH+hrLu9cdXI4zw9dBQJslwBEpbQ2P1oS7nDxs6jQ=="],
 

@@ -9,9 +9,10 @@ This repository is the canonical source and release authority for the BreadBoard
 | Surface | Authority |
 |---|---|
 | TUI source and `bb` binary | This repository |
-| Engine and canonical SDK source | [`kmccleary3301/breadboard`](https://github.com/kmccleary3301/breadboard) |
+| Python engine, its HTTP SDK, and CLI (used by RL and scripted callers) | [`kmccleary3301/breadboard`](https://github.com/kmccleary3301/breadboard) |
 | Upstream TUI spine | [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi) |
-The product runs directly on the native TypeScript turn loop and native harness package (`@breadboard/harness`). The Python engine bridge, SDK client, and attach modes have been retired.
+
+The product runs directly on OMP's native TypeScript turn loop and the native harness package (`@breadboard/harness`). The Python engine bridge, its bundled SDK client, and the attach modes are retired; the `bb` archive carries no Python engine.
 
 Current product identity:
 
@@ -22,7 +23,8 @@ Current product identity:
 
 The product defaults to the native `bb-omp.native` harness. An explicit harness spec can be selected via `--harness <path.yaml>`, `breadboard.sessionConfigPath`, or `breadboard.harness.default`.
 
-Legacy engine bridge modes (`local-owned`, `local-external`, `remote`) and flags (`--engine-mode`, `--engine-url`) have been removed. Any attempt to request an engine bridge via CLI, environment (`BREADBOARD_ENGINE_MODE`, `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`), or profile settings will refuse to launch with an explicit error naming the native default (`native`). The only supported engine modes are `native` and `off`.
+The engine bridge modes (`local-owned`, `local-external`, `remote`) and their flags (`--engine-mode`, `--engine-url`) are removed. A bridge request from the CLI, the environment (`BREADBOARD_ENGINE_MODE`, `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`), or settings (`breadboard.engineMode`, `breadboard.baseUrl`, `breadboard.engineArtifact`) exits with status 2 before any session starts and names the source to remove. The supported modes are `native` (the default) and `off`.
+
 Generate the candidate launcher with a per-workspace native profile root. The launcher copies the
 matching R39 profile into that root, runs the one-shot product migration, and records a source
 checksum marker; it never mutates the R39 root:
@@ -45,24 +47,16 @@ install -m 755 /path/to/r39/launch ~/.local/bin/bb-omp
 
 ## Build
 
-Prerequisites: Bun `1.4.0` (the repository package manager and primary CI lane use Bun 1.4), the platform's OMP native addon, and a checkout of the exact backend commit recorded in `packages/coding-agent/breadboard-sdk-provenance.json`.
+Prerequisites: Bun `1.4.0` (the repository package manager and primary CI lane use Bun 1.4) and the platform's OMP native addon.
 
 ```sh
 bun install --frozen-lockfile
-bun packages/coding-agent/scripts/build-engine-distribution.ts \
-  --backend-root /path/to/pinned/breadboard \
-  --output-root /path/to/private/engine-distribution \
-  --product-version 0.1.0-rc.7
-BREADBOARD_P30_BACKEND_ROOT=/path/to/pinned/breadboard \
-  BREADBOARD_ENGINE_DISTRIBUTION_ROOT=/path/to/private/engine-distribution \
-  bun run --cwd packages/coding-agent build:bb
+bun run --cwd packages/coding-agent build:bb
 ./packages/coding-agent/dist/bb --version
 ./packages/coding-agent/dist/bb --smoke-test
 ```
 
-The SDK provenance gate fails closed when the backend checkout, generated contract, or vendored artifact differs from the recorded identity.
-
-The engine distribution builder requires its pinned Bun `1.3.14`, Python and uv toolchain. It builds the engine from the clean backend commit rather than importing that checkout at runtime.
+`build:bb` first runs the third-party notices gate (`gate:distribution`), which fails when `THIRD_PARTY_NOTICES.txt` is out of date.
 
 ## Supported product target
 
@@ -80,7 +74,6 @@ BB_DEVELOPMENT_EVIDENCE=1 \
   BB_NATIVE_ADDON_PATH="$PWD/packages/natives/native/pi_natives.darwin-arm64.node" \
   BB_LICENSE_PATH="$PWD/LICENSE" \
   BB_NOTICES_PATH="$PWD/packages/coding-agent/THIRD_PARTY_NOTICES.txt" \
-  BB_ENGINE_DISTRIBUTION_ROOT=/path/to/private/engine-distribution \
   BB_PRODUCT_VERSION=0.1.0-rc.7 \
   BB_RELEASE_OUTPUT_ROOT=/private/release-output \
   bun run bb:release
@@ -89,7 +82,7 @@ bun run bb:install install /private/release-output/bb-darwin-arm64-0.1.0-rc.7.ta
 
 Unsigned development evidence is rejected unless `--allow-unsigned-development` is explicit. A release-candidate archive instead requires an independently distributed archive digest via `--expected-archive-sha256 sha256:<digest>` until publisher-signature verification is available. The same trust flags apply to `update`.
 
-Managed `install`, `update`, `rollback`, `uninstall`, and `status` actions verify the archive before changing a private destination and retain authenticated predecessor revisions for rollback. Release-candidate installation also requires legal inputs, an engine release-envelope declaration, and the independently supplied whole-archive digest.
+Managed `install`, `update`, `rollback`, `uninstall`, and `status` actions verify the archive before changing a private destination and retain authenticated predecessor revisions for rollback. Release-candidate installation also requires legal inputs and the independently supplied whole-archive digest. The archive holds `bb`, `native/`, and its manifest, checksums, and provenance.
 
 ## Persistent code evaluation
 
@@ -110,7 +103,7 @@ The fork audit compares the product tree with the exact upstream tag and rejects
 
 ## Upstream convergence
 
-The current baseline is the upstream release `v18.2.11` (`e4151593ace2781d1dc2f06d760301f88af3e9dc`).
+The current baseline is the upstream release `v18.3.0` (`62bc57be1b03ef0802a33cf7f5f530e534527531`).
 
 Each stable OMP train follows one reviewable sequence:
 

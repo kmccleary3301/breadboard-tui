@@ -42,7 +42,6 @@ export interface DeltaPolicy extends SyncPolicy {
 	readonly manualBoundaries: readonly PolicyManualBoundary[];
 	readonly upstreamEntrypoints: readonly string[];
 	readonly adapters: {
-		readonly sdkImports: readonly string[];
 		readonly endpointAndSchemaLiterals: readonly string[];
 	};
 	readonly distribution: DistributionPolicy;
@@ -302,7 +301,7 @@ function validatePolicy(raw: unknown): asserts raw is DeltaPolicy {
 	) {
 		throw new Error("upstreamEntrypoints must be a non-empty string array");
 	}
-	for (const field of ["sdkImports", "endpointAndSchemaLiterals"] as const) {
+	for (const field of ["endpointAndSchemaLiterals"] as const) {
 		if (
 			!Array.isArray(raw.adapters[field]) ||
 			raw.adapters[field].length === 0 ||
@@ -470,13 +469,11 @@ async function inspectAdapters(repoRoot: string, state: AuditState): Promise<Aud
 		if (!SOURCE_EXTENSIONS.has(path.extname(entry.path).toLowerCase())) continue;
 		if (SDK_IMPORT.test(text)) {
 			SDK_IMPORT.lastIndex = 0;
-			if (!state.policy.adapters.sdkImports.some(pattern => matchesPolicyPattern(entry.path, pattern))) {
-				violations.push({
-					code: "adapter-boundary",
-					path: entry.path,
-					detail: "@breadboard/sdk import is outside a declared adapter",
-				});
-			}
+			violations.push({
+				code: "adapter-boundary",
+				path: entry.path,
+				detail: "@breadboard/sdk was removed from the product; nothing may import it",
+			});
 		}
 		if (
 			BREADBOARD_LITERAL.test(text) &&

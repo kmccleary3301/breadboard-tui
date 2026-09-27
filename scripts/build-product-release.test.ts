@@ -19,8 +19,6 @@ async function fixture(root: string): Promise<{
 		`#!/bin/sh\nprintf '%s\\n' '${[
 			`bb/${BREADBOARD_DISTRIBUTION_POLICY.productVersion}`,
 			`omp/${BREADBOARD_DISTRIBUTION_POLICY.ompVersion}`,
-			`sdk/${BREADBOARD_DISTRIBUTION_POLICY.sdkVersion}`,
-			`engine-api ${BREADBOARD_DISTRIBUTION_POLICY.engineApiRange}`,
 		].join(" ")}'\n`,
 	);
 	await chmod(binaryPath, 0o500);

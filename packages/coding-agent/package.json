@@ -43,8 +43,6 @@
 		"LICENSE",
 		"THIRD_PARTY_NOTICES.txt",
 		"THIRD_PARTY_NOTICES.manifest.json",
-		"breadboard-sdk-provenance.json",
-		"vendor/breadboard-sdk-0.4.0.tgz",
 		"examples",
 		"README.md",
 		"CHANGELOG.md"
@@ -519,7 +517,6 @@
 	"scripts": {
 		"build": "bun run gate:distribution && bun scripts/build-binary.ts",
 		"build:bb": "bun run gate:distribution && BUILD_PRODUCT=bb bun scripts/build-binary.ts",
-		"build:engine": "bun scripts/build-engine-distribution.ts",
 		"build:release": "bun run gate:distribution && bun ../../scripts/build-product-release.ts",
 		"install:release": "bun ../../scripts/install-product-release.ts",
 		"build:omp": "bun run gate:distribution && BUILD_PRODUCT=omp bun scripts/build-binary.ts",
@@ -536,14 +533,12 @@
 		"gen:native:reset": "bun --cwd=../natives run gen:native:reset",
 		"prepack": "bun run gate:distribution && bun run gen:tool-views && bun run gen:bundle",
 		"bench:guard": "bun scripts/bench-guard.ts",
-		"gate:breadboard-sdk": "bun scripts/verify-breadboard-sdk-provenance.ts",
-		"gate:distribution": "bun run gate:breadboard-sdk && bun run gate:notices",
+		"gate:distribution": "bun run gate:notices",
 		"gate:notices": "bun ../../scripts/generate-third-party-notices.ts --check"
 	},
 	"dependencies": {
 		"@babel/parser": "catalog:",
 		"@breadboard/harness": "catalog:",
-		"@breadboard/sdk": "file:./vendor/breadboard-sdk-0.4.0.tgz",
 		"@oh-my-pi/omp-stats": "catalog:",
 		"@oh-my-pi/omptype": "catalog:",
 		"@oh-my-pi/pi-agent-core": "catalog:",
@@ -566,13 +561,9 @@
 		"@opentelemetry/sdk-metrics": "catalog:",
 		"@opentelemetry/sdk-trace-base": "catalog:",
 		"@opentelemetry/sdk-trace-node": "catalog:",
-		"eventsource-parser": "^1.1.2",
 		"axe-core": "4.13.0",
 		"puppeteer-core": "catalog:"
 	},
-	"bundledDependencies": [
-		"@breadboard/sdk"
-	],
 	"devDependencies": {
 		"@types/bun": "catalog:"
 	},
