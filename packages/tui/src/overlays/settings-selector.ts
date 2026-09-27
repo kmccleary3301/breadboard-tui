@@ -22,8 +22,6 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../index";
-import { Spacer } from "../components/spacer";
-import { Text } from "../components/text";
 import type { ShapeTarget } from "@oh-my-pi/snapcompact";
 import type {
 	ContextLineMode,
@@ -37,27 +35,17 @@ import {
 	type SettingTab,
 	type SettingsHost,
 	type SettingsDisplayEntry,
-	type SettingsBreadboardContext,
 } from "./settings-defs";
 import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../thinking";
 import { getTabBarTheme } from "../chrome/shared";
-import { getComposerShapeOptions } from "./composer-shape-registry";
 import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./composer-shape-preview";
-import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
+import { getComposerShapeOptions } from "./composer-shape-registry";
 import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
 import { PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
-import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
+import { getSettingCustomEditor, getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
+import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "../status-line/presets";
-import {
-	BREADBOARD_FIELD_DEFINITIONS,
-	type BreadboardFieldKey,
-	type BreadboardFieldSettings,
-	DEFAULT_BREADBOARD_FIELD_SETTINGS,
-	isBreadboardFieldKey,
-	updateBreadboardField,
-	isBreadboardPreset,
-} from "./settings-breadboard-shim";
 import { FormField, SelectFormField, TextFormField } from "../components/form";
 import { formTheme } from "../chrome/form-theme";
 
@@ -94,7 +82,7 @@ function createSettingsTextField(
  * Preserves the current selection, live async previews, footer previews,
  * and select/cancel dispatch of the bespoke submenu it replaces.
  */
-function createSettingsSelectField(
+export function createSettingsSelectField(
 	title: string,
 	description: string,
 	options: ReadonlyArray<SelectItem>,
@@ -122,237 +110,6 @@ function createSettingsSelectField(
 		footer,
 		requestRender,
 	});
-}
-
-export class BreadboardCustomizeSubmenu extends Container {
-	#selectList!: SelectList;
-	#selectListLineOffset = 0;
-	#editor: SelectFormField | null = null;
-	#draft: BreadboardFieldSettings;
-	readonly #original: BreadboardFieldSettings;
-
-	constructor(
-		initial: BreadboardFieldSettings,
-		private readonly preset: StatusLinePreset | string,
-		private readonly onPreview: (fields: BreadboardFieldSettings) => void,
-		private readonly onApply: (fields: BreadboardFieldSettings) => void,
-		private readonly onCancel: () => void,
-		private readonly preview?: Component,
-		private readonly requestRender?: () => void,
-	) {
-		super();
-		this.#draft = { ...initial };
-		this.#original = { ...initial };
-		this.#showList();
-	}
-
-	showPresets(
-		current: StatusLinePreset | string,
-		onSelect: (preset: StatusLinePreset | string) => void,
-		onPreview: (preset: StatusLinePreset | string) => void,
-		onCancel: () => void,
-		presets: ReadonlyArray<SelectItem>,
-	): void {
-		const choices: SelectItem[] = [
-			...presets.filter(option => isBreadboardPreset(option.value as StatusLinePreset)),
-			{
-				value: "__customize",
-				label: "Customize…",
-				description: "Edit the current layout without changing shape or glyphs",
-			},
-			...presets.filter(option => !isBreadboardPreset(option.value as StatusLinePreset)),
-		];
-		this.clear();
-		this.#editor = createSettingsSelectField(
-			"Information layout",
-			"Choose a preset or customize individual fields.",
-			choices,
-			current,
-			value => {
-				if (value === "__customize") {
-					this.#previewDraft();
-					this.#showList();
-					return;
-				}
-				const choice = presets.find(option => option.value === value);
-				if (choice) onSelect(choice.value as StatusLinePreset);
-			},
-			onCancel,
-			value => {
-				const choice = presets.find(option => option.value === value);
-				onPreview((choice?.value ?? current) as StatusLinePreset);
-			},
-			undefined,
-			this.preview,
-			this.requestRender,
-		);
-		this.addChild(this.#editor);
-		this.requestRender?.();
-	}
-
-	#items(): readonly SelectItem[] {
-		const fields: SelectItem[] = BREADBOARD_FIELD_DEFINITIONS.map(definition => {
-			const current = definition.options.find(option => option.value === this.#draft[definition.key]);
-			return {
-				value: definition.key,
-				label: `${definition.label}: ${current?.label ?? "Preset"}`,
-				description: current?.description,
-			};
-		});
-		return [
-			...fields,
-			{
-				value: "__reset",
-				label: "Reset layout to selected preset",
-				description: `Clear field overrides and follow ${this.preset.replace("bb-", "")}`,
-			},
-			{ value: "__apply", label: "Apply", description: "Save these fields and update the live status line" },
-			{ value: "__cancel", label: "Cancel", description: "Discard staged field changes" },
-		];
-	}
-
-	#showList(selectedValue?: string): void {
-		this.#editor = null;
-		this.clear();
-		this.addChild(new Text(theme.bold(theme.fg("accent", "Customize BreadBoard information")), 0, 0));
-		this.addChild(new Spacer(1));
-		this.addChild(
-			new Text(
-				theme.fg(
-					"muted",
-					"~ marks estimates. Unavailable accounting or effort stays hidden. Approval and error alerts stay visible.",
-				),
-				0,
-				0,
-			),
-		);
-		if (this.preview) {
-			this.addChild(new Spacer(1));
-			this.addChild(this.preview);
-		}
-		this.addChild(new Spacer(1));
-		const items = this.#items();
-		this.#selectList = new SelectList(items, Math.min(12, items.length), getSelectListTheme());
-		const selectedIndex = selectedValue === undefined ? 0 : items.findIndex(item => item.value === selectedValue);
-		if (selectedIndex >= 0) this.#selectList.setSelectedIndex(selectedIndex);
-		this.#selectList.onSelect = item => {
-			if (item.value === "__reset") {
-				this.#draft = { ...DEFAULT_BREADBOARD_FIELD_SETTINGS };
-				this.#previewDraft();
-				this.#showList("__reset");
-				return;
-			}
-			if (item.value === "__apply") {
-				this.onApply(this.#draft);
-				return;
-			}
-			if (item.value === "__cancel") {
-				this.onPreview(this.#original);
-				this.onCancel();
-				return;
-			}
-			if (!isBreadboardFieldKey(item.value)) return;
-			this.#openField(item.value);
-		};
-		this.#selectList.onCancel = () => {
-			this.onPreview(this.#original);
-			this.onCancel();
-		};
-		this.addChild(this.#selectList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to edit · Esc to cancel · ←/→ changes selected field"), 0, 0));
-		this.requestRender?.();
-	}
-
-	#previewDraft(): void {
-		this.onPreview(this.#draft);
-		this.requestRender?.();
-	}
-
-	#openField(key: BreadboardFieldKey): void {
-		const definition = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
-		if (!definition) return;
-		this.clear();
-		this.#editor = createSettingsSelectField(
-			definition.label,
-			"Choose Preset to follow the selected layout, or pin this field independently.",
-			definition.options.map(option => ({
-				value: option.value,
-				label: option.label,
-				description: option.description,
-			})),
-			String(this.#draft[key]),
-			value => {
-				const updated = updateBreadboardField(this.#draft, key, value);
-				if (!updated) return;
-				this.#draft = updated;
-				this.#previewDraft();
-				this.#showList(key);
-			},
-			() => {
-				this.#previewDraft();
-				this.#showList(key);
-			},
-			value => {
-				const updated = updateBreadboardField(this.#draft, key, value);
-				if (updated) this.onPreview(updated);
-				this.requestRender?.();
-			},
-			undefined,
-			this.preview,
-			this.requestRender,
-		);
-		this.addChild(this.#editor);
-		this.requestRender?.();
-	}
-
-	override render(width: number): readonly string[] {
-		const lines: string[] = [];
-		for (const child of this.children) {
-			const childLines = child.render(Math.max(1, width));
-			if (child === this.#selectList) this.#selectListLineOffset = lines.length;
-			lines.push(...childLines);
-		}
-		return lines;
-	}
-
-	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
-		if (this.#editor) {
-			this.#editor.routeMouse(event, line, col);
-			return;
-		}
-		routeSelectListMouse(this.#selectList, event, line - this.#selectListLineOffset);
-	}
-
-	handleInput(data: string): void {
-		if (this.#editor) {
-			this.#editor.handleInput(data);
-			return;
-		}
-		if ((data === "\x1b[D" || data === "\x1b[C") && this.#selectList.getSelectedItem()) {
-			const selected = this.#selectList.getSelectedItem();
-			if (
-				selected &&
-				selected.value !== "__reset" &&
-				selected.value !== "__apply" &&
-				selected.value !== "__cancel"
-			) {
-				const definition = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === selected.value);
-				if (!definition) return;
-				const currentIndex = definition.options.findIndex(option => option.value === this.#draft[definition.key]);
-				const nextIndex =
-					(currentIndex + (data === "\x1b[C" ? 1 : -1) + definition.options.length) % definition.options.length;
-				const updated = updateBreadboardField(this.#draft, definition.key, definition.options[nextIndex]!.value);
-				if (updated) {
-					this.#draft = updated;
-					this.#previewDraft();
-					this.#showList(definition.key);
-				}
-				return;
-			}
-		}
-		this.#selectList.handleInput(data);
-	}
 }
 
 /**
@@ -700,26 +457,20 @@ export interface SettingsRuntimeContext {
 	imageBudget?: ImageBudget;
 	/** Schedules a re-render after async preview work completes. */
 	requestRender?: () => void;
-	/** Current harness snapshot, retained for host refresh updates. */
-	harness?: SettingsBreadboardContext["harness"];
-	/** Optional BreadBoard host seam; native policy stays in coding-agent. */
-	breadboard?: SettingsBreadboardContext;
 	/** Live status renderer for composer-shape previews (the session's status line). */
 	composerPreviewStatus?: ComposerPreviewStatusSource;
-	/** Product labels for the composer selector; supplied by the host. */
 }
 
 /** Status line settings subset for preview */
 export interface StatusLinePreviewSettings {
-	preset?: StatusLinePreset | string;
+	preset?: StatusLinePreset;
 	contextLine?: ContextLineMode;
-	leftSegments?: (StatusLineSegmentId | string)[];
-	rightSegments?: (StatusLineSegmentId | string)[];
+	leftSegments?: StatusLineSegmentId[];
+	rightSegments?: StatusLineSegmentId[];
 	separator?: StatusLineSeparatorStyle;
 	sessionAccent?: boolean;
 	transparent?: boolean;
 	compactThinkingLevel?: boolean;
-	breadboard?: BreadboardFieldSettings;
 }
 
 export interface SettingsCallbacks {
@@ -737,24 +488,6 @@ export interface SettingsCallbacks {
 	onCancel: () => void;
 }
 
-class UnavailableSettingsPanel implements Component {
-	constructor(
-		private readonly reason: string,
-		private readonly onClose: () => void,
-	) {}
-
-	render(width: number): readonly string[] {
-		return [
-			theme.bold(theme.fg("warning", "Extensions · unavailable")),
-			truncateToWidth(theme.fg("muted", this.reason), width),
-		];
-	}
-
-	handleInput(data: string): void {
-		if (data === "\x1b" || matchesKey(data, "escape")) this.onClose();
-	}
-}
-
 /**
  * Main tabbed settings selector component.
  * Uses declarative settings definitions from settings-defs.ts.
@@ -764,7 +497,6 @@ export class SettingsSelectorComponent implements Component {
 	#currentList: SettingsList | null = null;
 	#searchList: SettingsList | null = null;
 	#pluginComponent: PluginSettingsComponent | null = null;
-	#pluginUnavailable: UnavailableSettingsPanel | null = null;
 	#currentTabId: SettingTab | "plugins" = "appearance";
 	#preSearchTabId: SettingTab | "plugins" = "appearance";
 	#searchQuery = "";
@@ -807,15 +539,6 @@ export class SettingsSelectorComponent implements Component {
 		// Initialize with first tab
 		this.#switchToTab("appearance");
 	}
-	/** Update the lock-derived policy row when the active harness changes. */
-	setHarness(harness: SettingsBreadboardContext["harness"]): void {
-		this.#context.harness = harness;
-		if (this.#context.breadboard) this.#context.breadboard = { ...this.#context.breadboard, harness };
-		if (this.#currentTabId === "breadboard") {
-			this.#refreshCurrentTabItems(getSettingsForTab(this.#context.settings.entries, "breadboard"));
-		}
-		this.invalidate();
-	}
 
 	invalidate(): void {
 		this.#tabBar.invalidate();
@@ -829,7 +552,6 @@ export class SettingsSelectorComponent implements Component {
 		this.#currentList = null;
 		this.#searchList = null;
 		this.#pluginComponent = null;
-		this.#pluginUnavailable = null;
 		build();
 	}
 
@@ -895,8 +617,6 @@ export class SettingsSelectorComponent implements Component {
 			// SettingsList pads itself to viewport + blank + 3 description rows.
 			list.setMaxVisible(contentRows - 4);
 			contentLines = list.render(innerWidth);
-		} else if (this.#pluginUnavailable) {
-			contentLines = this.#pluginUnavailable.render(innerWidth);
 		} else if (this.#pluginComponent) {
 			contentLines = this.#pluginComponent.render(innerWidth);
 		} else {
@@ -1140,16 +860,10 @@ export class SettingsSelectorComponent implements Component {
 		if (def) this.#tabBar.setActiveById(def.tab);
 	}
 
-	#settingRestriction(def: SettingDef): string | undefined {
-		return this.#context.breadboard?.nativeSettingRestriction?.(def.path, def.group);
-	}
-
 	/** Value-change dispatch for the search result list (any tab's setting). */
 	#onSearchSettingChange(path: string, newValue: string): void {
 		const def = getSettingDef(this.#context.settings.entries, path);
 		if (!def) return;
-		const restriction = this.#settingRestriction(def);
-		if (restriction) return;
 		if (def.type === "boolean") {
 			const boolValue = newValue === "true";
 			this.#context.settings.set(path, boolValue);
@@ -1175,7 +889,6 @@ export class SettingsSelectorComponent implements Component {
 		if (def.condition && !def.condition()) {
 			return null;
 		}
-		if (this.#settingRestriction(def)) return null;
 
 		const currentValue = this.#getCurrentValue(def);
 		const item = {
@@ -1187,22 +900,18 @@ export class SettingsSelectorComponent implements Component {
 		};
 		if (def.readonly) {
 			const displayValue =
-				def.path === "breadboard.harness.max_concurrent_agents"
-					? currentValue === undefined || currentValue === null
-						? "not available"
-						: String(currentValue)
-					: currentValue === undefined || currentValue === null || currentValue === ""
+				currentValue === undefined || currentValue === null
+					? "not available"
+					: typeof currentValue === "string" && currentValue === ""
 						? "not configured"
-						: "configured";
+						: String(currentValue);
 			return {
 				...item,
-				// Provider metadata rows expose availability only, never the
-				// configured endpoint or credential value. Harness policy rows
-				// expose the lock-derived numeric limit.
 				currentValue: displayValue,
 				changed: false,
 			};
 		}
+
 		switch (def.type) {
 			case "boolean":
 				return { ...item, currentValue: currentValue ? "true" : "false", values: ["true", "false"] };
@@ -1244,9 +953,6 @@ export class SettingsSelectorComponent implements Component {
 	 * Get the current value for a setting.
 	 */
 	#getCurrentValue(def: SettingDef): unknown {
-		if (def.path === "breadboard.harness.max_concurrent_agents") {
-			return this.#context.breadboard?.teamSize ?? null;
-		}
 		return this.#context.settings.get(def.path);
 	}
 
@@ -1280,45 +986,15 @@ export class SettingsSelectorComponent implements Component {
 		currentValue: string,
 		done: (value?: string) => void,
 	): Component {
-		if (def.path === "statusLine.preset" && this.#context.breadboard?.enabled === true) {
-			const original = this.#context.settings.get("statusLine.breadboard") as BreadboardFieldSettings;
-			const originalPreset = this.#context.settings.get("statusLine.preset") as StatusLinePreset;
-			const preset = isBreadboardPreset(originalPreset) ? originalPreset : "bb-balanced";
-			const preview = new ComposerShapePreview(String(this.#context.settings.get("composer.shape")), {
-				requestRender: this.#context.requestRender,
-				status: this.#context.composerPreviewStatus,
-			});
-			const cancel = () => {
-				this.#callbacks.onStatusLinePreview?.({ preset: originalPreset, breadboard: original });
-				done();
-			};
-			const customizer = new BreadboardCustomizeSubmenu(
-				original,
-				preset,
-				fields => this.#callbacks.onStatusLinePreview?.({ preset, breadboard: fields }),
-				fields => {
-					this.#context.settings.set("statusLine.preset", preset);
-					this.#context.settings.set("statusLine.breadboard", fields);
-					this.#callbacks.onChange("statusLine.breadboard", fields);
-					done();
-				},
-				cancel,
-				preview,
-				this.#context.requestRender,
-			);
-			customizer.showPresets(
-				originalPreset,
-				value => {
-					const selectedPreset = value as StatusLinePreset;
-					this.#context.settings.set("statusLine.preset", selectedPreset);
-					this.#callbacks.onChange("statusLine.preset", selectedPreset);
-					done(selectedPreset);
-				},
-				value => this.#callbacks.onStatusLinePreview?.({ preset: value as StatusLinePreset, breadboard: original }),
-				cancel,
-				def.options,
-			);
-			return customizer;
+		const customEditor = getSettingCustomEditor(def.path);
+		if (customEditor) {
+			return customEditor({
+				def,
+				currentValue,
+				done,
+				context: this.#context,
+				callbacks: this.#callbacks,
+			}) as Component;
 		}
 		let options = def.options;
 
@@ -1496,8 +1172,6 @@ export class SettingsSelectorComponent implements Component {
 			initial,
 			def.ordered,
 			value => {
-				const restriction = this.#settingRestriction(def);
-				if (restriction) return;
 				this.#context.settings.set(def.path, value);
 				this.#callbacks.onChange(def.path, value);
 			},
@@ -1582,8 +1256,6 @@ export class SettingsSelectorComponent implements Component {
 			(id, newValue) => {
 				const def = defs.find(d => d.path === id);
 				if (!def) return;
-				const restriction = this.#settingRestriction(def);
-				if (restriction) return;
 
 				const path = def.path;
 
@@ -1622,24 +1294,9 @@ export class SettingsSelectorComponent implements Component {
 		const items: SettingItem[] = [];
 		let lastGroup: string | undefined;
 		for (const def of defs) {
-			if (def.condition && !def.condition()) continue;
-			const restriction = this.#settingRestriction(def);
-			if (restriction) {
-				if (def.group !== lastGroup || items.at(-1)?.id !== `__heading:${def.group}:unavailable`) {
-					items.push({
-						id: `__heading:${def.group}:unavailable`,
-						label: `${def.group} · unavailable`,
-						description: restriction,
-						currentValue: "",
-						heading: true,
-					});
-				}
-				lastGroup = def.group;
-				continue;
-			}
 			const item = this.#defToItem(def);
 			if (!item) continue;
-			if (def.group && (def.group !== lastGroup || items.at(-1)?.id === `__heading:${def.group}:unavailable`)) {
+			if (def.group && def.group !== lastGroup) {
 				items.push({ id: `__heading:${def.group}`, label: def.group, currentValue: "", heading: true });
 				lastGroup = def.group;
 			}
@@ -1680,11 +1337,6 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	#showPluginsTab(): void {
-		const restriction = this.#context.breadboard?.nativeSettingsGroupRestriction?.("Extensions");
-		if (restriction) {
-			this.#pluginUnavailable = new UnavailableSettingsPanel(restriction, () => this.#callbacks.onCancel());
-			return;
-		}
 		this.#pluginComponent = new PluginSettingsComponent(this.#context.plugins, {
 			onClose: () => this.#callbacks.onCancel(),
 			onPluginChanged: () => this.#callbacks.onPluginsChanged?.(),
@@ -1746,8 +1398,6 @@ export class SettingsSelectorComponent implements Component {
 
 		if (this.#currentList) {
 			this.#currentList.handleInput(data);
-		} else if (this.#pluginUnavailable) {
-			this.#pluginUnavailable.handleInput(data);
 		} else if (this.#pluginComponent) {
 			this.#pluginComponent.handleInput(data);
 		}
