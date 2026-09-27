@@ -15,13 +15,14 @@ async function main(): Promise<void> {
 	process.env.BREADBOARD_PRODUCT = "1";
 	const metadataOnly = ["--version", "-v", "--help", "-h", "help", "--license"].includes(process.argv[2] ?? "");
 	let stopStartupComposer: (() => void) | undefined;
+	// bb themes, symbols and status-line presets register before the prepaint resolves the cached theme.
+	const breadboardUi = import("./breadboard/ui");
 	if (Bun.isMainThread && !process.env.PI_TIMING && process.stdin.isTTY === true && process.stdout.isTTY === true) {
 		const startupPrepaint = parseStartupPrepaintArgs(process.argv.slice(2));
 		if (startupPrepaint !== null) {
-			const [{ VERSION }, { beginStartupComposer, stopPendingStartupComposer }] = await Promise.all([
-				import("@oh-my-pi/pi-utils/dirs"),
-				import("./modes/startup-composer"),
-			]);
+			const [{ VERSION }, { beginStartupComposer, stopPendingStartupComposer }, { registerBreadboardUi }] =
+				await Promise.all([import("@oh-my-pi/pi-utils/dirs"), import("./modes/startup-composer"), breadboardUi]);
+			registerBreadboardUi();
 			beginStartupComposer({ version: VERSION, modelSelector: startupPrepaint.modelSelector });
 			stopStartupComposer = stopPendingStartupComposer;
 		}
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
 		stopStartupComposer?.();
 		throw error;
 	}
+	(await breadboardUi).registerBreadboardUi();
 	const { runCli } = await import("./cli");
 	// A compiled CLI module self-dispatches from its process entry. Source
 	// execution imports cli.ts as a module, so the wrapper owns invocation there.
