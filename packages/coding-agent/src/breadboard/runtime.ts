@@ -1,8 +1,11 @@
 /**
  * BreadBoard native runtime boundary.
  */
+import { isAbsolute, join } from "node:path";
+import { realpathSync, statSync } from "node:fs";
 import { builtinNativeHarness, DEFAULT_NATIVE_HARNESS_ID } from "@breadboard/harness";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { createBreadboardProviderFreeModel } from "./provider-free-model";
 import { getProjectDir, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils";
 import type { Args } from "../cli/args";
 import { type Settings, settings } from "../config/settings";
@@ -151,7 +154,7 @@ const BREADBOARD_MODEL_PROVIDER_ALIASES: Readonly<Record<string, string>> = Obje
 	openai: "openai",
 	anthropic: "anthropic",
 	google: "google",
-	codex: "codex",
+	codex: "openai-codex",
 });
 
 export function resolveBreadboardBackendModel(
@@ -184,6 +187,8 @@ export function resolveBreadboardBackendModel(
 				? aliasedProviderMatches
 				: models.filter(model => model.id === selector);
 	if (matches.length === 0) {
+		const providerFreeModel = createBreadboardProviderFreeModel(selector);
+		if (providerFreeModel !== undefined) return providerFreeModel;
 		throw new BreadboardModelAuthorityError(
 			"unresolved_backend_model",
 			`BreadBoard backend model ${selector} is not present in the loaded OMP model registry.`,
@@ -200,6 +205,23 @@ export function resolveBreadboardBackendModel(
 
 export function formatBreadboardStartupError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+export { createBreadboardProviderFreeModel, isBreadboardProviderFreeModel } from "./provider-free-model";
+
+export function resolveBreadboardOmpAgentDir(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	const directory = value.trim();
+	if (!directory || !isAbsolute(directory)) {
+		throw new Error("BREADBOARD_OMP_AGENT_DIR must name an absolute existing OMP agent directory");
+	}
+	try {
+		const canonical = realpathSync(directory);
+		if (statSync(canonical).isDirectory() && statSync(join(canonical, "agent.db")).isFile()) return canonical;
+	} catch {
+		// Do not let auth discovery create an empty replacement for a mistyped vault.
+	}
+	throw new Error("BREADBOARD_OMP_AGENT_DIR must contain an existing OMP agent.db");
 }
 
 export interface PreparedBreadboardRuntime {

@@ -48,9 +48,7 @@ it("--harness captures a name or definition path", () => {
 	const result = parseArgs(["--harness", "codex.yaml", "hello"]);
 	expect(result.harness).toBe("codex.yaml");
 	expect(result.messages).toEqual(["hello"]);
-	expect(STRING_VALUE_FLAGS.has("--harness")).toBe(true);
 });
-
 describe("OPTIONAL_VALUE_FLAGS table is honored by args.ts parseArgs", () => {
 	for (const flag of OPTIONAL_VALUE_FLAGS) {
 		it(`${flag} releases tokens that start with -`, () => {

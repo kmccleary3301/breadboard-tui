@@ -34,6 +34,7 @@ import {
 	formatBreadboardStartupError,
 	type PreparedBreadboardRuntime,
 	prepareBreadboardRuntime,
+	resolveBreadboardOmpAgentDir,
 	resolveNativeHarnessSpec,
 	resolveNativeSurfaceEngineSelection,
 	startupBreadboardEngineOwnsTurns,
@@ -1825,7 +1826,10 @@ export async function runRootCommand(
 		// Account routing must use the effective settings, including `--config` and
 		// `PI_CONFIG_FILES` overlays, rather than independently re-reading only the
 		// main config file during auth discovery.
-		const ompAgentDir = process.env.BREADBOARD_OMP_AGENT_DIR;
+		const ompAgentDir = resolveBreadboardOmpAgentDir(process.env.BREADBOARD_OMP_AGENT_DIR);
+		if (ompAgentDir !== undefined && !isInteractive) {
+			throw new Error("BREADBOARD_OMP_AGENT_DIR requires interactive BreadBoard execution");
+		}
 		const settingsPromise = deps.settings
 			? Promise.resolve(deps.settings)
 			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });

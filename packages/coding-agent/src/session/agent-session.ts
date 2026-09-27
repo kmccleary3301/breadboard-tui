@@ -418,7 +418,11 @@ import { TtsrCoordinator, type TtsrCoordinatorHost } from "./ttsr-coordinator";
 const PLAN_MODE_REMINDER_MAX = 3;
 const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 const AGENT_START_POLICY_MAX_ATTEMPTS = 3;
-function assertNativeControlAllowed(_control?: unknown, _externalTurnLifecycle?: unknown): void {}
+function assertNativeControlAllowed(_control?: unknown, externalTurnLifecycle?: boolean): void {
+	if (externalTurnLifecycle) {
+		throw new Error("BreadBoard owns turns; native control is unavailable.");
+	}
+}
 
 /** A failed preparation, not a provider failure: the ordinary input can still be restored. */
 class AgentStartPolicyChangedError extends Error {
@@ -5473,6 +5477,7 @@ export class AgentSession {
 
 	/** True when `auto` thinking mode is active. */
 	get isAutoThinking(): boolean {
+		if (this.#mainStreamOwnsTurnLifecycle) return false;
 		return this.#models.isAutoThinking;
 	}
 
