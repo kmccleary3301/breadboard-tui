@@ -140,17 +140,17 @@ describe("buildDesktopNotifyCommand", () => {
 	it("uses a caller-supplied product identity for the app name and blank-title fallback", () => {
 		expect(
 			buildDesktopNotifyCommand(notifySend, {
-				applicationName: "BreadBoard",
+				applicationName: "Example App",
 				title: " ",
 				body: "Complete",
 			}),
 		).toEqual([
 			"/usr/bin/notify-send",
 			"--app-name",
-			"BreadBoard",
+			"Example App",
 			"--urgency=normal",
 			"--expire-time=5000",
-			"BreadBoard",
+			"Example App",
 			"Complete",
 		]);
 	});

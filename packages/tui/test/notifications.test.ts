@@ -160,13 +160,13 @@ describe("terminal notifications", () => {
 		setOsc99Supported(true);
 		const terminal = getTerminalInfo("kitty");
 		const out = terminal.formatNotification({
-			applicationName: "BreadBoard",
+			applicationName: "Example App",
 			title: "Session",
 			body: "Complete",
 			id: "product",
 		});
 
-		expect(out).toStartWith("\x1b]99;i=product:f=QnJlYWRCb2FyZA==:d=0;Session\x1b\\");
+		expect(out).toStartWith("\x1b]99;i=product:f=RXhhbXBsZSBBcHA=:d=0;Session\x1b\\");
 	});
 
 	it("base64-encodes unsafe OSC 99 payload controls", () => {
@@ -258,7 +258,7 @@ describe("terminal notifications", () => {
 		const unref = vi.fn();
 		const spawn = vi.spyOn(Bun, "spawn").mockImplementation((..._args: unknown[]) => ({ unref }) as never);
 
-		TERMINAL.sendNotification({ applicationName: "BreadBoard", body: "Complete" });
+		TERMINAL.sendNotification({ applicationName: "Example App", body: "Complete" });
 
 		expect(spawn).toHaveBeenCalledWith({
 			cmd: [
@@ -267,7 +267,7 @@ describe("terminal notifications", () => {
 				"--surface",
 				"123e4567-e89b-12d3-a456-426614174000",
 				"--title",
-				"BreadBoard",
+				"Example App",
 				"--body",
 				"Complete",
 			],
