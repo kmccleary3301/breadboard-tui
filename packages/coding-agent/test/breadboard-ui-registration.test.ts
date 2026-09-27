@@ -1,5 +1,13 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { registerBreadboardUi, unregisterBreadboardUi } from "../src/breadboard/ui";
+import { getSettingTabs } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import { composerSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/composer";
+import { glyphSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/glyph";
+import { modelSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/model";
+import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/providers";
+import { themeSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/theme";
+import { getSetupScenes } from "@oh-my-pi/pi-tui/setup/wizard";
+import { informationLayoutSetupScene } from "../src/breadboard/ui/information-layout";
 import {
 	getAvailableSymbolPresets,
 	getAvailableThemes,
@@ -90,5 +98,42 @@ describe("BreadBoard UI registration slice", () => {
 		const restoredThemes = await getAvailableThemes();
 		expect(restoredThemes).not.toContain("breadboard");
 		expect(restoredThemes).not.toContain("breadboard-light");
+	});
+
+	// Upstream v18.3.0 lists (settings-defs.ts SETTING_TABS, wizard.ts ALL_SCENES).
+	const UPSTREAM_TABS = [
+		"appearance",
+		"model",
+		"interaction",
+		"context",
+		"memory",
+		"files",
+		"shell",
+		"tools",
+		"tasks",
+		"providers",
+	];
+	const upstreamSceneIds = () =>
+		[providersSetupScene, modelSetupScene, glyphSetupScene, composerSetupScene, themeSetupScene].map(
+			scene => scene.id,
+		);
+
+	it("adds the BreadBoard settings tab and setup scene only while registered", () => {
+		expect(getSettingTabs()).toEqual(UPSTREAM_TABS);
+		expect(getSetupScenes().map(scene => scene.id)).toEqual(upstreamSceneIds());
+
+		registerBreadboardUi();
+		expect(getSettingTabs()).toEqual([...UPSTREAM_TABS, "breadboard"]);
+		const [providers, model, ...rest] = upstreamSceneIds();
+		expect(getSetupScenes().map(scene => scene.id)).toEqual([
+			providers,
+			model,
+			informationLayoutSetupScene.id,
+			...rest,
+		]);
+
+		unregisterBreadboardUi();
+		expect(getSettingTabs()).toEqual(UPSTREAM_TABS);
+		expect(getSetupScenes().map(scene => scene.id)).toEqual(upstreamSceneIds());
 	});
 });
