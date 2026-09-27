@@ -187,7 +187,7 @@ export class Theme {
 			this.#hexBgColors[key] = resolveToHex(value, slIsLight);
 		}
 		// Build symbol map from preset + overrides
-		const baseSymbols = SYMBOL_PRESETS[symbolPreset];
+		const baseSymbols = (SYMBOL_PRESETS as Record<string, SymbolMap>)[symbolPreset] ?? SYMBOL_PRESETS.unicode;
 		this.#symbols = { ...baseSymbols };
 		for (const [key, value] of Object.entries(symbolOverrides)) {
 			if (key in this.#symbols) {
@@ -469,15 +469,15 @@ export class Theme {
 	/**
 	 * Get a symbol by key.
 	 */
-	symbol(key: SymbolKey): string {
-		return this.#symbols[key];
+	symbol(key: SymbolKey | (string & {})): string {
+		return (this.#symbols as Record<string, string>)[key] ?? "";
 	}
 
 	/**
 	 * Get a symbol styled with a color.
 	 */
-	styledSymbol(key: SymbolKey, color: ThemeColor): string {
-		return this.fg(color, this.#symbols[key]);
+	styledSymbol(key: SymbolKey | (string & {}), color: ThemeColor): string {
+		return this.fg(color, this.symbol(key));
 	}
 
 	/**
@@ -787,7 +787,7 @@ export class Theme {
 	 * Get spinner frames by type.
 	 */
 	getSpinnerFrames(type: SpinnerType = "status"): string[] {
-		return this.#spinnerFramesOverrides[type] ?? SPINNER_FRAMES[this.symbolPreset][type];
+		return this.#spinnerFramesOverrides[type] ?? (SPINNER_FRAMES as Record<string, Record<SpinnerType, string[]>>)[this.symbolPreset]?.[type] ?? SPINNER_FRAMES.unicode[type];
 	}
 
 	/**

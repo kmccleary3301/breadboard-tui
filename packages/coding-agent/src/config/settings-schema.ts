@@ -1,3 +1,4 @@
+import { getSymbolPresetInfos, type SymbolPreset } from "@oh-my-pi/pi-tui/theme/symbols";
 import { type AuthAccountPolicies, DEFAULT_USAGE_RESERVE_PCT } from "@oh-my-pi/pi-ai/auth-storage";
 import { ADVISOR_DEFAULT_BUDGET_PER_UPDATE } from "../advisor/emission-guard";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
@@ -818,23 +819,20 @@ export const SETTINGS_SCHEMA = {
 
 	symbolPreset: {
 		type: "enum",
-		values: ["unicode", "nerd", "emoji", "ascii"] as const,
+		values: ["unicode", "nerd", "emoji", "ascii"] as const satisfies readonly SymbolPreset[],
 		default: "unicode",
 		ui: {
 			tab: "appearance",
 			group: "Theme",
 			label: "Symbol Preset",
 			description: "Choose restrained symbols, Nerd Font icons, emoji, or plain ASCII",
-			options: [
-				{ value: "unicode", label: "Unicode", description: "Restrained monochrome symbols (default)" },
-				{
-					value: "nerd",
-					label: "Nerd Font",
-					description: "Requires a Nerd Font, or a Glyph Protocol terminal (icons ship in-band)",
-				},
-				{ value: "emoji", label: "Emoji", description: "Expressive icons; preview terminal alignment" },
-				{ value: "ascii", label: "ASCII", description: "Maximum compatibility" },
-			],
+			get options() {
+				return getSymbolPresetInfos().map(info => ({
+					value: info.preset,
+					label: info.label,
+					description: info.description,
+				}));
+			},
 		},
 	},
 

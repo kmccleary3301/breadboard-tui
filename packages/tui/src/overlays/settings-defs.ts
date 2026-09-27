@@ -15,7 +15,7 @@ export type SettingTab =
 	| "breadboard";
 
 /** Tab display metadata - icon is resolved via theme.symbol() */
-export type TabMetadata = { label: string; icon: Extract<SymbolKey, `tab.${string}`> };
+export type TabMetadata = { label: string; icon: Extract<SymbolKey, `tab.${string}`> | `tab.${string}` };
 
 /** Ordered list of tabs for UI rendering */
 export const SETTING_TABS: SettingTab[] = [

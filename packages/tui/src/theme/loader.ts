@@ -21,8 +21,24 @@ const BUILTIN_THEMES: Record<string, ThemeJson> = {
 	...(defaultThemes as Record<string, ThemeJson>),
 };
 
+const REGISTERED_BUILTIN_THEMES = new Map<string, ThemeJson>();
+
+export function registerBuiltinTheme(name: string, themeJson: ThemeJson): () => void {
+	REGISTERED_BUILTIN_THEMES.set(name, themeJson);
+	return () => {
+		REGISTERED_BUILTIN_THEMES.delete(name);
+	};
+}
+
 export function getBuiltinThemes(): Record<string, ThemeJson> {
-	return BUILTIN_THEMES;
+	if (REGISTERED_BUILTIN_THEMES.size === 0) {
+		return BUILTIN_THEMES;
+	}
+	const result = { ...BUILTIN_THEMES };
+	for (const [name, themeJson] of REGISTERED_BUILTIN_THEMES) {
+		result[name] = themeJson;
+	}
+	return result;
 }
 
 export async function getAvailableThemes(): Promise<string[]> {

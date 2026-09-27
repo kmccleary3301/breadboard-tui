@@ -449,7 +449,7 @@ export class WelcomeComponent implements Component {
 		// Right column hints
 		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
 		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
-		// BreadBoard's identity line is intentionally a single compact row.
+		// The harness identity line is intentionally a single compact row.
 		const harness = this.harness;
 		let harnessIdentity = "";
 		if (harness) {
@@ -676,7 +676,7 @@ export interface ShineConfig {
 /**
  * Resolve the gradient SGR foreground escape for a normalized horizontal
  * position `t` (0..1), compositing the optional sliding shine highlight.
- * The truecolor path uses OKLCH interpolation with the original BreadBoard
+ * The truecolor path uses OKLCH interpolation with the active product
  * palette; indexed modes use the frozen palette ramps.
  * Shared by {@link gradientLogo} and the setup splash so both encode identical
  * truecolor, indexed, basic-color, or plain output.

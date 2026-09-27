@@ -2,7 +2,8 @@
 // Symbol Presets
 // ============================================================================
 
-export type SymbolPreset = "unicode" | "nerd" | "emoji" | "ascii";
+export type BuiltinSymbolPreset = "unicode" | "nerd" | "ascii";
+export type SymbolPreset = BuiltinSymbolPreset | (string & {});
 
 /**
  * All available symbol keys organized by category.
@@ -261,7 +262,6 @@ export type SymbolKey =
 	| "tab.memory"
 	| "tab.tasks"
 	| "tab.providers"
-	| "tab.breadboard"
 	// Tool identity icons
 	| "tool.write"
 	| "tool.edit"
@@ -367,7 +367,7 @@ export type SlashCommandIconName =
 	| "mcp"
 	| "pin";
 
-const EMOJI_SYMBOLS: SymbolMap = {
+const UNICODE_SYMBOLS: SymbolMap = {
 	// Status
 	"status.success": "✔",
 	"status.error": "✘",
@@ -622,7 +622,6 @@ const EMOJI_SYMBOLS: SymbolMap = {
 	"tab.memory": "🧠",
 	"tab.tasks": "📦",
 	"tab.providers": "🌐",
-	"tab.breadboard": "🍞",
 	// Tool identity icons (per-tool signature glyph on the success header)
 	"tool.write": "✎",
 	"tool.edit": "✎",
@@ -648,135 +647,6 @@ const EMOJI_SYMBOLS: SymbolMap = {
 	"tool.irc": "✉",
 	"tool.delete": "🗑",
 	"tool.move": "➜",
-};
-/**
- * Unicode keeps the composer and status chrome monochrome and terminal-safe.
- * Emoji remains available as a separate expressive preset, while language and
- * extension labels retain short, legible text rather than color glyphs.
- */
-const UNICODE_SYMBOLS: SymbolMap = {
-	...EMOJI_SYMBOLS,
-	// Composer/status icons.
-	"status.pending": "…",
-	"icon.time": "◷",
-	"icon.job": "✣",
-	"icon.throughput": "↯",
-	"icon.fast": "↯",
-	"icon.plan": "☷",
-	"icon.prewalk": "▶",
-	"icon.goal": "◎",
-	"icon.folder": "▱",
-	"icon.worktree": "♧",
-	"icon.search": "⌕",
-	"icon.scratchFolder": "⊗",
-	"icon.file": "▤",
-	"icon.pin": "⌖",
-	"icon.tokens": "◈",
-	"icon.cost": "$",
-	"icon.advisor": "◉",
-	"icon.advisorClosed": "○",
-	"icon.ghost": "◌",
-	"icon.agents": "♧",
-	"icon.cache": "▣",
-	"icon.intelligence": "✧",
-	"icon.host": "▦",
-	"icon.session": "◫",
-	"icon.package": "▦",
-	"icon.extensionTool": "†",
-	"icon.extensionMcp": "⌘",
-	"icon.extensionHook": "↪",
-	"icon.extensionContextFile": "⌑",
-	"icon.extensionInstruction": "▧",
-	// Slash-command indicators.
-	"cmd.extension": "◇",
-	"cmd.settings": "✣",
-	"cmd.gear": "✣",
-	"cmd.shield": "⚑",
-	"cmd.compass": "⊙",
-	"cmd.inbox": "⇩",
-	"cmd.computer": "▣",
-	"cmd.eye": "◉",
-	"cmd.stats": "▥",
-	"cmd.news": "▤",
-	"cmd.export": "⇧",
-	"cmd.clipboard": "▱",
-	"cmd.broadcast": "⌁",
-	"cmd.globe": "◎",
-	"cmd.eraser": "⌫",
-	"cmd.trash": "⌑",
-	"cmd.compress": "≋",
-	"cmd.vibrate": "≋",
-	"cmd.history": "↶",
-	"cmd.question": "?",
-	"cmd.rocket": "↗",
-	"cmd.stethoscope": "⊙",
-	"cmd.redo": "↻",
-	"cmd.bug": "♣",
-	"cmd.memory": "▦",
-	"cmd.folderMove": "↪",
-	"cmd.folderPlus": "⊞",
-	"cmd.hammer": "†",
-	"cmd.cart": "▣",
-	"icon.mic": "♩",
-	"icon.camera": "▧",
-	// Language/file labels stay monochrome and width-stable.
-	"lang.typescript": "TS",
-	"lang.javascript": "JS",
-	"lang.python": "Py",
-	"lang.rust": "Rs",
-	"lang.go": "Go",
-	"lang.java": "J",
-	"lang.c": "C",
-	"lang.cpp": "C++",
-	"lang.csharp": "C#",
-	"lang.ruby": "Rb",
-	"lang.julia": "Jl",
-	"lang.php": "PHP",
-	"lang.swift": "Sw",
-	"lang.kotlin": "Kt",
-	"lang.shell": "$",
-	"lang.html": "<>",
-	"lang.css": "#",
-	"lang.json": "{}",
-	"lang.yaml": "YAML",
-	"lang.markdown": "Md",
-	"lang.sql": "SQL",
-	"lang.docker": "Dk",
-	"lang.lua": "Lu",
-	"lang.text": "Tx",
-	"lang.env": "Env",
-	"lang.toml": "Toml",
-	"lang.log": "Log",
-	"lang.csv": "Csv",
-	"lang.tsv": "Tsv",
-	"lang.image": "Img",
-	"lang.archive": "Arc",
-	"lang.binary": "Bin",
-	"lang.ini": "Ini",
-	"lang.conf": "Cfg",
-	// Attachment chips and settings tabs.
-	"chip.image": "▧",
-	"chip.video": "▥",
-	"chip.paste": "▤",
-	"tab.appearance": "✦",
-	"tab.model": "◆",
-	"tab.context": "▤",
-	"tab.files": "▱",
-	"tab.shell": "$",
-	"tab.tools": "†",
-	"tab.memory": "▦",
-	"tab.tasks": "☑",
-	"tab.providers": "◎",
-	"tab.breadboard": "⌘",
-	// Tool identity icons.
-	"tool.lsp": "?",
-	"tool.exa": "◌",
-	"tool.browser": "◎",
-	"tool.debug": "♣",
-	"tool.mcp": "⌘",
-	"tool.launch": "↗",
-	"tool.memory": "▦",
-	"tool.delete": "⌫",
 };
 
 const NERD_SYMBOLS: SymbolMap = {
@@ -1204,7 +1074,6 @@ const NERD_SYMBOLS: SymbolMap = {
 	"tab.memory": "󰧑",
 	"tab.tasks": "󰐱",
 	"tab.providers": "󰖟",
-	"tab.breadboard": "󰐱",
 	// Tool identity icons (per-tool signature glyph on the success header)
 	"tool.write": "\uEA7F",
 	"tool.edit": "\uEA73",
@@ -1481,7 +1350,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"tab.memory": "[Y]",
 	"tab.tasks": "[K]",
 	"tab.providers": "[P]",
-	"tab.breadboard": "[B]",
 	// Tool identity icons (per-tool signature glyph on the success header)
 	"tool.write": "+f",
 	"tool.edit": "~",
@@ -1512,7 +1380,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 export const SYMBOL_PRESETS: Record<SymbolPreset, SymbolMap> = {
 	unicode: UNICODE_SYMBOLS,
 	nerd: NERD_SYMBOLS,
-	emoji: EMOJI_SYMBOLS,
 	ascii: ASCII_SYMBOLS,
 };
 
@@ -1526,10 +1393,6 @@ export const SPINNER_FRAMES: Record<SymbolPreset, Record<SpinnerType, string[]>>
 	nerd: {
 		status: ["󱑖", "󱑋", "󱑌", "󱑍", "󱑎", "󱑏", "󱑐", "󱑑", "󱑒", "󱑓", "󱑔", "󱑕"],
 		activity: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-	},
-	emoji: {
-		status: ["⏳", "⌛", "🔄", "🔃"],
-		activity: ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"],
 	},
 	ascii: {
 		status: ["|", "/", "-", "\\"],
@@ -1556,16 +1419,149 @@ export function normalizeSpinnerFramesOverride(
 	return result;
 }
 
+export interface SymbolPresetOptions {
+	spinnerFrames?: Record<SpinnerType, string[]>;
+	inherit?: SymbolPreset;
+	label?: string;
+	sample?: string;
+	description?: string;
+}
+
+export interface SymbolPresetInfo {
+	preset: SymbolPreset;
+	label: string;
+	sample: string;
+	description?: string;
+}
+
+const DEFAULT_PRESET_METADATA: Record<string, { label: string; sample: string; description?: string }> = {
+	unicode: {
+		label: "Unicode",
+		sample: "✔  ✖  📁  ⬢  ╭─╮  ├─  •  ⠋  →",
+		description: "Standard symbols (default)",
+	},
+	nerd: {
+		label: "Nerd Font",
+		sample: "      󰉋  ",
+		description: "Requires a Nerd Font, or a Glyph Protocol terminal (icons ship in-band)",
+	},
+	ascii: {
+		label: "ASCII",
+		sample: "[ok]  [x]  >  +  [D]  +-+  |--  *  ->",
+		description: "Maximum compatibility",
+	},
+};
+
+const REGISTERED_METADATA = new Map<string, { label?: string; sample?: string; description?: string }>();
+
+export function registerSymbolPreset(
+	name: string,
+	symbols: Partial<SymbolMap> | Record<string, string>,
+	options?: SymbolPresetOptions,
+): () => void {
+	const hadExisting = name in SYMBOL_PRESETS;
+	const prevSymbols = (SYMBOL_PRESETS as Record<string, SymbolMap>)[name];
+	const prevSpinners = (SPINNER_FRAMES as Record<string, Record<SpinnerType, string[]>>)[name];
+	const prevMeta = REGISTERED_METADATA.get(name);
+
+	const basePreset = options?.inherit ?? "unicode";
+	const base = (SYMBOL_PRESETS as Record<string, SymbolMap>)[basePreset] ?? UNICODE_SYMBOLS;
+	(SYMBOL_PRESETS as Record<string, SymbolMap>)[name] = { ...base, ...symbols } as SymbolMap;
+
+	if (options?.spinnerFrames) {
+		(SPINNER_FRAMES as Record<string, Record<SpinnerType, string[]>>)[name] = options.spinnerFrames;
+	}
+	if (options?.label || options?.sample || options?.description) {
+		REGISTERED_METADATA.set(name, {
+			label: options.label,
+			sample: options.sample,
+			description: options.description,
+		});
+	}
+
+	return () => {
+		if (hadExisting) {
+			(SYMBOL_PRESETS as Record<string, SymbolMap>)[name] = prevSymbols;
+			if (prevSpinners) {
+				(SPINNER_FRAMES as Record<string, Record<SpinnerType, string[]>>)[name] = prevSpinners;
+			} else {
+				delete (SPINNER_FRAMES as Record<string, unknown>)[name];
+			}
+			if (prevMeta) {
+				REGISTERED_METADATA.set(name, prevMeta);
+			} else {
+				REGISTERED_METADATA.delete(name);
+			}
+		} else {
+			delete (SYMBOL_PRESETS as Record<string, unknown>)[name];
+			delete (SPINNER_FRAMES as Record<string, unknown>)[name];
+			REGISTERED_METADATA.delete(name);
+		}
+	};
+}
+
+export function registerSymbolOverrides(
+	preset: string,
+	overrides: Partial<SymbolMap> | Record<string, string>,
+	meta?: { label?: string; sample?: string; description?: string },
+): () => void {
+	const target = (SYMBOL_PRESETS as Record<string, SymbolMap>)[preset];
+	if (!target) return () => {};
+
+	const previous: Record<string, string | undefined> = {};
+	for (const [key, value] of Object.entries(overrides)) {
+		previous[key] = (target as Record<string, string>)[key];
+		(target as Record<string, string>)[key] = value;
+	}
+	const prevMeta = REGISTERED_METADATA.get(preset);
+	if (meta) {
+		REGISTERED_METADATA.set(preset, { ...REGISTERED_METADATA.get(preset), ...meta });
+	}
+
+	return () => {
+		for (const [key, prevVal] of Object.entries(previous)) {
+			if (prevVal === undefined) {
+				delete (target as Record<string, string>)[key];
+			} else {
+				(target as Record<string, string>)[key] = prevVal;
+			}
+		}
+		if (meta) {
+			if (prevMeta) {
+				REGISTERED_METADATA.set(preset, prevMeta);
+			} else {
+				REGISTERED_METADATA.delete(preset);
+			}
+		}
+	};
+}
+
 /**
  * Get available symbol presets.
  */
 export function getAvailableSymbolPresets(): SymbolPreset[] {
-	return ["unicode", "nerd", "emoji", "ascii"];
+	return Object.keys(SYMBOL_PRESETS) as SymbolPreset[];
 }
 
 /**
  * Check if a string is a valid symbol preset.
  */
 export function isValidSymbolPreset(preset: string): preset is SymbolPreset {
-	return preset === "unicode" || preset === "nerd" || preset === "emoji" || preset === "ascii";
+	return preset in SYMBOL_PRESETS;
+}
+
+export function getSymbolPresetInfos(): SymbolPresetInfo[] {
+	return getAvailableSymbolPresets().map(preset => {
+		const meta = REGISTERED_METADATA.get(preset);
+		const def = DEFAULT_PRESET_METADATA[preset] ?? {
+			label: preset,
+			sample: "",
+		};
+		return {
+			preset,
+			label: meta?.label ?? def.label,
+			sample: meta?.sample ?? def.sample,
+			description: meta?.description ?? def.description,
+		};
+	});
 }

@@ -12,14 +12,19 @@ import type { ColorMode, ThemeColor, ThemeJson } from "./schema";
 import type { SymbolPreset } from "./symbols";
 import type { Theme } from "./theme-class";
 
-export { getAvailableThemes, getAvailableThemesWithPaths, getThemeByName, type ThemeInfo } from "./loader";
+export { getAvailableThemes, getAvailableThemesWithPaths, getThemeByName, registerBuiltinTheme, type ThemeInfo } from "./loader";
 export { isValidThemeColor, type ThemeBg, type ThemeColor } from "./schema";
 export {
 	getAvailableSymbolPresets,
+	getSymbolPresetInfos,
 	isValidSymbolPreset,
+	registerSymbolPreset,
+	registerSymbolOverrides,
 	type SpinnerType,
 	type SymbolKey,
 	type SymbolPreset,
+	type SymbolPresetInfo,
+	type SymbolPresetOptions,
 } from "./symbols";
 export { Theme } from "./theme-class";
 export {
