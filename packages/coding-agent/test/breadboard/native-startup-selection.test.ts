@@ -45,6 +45,23 @@ describe("native startup selection", () => {
 		).toBe("native");
 	});
 
+	it("never refuses in stock OMP, which runs native only on an explicit native request", () => {
+		for (const mode of ["local-owned", "local-external", "remote"]) {
+			expect(resolveBreadboardEngineMode({ engineMode: mode }, settingsWith(), false, {})).toBe("off");
+			expect(resolveBreadboardEngineMode({}, settingsWith(), false, { BREADBOARD_ENGINE_MODE: mode })).toBe("off");
+			expect(resolveBreadboardEngineMode({}, settingsWith({ engineMode: mode }), false, {})).toBe("off");
+		}
+		expect(resolveBreadboardEngineMode({ engineUrl: "http://127.0.0.1:1" }, settingsWith(), false, {})).toBe("off");
+		expect(
+			resolveBreadboardEngineMode({}, settingsWith({ engineArtifact: { path: "/bundle" } }), false, {
+				BREADBOARD_API_URL: "http://127.0.0.1:1",
+			}),
+		).toBe("off");
+		expect(resolveBreadboardEngineMode({}, settingsWith(), false, { BREADBOARD_ENGINE_MODE: "native" })).toBe(
+			"native",
+		);
+	});
+
 	it("refuses every bridge source with exit code 2, naming the source", () => {
 		const none = settingsWith();
 		for (const mode of ["local-owned", "local-external", "remote"]) {

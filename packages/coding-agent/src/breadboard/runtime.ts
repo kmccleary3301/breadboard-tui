@@ -43,7 +43,8 @@ function readBreadboardSettings(activeSettings: Settings): Record<string, unknow
 /**
  * Resolves the engine mode from `--engine-mode`, then `BREADBOARD_ENGINE_MODE`, then
  * `breadboard.engineMode`. Unset means `native` for the product and `off` for stock OMP.
- * Any request for the removed Python bridge throws `BreadboardBridgeRefusalError`.
+ * The product throws `BreadboardBridgeRefusalError` for any request for the removed Python bridge;
+ * stock OMP never refuses and runs native only on an explicit `native` request.
  */
 export function resolveBreadboardEngineMode(
 	parsed: Pick<Args, "engineMode" | "engineUrl">,
@@ -51,6 +52,11 @@ export function resolveBreadboardEngineMode(
 	isBreadboardProduct = IS_BREADBOARD_PRODUCT,
 	environment: Readonly<Record<string, string | undefined>> = process.env,
 ): BreadboardEngineMode {
+	if (!isBreadboardProduct) {
+		const raw = activeSettings.getRaw("breadboard");
+		const configured = isRecord(raw) ? raw.engineMode : undefined;
+		return (parsed.engineMode ?? environment.BREADBOARD_ENGINE_MODE ?? configured) === "native" ? "native" : "off";
+	}
 	const selected = readBreadboardSettings(activeSettings);
 	assertNoBridgeRequested({
 		cli: { engineMode: parsed.engineMode, engineUrl: parsed.engineUrl },

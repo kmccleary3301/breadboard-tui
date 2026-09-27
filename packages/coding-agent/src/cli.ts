@@ -449,7 +449,9 @@ export async function runCli(argv: string[], options: { readonly processEntry?: 
 	try {
 		const extracted = extractProfileFlags(resolvedArgv);
 		resolvedArgv = extracted.argv;
-		const refusal = detectBridgeRefusal({ argv: resolvedArgv, environment: process.env });
+		const refusal = IS_BREADBOARD_PRODUCT
+			? detectBridgeRefusal({ argv: resolvedArgv, environment: process.env })
+			: undefined;
 		if (refusal) {
 			process.stderr.write(`${formatBridgeRefusal(refusal.source, refusal.value)}\n`);
 			process.exitCode = 2;

@@ -207,8 +207,11 @@ describe("BreadBoard product entrypoint", () => {
 			const lightBase = await Bun.file("../tui/src/theme/light.json").json();
 			await Bun.write(path.join(themesDir, "identity-custom-dark.json"), JSON.stringify({ ...darkBase, name: "identity-custom-dark" }));
 			await Bun.write(path.join(themesDir, "identity-custom-light.json"), JSON.stringify({ ...lightBase, name: "identity-custom-light" }));
-			// coding-agent registers the active product identity with pi-tui on import.
+			// coding-agent registers the active product identity with pi-tui on import;
+			// bb.ts registers the BreadBoard themes before startup.
 			await import("./src/product-identity.ts");
+			const { registerBreadboardThemes } = await import("./src/breadboard/ui/themes.ts");
+			registerBreadboardThemes();
 			const { Settings } = await import("./src/config/settings.ts");
 			const theme = await import("@oh-my-pi/pi-tui/theme/theme");
 			await Settings.init({ inMemory: true });
