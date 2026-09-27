@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	assertNoBridgeRequested,
 	BreadboardBridgeRefusalError,
@@ -102,5 +105,73 @@ describe("bridge refusal", () => {
 	test("defaults cleanly when no bridge options are specified", () => {
 		expect(detectBridgeRefusal({})).toBeNull();
 		expect(detectBridgeRefusal({ environment: { BREADBOARD_PRODUCT: "1" } })).toBeNull();
+	});
+});
+
+describe("bb refuses bridge settings before any subcommand opens state", () => {
+	const packageRoot = path.resolve(import.meta.dir, "../..");
+
+	async function runBb(args: readonly string[], root: string) {
+		const child = Bun.spawn([process.execPath, "src/bb.ts", ...args], {
+			cwd: packageRoot,
+			env: {
+				PATH: Bun.env.PATH ?? "/usr/bin:/bin",
+				HOME: root,
+				PI_CODING_AGENT_DIR: path.join(root, "agent"),
+				BREADBOARD_CONFIG_DIR: path.join(root, "config"),
+				BREADBOARD_PRODUCT: "1",
+			},
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [stdout, stderr, exitCode] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		return { stdout, stderr, exitCode };
+	}
+
+	test("a --config overlay requesting the bridge stops `models`, `config` and `-p` with exit 2", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "bb-settings-refusal-"));
+		try {
+			const overlay = path.join(root, "bridge.yml");
+			fs.writeFileSync(overlay, "breadboard:\n  baseUrl: http://127.0.0.1:9099\n");
+			const message = formatBridgeRefusal("breadboard.baseUrl", "http://127.0.0.1:9099");
+			const runs = await Promise.all([
+				runBb(["models", "--config", overlay], root),
+				runBb([`--config=${overlay}`, "config", "list"], root),
+				runBb(["--config", overlay, "-p", "hi"], root),
+			]);
+			for (const run of runs) {
+				expect(run.exitCode).toBe(2);
+				expect(run.stderr.trim()).toBe(message);
+				expect(run.stdout).toBe("");
+			}
+			expect(fs.existsSync(path.join(root, "agent", "agent.db"))).toBe(false);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("the global config requesting a bridge mode stops a subcommand; native mode does not", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "bb-settings-refusal-"));
+		try {
+			fs.mkdirSync(path.join(root, "agent"), { recursive: true });
+			const config = path.join(root, "agent", "config.yml");
+			fs.writeFileSync(config, "breadboard:\n  engineMode: local-owned\n");
+			const refused = await runBb(["models"], root);
+			expect(refused.exitCode).toBe(2);
+			expect(refused.stderr.trim()).toBe(formatBridgeRefusal("breadboard.engineMode", "local-owned"));
+			expect(fs.existsSync(path.join(root, "agent", "agent.db"))).toBe(false);
+
+			fs.writeFileSync(config, "breadboard:\n  engineMode: native\n");
+			const accepted = await runBb(["models", "--help"], root);
+			expect(accepted.exitCode).toBe(0);
+			expect(accepted.stderr).not.toContain("bridge was removed");
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

@@ -453,11 +453,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/modes/components/agent-hub/activity-view.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/coding-agent/src/modes/components/agent-hub/harness-view.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -466,16 +461,6 @@
 			"path": "packages/coding-agent/src/modes/components/agent-hub/messages-view.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/agent-hub/roster-view.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/modes/components/breadboard-tool-renderers.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/modes/controllers/command-controller.ts",
@@ -795,16 +780,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/test/modes/components/breadboard-provider-auth-selector.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/modes/components/breadboard-tool-renderers.test.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/test/modes/components/composer-shape-preview.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -1070,11 +1045,6 @@
 		},
 		{
 			"path": "packages/tui/src/overlays/agent-hub.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/tui/src/overlays/breadboard-provider-auth-selector.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},

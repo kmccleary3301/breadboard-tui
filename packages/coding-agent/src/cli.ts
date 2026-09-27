@@ -43,7 +43,7 @@ import {
 import type * as JsProcessEntry from "./eval/js/process-entry";
 import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
 import { parseStartupPrepaintArgs } from "./startup-prepaint-args";
-import { detectBridgeRefusal, formatBridgeRefusal } from "./breadboard/bridge-refusal";
+import { detectBridgeRefusal, detectSettingsBridgeRefusal, formatBridgeRefusal } from "./breadboard/bridge-refusal";
 
 if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
 	process.stderr.write(
@@ -556,7 +556,19 @@ export async function runCli(argv: string[], options: { readonly processEntry?: 
 		resolvedArgv[0] === "--version" ||
 		resolvedArgv[0] === "-v" ||
 		resolvedArgv[0] === "help";
-	await Promise.all([setFullProcessName(), helpOrVersion ? Promise.resolve() : installNetworkBootstrap()]);
+	const [, , settingsRefusal] = await Promise.all([
+		setFullProcessName(),
+		helpOrVersion ? Promise.resolve() : installNetworkBootstrap(),
+		// Before any command opens agent.db or the auth store, bridge settings refuse every subcommand.
+		IS_BREADBOARD_PRODUCT && !helpOrVersion ? detectSettingsBridgeRefusal(resolvedArgv) : null,
+	]);
+	if (settingsRefusal) {
+		stopStartupComposer?.();
+		process.stderr.write(`${formatBridgeRefusal(settingsRefusal.source, settingsRefusal.value)}\n`);
+		process.exitCode = 2;
+		if (isProcessEntry) process.exit(2);
+		return;
+	}
 
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();

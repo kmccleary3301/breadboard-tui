@@ -1,6 +1,7 @@
 /**
  * Refusal for retired Python engine bridge modes and options.
  */
+import * as path from "node:path";
 
 export class BreadboardBridgeRefusalError extends Error {
 	readonly source: string;
@@ -127,4 +128,48 @@ export function assertNoBridgeRequested(input: BridgeRefusalCheckInput): void {
 	if (refusal) {
 		throw new BreadboardBridgeRefusalError(refusal.source, refusal.value);
 	}
+}
+
+/** `--config` overlays and `--cwd`, read the way launch and `models` consume them (the next token, always). */
+function settingsLocationFlags(argv: readonly string[]): { configFiles: string[]; cwd?: string } {
+	const configFiles: string[] = [];
+	let cwd: string | undefined;
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === "--") break;
+		if ((arg === "--config" || arg === "--cwd") && i + 1 < argv.length) {
+			if (arg === "--config") configFiles.push(argv[i + 1]);
+			else cwd = argv[i + 1];
+			i++;
+		} else if (arg.startsWith("--config=")) {
+			configFiles.push(arg.slice("--config=".length));
+		} else if (arg.startsWith("--cwd=")) {
+			cwd = arg.slice("--cwd=".length);
+		}
+	}
+	return { configFiles, cwd };
+}
+
+/**
+ * Refusal requested by effective `breadboard.*` settings (global, project, `PI_CONFIG_FILES` and `--config`
+ * overlays). Reads settings without opening agent.db, so a refused launch leaves no state behind, whatever
+ * subcommand follows. Unreadable settings are left for the command's own settings load to report.
+ */
+export async function detectSettingsBridgeRefusal(
+	argv: readonly string[],
+): Promise<{ readonly source: string; readonly value: string } | null> {
+	const { configFiles, cwd } = settingsLocationFlags(argv);
+	const { Settings } = await import("../config/settings");
+	let selected: unknown;
+	try {
+		const settings = await Settings.loadReadOnly({
+			cwd: cwd === undefined ? undefined : path.resolve(cwd),
+			configFiles,
+		});
+		selected = settings.getRaw("breadboard");
+	} catch {
+		return null;
+	}
+	if (typeof selected !== "object" || selected === null || Array.isArray(selected)) return null;
+	return detectBridgeRefusal({ environment: {}, selectedConfig: selected as Record<string, unknown> });
 }

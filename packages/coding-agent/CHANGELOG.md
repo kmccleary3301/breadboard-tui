@@ -1,95 +1,35 @@
 # Changelog
 
 ## [Unreleased]
-### Removed
-
-- Retired the Python engine bridge, SDK client (`@breadboard/sdk`), and engine attach modes (`local-owned`, `local-external`, `remote`). The product executes its turn loop directly through the native TypeScript runtime and native harness package (`@breadboard/harness`).
-- Configured bridge requests via CLI flags (`--engine-mode`, `--engine-url`), environment variables (`BREADBOARD_ENGINE_MODE`, `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`), or profile settings now explicitly refuse launch with a clear error pointing to the native default (`native`). The only supported engine modes are `native` and `off`.
-- Removed bridge lifecycle supervisor, engine distribution selection/installer, OMP auth gateway, verified Darwin spawn, shared-engine worker/client protocol, and the `engine` subcommand.
 ### Added
 
-- Added BreadBoard Balanced, Quiet, and Detailed information layouts, with shared live/setup previews and width-aware priority for actionable state.
-- Added per-field BreadBoard composer customization with staged Apply/Cancel, a live preview, and a layout-only reset. Shape and glyph preferences remain independent.
-- Added an independent Emoji glyph preset alongside restrained Unicode, Nerd Font, and ASCII.
-- Added `bb research compare` for durable recorded-run comparison through the installed engine, with stable run/report identities, restart recovery, and semantic failure codes.
-- Added shared OMP subscription authentication for attached local BreadBoard engines through an authenticated loopback inference gateway, retaining BreadBoard tools and permissions without copying provider credentials.
-- Added a caller-workspace launcher with separate per-project runtime state and workspace-contained harness resources; conflicting project resources are never overwritten.
-- Added engine-owned persistent IPython and JavaScript evaluation for process-backed sessions, with bundled runtimes, per-language reset, shell approvals, bounded output, cancellation, and session-owned cleanup. Docker-backed eval and native OMP's tool/delegation prelude are not supported.
+- BreadBoard runs on OMP's own turn loop through the native harness package (`@breadboard/harness`). The default harness is `bb-omp.native`; `--harness` takes a built-in harness id or a harness spec path.
+- Built-in research harnesses `claude_code`, `codex`, `opencode`, `oh_my_opencode`, `pi` and `oh_my_pi`. They use OMP's write and replacement-edit schemas and require write approval for file mutations.
+- `/harness reload` recompiles the workspace harness spec and applies the next generation at the next turn boundary, or reports why the new spec was rejected.
+- `NativeRpcTransport` in `@breadboard/harness` drives `bb` sessions from TypeScript over OMP's RPC mode, with harness selection and approval handling.
+- BreadBoard Balanced, Quiet and Detailed information layouts, with shared live and setup previews and width-aware priority for actionable state.
+- Per-field BreadBoard composer customization with staged Apply/Cancel, a live preview and a layout-only reset. Shape and glyph preferences are independent.
+- An Emoji glyph preset alongside Unicode, Nerd Font and ASCII.
+- A caller-workspace launcher with separate per-project runtime state and workspace-contained harness resources. Conflicting project resources are never overwritten.
 
 ### Changed
-- The installed product now defaults to the native `bb-omp.native` harness when no engine mode is configured. Python bridge modes remain selectable through `breadboard.engineMode`, `--engine-mode`, or `BREADBOARD_ENGINE_MODE`; the R39 launcher remains the documented rollback.
 
+- The downstream standalone distribution resolves update metadata and self-updates only through its own signed release channel. Upstream OMP and package-manager channels are unchanged for OMP builds.
+- Task defaults in downstream builds are four concurrent subagents, one delegation level and a 30-minute wall clock. OMP builds keep their existing defaults.
+- The welcome screen shows `/login` and `/model`, including on narrow terminals.
+- Streaming Markdown reuses fixed ANSI styles, which reduces rendering overhead without changing terminal output.
+- Restored the stacked BreadBoard wordmark and its red/magenta/blue gradient.
 
-- BreadBoard Balanced now shows compact context and available spend alongside folder, session, branch, and model identity. Unknown accounting and subscription billing remain hidden; effort follows actual gateway request metadata or verified harness configuration.
-- BreadBoard composer metadata reflows between attached edges, preserving whole numeric badges and stable identity alignment as activity changes. Full folder paths, token counts, and session or turn spend are selectable.
-- Integrated official OMP main through `e220aab07e9a10da4953c90bd3b94bb7ff3ceeac`, including v18.2.2 and its subsequent CJK edit fix, while retaining BreadBoard execution and shared subscription authentication.
-- BreadBoard-owned sessions now gate unsupported native subagent, prewalk, plan, compaction, advisor, automation, and tool controls while preserving frontend presentation and scoped helpers.
-- The downstream standalone distribution now resolves update metadata and self-updates only through its own signed release channel; upstream OMP and package-manager channels remain unchanged for OMP builds.
-- Native task defaults in downstream builds are four concurrent subagents, one delegation level, and a 30-minute wall clock. These settings do not provide a BreadBoard subagent execution route; native OMP retains its existing defaults.
-- The welcome screen exposes `/login` and `/model`, including on narrow terminals.
-- Streaming Markdown reuses fixed ANSI styles to reduce rendering overhead without changing terminal output.
-- Restored the original stacked BreadBoard wordmark and red/magenta/blue gradient.
+### Removed
+
+- Removed the Python engine bridge: the `@breadboard/sdk` client, the engine attach modes (`local-owned`, `local-external`, `remote`), the lifecycle supervisor, engine distribution and installer, the OMP auth gateway, the shared-engine worker protocol, and the `engine` and `research` subcommands. Standalone archives no longer carry an engine.
+- A request for the removed bridge now stops `bb` before it creates any session or opens the auth store, with exit status 2 and a message naming the setting to remove, for example: `bb: the Python engine bridge was removed; --engine-mode requests "local-owned". bb runs the native OMP loop; remove --engine-mode to use it.` This covers `--engine-mode`, `--engine-url`, `BREADBOARD_ENGINE_MODE` (values other than `native` and `off`), `BREADBOARD_API_URL`, `BREADBOARD_ENGINE_ARTIFACT`, and the `breadboard.*` bridge settings (`engineMode`, `baseUrl`, `auth`, `tls`, `engineArtifact`, `workspaceId`, `startupTimeoutMs`, `requestTimeoutMs`, `ownerExitPolicy`) in any settings file or `--config` overlay, for every subcommand.
+- BreadBoard builds no longer disable OMP commands: `acp`, `agents`, `cleanse`, `commit`, `compress` and `join` behave as in OMP.
 
 ### Fixed
 
-- Research packs now use OMP's write and replacement-edit schemas, preserve replacement mode independently of host settings, and require write approval for file mutations.
-- Idle BreadBoard sessions no longer inherit Bun's five-minute event-stream timeout, which permanently disabled inference with `HTTP request failed (0)`.
-- Successful tool receipts no longer force an ongoing BreadBoard task to finish. Requested follow-up writes, shell calls, and repeated observations continue until the model completes the turn.
-- Prompt text requesting one tool "exactly once" no longer imposes a global one-tool limit on the turn.
-- BreadBoard retains model-facing conversation context from the first turn instead of starting later requests with an empty history.
-- Implementation write-receipt enforcement is opt-in; ordinary sessions no longer acquire mandatory file writes from prompt-text heuristics.
-- Mixed-tool prompts identify native tools separately from additional text-invoked functions, keeping shell and file capabilities visible after tool calls.
-- Native tool follow-ups no longer inject a new `Continue.` user request or move tool guidance between messages.
-- Oversized BreadBoard tool-result and CTree events retain their full JSON in confined artifacts and stream bounded references, preventing these results from exceeding the event-stream limit.
-- Glyph setup cancels pending previews before restoring the original selection, and waits for persistence before completing.
-- Turn completion no longer computes an unused workspace diff when JSON snapshot output is disabled, avoiding post-answer workspace scans; requested snapshots still include their diff.
-- Session startup and tool-free chat no longer wait for a full-workspace checkpoint; automatic rollback points begin before file-editing or shell tools, retaining credential and sandbox safety checks. Failed startup releases the prepaint terminal.
-- Setup and application windows now share compatible attached local engines and their OMP gateway. Private leases outlive native HTTP idle deadlines; the final client triggers authenticated cleanup without cancelling another client's turn.
-- Retained sessions reopen their original private state directories when an engine restarts on a new port. Managed engines exclusively lock those directories while serving; compatible setup and coding windows reuse the resumed owner.
-- Cold credential and model discovery uses the configured startup timeout instead of the ten-second local-RPC deadline.
-- Attached startup cleanup authenticates and retires its own late-starting engine. Unresolved startup authority is retained instead of being reported as stopped.
-- Explicit BreadBoard setup retains its snake-and-logo startup animation without creating a coding session or workspace checkpoint; completing or cancelling setup releases its lease.
-- Setup saves the default model for future sessions while in-session engine model changes remain temporary.
-- Startup diagnostics identify engine preparation, point to the actual product logfile, and accept `PI_DEBUG_STARTUP` through the local launcher.
-- Engine model selection now owns picker, setup, command, and model-cycle changes; native helper-role settings do not configure engine workers.
-- Live owners with a different per-launch gateway identity are reported as ownership conflicts, without controlling or replacing the existing process.
-- Lifecycle-owned authority stores now release pinned filesystem handles deterministically while borrowed stores retain their caller's lifetime.
-- Raw BreadBoard launches no longer fall back to native print or protocol execution; unsupported startup flags and foreign-history imports are rejected explicitly.
-- Product help and heading-only settings panels now explain unavailable controls without advertising native execution routes.
-- Missing source-side harness lock files no longer hide the selected configuration or disable model selection. Unverified configuration details remain explicitly marked and cannot enable lock-gated capabilities.
-- Harness command overrides preserve native aliases and metadata; the welcome screen abbreviates generation hashes while the Harness inspector retains full hashes.
-- Standalone builds preserve ESM semantics so bundled `import.meta.resolve` calls work with Bun 1.4; bytecode acceleration is disabled for this compatibility boundary.
-- Owned engines now bind to the configured local endpoint instead of always using port 9099.
-- Slash-menu icons now update immediately when switching symbol presets; harness overrides retain native menu ordering without hiding unrelated custom commands.
-- `bb setup` preserves requested model and harness arguments instead of starting with an unintended default model.
-- Unresolved explicit BreadBoard model selectors now fail before engine startup; use a qualified provider/model identifier for models not yet registered by an extension.
-- Startup composer handoff preserves input and submissions received before interactive initialization.
-- Shared OMP authentication now passes the gateway bearer through the verified bootstrap descriptor, allowing macOS tool isolation without exposing credentials in the engine's startup environment.
-- BreadBoard broker-authenticated main turns no longer require a second credential in OMP's native store; native side requests retain their existing authentication.
-- Preserved text-parsed BreadBoard tool call IDs through execution and result delivery.
-- Live provider streams now preserve whitespace-only chunks and accept reasoning completion events and bounded encrypted reasoning payloads.
-- Public harness definitions now use the runtime dialect that applies their configured modes, prompts, and tool lists.
-- Existing files no longer satisfy requested-edit completion without a successful write receipt; completion summaries no longer claim unrecorded verification.
-- Search-and-replace now reports missing search text without rewriting or creating a file.
-- OpenRouter Responses sessions now send full conversation history instead of unsupported server-side continuation IDs.
-- Injected mode instructions no longer create verification requirements the user did not request.
-- Text tool parsing skips inactive formats, preventing an embedded patch from executing twice.
-- Preserved durable session cursors across completion-only assistant text and overlapping tool results, preventing coding turns from cancelling during projection.
-- Provider completions no longer fail solely because optional cache counters are absent.
-- Completed BreadBoard tasks no longer enter OMP's native empty-response recovery and submit the same task again; native-provider recovery remains unchanged.
-- Fixed upstream sync verification replaying already-resolved merge conflicts in its disposable worktree.
-- BreadBoard project model roles now read and persist in `.breadboard/config.yml` without modifying native `.omp` settings.
-- Disposable upstream verification now generates tool views before running its source proofs.
-- Fixed the downstream provider-login adapter dropping auth scheme, flow, browser/device authorization metadata, callback fields, account labels, and completed credential summaries.
-- Fixed ordinary external-runtime submission failures entering ambiguous-receipt recovery, and bounded close when a signal-less submission remains unresolved.
-- Fixed Ask dialogs duplicating rendered `(Recommended)` suffixes and terminal-title spinners continuing after interactive shutdown.
-- Provider selection distinguishes pending discovery from an empty catalog, stops validation after dismissal, and allows revoking credentials when new logins are unavailable.
-- Restored completed-session continuation, configured startup model selection, and durable submission correlation across reconnects.
-- Restored the verified local product archive/install path and operator-owned persistent permission rules.
-- SDK provenance checks now verify the dependency actually resolved by the consumer, including workspace-local installations.
-- Cyclic session-successor bindings now fail closed instead of reopening an earlier session.
-- Product archives now recheck the engine bytes being sealed and retain the verified trust root.
-- Configured prompt-mode sessions now wait for tool approval; explicit noninteractive modes do not open an approval wait.
+- `find` stops its file listing when the parallel content scan fails, so a timed-out search on a large root no longer stalls the UI afterwards.
+
 ## [18.3.0] - 2026-09-24
 
 ### Breaking Changes
