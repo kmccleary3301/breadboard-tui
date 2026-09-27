@@ -1,10 +1,10 @@
-import { registerBreadboardStatusLine } from "../../../../src/breadboard/ui/status-line";
+import { registerBreadboardStatusLine } from "../../src/breadboard/ui/status-line";
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import { BreadboardCustomizeSubmenu } from "@oh-my-pi/pi-tui/overlays/settings-selector";
-import { DEFAULT_BREADBOARD_FIELD_SETTINGS } from "../../../../src/breadboard/ui/status-line/breadboard-fields";
+import { DEFAULT_BREADBOARD_FIELD_SETTINGS } from "../../src/breadboard/ui/status-line/breadboard-fields";
 import { createBreadboardPreviewStatusSource } from "@oh-my-pi/pi-tui/setup/scenes/information-layout";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 beforeAll(async () => {
