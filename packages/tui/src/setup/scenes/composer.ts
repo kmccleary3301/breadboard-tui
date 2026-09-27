@@ -7,6 +7,7 @@ import type { ComposerShape } from "../../overlays/composer-shape-registry";
 import { type ComposerPreviewStatusSource, renderComposerShapePreview } from "../../overlays/composer-shape-preview";
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
 import { getProductIdentity, type ProductIdentity } from "../../product-identity";
+import { getSelectListTheme, theme } from "../../theme/theme";
 export type ComposerPreviewStatusFactory = (host: SetupSceneHost) => ComposerPreviewStatusSource | undefined;
 
 let previewStatusFactory: ComposerPreviewStatusFactory | undefined;

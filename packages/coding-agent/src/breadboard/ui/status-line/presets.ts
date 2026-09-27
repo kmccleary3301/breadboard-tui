@@ -1,4 +1,5 @@
 import type { PresetDef } from "@oh-my-pi/pi-tui/status-line/types";
+export { isBreadboardPreset } from "./breadboard-presentation";
 
 export const BREADBOARD_STATUS_LINE_PRESETS: Record<string, PresetDef> = {
 	"bb-balanced": {

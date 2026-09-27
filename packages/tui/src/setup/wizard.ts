@@ -8,6 +8,7 @@ import { providersSetupScene } from "./scenes/providers";
 import { themeSetupScene } from "./scenes/theme";
 import type { SetupScene } from "./scenes/types";
 import { SetupWizardComponent } from "./wizard-overlay";
+export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
 
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };

@@ -1,4 +1,4 @@
-import { ComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
+import { type ComposerPreviewStatusSource, ComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import {
 	getAllSettingDefs,
 	registerSettingCustomEditor,
@@ -32,7 +32,7 @@ export function registerBreadboardSettingsTab(): () => void {
 			const context = rawContext as {
 				settings: SettingsHost;
 				requestRender?: () => void;
-				composerPreviewStatus?: unknown;
+				composerPreviewStatus?: ComposerPreviewStatusSource;
 			};
 			const callbacks = rawCallbacks as {
 				onChange: (path: string, value: unknown) => void;

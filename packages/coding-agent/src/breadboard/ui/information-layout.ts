@@ -120,7 +120,7 @@ export function createBreadboardPreviewStatusSource(
 class InformationLayoutSceneController implements SetupSceneController {
 	readonly title = "Choose information layout";
 	#selectList: SelectList;
-	#currentPreset: StatusLinePreset;
+	#currentPreset: StatusLinePreset | string;
 	#committing = false;
 	#listRowStart = 0;
 	#customizer: BreadboardCustomizeSubmenu | null = null;
@@ -244,7 +244,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 	async #commitFields(fields: BreadboardFieldSettings): Promise<void> {
 		if (this.#committing) return;
 		this.#committing = true;
-		this.host.ctx.settings.set("statusLine.preset", this.#currentPreset);
+		this.host.ctx.settings.set("statusLine.preset", this.#currentPreset as never);
 		this.host.ctx.settings.set("statusLine.breadboard", fields);
 		this.host.ctx.statusLine?.updateSettings?.({
 			...this.host.ctx.settings.getGroup("statusLine"),
@@ -253,10 +253,10 @@ class InformationLayoutSceneController implements SetupSceneController {
 		this.host.finish("done");
 	}
 
-	async #commit(preset: StatusLinePreset): Promise<void> {
+	async #commit(preset: StatusLinePreset | string): Promise<void> {
 		if (this.#committing) return;
 		this.#committing = true;
-		this.host.ctx.settings.set("statusLine.preset", preset);
+		this.host.ctx.settings.set("statusLine.preset", preset as never);
 		this.host.ctx.statusLine?.updateSettings?.(this.host.ctx.settings.getGroup("statusLine"));
 		this.host.finish("done");
 	}
@@ -267,5 +267,5 @@ export const informationLayoutSetupScene: SetupScene = {
 	title: "Choose information layout",
 	minVersion: 1,
 	shouldRun: () => IS_BREADBOARD_PRODUCT,
-	mount: host => new InformationLayoutSceneController(host),
+	mount: (host: SetupSceneHost) => new InformationLayoutSceneController(host),
 };

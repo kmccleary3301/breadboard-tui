@@ -14,6 +14,7 @@ import {
 	getUi,
 	isCredential,
 	type SettingPath,
+	type SettingTab as SchemaSettingTab,
 } from "./settings-schema";
 
 const CONDITIONS: Record<string, () => boolean> = {
@@ -88,7 +89,7 @@ const CONDITIONS: Record<string, () => boolean> = {
 export function createSettingsHost(): SettingsHost {
 	const entries: SettingsDisplayEntry[] = [];
 	for (const tab of SETTING_TABS) {
-		for (const path of getPathsForTab(tab)) {
+		for (const path of getPathsForTab(tab as SchemaSettingTab)) {
 			const ui = getUi(path);
 			entries.push({
 				path,

@@ -991,7 +991,7 @@ export class SettingsSelectorComponent implements Component {
 			return customEditor({
 				def,
 				currentValue,
-				done,
+				done: value => done(typeof value === "string" ? value : undefined),
 				context: this.#context,
 				callbacks: this.#callbacks,
 			}) as Component;
@@ -1029,8 +1029,8 @@ export class SettingsSelectorComponent implements Component {
 				const presetDef = getPreset(value as StatusLinePreset);
 				this.#callbacks.onStatusLinePreview?.({
 					preset: value as StatusLinePreset,
-					leftSegments: presetDef.leftSegments,
-					rightSegments: presetDef.rightSegments,
+					leftSegments: presetDef.leftSegments as StatusLineSegmentId[],
+					rightSegments: presetDef.rightSegments as StatusLineSegmentId[],
 					separator: presetDef.separator,
 				});
 			};
@@ -1039,8 +1039,8 @@ export class SettingsSelectorComponent implements Component {
 				const presetDef = getPreset(currentPreset);
 				this.#callbacks.onStatusLinePreview?.({
 					preset: currentPreset,
-					leftSegments: presetDef.leftSegments,
-					rightSegments: presetDef.rightSegments,
+					leftSegments: presetDef.leftSegments as StatusLineSegmentId[],
+					rightSegments: presetDef.rightSegments as StatusLineSegmentId[],
 					separator: presetDef.separator,
 				});
 			};
