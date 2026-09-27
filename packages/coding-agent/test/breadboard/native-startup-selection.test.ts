@@ -8,7 +8,7 @@ import * as os from "node:os";
 import { resolveNativeLaunchPolicy } from "@oh-my-pi/pi-coding-agent/breadboard/native-launch-policy";
 import {
 	resolveNativeHarnessSpec,
-	startupBreadboardEngineOwnsTurns,
+	resolveNativeSurfaceEngineSelection,
 } from "@oh-my-pi/pi-coding-agent/breadboard/runtime";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 
@@ -25,15 +25,23 @@ function settingsWith(values: { engineMode?: string; sessionConfigPath?: string;
 describe("native startup selection", () => {
 	it("defaults product launches to the native OMP loop", () => {
 		const defaults = settingsWith({});
-		expect(startupBreadboardEngineOwnsTurns({}, defaults, WORKSPACE, true)).toBe(false);
+		expect(resolveNativeSurfaceEngineSelection({}, defaults, WORKSPACE, true)).toEqual({ engineMode: "native" });
 		expect(resolveNativeHarnessSpec({}, defaults, WORKSPACE, true)).toBe("bb-omp.native");
 	});
 
 	it("keeps turns on OMP's loop in native and off modes only", () => {
 		const native = settingsWith({ engineMode: "native" });
-		expect(startupBreadboardEngineOwnsTurns({}, native, WORKSPACE, true)).toBe(false);
-		expect(startupBreadboardEngineOwnsTurns({ engineMode: "off" }, native, WORKSPACE, true)).toBe(false);
-		expect(() => startupBreadboardEngineOwnsTurns({ engineMode: "local-owned" }, native, WORKSPACE, true)).toThrow();
+		expect(resolveNativeSurfaceEngineSelection({}, native, WORKSPACE, true)).toEqual({
+			engineMode: "native",
+			engineUrl: undefined,
+		});
+		expect(resolveNativeSurfaceEngineSelection({ engineMode: "off" }, native, WORKSPACE, true)).toEqual({
+			engineMode: "off",
+			engineUrl: undefined,
+		});
+		expect(() =>
+			resolveNativeSurfaceEngineSelection({ engineMode: "local-owned" }, native, WORKSPACE, true),
+		).toThrow();
 	});
 
 	it("opens print and protocol surfaces in native mode and refuses them for engine modes", () => {

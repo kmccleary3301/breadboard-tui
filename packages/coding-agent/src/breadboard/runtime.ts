@@ -9,38 +9,12 @@ import { createBreadboardProviderFreeModel } from "./provider-free-model";
 import { getProjectDir, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils";
 import type { Args } from "../cli/args";
 import { type Settings, settings } from "../config/settings";
-import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 import {
 	BreadboardRunConfigError,
 	hasExplicitEngineSelection,
 	parseSelectedBreadboardConfig,
 	resolveBreadboardRunConfig,
 } from "./lifecycle/run-config";
-
-export class BreadboardProductApiKeyError extends Error {
-	constructor() {
-		super(
-			`--api-key is not accepted in ${BREADBOARD_PRODUCT_IDENTITY.displayName} product mode; use /login to add an API key through the auth broker`,
-		);
-		this.name = "BreadboardProductApiKeyError";
-	}
-}
-
-export function applyCliApiKeyOverride(
-	authStorage: {
-		keys?: { setRuntime(provider: string, apiKey: string): void };
-	},
-	input: {
-		readonly apiKey: string;
-		readonly provider?: string;
-		readonly breadboardProductModeSelected: boolean;
-	},
-): void {
-	if (input.breadboardProductModeSelected) throw new BreadboardProductApiKeyError();
-	if (input.provider) {
-		authStorage.keys?.setRuntime(input.provider, input.apiKey);
-	}
-}
 
 export class BreadboardLifecycleStartupError extends Error {
 	constructor(readonly result: unknown) {
@@ -111,31 +85,6 @@ export function resolveNativeHarnessSpec(
 	}
 	return spec;
 }
-
-export function startupBreadboardEngineOwnsTurns(
-	parsed: Pick<Args, "engineMode" | "engineUrl">,
-	activeSettings: Settings,
-	workspacePath: string,
-	isBreadboardProduct: boolean,
-): boolean {
-	resolveNativeSurfaceEngineSelection(parsed, activeSettings, workspacePath, isBreadboardProduct);
-	return false;
-}
-
-const ALLOW_STARTUP_FORK = (): void => {};
-
-export function createBreadboardStartupForkPolicy(
-	_parsed?: Pick<Args, "engineMode" | "engineUrl">,
-	_activeSettings: Settings = settings,
-	_workspacePath: string = getProjectDir(),
-	_canPrepareBreadboardRuntime = true,
-	_isBreadboardProduct = IS_BREADBOARD_PRODUCT,
-): () => void {
-	return ALLOW_STARTUP_FORK;
-}
-
-export function rejectBreadboardSessionTransition(_plan?: unknown): void {}
-
 export class BreadboardModelAuthorityError extends Error {
 	constructor(
 		readonly code: string,

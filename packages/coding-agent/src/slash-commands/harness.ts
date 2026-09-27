@@ -11,43 +11,6 @@ export interface HarnessPaletteSettings {
 	readonly unsupportedCommands: "dim" | "hide";
 }
 
-type PublicData = Readonly<Record<string, unknown>>;
-interface PublicResult {
-	readonly ok: boolean;
-	readonly status: string;
-	readonly data: PublicData;
-	readonly error?: { readonly message?: string };
-	readonly exit_code?: number;
-}
-
-interface HarnessControlClient {
-	getHarness(id: string): Promise<PublicResult>;
-	validateHarness(id: string): Promise<PublicResult>;
-	explainHarness(id: string): Promise<PublicResult>;
-	lockHarness(id: string): Promise<PublicResult>;
-	getHarnessLock(id: string): Promise<PublicResult>;
-}
-
-async function resolveHarnessId(client: HarnessControlClient, requested: string): Promise<string> {
-	const candidates =
-		requested.includes("/") || /\.(?:yaml|yml|json)$/u.test(requested)
-			? [requested]
-			: [`agent_configs/v2/${requested}.yaml`, `agent_configs/${requested}.yaml`, `${requested}.yaml`, requested];
-	for (const candidate of candidates) {
-		try {
-			const res = await client.getHarness(candidate);
-			if (res && res.ok !== false) return candidate;
-		} catch (error: unknown) {
-			const status =
-				typeof error === "object" && error !== null && "status" in error
-					? (error as { status: unknown }).status
-					: undefined;
-			if (status !== 404) throw error;
-		}
-	}
-	return requested;
-}
-
 const LOCK_COMMANDS = [
 	["mode", "modes"],
 	["model", "providers.models"],
@@ -76,9 +39,10 @@ const NO_HOST_IMPLEMENTATION: Readonly<Record<string, true>> = {
 function isStaticPanelCommand(name: string): name is "team" | "prompts" | "evidence" {
 	return name === "team" || name === "prompts" || name === "evidence";
 }
+type LockRow = Readonly<Record<string, unknown>>;
 
-function record(value: unknown): PublicData | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as PublicData) : undefined;
+function record(value: unknown): LockRow | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as LockRow) : undefined;
 }
 
 function settingValue(settings: Settings, key: string): unknown {
@@ -110,10 +74,10 @@ function effectiveValue(lock: Readonly<Record<string, unknown>>, path: string): 
 	return { found: false, value: undefined };
 }
 
-function effectiveEntries(lock: Readonly<Record<string, unknown>>, prefix: string): readonly PublicData[] {
+function effectiveEntries(lock: Readonly<Record<string, unknown>>, prefix: string): readonly LockRow[] {
 	const entries = lock.effective_values;
 	if (!Array.isArray(entries)) return [];
-	const visible: PublicData[] = [];
+	const visible: LockRow[] = [];
 	for (const entry of entries) {
 		const object = record(entry);
 		if (!object || typeof object.path !== "string") continue;
@@ -285,156 +249,6 @@ async function harnessList(runtime: TuiSlashCommandRuntime, directory?: string):
 	return true;
 }
 
-function controlClient(runtime: TuiSlashCommandRuntime): HarnessControlClient | undefined {
-	return runtime.ctx.harnessPort?.controlClient as HarnessControlClient | undefined;
-}
-
-function resultData(result: PublicResult, operation: string): PublicData {
-	if (!result.ok || result.status !== "ok")
-		throw new Error(`BreadBoard ${operation} failed: ${result.error?.message ?? `exit code ${result.exit_code}`}`);
-	return result.data;
-}
-
-function resultString(data: PublicData, key: string): string | undefined {
-	return typeof data[key] === "string" && data[key].length > 0 ? data[key] : undefined;
-}
-
-function lockRows(data: PublicData, operation: string): readonly PublicData[] {
-	const lock = record(data.lock);
-	if (!lock) throw new Error(`BreadBoard ${operation} response missing lock`);
-	const rows = lock.effective_values;
-	if (!Array.isArray(rows)) throw new Error(`BreadBoard ${operation} response missing effective_values`);
-	return rows.flatMap(row => {
-		const object = record(row);
-		return object &&
-			typeof object.path === "string" &&
-			object.visibility !== "redacted" &&
-			object.value_kind !== "secret-ref"
-			? [object]
-			: [];
-	});
-}
-
-function displayValue(value: unknown): string {
-	if (typeof value === "string") return value;
-	const encoded = JSON.stringify(value);
-	return encoded === undefined ? String(value) : encoded;
-}
-
-async function harnessExplain(runtime: TuiSlashCommandRuntime, path: string): Promise<boolean> {
-	const snapshot = runtime.ctx.harnessPort?.current();
-	const client = controlClient(runtime);
-	if (!snapshot || !client) {
-		runtime.ctx.showStatus("Harness explanation is unavailable: no BreadBoard control-plane client");
-		return true;
-	}
-	try {
-		const data = resultData(await client.explainHarness(snapshot.harnessId), "harness.explain");
-		const field = Array.isArray(data.fields) ? data.fields.map(record).find(item => item?.path === path) : undefined;
-		const lockRow = effectiveEntries(snapshot.lock ?? {}, path).find(item => item.path === path);
-		if (!field || !lockRow) throw new Error(`No visible effective lock leaf exists at ${path}`);
-		const source = typeof field.source_layer === "string" ? field.source_layer : "unknown";
-		runtime.ctx.showStatus(
-			`${path}: ${displayValue(lockRow.value)} (source layer ${source}, value kind ${String(lockRow.value_kind)}, visibility ${String(lockRow.visibility)})`,
-		);
-	} catch (error) {
-		runtime.ctx.showStatus(error instanceof Error ? error.message : String(error));
-	}
-	return true;
-}
-
-async function harnessValidate(runtime: TuiSlashCommandRuntime): Promise<boolean> {
-	const snapshot = runtime.ctx.harnessPort?.current();
-	const client = controlClient(runtime);
-	if (!snapshot || !client) {
-		runtime.ctx.showStatus("Harness validation is unavailable: no BreadBoard control-plane client");
-		return true;
-	}
-	try {
-		const data = resultData(await client.validateHarness(snapshot.harnessId), "harness.validate");
-		const problems = Array.isArray(data.problems) ? data.problems : [];
-		if (problems.length > 0) {
-			runtime.ctx.showStatus(`Harness validation: problems\n${problems.map(displayValue).join("\n")}`);
-		} else {
-			runtime.ctx.showStatus(
-				`Harness validation: ok${resultString(data, "path") ? ` (${resultString(data, "path")})` : ""}`,
-			);
-		}
-	} catch (error) {
-		runtime.ctx.showStatus(error instanceof Error ? error.message : String(error));
-	}
-	return true;
-}
-
-async function harnessLock(runtime: TuiSlashCommandRuntime): Promise<boolean> {
-	const snapshot = runtime.ctx.harnessPort?.current();
-	const client = controlClient(runtime);
-	if (!snapshot || !client) {
-		runtime.ctx.showStatus("Harness lock is unavailable: no BreadBoard control-plane client");
-		return true;
-	}
-	try {
-		const data = resultData(await client.lockHarness(snapshot.harnessId), "harness.lock");
-		const graphHash = resultString(data, "graph_hash");
-		const path = resultString(data, "path");
-		runtime.ctx.showStatus(`Harness lock: ${graphHash ?? "unknown graph hash"}${path ? `\nPath: ${path}` : ""}`);
-	} catch (error) {
-		runtime.ctx.showStatus(error instanceof Error ? error.message : String(error));
-	}
-	return true;
-}
-
-async function harnessDiff(runtime: TuiSlashCommandRuntime, args: string): Promise<boolean> {
-	const client = controlClient(runtime);
-	const [left, right] = args.trim().split(/\s+/u);
-	if (!left || !right) {
-		runtime.ctx.showStatus("Usage: /harness diff <a> <b>");
-		return true;
-	}
-	if (!client) {
-		runtime.ctx.showStatus("Harness diff is unavailable: no BreadBoard control-plane client");
-		return true;
-	}
-	try {
-		const [leftId, rightId] = await Promise.all([resolveHarnessId(client, left), resolveHarnessId(client, right)]);
-		const [leftData, rightData] = await Promise.all([client.getHarnessLock(leftId), client.getHarnessLock(rightId)]);
-		const leftRows = new Map(
-			lockRows(resultData(leftData, "harness_lock.get"), "harness_lock.get").map(row => [
-				row.path as string,
-				row.value,
-			]),
-		);
-		const rightRows = new Map(
-			lockRows(resultData(rightData, "harness_lock.get"), "harness_lock.get").map(row => [
-				row.path as string,
-				row.value,
-			]),
-		);
-		const added: string[] = [];
-		const removed: string[] = [];
-		const changed: string[] = [];
-		for (const path of new Set([...leftRows.keys(), ...rightRows.keys()])) {
-			const inLeft = leftRows.has(path);
-			const inRight = rightRows.has(path);
-			if (!inLeft) added.push(`${path}: ${displayValue(rightRows.get(path))}`);
-			else if (!inRight) removed.push(`${path}: ${displayValue(leftRows.get(path))}`);
-			else if (JSON.stringify(leftRows.get(path)) !== JSON.stringify(rightRows.get(path))) {
-				changed.push(`${path}: ${displayValue(leftRows.get(path))} -> ${displayValue(rightRows.get(path))}`);
-			}
-		}
-		const lines = [
-			"Harness diff:",
-			`Added: ${added.length ? added.join(", ") : "none"}`,
-			`Removed: ${removed.length ? removed.join(", ") : "none"}`,
-			`Changed: ${changed.length ? changed.join(", ") : "none"}`,
-		];
-		runtime.ctx.showStatus(lines.join("\n"));
-	} catch (error) {
-		runtime.ctx.showStatus(error instanceof Error ? error.message : String(error));
-	}
-	return true;
-}
-
 async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<boolean> {
 	const port = runtime.ctx.harnessPort;
 	if (parsed.name === "plan" || parsed.name === "todo") return false;
@@ -561,16 +375,6 @@ export async function executeHarnessSlashCommand(
 			}
 			return harnessUse(runtime, rest);
 		}
-		if (verb === "explain") {
-			if (!rest) {
-				runtime.ctx.showStatus("Usage: /harness explain <dotted.path>");
-				return true;
-			}
-			return harnessExplain(runtime, rest);
-		}
-		if (verb === "validate") return harnessValidate(runtime);
-		if (verb === "lock") return harnessLock(runtime);
-		if (verb === "diff") return harnessDiff(runtime, rest);
 		runtime.ctx.showStatus(`Unknown /harness operation: ${verb}`);
 		return true;
 	}
@@ -593,10 +397,6 @@ export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
 			{ name: "list", description: "List available harnesses", usage: "[directory]" },
 			{ name: "reload", description: "Compile the workspace harness and apply it at the next turn", usage: "" },
 			{ name: "use", description: "Start a new session on a harness", usage: "<name|path>" },
-			{ name: "explain", description: "Show field provenance", usage: "[field]" },
-			{ name: "diff", description: "Compare harness locks", usage: "<a> <b>" },
-			{ name: "validate", description: "Validate a harness definition" },
-			{ name: "lock", description: "Write and show the effective lock" },
 		],
 	},
 ];

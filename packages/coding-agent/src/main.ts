@@ -29,15 +29,12 @@ import { createNativeHarnessPort } from "./breadboard/native-harness-port";
 import { applyNativeHarnessSessionOptions } from "./breadboard/native-harness-session";
 import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
 import {
-	applyCliApiKeyOverride,
-	BreadboardProductApiKeyError,
 	formatBreadboardStartupError,
 	type PreparedBreadboardRuntime,
 	prepareBreadboardRuntime,
 	resolveBreadboardOmpAgentDir,
 	resolveNativeHarnessSpec,
 	resolveNativeSurfaceEngineSelection,
-	startupBreadboardEngineOwnsTurns,
 } from "./breadboard/runtime";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -1291,12 +1288,6 @@ export async function buildSessionOptions(
 	activeSettings: Settings,
 	nativeHarness?: LoadedNativeHarness,
 ): Promise<CreateAgentSessionOptions> {
-	const externalTurnLifecycle = startupBreadboardEngineOwnsTurns(
-		parsed,
-		activeSettings,
-		parsed.cwd ?? getProjectDir(),
-		IS_BREADBOARD_PRODUCT,
-	);
 	const options: CreateAgentSessionOptions = {
 		cwd: parsed.cwd ?? getProjectDir(),
 		autoApprove: parsed.autoApprove ?? false,
@@ -1307,7 +1298,7 @@ export async function buildSessionOptions(
 	}
 	const cliDirs = parsed.addDir ?? [];
 	const settingsDirs = activeSettings.get("workspace.additionalDirectories");
-	if (!externalTurnLifecycle && (cliDirs.length > 0 || settingsDirs.length > 0)) {
+	if (cliDirs.length > 0 || settingsDirs.length > 0) {
 		options.additionalDirectories = [...new Set([...cliDirs, ...settingsDirs])];
 	}
 	if (parsed.maxTime !== undefined) {
@@ -1491,7 +1482,7 @@ export async function buildSessionOptions(
 		: explicitPrewalk
 			? true
 			: !restoringSession && activeSettings.get("prewalk.enabled");
-	if (!externalTurnLifecycle && prewalkEnabled) {
+	if (prewalkEnabled) {
 		const target = parsed.prewalkInto ?? DEFAULT_PREWALK_TARGET;
 		let targetPatterns: string[];
 
@@ -1694,7 +1685,6 @@ export async function buildSessionOptions(
 			options.disableExtensionDiscovery = true;
 		}
 	}
-	if (externalTurnLifecycle) delete options.thinkingLevel;
 
 	if (nativeHarness !== undefined) {
 		applyNativeHarnessSessionOptions(options, nativeHarness, activeSettings, {
@@ -1849,12 +1839,6 @@ export async function runRootCommand(
 		}
 
 		const settingsInstance = await settingsPromise;
-		const breadboardProductModeSelected = startupBreadboardEngineOwnsTurns(
-			parsedArgs,
-			settingsInstance,
-			cwd,
-			IS_BREADBOARD_PRODUCT,
-		);
 		if (parsedArgs.approvalMode) {
 			// Runtime override (not persisted): every settings.get("tools.approvalMode") downstream
 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
@@ -2183,7 +2167,7 @@ export async function runRootCommand(
 			await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
 		}
 
-		if (!breadboardProductModeSelected && resolveStartupNetworkPolicy().backgroundUpdates) {
+		if (resolveStartupNetworkPolicy().backgroundUpdates) {
 			scheduleMarketplaceAutoUpdate({
 				autoUpdate: settingsInstance.get("marketplace.autoUpdate"),
 				resolveActiveProjectRegistryPath,
@@ -2221,25 +2205,16 @@ export async function runRootCommand(
 			sessionOptions.telemetry = createTelemetryExportConfig(sessionOptions.telemetry);
 		}
 
-		// Product sessions bind credentials through the BreadBoard broker. Reject
-		// the native override before AuthStorage can observe the supplied secret.
+		// Handle CLI --api-key as runtime override (not persisted)
 		if (parsedArgs.apiKey) {
-			try {
-				applyCliApiKeyOverride(authStorage, {
-					apiKey: parsedArgs.apiKey,
-					provider: sessionOptions.model?.provider,
-					breadboardProductModeSelected,
-				});
-			} catch (error) {
-				if (!(error instanceof BreadboardProductApiKeyError)) throw error;
-				process.stderr.write(`${chalk.red(error.message)}\n`);
-				process.exit(1);
-			}
 			if (!sessionOptions.model && !sessionOptions.modelPattern) {
 				process.stderr.write(
 					`${chalk.red("--api-key requires a model to be specified via --model, --provider/--model, or --models")}\n`,
 				);
 				process.exit(1);
+			}
+			if (sessionOptions.model) {
+				authStorage.keys.setRuntime(sessionOptions.model.provider, parsedArgs.apiKey);
 			}
 		}
 
@@ -2414,12 +2389,8 @@ export async function runRootCommand(
 				}),
 				Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 			);
-			if (parsedArgs.apiKey && preparedBreadboardRuntime === null && !sessionOptions.model && session.model) {
-				applyCliApiKeyOverride(authStorage, {
-					apiKey: parsedArgs.apiKey,
-					provider: session.model.provider,
-					breadboardProductModeSelected: false,
-				});
+			if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
+				authStorage.keys.setRuntime(session.model.provider, parsedArgs.apiKey);
 			}
 
 			// Runtime provider discovery (opencode-go, models.yml `discovery:`, proxies)
