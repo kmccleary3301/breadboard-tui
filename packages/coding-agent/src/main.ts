@@ -27,7 +27,7 @@ import { type LoadedNativeHarness, loadNativeHarness } from "@breadboard/harness
 import type { HarnessPort } from "./breadboard/harness-port";
 import { createNativeHarnessPort } from "./breadboard/native-harness-port";
 import { applyNativeHarnessSessionOptions } from "./breadboard/native-harness-session";
-import { resolveNativeLaunchPolicy } from "./breadboard/native-launch-policy";
+import { BreadboardBridgeRefusalError } from "./breadboard/bridge-refusal";
 import {
 	formatBreadboardStartupError,
 	type PreparedBreadboardRuntime,
@@ -1805,7 +1805,6 @@ export async function runRootCommand(
 		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
 		const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
 		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
-		const nativeSurface = mode === "rpc" || mode === "rpc-ui" || mode === "acp" ? mode : "print";
 		// Only the interactive host renders a focusable Agent Hub / subagent session
 		// tree; declare it so headless subagent optimizations (e.g. skipping replan
 		// title refresh) can tell a focusable process from a print/RPC/eval one.
@@ -1863,18 +1862,16 @@ export async function runRootCommand(
 				}),
 		);
 
-		if (!isInteractive) {
-			const nativePolicy = resolveNativeLaunchPolicy(
-				resolveNativeSurfaceEngineSelection(parsedArgs, settingsInstance, getProjectDir()),
-				nativeSurface,
-			);
-			if (nativePolicy.kind === "unavailable") {
-				process.stderr.write(`${nativePolicy.message}\n`);
-				process.exitCode = nativePolicy.exitCode;
-				stopStartupWatchdog();
-				stopThemeWatcher();
-				return;
-			}
+		try {
+			resolveNativeSurfaceEngineSelection(parsedArgs, settingsInstance, getProjectDir());
+		} catch (error) {
+			if (!(error instanceof BreadboardBridgeRefusalError)) throw error;
+			stopPendingStartupComposer();
+			process.stderr.write(`${error.message}\n`);
+			process.exitCode = error.exitCode;
+			stopStartupWatchdog();
+			stopThemeWatcher();
+			return;
 		}
 		if (parsedArgs.noPty || parsedArgs.mode === "rpc-ui") {
 			Bun.env.PI_NO_PTY = "1";

@@ -133,17 +133,18 @@ When the broker is enabled, the local SQLite credential store is bypassed and al
 
 The gateway has no dedicated env vars — it inherits `OMP_AUTH_BROKER_*`. Its own inbound bearer token lives at `<config-dir>/auth-gateway.token` and is managed via `omp auth-gateway token`.
 
-### BreadBoard shared OMP authentication and environment variables
+### BreadBoard shared OMP authentication
 
 `BREADBOARD_OMP_AGENT_DIR` selects an existing absolute OMP agent directory containing `agent.db`. BreadBoard keeps its own sessions and settings directory, but uses the selected OMP auth store and native provider refresh/account selection. It does not copy credentials. A missing directory or database is an error.
 
 ### Retired bridge environment variables
 
-The Python engine bridge and attach modes have been retired:
+The Python engine bridge and its attach modes are removed. `bb` exits with status 2 before starting a session, and names the variable to unset, when any of these is set to a bridge value:
 
-- `BREADBOARD_ENGINE_MODE`: Legacy bridge modes (`local-owned`, `local-external`, `remote`) are refused at startup with an error naming the native default (`native`). Only `native` (the default) and `off` are supported.
-- `BREADBOARD_API_URL`: Legacy engine URL variable. Setting it refuses launch.
-- `BREADBOARD_ENGINE_ARTIFACT`: Legacy engine artifact variable. Setting it refuses launch.
+- `BREADBOARD_ENGINE_MODE`: any value other than `native` (the default) or `off`, for example `local-owned`, `local-external` or `remote`.
+- `BREADBOARD_API_URL`: any non-empty value.
+- `BREADBOARD_ENGINE_ARTIFACT`: any non-empty value.
+
 ---
 
 ## 2) Provider-specific runtime configuration

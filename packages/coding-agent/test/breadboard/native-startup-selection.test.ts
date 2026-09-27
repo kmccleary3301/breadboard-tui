@@ -5,7 +5,6 @@
  */
 import { describe, expect, it } from "bun:test";
 import * as os from "node:os";
-import { resolveNativeLaunchPolicy } from "@oh-my-pi/pi-coding-agent/breadboard/native-launch-policy";
 import {
 	resolveNativeHarnessSpec,
 	resolveNativeSurfaceEngineSelection,
@@ -42,13 +41,6 @@ describe("native startup selection", () => {
 		expect(() =>
 			resolveNativeSurfaceEngineSelection({ engineMode: "local-owned" }, native, WORKSPACE, true),
 		).toThrow();
-	});
-
-	it("opens print and protocol surfaces in native mode and refuses them for engine modes", () => {
-		for (const surface of ["print", "rpc", "rpc-ui", "acp"] as const) {
-			expect(resolveNativeLaunchPolicy({ engineMode: "native" }, surface).kind).toBe("native");
-			expect(resolveNativeLaunchPolicy({ engineMode: "local-owned" }, surface).kind).toBe("unavailable");
-		}
 	});
 
 	it("resolves the spec from --harness, then sessionConfigPath, then the configured default", () => {

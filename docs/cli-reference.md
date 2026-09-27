@@ -277,9 +277,9 @@ BreadBoard runs OMP's turn loop natively using `@breadboard/harness`. The legacy
 Python engine bridge (`local-owned`, `local-external`, `remote`), engine distribution
 sidecars, and flags (`--engine-mode`, `--engine-url`) have been removed.
 
-Passing `--engine-mode` with a legacy mode or passing `--engine-url` is refused
-at startup with an error naming the native default (`native`). The only supported
-engine modes are `native` (the default) and `off`.
+`--engine-mode` with any value other than `native` or `off`, and `--engine-url`
+with any value, exit with status 2 before a session starts. The message names the
+flag to remove. The supported engine modes are `native` (the default) and `off`.
 
 `--harness` takes a built-in harness id or a harness spec path (`.yaml`). Precedence
 is `--harness`, then `breadboard.sessionConfigPath`, then `breadboard.harness.default`.
