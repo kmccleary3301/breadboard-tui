@@ -130,21 +130,6 @@
 			"layer": 3
 		},
 		{
-			"path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_ab_report.md",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_binary_provenance.json",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "docs_tmp/bb_direction_assessment/evidence/ACI/aci_signing_runbook.md",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "package.json",
 			"class": "manual-review",
 			"rule": "manual-review-boundaries",

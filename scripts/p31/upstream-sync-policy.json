@@ -122,8 +122,7 @@
 				"scripts/p31/**",
 				".github/workflows/fork-delta-audit.yml",
 				"docs/conformance/p30/**",
-				"docs/conformance/p31/**",
-				"docs_tmp/bb_direction_assessment/evidence/ACI/**"
+				"docs/conformance/p31/**"
 			]
 		},
 		{
