@@ -267,6 +267,17 @@ export function nativeCacheRetention(harness: LoadedNativeHarness): "long" | "sh
 	return nativeLockValue(harness.lock, `${prefix}.cache_control.ttl`) === "1h" ? "long" : "short";
 }
 
+/**
+ * The Responses chaining the lock declares with `provider_tools.responses_stateful`, which Python's
+ * Responses runtime reads to decide whether a request continues `previous_response_id`
+ * (`provider/runtimes/openai/responses.py:63-66`): `false` sends the full transcript on every
+ * request. Undefined when the lock does not declare it, which leaves OMP's provider default.
+ */
+export function nativeStatefulResponses(harness: LoadedNativeHarness): boolean | undefined {
+	const declared = nativeLockValue(harness.lock, "provider_tools.responses_stateful");
+	return typeof declared === "boolean" ? declared : undefined;
+}
+
 function assistantText(message: AgentMessage): string {
 	if (message.role !== "assistant") return "";
 	return message.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("");

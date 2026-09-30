@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { type LoadedNativeHarness, loadNativeHarness } from "@breadboard/harness";
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
+import { type FetchImpl, streamSimple, type ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { applyNativeHarnessSessionOptions } from "@oh-my-pi/pi-coding-agent/breadboard/native-harness-session";
@@ -496,5 +496,59 @@ describe("research pack file tools", () => {
 		await session.waitForIdle();
 		expect(toolResult(session, "write-denied")?.isError).toBe(true);
 		expect(fs.existsSync(path.join(harness.workspaceRoot, "unapproved.txt"))).toBe(false);
+	});
+});
+
+/** Two prompts through the real OpenAI Responses provider; returns the request bodies it sent. */
+async function responsesRequests(specPath: string): Promise<Array<Record<string, unknown>>> {
+	const bodies: Array<Record<string, unknown>> = [];
+	const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+		bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+		const id = `resp_${bodies.length}`;
+		const item = {
+			type: "message",
+			id: `msg_${id}`,
+			role: "assistant",
+			content: [{ type: "output_text", text: "ok" }],
+		};
+		const events = [
+			{ type: "response.created", response: { id } },
+			{ type: "response.output_item.added", item: { ...item, status: "in_progress", content: [] } },
+			{ type: "response.content_part.added", part: { type: "output_text", text: "" } },
+			{ type: "response.output_text.delta", delta: "ok" },
+			{ type: "response.output_item.done", item: { ...item, status: "completed" } },
+			{
+				type: "response.completed",
+				response: { id, status: "completed", usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6 } },
+			},
+		];
+		return new Response(`${events.map(event => `data: ${JSON.stringify(event)}`).join("\n\n")}\n\n`, {
+			headers: { "content-type": "text/event-stream" },
+		});
+	}) as FetchImpl;
+	const { session } = await nativeSession([], { specPath, autoApprove: true });
+	vi.spyOn(session.agent, "streamFn").mockImplementation((model, context, options) =>
+		streamSimple(model, context, { ...options, fetch }),
+	);
+	await session.prompt("first question");
+	await session.waitForIdle();
+	await session.prompt("second question");
+	await session.waitForIdle();
+	return bodies;
+}
+
+describe("research pack Responses chaining", () => {
+	it("replays the full transcript for a pack that declares responses_stateful: false", async () => {
+		const bodies = await responsesRequests("oh_my_opencode");
+		expect(bodies).toHaveLength(2);
+		expect(bodies[1]?.previous_response_id).toBeUndefined();
+		expect(JSON.stringify(bodies[1]?.input)).toContain("first question");
+	});
+
+	it("keeps OMP's chaining for a pack that does not declare it", async () => {
+		const bodies = await responsesRequests("codex");
+		expect(bodies).toHaveLength(2);
+		expect(bodies[1]?.previous_response_id).toBe("resp_1");
+		expect(JSON.stringify(bodies[1]?.input)).not.toContain("first question");
 	});
 });

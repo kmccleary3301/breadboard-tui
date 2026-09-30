@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the `statefulResponses` agent option, forwarded to every provider stream call.
+
 ## [18.3.0] - 2026-09-24
 
 ### Added

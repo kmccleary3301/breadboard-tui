@@ -456,6 +456,8 @@ export interface CreateAgentSessionOptions {
 	 * that own the whole prompt contract through {@link systemPrompt} can turn it off.
 	 */
 	dateCwdReminder?: boolean;
+	/** OpenAI Responses `previous_response_id` chaining. Default: the provider's own choice. */
+	statefulResponses?: boolean;
 	/** Raw Handlebars template replacing the bundled default system prompt rendering. */
 	systemPromptTemplate?: string;
 	/** Already-loaded custom prompt text rendered through the bundled custom system prompt template. */
@@ -3799,6 +3801,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			hideThinkingSummary: settings.get("omitThinking"),
 			kimiApiFormat,
 			preferWebsockets: preferOpenAICodexWebsockets,
+			statefulResponses: options.statefulResponses,
 			getToolContext: tc => toolContextStore.getContext(tc),
 			getApiKey: effectiveGetApiKey,
 			streamFn: (streamModel, context, streamOptions) => {

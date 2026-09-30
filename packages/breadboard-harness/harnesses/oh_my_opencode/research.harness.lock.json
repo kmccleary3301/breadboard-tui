@@ -118,6 +118,14 @@
     },
     {
       "env_gate_ids": [],
+      "path": "provider_tools.responses_stateful",
+      "source_layer_id": "agent-config:0000:research.harness.yaml",
+      "value": false,
+      "value_kind": "boolean",
+      "visibility": "model-visible"
+    },
+    {
+      "env_gate_ids": [],
       "path": "provider_tools.responses_use_developer_role",
       "source_layer_id": "agent-config:0000:research.harness.yaml",
       "value": true,
@@ -250,7 +258,7 @@
     }
   ],
   "env_gates": [],
-  "graph_hash": "sha256:0056de08c5ac61016b8ffeb5df486eb3ea0fc46531f4114fe156925b406314ba",
+  "graph_hash": "sha256:5e1e38b7c3816b2e5743839741436c2c94ba7cd910152de97fa95e9fcfa1edaa",
   "graph_id": "agent_config:research.harness",
   "merge_policy": {
     "conflict_resolution": "highest-precedence",
@@ -269,7 +277,7 @@
   "source_layers": [
     {
       "host_visible": true,
-      "layer_hash": "sha256:d7505ceda44bdaadf5b11f310c22df8ca0b204ae842c3d92ac9fc316f182bc49",
+      "layer_hash": "sha256:0c819758435e510680a766a6a1088fbff12edafbe3730c1aba50f8ecd7db1e9e",
       "layer_id": "agent-config:0000:research.harness.yaml",
       "model_visible": true,
       "precedence": 0,
@@ -310,6 +318,7 @@
       "prompts.packs.base.system",
       "prompts.tool_prompt_mode",
       "provider_tools.api_variant",
+      "provider_tools.responses_stateful",
       "provider_tools.responses_use_developer_role",
       "provider_tools.suppress_prompts",
       "provider_tools.tool_choice",

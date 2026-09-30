@@ -8,6 +8,7 @@
 - `/harness reload` recompiles the workspace harness spec and applies the next generation at the next turn boundary, or reports why the new spec was rejected.
 - `NativeRpcTransport` in `@breadboard/harness` drives `bb` sessions from TypeScript over OMP's RPC mode, with harness selection and approval handling.
 - With `BREADBOARD_OMP_AGENT_DIR` set, print, JSON and RPC modes use the shared OMP auth store, like interactive sessions. Before, they refused to start.
+- Added the `statefulResponses` session option, which turns OpenAI Responses `previous_response_id` chaining on or off for the whole session.
 - Added `registerSettingValueNormalizer` and `registerGlobalSettingsMigration` (`config/settings-extensions`). A distribution can use them to validate its own setting values and rewrite its own profile keys; `Settings` has no product-specific branches.
 - `bb` registers its themes, monochrome glyph overrides, status-line presets (`bb-balanced`, `bb-quiet`, `bb-detailed`), BreadBoard settings tab and information-layout setup scene at startup, before the first paint, through the pi-tui registration points. They now live in coding-agent, and stock pi-tui shows none of them.
 - `bb` starts its cached composer before it loads the product setting defaults, and still applies those defaults before the shared CLI runs.
@@ -48,6 +49,7 @@
 - Stock `omp` no longer lists the BreadBoard Balanced, Quiet and Detailed status-line presets in settings. `bb` still lists them first.
 - `/team`, `/prompts`, `/evidence` and the other harness panel commands open the Agent Hub on the requested panel with the active harness loaded. Before, the hub dropped both, so it opened the overview with no harness data.
 - Stock `omp` no longer shows a Harness tab in the Agent Hub. It appears only when a harness is bound.
+- The `oh_my_opencode` harness sends every Responses request with the full transcript and no `previous_response_id`, as its reference config's `responses_stateful: false` declares. Before, the second and later requests were chained deltas.
 
 ## [18.3.0] - 2026-09-24
 

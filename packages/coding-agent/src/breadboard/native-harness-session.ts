@@ -2,6 +2,7 @@ import {
 	createNativeHarnessExtension,
 	type LoadedNativeHarness,
 	nativeCacheRetention,
+	nativeStatefulResponses,
 	nativeToolDelegates,
 } from "@breadboard/harness";
 import type { Settings } from "../config/settings";
@@ -43,4 +44,7 @@ export function applyNativeHarnessSessionOptions(
 	// Python caches the system prompt exactly as the harness declares; OMP's default retention depends on the auth type.
 	const cacheRetention = nativeCacheRetention(harness);
 	if (cacheRetention !== undefined) activeSettings.override("providers.cacheRetention", cacheRetention);
+	// Python replays the full transcript when the lock turns off Responses chaining.
+	const statefulResponses = nativeStatefulResponses(harness);
+	if (statefulResponses !== undefined) options.statefulResponses = statefulResponses;
 }

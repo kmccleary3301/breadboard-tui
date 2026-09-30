@@ -145,6 +145,9 @@ export interface AgentOptions {
 	/** Hint that websocket transport should be preferred when supported by the provider implementation. */
 	preferWebsockets?: boolean;
 
+	/** OpenAI Responses `previous_response_id` chaining; `false` replays the full transcript on every request. */
+	statefulResponses?: boolean;
+
 	/**
 	 * Custom stream function (for proxy backends, etc.). Default uses streamSimple.
 	 */
@@ -434,6 +437,7 @@ export class Agent {
 	#resolveRunningPrompt?: () => void;
 	#kimiApiFormat?: "openai" | "anthropic";
 	#preferWebsockets?: boolean;
+	#statefulResponses?: boolean;
 	#transformToolCallArguments?: (args: Record<string, unknown>, toolName: string) => Record<string, unknown>;
 	#speculativeToolExecution?: SpeculativeToolExecutionConfig;
 	#resolveFallbackTool?: (name: string, advertised: readonly AgentTool<any>[]) => AgentTool<any> | undefined;
@@ -533,6 +537,7 @@ export class Agent {
 		this.#cwdResolver = opts.cwdResolver;
 		this.#kimiApiFormat = opts.kimiApiFormat;
 		this.#preferWebsockets = opts.preferWebsockets;
+		this.#statefulResponses = opts.statefulResponses;
 		this.#transformToolCallArguments = opts.transformToolCallArguments;
 		this.#speculativeToolExecution = opts.speculativeToolExecution;
 		this.#resolveFallbackTool = opts.resolveFallbackTool;
@@ -1598,6 +1603,7 @@ export class Agent {
 			maxRetryDelayMs: this.#maxRetryDelayMs,
 			kimiApiFormat: this.#kimiApiFormat,
 			preferWebsockets: this.#preferWebsockets,
+			statefulResponses: this.#statefulResponses,
 			convertToLlm: this.#convertToLlm,
 			transformProviderContext: this.#transformProviderContext,
 			sentToolDefinitions: this.#sentToolDefinitions,

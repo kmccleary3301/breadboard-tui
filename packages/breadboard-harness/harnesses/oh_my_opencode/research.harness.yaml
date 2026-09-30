@@ -13,6 +13,7 @@ provider_tools:
   api_variant: responses
   responses_use_developer_role: true
   tool_choice: auto
+  responses_stateful: false
 
 tools:
   registry:
