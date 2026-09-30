@@ -204,4 +204,48 @@ describe("harness compiler", () => {
 		});
 		expect(findings.map(finding => [finding.pointer, finding.code])).toEqual([["/dossier/bad/self", "json_cycle"]]);
 	});
+
+	test("keeps inherited keys when compiling a spec with single-mapping YAML merge key", () => {
+		const yamlWithSingleMerge = `
+schema_version: bb.harness_definition.v1
+version: 1
+workspace:
+  root: .
+providers:
+  default_model: mock/reference
+  models:
+    - &shared_config
+      id: mock/base
+      adapter: mock_chat
+    - id: mock/reference
+      "<<": *shared_config
+modes:
+  - name: respond
+loop:
+  sequence:
+    - mode: respond
+`;
+		const compiled = compileHarnessYaml(yamlWithSingleMerge, { sourceRef: "single_merge.yaml" });
+		expect(compiled.effective.providers).toEqual({
+			default_model: "mock/reference",
+			models: [
+				{ id: "mock/base", adapter: "mock_chat" },
+				{ id: "mock/reference", adapter: "mock_chat" },
+			],
+		});
+
+		const parsed = parseHarnessYaml(`
+anchor: &anchor
+  foo: "merged_val_1"
+  bar: "merged_val_2"
+target:
+  "<<": *anchor
+  baz: "target_val"
+`);
+		expect(parsed.target).toEqual({
+			baz: "target_val",
+			foo: "merged_val_1",
+			bar: "merged_val_2",
+		});
+	});
 });

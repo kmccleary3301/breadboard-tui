@@ -28,7 +28,7 @@ export function normalizeHarnessSelection(selection: string | NativeHarnessSelec
 
 /** A typed policy result for an OMP extension approval request. */
 export type NativeApprovalDecision =
-	| { readonly decision: "allow" }
+	| { readonly decision: "allow"; readonly selectedOption?: string }
 	| { readonly decision: "deny"; readonly reason?: string };
 
 export interface NativeApprovalRequest {
@@ -414,8 +414,12 @@ export class NativeRpcTransport {
 			transport: "omp-rpc",
 		};
 	}
-	async prompt(message: string): Promise<void> {
+	async #sendPrompt(message: string): Promise<void> {
 		await this.#send({ type: "prompt", message });
+	}
+
+	async prompt(message: string): Promise<void> {
+		await this.#sendPrompt(message);
 		this.#emitPublic(
 			"input.accepted",
 			{ content_hash: PUBLIC_ZERO_SHA256, attachments: [] },
@@ -436,25 +440,24 @@ export class NativeRpcTransport {
 
 	/** Request the native `/bb-transcript` exporter and return its announced path. */
 	async exportTranscript(): Promise<string | undefined> {
-		const result = new Promise<string | undefined>((resolve, reject) => {
-			const timeoutId = setTimeout(() => {
-				const index = this.#notifyWaiters.indexOf(onNotify);
-				if (index >= 0) this.#notifyWaiters.splice(index, 1);
-				reject(new Error("Timed out waiting for the native transcript exporter"));
-			}, this.#options.transcriptTimeoutMs ?? 30_000);
-			const onNotify = (request: UiNotifyRequest): void => {
-				clearTimeout(timeoutId);
-				if (request.message.startsWith("Transcript written to "))
-					resolve(request.message.slice("Transcript written to ".length));
-				else if (request.message.startsWith("No session file yet")) resolve(undefined);
-				else return;
-				const index = this.#notifyWaiters.indexOf(onNotify);
-				if (index >= 0) this.#notifyWaiters.splice(index, 1);
-			};
-			this.#notifyWaiters.push(onNotify);
-		});
-		await this.prompt("/bb-transcript");
-		return result;
+		const { promise, resolve, reject } = Promise.withResolvers<string | undefined>();
+		const timeoutId = setTimeout(() => {
+			const index = this.#notifyWaiters.indexOf(onNotify);
+			if (index >= 0) this.#notifyWaiters.splice(index, 1);
+			reject(new Error("Timed out waiting for the native transcript exporter"));
+		}, this.#options.transcriptTimeoutMs ?? 30_000);
+		const onNotify = (request: UiNotifyRequest): void => {
+			clearTimeout(timeoutId);
+			if (request.message.startsWith("Transcript written to "))
+				resolve(request.message.slice("Transcript written to ".length));
+			else if (request.message.startsWith("No session file yet")) resolve(undefined);
+			else return;
+			const index = this.#notifyWaiters.indexOf(onNotify);
+			if (index >= 0) this.#notifyWaiters.splice(index, 1);
+		};
+		this.#notifyWaiters.push(onNotify);
+		await this.#sendPrompt("/bb-transcript");
+		return promise;
 	}
 
 	/** Projected BreadBoard public events. */
@@ -581,6 +584,7 @@ export class NativeRpcTransport {
 		}
 		if (candidate.type === "agent_end") {
 			if (this.#cancelRequested) return;
+			if (candidate.isTerminal === false) return;
 			const error = typeof candidate.error === "string" ? candidate.error : undefined;
 			this.#emitPublic(
 				error ? "session.failed" : "session.completed",
@@ -745,6 +749,7 @@ export class NativeRpcTransport {
 	async #resolveApproval(request: UiConfirmRequest | UiSelectRequest): Promise<void> {
 		const policy = this.#options.approval ?? { kind: "deny" as const };
 		let allowed = false;
+		let selectedOption: string | undefined;
 		if (policy.kind === "forward") {
 			const decision = await policy.decide({
 				id: request.id,
@@ -754,11 +759,20 @@ export class NativeRpcTransport {
 				...(request.timeout === undefined ? {} : { timeout: request.timeout }),
 			});
 			allowed = decision.decision === "allow";
+			if (decision.decision === "allow" && typeof decision.selectedOption === "string") {
+				selectedOption = decision.selectedOption;
+			}
 		}
 		const response: RpcExtensionUIResponse =
 			request.method === "confirm"
 				? { type: "extension_ui_response", id: request.id, confirmed: allowed }
 				: (() => {
+						if (selectedOption !== undefined) {
+							const value = request.options.find(option => option === selectedOption);
+							return value === undefined
+								? { type: "extension_ui_response", id: request.id, cancelled: true }
+								: { type: "extension_ui_response", id: request.id, value };
+						}
 						const expected = allowed ? "Approve" : "Deny";
 						const value = request.options.find(option => option === expected);
 						return value === undefined

@@ -14,6 +14,8 @@ export interface NativeToolDefinition {
 	readonly nativePrimary: boolean;
 	/** `execution.max_per_turn`. */
 	readonly maxPerTurn?: number;
+	/** `binding.handler`: the engine handler the definition declares, when it names one. */
+	readonly handler?: string;
 }
 
 export interface NativeToolSurfacePack {

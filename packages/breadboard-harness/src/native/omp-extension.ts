@@ -11,7 +11,7 @@ import {
 import { RESEARCH_NATIVE_BINDINGS, researchBindingForTool } from "./research-bindings";
 import { NativeHarnessReloadError, type LoadedNativeHarness, type NativeHarnessLiveState } from "./load-native-harness";
 import { nativeLockValue } from "./lock-values";
-import { frameNativeUserContent } from "./prompt-assembly";
+import { frameNativeUserContent, type NativeUserTextBlock } from "./prompt-assembly";
 import { createNativeStageMachine } from "./stage-machine";
 import {
 	evalOutcomeFromOmp,
@@ -233,8 +233,13 @@ export const NATIVE_BINDINGS: Readonly<Record<string, NativeBinding>> = {
 	},
 };
 
-/** Resolve from the tool's declared name and schema, without depending on registry paths. */
+/**
+ * Resolve from the tool's declared definition, without depending on registry paths. A definition
+ * that declares the engine `eval` handler gets the engine's result shape; research packs' `eval`
+ * declares none and delegates to OMP's eval.
+ */
 export function nativeBindingForTool(tool: NativeToolDefinition): NativeBinding | undefined {
+	if (tool.handler === "eval") return NATIVE_BINDINGS.eval;
 	if (Object.hasOwn(RESEARCH_NATIVE_BINDINGS, tool.name)) return researchBindingForTool(tool);
 	return NATIVE_BINDINGS[tool.name];
 }
@@ -242,7 +247,7 @@ export function nativeBindingForTool(tool: NativeToolDefinition): NativeBinding 
 /** Built-ins the harness's function tools delegate to, keyed by harness tool name. */
 export function nativeToolDelegates(harness: LoadedNativeHarness): Record<string, NativeToolDelegate> {
 	const delegates: Record<string, NativeToolDelegate> = {};
-	for (const tool of harness.toolSurface.native) {
+	for (const tool of harness.registeredToolSurface.native) {
 		const delegate = nativeBindingForTool(tool)?.delegate;
 		if (delegate !== undefined) delegates[tool.name] = delegate;
 	}
@@ -317,14 +322,19 @@ async function runTextCalls(
 
 function assertNativeHarnessBindings(harness: LoadedNativeHarness): void {
 	for (const tool of harness.registeredToolSurface.native) {
-		if (NATIVE_BINDINGS[tool.name] === undefined)
+		if (nativeBindingForTool(tool) === undefined)
 			throw new Error(`native harness tool ${tool.name} has no OMP binding`);
 	}
 }
 
+/**
+ * Registers `harness`'s tools. Each call resolves against the generation active when it runs, so a
+ * tool a later generation dropped fails instead of running with the old generation's definition.
+ */
 function registerFunctionTools(
 	api: ExtensionAPI,
 	harness: LoadedNativeHarness,
+	getActiveHarness: () => LoadedNativeHarness,
 	todos: TodoWriteState,
 	guard: CompletionGuard,
 ): void {
@@ -342,9 +352,23 @@ function registerFunctionTools(
 			approval: binding.approval,
 			...(tool.name === "mark_task_complete" ? { terminal: result => guard.endsRun(result.details) } : {}),
 			async execute(_toolCallId, params, signal, onUpdate, context) {
+				const activeHarness = getActiveHarness();
+				const activeTool = activeHarness.registeredToolSurface.native.find(t => t.name === tool.name);
+				const activeBinding = activeTool === undefined ? undefined : nativeBindingForTool(activeTool);
+				if (activeBinding === undefined) {
+					throw new Error(`Tool "${tool.name}" is not registered in the active generation`);
+				}
 				const input = parseCanonicalJson(JSON.stringify(params ?? null));
 				if (!isJsonRecord(input)) throw new Error(`${tool.name} arguments must be an object`);
-				const output = await binding.run({ input, harness, context, signal, onUpdate, todos, guard });
+				const output = await activeBinding.run({
+					input,
+					harness: activeHarness,
+					context,
+					signal,
+					onUpdate,
+					todos,
+					guard,
+				});
 				return {
 					content: [{ type: "text", text: output.text }],
 					details: output.details,
@@ -553,6 +577,34 @@ function instructionsPayload(payload: unknown): unknown {
 	};
 }
 
+interface ResponsesSystem {
+	readonly developer: readonly JsonRecord[];
+	readonly instructions?: string;
+}
+
+/** The system prompt OMP put in a Responses payload, before any harness role conversion. */
+function responsesSystem(payload: unknown): ResponsesSystem | undefined {
+	if (!isJsonRecord(payload as never) || !Array.isArray((payload as JsonRecord).input)) return undefined;
+	const record = payload as JsonRecord;
+	const developer = (record.input as unknown[]).filter(
+		(item): item is JsonRecord => isJsonRecord(item as never) && (item as JsonRecord).role === "developer",
+	);
+	return typeof record.instructions === "string" ? { developer, instructions: record.instructions } : { developer };
+}
+
+/** Puts `system` back on a chained request that carries none of its own. */
+function withResponsesSystem(payload: unknown, system: ResponsesSystem): unknown {
+	const record = payload as JsonRecord;
+	if (typeof record.previous_response_id !== "string") return payload;
+	const own = responsesSystem(payload);
+	if (own === undefined || own.developer.length > 0 || own.instructions !== undefined) return payload;
+	return {
+		...record,
+		input: [...system.developer, ...(record.input as unknown[])],
+		...(system.instructions === undefined ? {} : { instructions: system.instructions }),
+	};
+}
+
 function usesResponsesDialect(lock: JsonRecord): boolean {
 	if (nativeLockValue(lock, "provider_tools.api_variant") === "responses") return true;
 	const models = nativeLockValue(lock, "providers.models");
@@ -572,6 +624,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		let pendingGeneration: number | undefined;
 		let activeHarness = harness;
 		let pendingHarness = harness;
+		const getActiveHarness = (): LoadedNativeHarness => activeHarness;
 		let stageMachine = createNativeStageMachine(activeHarness.lock, activeHarness.stages);
 		let policy = new NativeTurnPolicy(activeHarness.registeredToolSurface);
 		const todos = new TodoWriteState();
@@ -585,11 +638,22 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				graph_hash: current.graphHash,
 			});
 		};
+		// Python sends the system prompt on every Responses request (`responses.py:68-114`), including
+		// requests chained with `previous_response_id`; OMP's delta input drops it after the first turn,
+		// and a chained request does not inherit `instructions`. A chained request only happens when
+		// the history prefix, system messages included, is unchanged, so the last full request's
+		// system items are the ones in effect.
+		let lastSystem: ResponsesSystem = { developer: [] };
 		api.on("before_provider_request", event => {
 			if (!usesResponsesDialect(activeHarness.lock)) return undefined;
+			const current = responsesSystem(event.payload);
+			if (current !== undefined && (current.developer.length > 0 || current.instructions !== undefined)) {
+				lastSystem = current;
+			}
+			const payload = current === undefined ? event.payload : withResponsesSystem(event.payload, lastSystem);
 			return nativeLockValue(activeHarness.lock, "provider_tools.responses_use_developer_role") === true
-				? developerRolePayload(event.payload)
-				: instructionsPayload(event.payload);
+				? developerRolePayload(payload)
+				: instructionsPayload(payload);
 		});
 		const applyStage = async (): Promise<void> => {
 			const stage = stageMachine.current;
@@ -600,7 +664,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 			if (pendingHarness === activeHarness) return;
 			const next = pendingHarness;
 			const generation = pendingGeneration;
-			registerFunctionTools(api, next, todos, guard);
+			registerFunctionTools(api, next, getActiveHarness, todos, guard);
 			activeHarness = next;
 			transcript.specPath = next.harnessId;
 			transcript.graphHash = next.graphHash;
@@ -624,7 +688,7 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 		}
 		const live = activeHarness.live;
 		live?.setReloadValidator(assertNativeHarnessBindings);
-		registerFunctionTools(api, activeHarness, todos, guard);
+		registerFunctionTools(api, activeHarness, getActiveHarness, todos, guard);
 		if (live?.editable) {
 			api.on("session_start", async (_event, context) => {
 				const watcher = startNativeHarnessWatcher({
@@ -683,43 +747,60 @@ export function createNativeHarnessExtension(harness: LoadedNativeHarness): Exte
 				);
 			}
 		});
-		api.on("context", event => ({
-			messages: event.messages.map(message => {
-				if (
-					message.role === "custom" &&
-					(message.customType === NATIVE_TEXT_RESULTS_MESSAGE_TYPE ||
-						message.customType === NATIVE_GUARD_MESSAGE_TYPE)
-				) {
-					return {
-						role: "user",
-						content:
-							typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content,
-						attribution: "agent",
-						timestamp: message.timestamp,
-					};
-				}
-				if (message.role !== "user" || message.attribution === "agent") return message;
-				if (typeof message.content === "string") {
-					return { ...message, content: frameNativeUserContent(message.content, stageMachine.current) };
-				}
-				const first = message.content.findIndex(block => block.type === "text");
-				if (first < 0) return message;
-				const block = message.content[first];
-				if (block.type !== "text") return message;
-				const framed = frameNativeUserContent(block.text, stageMachine.current);
-				if (typeof framed === "string") {
+		// Python frames a user message once, with the stage in effect when it was sent, and keeps that
+		// framing in history (`prompt_planner.py:104-118`). OMP rebuilds the provider context every turn,
+		// so remember each message's framing by its position among user messages and its timestamp.
+		const framedUserMessages = new Map<string, { rawText: string; framed: string | NativeUserTextBlock[] }>();
+		const framedOnce = (key: string, rawText: string): string | NativeUserTextBlock[] => {
+			const cached = framedUserMessages.get(key);
+			if (cached?.rawText === rawText) return cached.framed;
+			const framed = frameNativeUserContent(rawText, stageMachine.current);
+			framedUserMessages.set(key, { rawText, framed });
+			return framed;
+		};
+		api.on("context", event => {
+			let userIndex = 0;
+			return {
+				messages: event.messages.map(message => {
+					if (
+						message.role === "custom" &&
+						(message.customType === NATIVE_TEXT_RESULTS_MESSAGE_TYPE ||
+							message.customType === NATIVE_GUARD_MESSAGE_TYPE)
+					) {
+						return {
+							role: "user",
+							content:
+								typeof message.content === "string"
+									? [{ type: "text", text: message.content }]
+									: message.content,
+							attribution: "agent",
+							timestamp: message.timestamp,
+						};
+					}
+					if (message.role !== "user" || message.attribution === "agent") return message;
+					const key = `${userIndex++}:${message.timestamp}`;
+					if (typeof message.content === "string") {
+						return { ...message, content: framedOnce(key, message.content) };
+					}
+					const first = message.content.findIndex(block => block.type === "text");
+					if (first < 0) return message;
+					const block = message.content[first];
+					if (block.type !== "text") return message;
+					const framed = framedOnce(key, block.text);
+					if (typeof framed === "string") {
+						return {
+							...message,
+							content: message.content.map((candidate, index) =>
+								index === first && candidate.type === "text" ? { ...candidate, text: framed } : candidate,
+							),
+						};
+					}
 					return {
 						...message,
-						content: message.content.map((candidate, index) =>
-							index === first && candidate.type === "text" ? { ...candidate, text: framed } : candidate,
-						),
+						content: [...message.content.slice(0, first), ...framed, ...message.content.slice(first + 1)],
 					};
-				}
-				return {
-					...message,
-					content: [...message.content.slice(0, first), ...framed, ...message.content.slice(first + 1)],
-				};
-			}),
-		}));
+				}),
+			};
+		});
 	};
 }

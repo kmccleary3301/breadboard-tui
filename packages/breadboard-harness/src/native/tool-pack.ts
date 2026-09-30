@@ -93,6 +93,7 @@ function parseToolDefinition(source: JsonRecord, path: string, provider: Provide
 	const execution = isRecord(source.execution) ? source.execution : {};
 	const maxPerTurn = execution.max_per_turn;
 	const strict = routingRecord.strict;
+	const handler = isRecord(source.binding) ? source.binding.handler : undefined;
 	return Object.freeze({
 		id: requiredString(source.id, `${name}.id`),
 		sourcePath: path,
@@ -102,6 +103,7 @@ function parseToolDefinition(source: JsonRecord, path: string, provider: Provide
 		...(provider === "openai" && typeof strict === "boolean" ? { strict } : {}),
 		nativePrimary: routingRecord.native_primary === true,
 		...(typeof maxPerTurn === "number" && Number.isInteger(maxPerTurn) && maxPerTurn > 0 ? { maxPerTurn } : {}),
+		...(typeof handler === "string" && handler.length > 0 ? { handler } : {}),
 	});
 }
 

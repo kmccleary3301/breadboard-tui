@@ -59,7 +59,7 @@ export function pythonFloatRepr(value: number): string {
 }
 
 /** Python `sorted()` order on `str`: code point, not UTF-16 unit. */
-function compareCodePoints(left: string, right: string): number {
+export function compareCodePoints(left: string, right: string): number {
 	const a = [...left];
 	const b = [...right];
 	const length = Math.min(a.length, b.length);

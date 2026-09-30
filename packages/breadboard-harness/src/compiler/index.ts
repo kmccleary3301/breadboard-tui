@@ -13,6 +13,7 @@ import YAML, {
 } from "yaml";
 
 import {
+	compareCodePoints,
 	JsonFloat,
 	type CanonicalJson,
 	canonicalJson,
@@ -102,17 +103,6 @@ interface MergedValue {
 }
 
 const EMPTY_RECORD = (): JsonRecord => ({});
-
-function compareCodePoints(left: string, right: string): number {
-	const a = [...left];
-	const b = [...right];
-	const length = Math.min(a.length, b.length);
-	for (let index = 0; index < length; index += 1) {
-		const difference = a[index]!.codePointAt(0)! - b[index]!.codePointAt(0)!;
-		if (difference !== 0) return difference;
-	}
-	return a.length - b.length;
-}
 
 function sortedKeys(record: JsonRecord): string[] {
 	return Object.keys(record).sort(compareCodePoints);
@@ -562,10 +552,13 @@ export function parseHarnessYaml(source: string): JsonRecord {
 				const key = convert(pair.key);
 				if (key === "<<") {
 					const value = convert(pair.value);
-					if (Array.isArray(value))
-						for (const item of value)
+					if (Array.isArray(value)) {
+						for (const item of value) {
 							if (isRecord(item)) merged.push(item);
-							else if (isRecord(value)) merged.push(value);
+						}
+					} else if (isRecord(value)) {
+						merged.push(value);
+					}
 					continue;
 				}
 				if (typeof key !== "string")

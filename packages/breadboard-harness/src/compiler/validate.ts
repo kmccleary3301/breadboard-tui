@@ -1,4 +1,4 @@
-import { JsonFloat } from "../canonical-json";
+import { compareCodePoints, JsonFloat } from "../canonical-json";
 import { bundledEngineDataSnapshot } from "../engine-data";
 
 export interface HarnessValidationFinding {
@@ -20,17 +20,6 @@ type RawError = {
 const CANONICAL_SCHEMA_ID = "https://breadboard.dev/contracts/public/schemas/bb.harness_definition.v1.schema.json";
 const LEGACY_SCHEMA_ID = "https://breadboard.dev/contracts/kernel/schemas/bb.agent_config_surface.v2.schema.json";
 const MAX_JSON_INTEGER_DIGITS = 640;
-
-function compareCodePoints(left: string, right: string): number {
-	const a = [...left];
-	const b = [...right];
-	const length = Math.min(a.length, b.length);
-	for (let index = 0; index < length; index += 1) {
-		const difference = a[index]!.codePointAt(0)! - b[index]!.codePointAt(0)!;
-		if (difference !== 0) return difference;
-	}
-	return a.length - b.length;
-}
 
 function pathPointer(path: readonly PathPart[]): string {
 	if (path.length === 0) return "/";

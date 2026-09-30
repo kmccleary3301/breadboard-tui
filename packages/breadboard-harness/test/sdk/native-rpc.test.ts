@@ -216,7 +216,7 @@ describe("NativeRpcTransport", () => {
 		await transport.stop();
 	});
 
-	test("matches exact approval labels and cancels unknown select options", async () => {
+	test("matches exact approval labels, supports explicit option selection, and cancels unknown select options", async () => {
 		const reversed = fakePeer(["Deny", "Approve"]);
 		const allow = new NativeRpcTransport({
 			binaryPath: "/tmp/bb",
@@ -230,6 +230,30 @@ describe("NativeRpcTransport", () => {
 		expect(reversed.writes.at(-1)).toContain('"value":"Approve"');
 		await allow.stop();
 
+		const multiOption = fakePeer(["main", "feature", "dev"]);
+		const explicitSelect = new NativeRpcTransport({
+			binaryPath: "/tmp/bb",
+			approval: { kind: "forward", decide: () => ({ decision: "allow", selectedOption: "feature" }) },
+			spawn: async () => multiOption.process,
+		});
+		await explicitSelect.start();
+		await explicitSelect.prompt("ask");
+		await eventually(() => multiOption.writes.find(line => line.includes("approval-1")));
+		expect(multiOption.writes.at(-1)).toContain('"value":"feature"');
+		await explicitSelect.stop();
+
+		const unknownOption = fakePeer(["main", "feature", "dev"]);
+		const invalidSelect = new NativeRpcTransport({
+			binaryPath: "/tmp/bb",
+			approval: { kind: "forward", decide: () => ({ decision: "allow", selectedOption: "staging" }) },
+			spawn: async () => unknownOption.process,
+		});
+		await invalidSelect.start();
+		await invalidSelect.prompt("ask");
+		await eventually(() => unknownOption.writes.find(line => line.includes("approval-1")));
+		expect(unknownOption.writes.at(-1)).toContain('"cancelled":true');
+		await invalidSelect.stop();
+
 		const unknown = fakePeer(["Yes", "No"]);
 		const deny = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => unknown.process });
 		await deny.start();
@@ -237,6 +261,59 @@ describe("NativeRpcTransport", () => {
 		await eventually(() => unknown.writes.find(line => line.includes("approval-1")));
 		expect(unknown.writes.at(-1)).toContain('"cancelled":true');
 		await deny.stop();
+	});
+
+	test("agent_end with isTerminal === false does not complete session and allows subsequent events", async () => {
+		const peer = fakePeer();
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => peer.process });
+		const events = transport.events();
+		await transport.createSession({ task: "hello" });
+		const started = (await events.next()).value as PublicSessionEvent;
+		expect(started.kind).toBe("session.started");
+		const input = (await events.next()).value as PublicSessionEvent;
+		expect(input.kind).toBe("input.accepted");
+
+		peer.emit({ type: "agent_end", messages: [], isTerminal: false });
+		peer.emit({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "continued execution" }] },
+		});
+		peer.emit({ type: "agent_end", messages: [], isTerminal: true });
+
+		const assistantMsg = (await events.next()).value as PublicSessionEvent;
+		expect(assistantMsg).toMatchObject({
+			kind: "assistant_message",
+			session_id: "s1",
+			payload: { text: "continued execution" },
+		});
+
+		const completed = (await events.next()).value as PublicSessionEvent;
+		expect(completed).toMatchObject({
+			kind: "session.completed",
+			session_id: "s1",
+		});
+		await transport.stop();
+	});
+
+	test("exportTranscript() does not emit a public input.accepted event onto transport.events()", async () => {
+		const peer = fakePeer();
+		const transport = new NativeRpcTransport({ binaryPath: "/tmp/bb", spawn: async () => peer.process });
+		const events = transport.events();
+		await transport.createSession({ task: "hello" });
+		const transcriptPath = await transport.exportTranscript();
+		expect(transcriptPath).toBe("/tmp/bb-transcript.v2.s1.json");
+		await transport.prompt("second prompt");
+		await transport.stop();
+
+		const received: PublicSessionEvent[] = [];
+		for await (const event of events) received.push(event);
+
+		expect(received.map(event => event.kind)).toEqual([
+			"session.started",
+			"input.accepted",
+			"input.accepted",
+		]);
+		expect(received.map(event => event.seq)).toEqual([0, 1, 2]);
 	});
 	test("resets or continues public sequence state across resume", async () => {
 		const peer = fakePeer();
