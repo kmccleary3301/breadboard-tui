@@ -47,8 +47,6 @@ export interface SessionHeader {
 	 */
 	additionalDirectories?: string[];
 	parentSession?: string;
-	/** BreadBoard lock path selected for a harness-switch session. */
-	configPath?: string;
 	/** Prior absolute JSONL locations recorded by successful session moves. */
 	previousSessionFiles?: string[];
 	/** Provider prompt-cache identity inherited by exact-route full forks. */
@@ -57,10 +55,6 @@ export interface SessionHeader {
 
 export interface NewSessionOptions {
 	parentSession?: string;
-	/** BreadBoard lock path to persist in the new session header. */
-	configPath?: string;
-	/** Session transition reason used by the session transition guard. */
-	transition?: "harnessSwitch";
 	/** Provider prompt-cache identity to seed on the new session header. */
 	providerPromptCacheKey?: string;
 	/** Skip flushing the current session and delete it instead of saving. */

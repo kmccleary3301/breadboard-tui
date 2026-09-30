@@ -436,7 +436,6 @@ const EXPERIMENTAL_CONTEXT_REQUIRED_TOOLS: Record<string, true> = {
 
 export type SessionTransitionPlan =
 	| { readonly reason: "new" }
-	| { readonly reason: "harnessSwitch" }
 	| { readonly reason: "resume"; readonly targetSessionFile: string }
 	| { readonly reason: "fork" }
 	| { readonly reason: "handoff" }
@@ -8545,7 +8544,7 @@ export class AgentSession {
 				return false;
 			}
 		}
-		await this.#sessionTransitionGuard?.({ reason: options?.transition ?? "new" });
+		await this.#sessionTransitionGuard?.({ reason: "new" });
 
 		this.#disconnectFromAgent();
 		let advisorRecordersDetached = false;
