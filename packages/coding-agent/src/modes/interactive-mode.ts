@@ -5777,6 +5777,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#eventController.dispose();
 		this.#codexResetFireworksController.dispose();
 		this.statusLine.dispose();
+		setStatusLineHarness(null);
 		if (this.#resizeHandler) {
 			process.stdout.removeListener("resize", this.#resizeHandler);
 			this.#resizeHandler = undefined;
