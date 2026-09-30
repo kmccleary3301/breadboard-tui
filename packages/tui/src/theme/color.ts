@@ -47,15 +47,35 @@ export function rgbToAnsi16Code(red: number, green: number, blue: number): numbe
 	return code;
 }
 
+const ANSI_COLOR_CACHE_LIMIT = 256;
+const ANSI_COLOR_CACHE_MAX_LENGTH = 128;
+const ansiColorCaches: Record<ColorMode, Map<string, string>> = {
+	none: new Map(),
+	"16color": new Map(),
+	"256color": new Map(),
+	truecolor: new Map(),
+};
+
+/** Convert a theme color to foreground SGR at the requested depth; throws for invalid colors. */
 export function colorToAnsi(color: string, mode: ColorMode): string {
 	if (mode === "none") return "";
+	const cache = color.length <= ANSI_COLOR_CACHE_MAX_LENGTH ? ansiColorCaches[mode] : undefined;
+	const cached = cache?.get(color);
+	if (cached !== undefined) return cached;
+	let ansi: string;
 	if (mode === "16color") {
 		const [red, green, blue] = colorToRgb(color);
-		return `\x1b[${rgbToAnsi16Code(red, green, blue)}m`;
+		ansi = `\x1b[${rgbToAnsi16Code(red, green, blue)}m`;
+	} else {
+		const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
+		const converted = Bun.color(color, format);
+		if (converted === null) throw new Error(`Invalid color value: ${color}`);
+		ansi = converted;
 	}
-	const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
-	const ansi = Bun.color(color, format);
-	if (ansi === null) throw new Error(`Invalid color value: ${color}`);
+	if (cache) {
+		if (cache.size >= ANSI_COLOR_CACHE_LIMIT) cache.clear();
+		cache.set(color, ansi);
+	}
 	return ansi;
 }
 

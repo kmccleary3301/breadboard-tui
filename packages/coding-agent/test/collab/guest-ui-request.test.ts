@@ -23,6 +23,7 @@ import {
 	parseCollabLink,
 } from "@oh-my-pi/pi-coding-agent/collab/protocol";
 import { CollabSocket } from "@oh-my-pi/pi-coding-agent/collab/relay-client";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type {
 	ExtensionAskDialogQuestion,
 	ExtensionUIDialogOptions,
@@ -189,7 +190,7 @@ async function makeHarness(opts?: { readOnly?: boolean }): Promise<GuestUiHarnes
 
 	const ctx = {
 		collabGuest: undefined as CollabGuestLink | undefined,
-		settings: { get: () => "" },
+		settings: Settings.isolated(),
 		sessionManager: {
 			getSessionFile: () => null,
 			getSessionName: () => "local session",
@@ -444,7 +445,7 @@ describe("collab TUI guest ui-request handling (#4049)", () => {
 /** Minimal InteractiveModeContext double: only the members CollabHost touches. */
 function makeHostContext(): InteractiveModeContext {
 	return {
-		settings: { get: () => "" },
+		settings: Settings.isolated(),
 		sessionManager: {
 			getSessionId: () => "sess-proto",
 			getCwd: () => "/tmp",
@@ -564,7 +565,6 @@ describe("collab proto handshake (#4049)", () => {
 			await host.stop("test done");
 		}
 	});
-
 	it("CollabGuestLink.join fails fast with the host's rejection message instead of hanging for the welcome", async () => {
 		// Scripted host that rejects every hello the way CollabHost does for a
 		// proto mismatch. The real guest must surface that message from join().
@@ -587,7 +587,7 @@ describe("collab proto handshake (#4049)", () => {
 		await hostOpen.promise;
 
 		const ctx = {
-			settings: { get: () => "" },
+			settings: Settings.isolated(),
 			sessionManager: { getSessionFile: () => null },
 			syncRunningSubagentBadge: () => {},
 		} as unknown as InteractiveModeContext;

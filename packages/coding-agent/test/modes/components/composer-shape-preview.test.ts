@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { COMPOSER_SHAPE_VALUES, type ComposerShape } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
+import { cfgComposerShape } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { ComposerShapePreview, renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import {
+	COMPOSER_SHAPE_VALUES,
+	type ComposerShape,
 	getComposerShapeOptions,
 	installExtensionComposerShape,
 } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
@@ -196,7 +198,7 @@ describe("composer shape preview", () => {
 		await initTheme(false, "unicode", false, "titanium", "light");
 		for (const identity of [OMP_PRODUCT_IDENTITY, BREADBOARD_PRODUCT_IDENTITY]) {
 			const isolated = Settings.isolated();
-			isolated.set("composer.shape", "pi");
+			cfgComposerShape.set(isolated, "pi");
 			const host = {
 				ctx: {
 					identity,

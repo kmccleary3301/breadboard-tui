@@ -12,7 +12,7 @@ import {
 	renderBreadboardStatusLine,
 	renderBreadboardStatusRows,
 } from "../src/breadboard/ui/status-line/breadboard-presentation";
-import { registerBreadboardSettingsSchema } from "../src/breadboard/settings-schema-extension";
+import { registerBreadboardSettings } from "../src/breadboard/settings";
 import { registerBreadboardStatusLine } from "../src/breadboard/ui/status-line";
 import { initTheme, setSymbolPreset } from "@oh-my-pi/pi-tui/theme";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
@@ -218,7 +218,7 @@ describe("BreadBoard composer while background jobs hold the turn", () => {
 	let unregisterSettings: (() => void) | undefined;
 
 	beforeEach(async () => {
-		unregisterSettings = registerBreadboardSettingsSchema();
+		unregisterSettings = registerBreadboardSettings();
 		unregisterStatusLine = registerBreadboardStatusLine();
 		settingsState = beginSettingsTest();
 		await Settings.init({ inMemory: true });

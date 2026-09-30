@@ -1,12 +1,39 @@
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { ProductAppearance, ProductIdentity } from "../../product-identity";
-import { gradientLogo } from "../../prompt/welcome";
+import { getProductIdentity, type ProductAppearance, type ProductIdentity } from "../../product-identity";
+import { gradientLogo, logoNode } from "../../prompt/welcome";
 import { padToWidth } from "../../render/utils";
 import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
+import { col, node, span, text } from "../../native/describe";
+import type { NativeNode } from "../../native/node";
+import { Memo } from "../../native/memo";
 import { renderStarfield, SETUP_TICK_MS } from "./splash";
 
 export const SETUP_OUTRO_MS = 1200;
+
+const outroMemo = new Memo();
+
+/**
+ * Native outro: the shimmering mark, the saved confirmation, and an
+ * indeterminate progress bar standing in for the timed sweep. A click sends
+ * the `continue` action.
+ */
+export function describeSetupOutro(identity: ProductIdentity = getProductIdentity()): NativeNode {
+	const saved = `${theme.status.success} Setup saved`;
+	return outroMemo.get([identity.id, saved], () =>
+		col(
+			[
+				node("spacer", { grow: 1 }),
+				logoNode(identity.logoArt, true),
+				text([span(saved, "success strong")], { wrap: "none" }),
+				text([span("Handing off to the normal CLI…", "muted")], { wrap: "none" }),
+				node("progress", { value: null, max: { w: "48ch" } }),
+				node("spacer", { grow: 1 }),
+			],
+			{ align: "center", gap: "sm", grow: 1, role: "omp.setup.outro", actions: { click: "continue" } },
+		),
+	);
+}
 
 function centerLine(line: string, width: number): string {
 	const lineWidth = visibleWidth(line);
@@ -24,9 +51,9 @@ export function renderSetupOutro(
 	width: number,
 	height: number,
 	elapsedMs: number,
-	identity: ProductIdentity,
-	appearance: ProductAppearance,
-	mode: ColorMode,
+	identity: ProductIdentity = getProductIdentity(),
+	appearance: ProductAppearance = "dark",
+	mode: ColorMode = theme.getColorMode(),
 ): string[] {
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
 	const lines = renderStarfield(width, height, frame + 1000);

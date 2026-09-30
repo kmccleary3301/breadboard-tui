@@ -29,6 +29,27 @@ import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 import { installInMemoryRelay, uninstallInMemoryRelay } from "./collab/helpers/in-memory-relay";
 import { createTestSession } from "./utilities";
 
+import {
+	cfgAutocompleteMaxVisible,
+	cfgComposerShape,
+	cfgDisplayReduceMotion,
+	cfgMarketplaceAutoUpdate,
+	cfgShowHardwareCursor,
+	cfgSpellingAutocomplete,
+	cfgSpellingAutocorrect,
+	cfgSpellingTypoDetection,
+	cfgStartupChangelogMode,
+	cfgStartupCheckUpdate,
+	cfgStartupQuiet,
+	cfgStartupSetupWizard,
+	cfgStartupShowSplash,
+	cfgTuiImeSafeCursor,
+	cfgTuiMaxInlineImages,
+	cfgTuiResizeScrollback,
+} from "@oh-my-pi/pi-coding-agent/modes/settings";
+
+const noRecentSessions = async () => [];
+
 class CountingTerminal extends VirtualTerminal {
 	starts = 0;
 	stops = 0;
@@ -52,11 +73,23 @@ class ThrowingStartTerminal extends CountingTerminal {
 
 class InputTrackingTerminal extends CountingTerminal {
 	inputEvents = 0;
-	override start(onInput: (data: string) => void, onResize: () => void): void {
+	startOptions: { deferInput?: boolean } | undefined;
+	inputEnables = 0;
+	override start(
+		onInput: (data: string) => void,
+		onResize: () => void,
+		_onDisconnect?: () => void,
+		options?: { deferInput?: boolean },
+	): void {
+		this.startOptions = options;
 		super.start(data => {
 			this.inputEvents += 1;
 			onInput(data);
 		}, onResize);
+	}
+
+	enableInput(): void {
+		this.inputEnables += 1;
 	}
 }
 
@@ -99,11 +132,11 @@ describe("outer startup collaboration gate", () => {
 		});
 		setProjectDir(testSession.tempDir);
 		const activeSettings = await Settings.init({ inMemory: true, cwd: testSession.tempDir });
-		activeSettings.override("startup.checkUpdate", false);
-		activeSettings.override("startup.changelogMode", "hidden");
-		activeSettings.override("startup.setupWizard", false);
-		activeSettings.override("startup.showSplash", false);
-		activeSettings.override("marketplace.autoUpdate", "off");
+		cfgStartupCheckUpdate.override(activeSettings, false);
+		cfgStartupChangelogMode.override(activeSettings, "hidden");
+		cfgStartupSetupWizard.override(activeSettings, false);
+		cfgStartupShowSplash.override(activeSettings, false);
+		cfgMarketplaceAutoUpdate.override(activeSettings, "off");
 		installInMemoryRelay();
 		const publish = registry.publishCollabHost;
 		vi.spyOn(registry, "publishCollabHost").mockImplementation((source, options) =>
@@ -148,7 +181,12 @@ describe("outer startup collaboration gate", () => {
 		});
 		Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
 		const authStorage = await AuthStorage.create(path.join(testSession.tempDir, "startup-auth.db"));
-		beginStartupComposer({ terminal: new VirtualTerminal(), version: "test", cache: false });
+		beginStartupComposer({
+			terminal: new VirtualTerminal(),
+			version: "test",
+			cache: false,
+			recentSessions: noRecentSessions,
+		});
 		const rawArgs = ["--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-tools", "--no-lsp"];
 		const running = runRootCommand(parseArgs(rawArgs), rawArgs, {
 			settings: activeSettings,
@@ -275,11 +313,11 @@ describe("runRootCommand startup teardown", () => {
 		const testSession = await createTestSession({ inMemory: true });
 		setProjectDir(testSession.tempDir);
 		const activeSettings = await Settings.init({ inMemory: true, cwd: testSession.tempDir });
-		activeSettings.override("startup.checkUpdate", false);
-		activeSettings.override("startup.changelogMode", "hidden");
-		activeSettings.override("startup.setupWizard", false);
-		activeSettings.override("startup.showSplash", false);
-		activeSettings.override("marketplace.autoUpdate", "off");
+		cfgStartupCheckUpdate.override(activeSettings, false);
+		cfgStartupChangelogMode.override(activeSettings, "hidden");
+		cfgStartupSetupWizard.override(activeSettings, false);
+		cfgStartupShowSplash.override(activeSettings, false);
+		cfgMarketplaceAutoUpdate.override(activeSettings, "off");
 		const authStorage = await AuthStorage.create(path.join(testSession.tempDir, "startup-auth.db"));
 		const terminal = new InputTrackingTerminal();
 		beginStartupComposer({ terminal, version: "test", cache: false });
@@ -334,16 +372,16 @@ describe("Composer prepaint", () => {
 		await initTheme();
 		settings = await Settings.init({ inMemory: true });
 		config = {
-			quiet: settings.get("startup.quiet"),
-			composerShape: settings.get("composer.shape") ?? "box",
-			showHardwareCursor: settings.get("showHardwareCursor"),
-			maxInlineImages: settings.get("tui.maxInlineImages"),
-			resizeScrollback: settings.get("tui.resizeScrollback"),
-			imeSafeCursor: settings.get("tui.imeSafeCursor"),
-			autocompleteMaxVisible: settings.get("autocompleteMaxVisible"),
-			spellingTypoDetection: settings.get("spelling.typoDetection"),
-			spellingAutocomplete: settings.get("spelling.autocomplete"),
-			spellingAutocorrect: settings.get("spelling.autocorrect"),
+			quiet: cfgStartupQuiet.get(settings),
+			composerShape: cfgComposerShape.get(settings) ?? "box",
+			showHardwareCursor: cfgShowHardwareCursor.get(settings),
+			maxInlineImages: cfgTuiMaxInlineImages.get(settings),
+			resizeScrollback: cfgTuiResizeScrollback.get(settings),
+			imeSafeCursor: cfgTuiImeSafeCursor.get(settings),
+			autocompleteMaxVisible: cfgAutocompleteMaxVisible.get(settings),
+			spellingTypoDetection: cfgSpellingTypoDetection.get(settings),
+			spellingAutocomplete: cfgSpellingAutocomplete.get(settings),
+			spellingAutocorrect: cfgSpellingAutocorrect.get(settings),
 		};
 	});
 
@@ -399,7 +437,7 @@ describe("Composer prepaint", () => {
 
 		try {
 			await initTheme(false, "ascii");
-			settings.set("composer.shape", "box");
+			cfgComposerShape.set(settings, "box");
 			vi.spyOn(KeybindingsManager, "create").mockReturnValue(KeybindingsManager.inMemory({ "app.clear": "ctrl+x" }));
 			mode = new InteractiveMode(
 				testSession.session,
@@ -814,16 +852,15 @@ describe("Composer prepaint", () => {
 			version: "9.9.9",
 			modelSelector: "mock/reference",
 			cache: false,
+			recentSessions: noRecentSessions,
 		});
+		// The welcome box names the `--model` selector and its provider before any session exists.
 		await terminal.waitForRender(() =>
-			terminal.getViewport().some(row => Bun.stripANSI(row).includes("mock/reference > connecting")),
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("mock/reference")),
 		);
-		expect(
-			terminal
-				.getViewport()
-				.map(row => Bun.stripANSI(row))
-				.join("\n"),
-		).toContain("mock/reference > connecting");
+		const rows = terminal.getViewport().map(row => Bun.stripANSI(row).trim());
+		expect(rows.some(row => /^│\s+mock\/reference\s+│/.test(row))).toBe(true);
+		expect(rows.some(row => /^│\s+mock\s+│/.test(row))).toBe(true);
 	});
 
 	it("preferences feed applies quiet mode", async () => {
@@ -853,10 +890,10 @@ describe("Composer prepaint", () => {
 			resizeScrollback: config.resizeScrollback,
 			imeSafeCursor: config.imeSafeCursor,
 			autocompleteMaxVisible: config.autocompleteMaxVisible,
-			spellingTypoDetection: settings.get("spelling.typoDetection"),
-			spellingAutocomplete: settings.get("spelling.autocomplete"),
-			spellingAutocorrect: settings.get("spelling.autocorrect"),
-			reduceMotion: settings.get("display.reduceMotion"),
+			spellingTypoDetection: cfgSpellingTypoDetection.get(settings),
+			spellingAutocomplete: cfgSpellingAutocomplete.get(settings),
+			spellingAutocorrect: cfgSpellingAutocorrect.get(settings),
+			reduceMotion: cfgDisplayReduceMotion.get(settings),
 			theme: {},
 		});
 		await terminal.waitForRender();
@@ -884,6 +921,7 @@ describe("Composer prepaint", () => {
 			terminal,
 			version: "9.9.9",
 			cache: false,
+			recentSessions: noRecentSessions,
 		});
 		await terminal.waitForRender();
 
@@ -975,5 +1013,46 @@ describe("Composer prepaint", () => {
 			await testSession.cleanup();
 			vi.restoreAllMocks();
 		}
+	});
+	it("defers raw input until resolved settings arrive, adoption as fallback", async () => {
+		// Regression contract: losing the deferral re-blinds typing during the
+		// startup module-load stall; losing the enable leaves the keyboard dead
+		// for the whole session.
+		const terminal = new InputTrackingTerminal(80, 32);
+		beginStartupComposer({
+			preferences: config,
+			terminal,
+			version: "9.9.9",
+			cache: false,
+			recentSessions: noRecentSessions,
+		});
+		// The prepaint must be physically written before any async runtime import
+		// can monopolize the event loop; a merely queued render is still a blind gap.
+		expect(terminal.getViewport().some(row => Bun.stripANSI(row).includes("9.9.9"))).toBeTrue();
+		expect(terminal.startOptions?.deferInput).toBeTrue();
+		expect(terminal.inputEnables).toBe(0);
+
+		applyStartupComposerPreferences({ ...config, theme: {} });
+		expect(terminal.inputEnables).toBe(1);
+
+		// Adoption after preferences must not double-enable…
+		const lease = takeStartupComposerLease();
+		lease?.adopt();
+		expect(terminal.inputEnables).toBe(1);
+		lease?.composer.ui.stop();
+	});
+	it("adoption enables raw input when settings never resolved", () => {
+		const terminal = new InputTrackingTerminal(80, 32);
+		beginStartupComposer({
+			preferences: config,
+			terminal,
+			version: "9.9.9",
+			cache: false,
+			recentSessions: noRecentSessions,
+		});
+		const lease = takeStartupComposerLease();
+		lease?.adopt();
+		expect(terminal.inputEnables).toBe(1);
+		lease?.composer.ui.stop();
 	});
 });

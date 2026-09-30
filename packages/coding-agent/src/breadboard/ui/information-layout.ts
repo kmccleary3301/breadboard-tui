@@ -18,7 +18,7 @@ import type { SetupScene, SetupSceneController, SetupSceneHost } from "@oh-my-pi
 import type { StatusLinePreset } from "@oh-my-pi/pi-tui/status-line/types";
 import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
 import { BreadboardCustomizeSubmenu } from "./customize-submenu";
-import type { BreadboardFieldSettings } from "./status-line/breadboard-fields";
+import { type BreadboardFieldSettings, DEFAULT_BREADBOARD_FIELD_SETTINGS } from "./status-line/breadboard-fields";
 import {
 	type BreadboardComposerActivity,
 	type BreadboardStatusSnapshot,
@@ -26,6 +26,14 @@ import {
 	renderBreadboardStatusRows,
 } from "./status-line/breadboard-presentation";
 import { isBreadboardPreset } from "./status-line/presets";
+
+/** Saved field choices; `statusLine.breadboard` stores only the fields a user changed. */
+function savedFields(host: SetupSceneHost): BreadboardFieldSettings {
+	return {
+		...DEFAULT_BREADBOARD_FIELD_SETTINGS,
+		...host.ctx.settings.get<Partial<BreadboardFieldSettings> | undefined>("statusLine.breadboard"),
+	};
+}
 
 export const PRESENTATION_PRESETS: readonly SelectItem[] = [
 	{
@@ -135,7 +143,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 	constructor(private readonly host: SetupSceneHost) {
 		this.#snapshot = previewSnapshot(host);
 		this.#currentPreset = host.ctx.settings.get<StatusLinePreset>("statusLine.preset");
-		this.#previewFields = host.ctx.settings.get<BreadboardFieldSettings>("statusLine.breadboard");
+		this.#previewFields = savedFields(host);
 		this.#selectList = new SelectList(PRESENTATION_ITEMS, 5, getSelectListTheme());
 		this.#selectList.setSelectedIndex(
 			Math.max(
@@ -225,7 +233,7 @@ class InformationLayoutSceneController implements SetupSceneController {
 	}
 
 	#openCustomizer(): void {
-		this.#previewFields = this.host.ctx.settings.get<BreadboardFieldSettings>("statusLine.breadboard");
+		this.#previewFields = savedFields(this.host);
 		const original = this.#previewFields;
 		this.#customizer = new BreadboardCustomizeSubmenu(
 			original,

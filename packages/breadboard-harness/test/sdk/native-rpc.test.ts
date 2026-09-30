@@ -308,11 +308,7 @@ describe("NativeRpcTransport", () => {
 		const received: PublicSessionEvent[] = [];
 		for await (const event of events) received.push(event);
 
-		expect(received.map(event => event.kind)).toEqual([
-			"session.started",
-			"input.accepted",
-			"input.accepted",
-		]);
+		expect(received.map(event => event.kind)).toEqual(["session.started", "input.accepted", "input.accepted"]);
 		expect(received.map(event => event.seq)).toEqual([0, 1, 2]);
 	});
 	test("resets or continues public sequence state across resume", async () => {

@@ -173,6 +173,11 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.pluginHelp,
 	},
 	{
+		name: "predict",
+		load: () => import("./commands/predict").then(m => m.default),
+		help: commandHelp.predictHelp,
+	},
+	{
 		name: "ps",
 		load: () => import("./commands/ps").then(m => m.default),
 		help: commandHelp.psHelp,
@@ -314,7 +319,7 @@ const RESERVED_TOP_LEVEL_WORDS: Record<string, string> = {
 	uninstall: `\`${APP_NAME} uninstall\` is not a top-level command. Use \`${APP_NAME} plugin uninstall <name@marketplace>\` to remove a plugin, or run \`${APP_NAME} launch uninstall\` if you meant to send "uninstall" as a prompt.`,
 	marketplace: `\`${APP_NAME} marketplace\` is not a top-level command. Use \`${APP_NAME} plugin marketplace <add|remove|update|list>\` to manage marketplaces, or run \`${APP_NAME} launch marketplace\` if you meant to send "marketplace" as a prompt.`,
 	discover: `\`${APP_NAME} discover\` is not a top-level command. Use \`${APP_NAME} plugin discover [marketplace]\` to browse available plugins, or run \`${APP_NAME} launch discover\` if you meant to send "discover" as a prompt.`,
-	upgrade: `\`${APP_NAME} upgrade\` is not a top-level command. Use \`${APP_NAME} plugin upgrade [name@marketplace]\` to upgrade plugins, or run \`${APP_NAME} launch upgrade\` if you meant to send "upgrade" as a prompt.`,
+	upgrade: `\`${APP_NAME} upgrade\` is not a top-level command. Use \`${APP_NAME} plugin upgrade [name]\` to upgrade plugins, or run \`${APP_NAME} launch upgrade\` if you meant to send "upgrade" as a prompt.`,
 	enable: `\`${APP_NAME} enable\` is not a top-level command. Use \`${APP_NAME} plugin enable <name@marketplace>\` to enable a plugin, or run \`${APP_NAME} launch enable\` if you meant to send "enable" as a prompt.`,
 	disable: `\`${APP_NAME} disable\` is not a top-level command. Use \`${APP_NAME} plugin disable <name@marketplace>\` to disable a plugin, or run \`${APP_NAME} launch disable\` if you meant to send "disable" as a prompt.`,
 };

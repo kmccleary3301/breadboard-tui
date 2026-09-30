@@ -186,7 +186,8 @@ function adapterForTool(
 			timeoutKey,
 			timeoutInMilliseconds,
 			cwdKey: declaredAlias(properties, ["cwd", "workdir", "working_directory"]),
-			passthroughKeys: ["pty", "async", "env", "name", "ready"].filter(key => properties.has(key)),
+			// OMP bash takes no `env` since v18.4.4; a pack's `env` argument is dropped, not forwarded.
+			passthroughKeys: ["pty", "async", "name", "ready"].filter(key => properties.has(key)),
 		};
 		return input => adaptBashInput(input, shape);
 	}

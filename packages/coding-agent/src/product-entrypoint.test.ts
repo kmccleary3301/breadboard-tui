@@ -275,7 +275,7 @@ describe("BreadBoard product entrypoint", () => {
 		);
 
 		const probe =
-			'const { Settings } = await import("./src/config/settings.ts"); const settings = await Settings.loadReadOnly({ cwd: process.env.BB_PROJECT, agentDir: process.env.BB_AGENT }); process.stdout.write(String(settings.get("modelRoles").default));';
+			'const { Settings } = await import("./src/config/settings.ts"); const { cfgModelRoles } = await import("./src/config/model-settings.ts"); const settings = await Settings.loadReadOnly({ cwd: process.env.BB_PROJECT, agentDir: process.env.BB_AGENT }); process.stdout.write(String(cfgModelRoles.get(settings).default));';
 		const result = await runProcess(["-e", probe], home, {
 			BREADBOARD_PRODUCT: "1",
 			BB_PROJECT: projectRoot,

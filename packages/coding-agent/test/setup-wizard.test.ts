@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { webModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/special";
 import { runOnboardingSetup } from "@oh-my-pi/pi-coding-agent/commands/setup";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
@@ -15,21 +14,14 @@ import {
 	type SetupSceneResult,
 	selectSetupScenes,
 } from "@oh-my-pi/pi-coding-agent/modes/setup";
-import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/providers";
+import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/sign-in";
 import { themeSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/theme";
-import { WebSearchTab } from "@oh-my-pi/pi-tui/setup/scenes/web-search";
 import { SetupWizardComponent } from "@oh-my-pi/pi-tui/setup/wizard-overlay";
 import { setTerminalGlyphProtocol } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { SEARCH_PROVIDER_OPTIONS } from "@oh-my-pi/pi-tui/tools/web-search";
-import { IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
+import { cfgSetupVersion, cfgSymbolPreset } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { registerBreadboardUi, unregisterBreadboardUi } from "@oh-my-pi/pi-coding-agent/breadboard/ui";
-
-/** The information-layout scene runs only in the BreadBoard product. */
-function productSceneIds(): string[] {
-	return ALL_SCENES.filter(scene => scene.id !== "information-layout" || IS_BREADBOARD_PRODUCT).map(scene => scene.id);
-}
 
 type SetupApplicationSceneHost = Omit<SetupSceneHost, "ctx"> & { ctx: InteractiveModeContext };
 
@@ -68,7 +60,7 @@ afterEach(async () => {
 describe("setup wizard scene selection", () => {
 	it("runs all v1 scenes for a new user", async () => {
 		const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
-		expect(scenes.map(scene => scene.id)).toEqual(productSceneIds());
+		expect(scenes.map(scene => scene.id)).toEqual(ALL_SCENES.map(scene => scene.id));
 	});
 
 	it("keeps CURRENT_SETUP_VERSION in sync with the highest scene minVersion", () => {
@@ -101,11 +93,6 @@ describe("setup wizard scene selection", () => {
 		expect(await selectSetupScenes(0, ALL_SCENES, ctx, { isTTY: true, setupWizardEnabled: false })).toEqual([]);
 	});
 
-	it("keeps the providers scene eligible even when a model is already configured", async () => {
-		const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
-		expect(scenes.some(scene => scene.id === "providers")).toBe(true);
-	});
-
 	it("force mode ignores version and user skip gates but still requires a TTY", async () => {
 		const ctx = fakeContextWithConfiguredModel();
 		const selected = await selectSetupScenes(CURRENT_SETUP_VERSION, ALL_SCENES, ctx, {
@@ -115,7 +102,7 @@ describe("setup wizard scene selection", () => {
 			resuming: true,
 			force: true,
 		});
-		expect(selected.map(scene => scene.id)).toEqual(productSceneIds());
+		expect(selected.map(scene => scene.id)).toEqual(ALL_SCENES.map(scene => scene.id));
 		expect(await selectSetupScenes(0, ALL_SCENES, ctx, { isTTY: false, force: true })).toEqual([]);
 	});
 
@@ -123,7 +110,9 @@ describe("setup wizard scene selection", () => {
 		setTerminalGlyphProtocol(true);
 		try {
 			const scenes = await selectSetupScenes(0, ALL_SCENES, fakeContextWithConfiguredModel(), { isTTY: true });
-			expect(scenes.map(scene => scene.id)).toEqual(productSceneIds().filter(id => id !== "glyph-mode"));
+			expect(scenes.map(scene => scene.id)).toEqual(
+				ALL_SCENES.map(scene => scene.id).filter(id => id !== "glyph-mode"),
+			);
 		} finally {
 			setTerminalGlyphProtocol(false);
 		}
@@ -226,7 +215,7 @@ describe("setup wizard persistence", () => {
 	it("marks the current setup version complete", async () => {
 		const settings = Settings.isolated();
 		await markSetupWizardComplete(settings);
-		expect(settings.get("setupVersion")).toBe(CURRENT_SETUP_VERSION);
+		expect(cfgSetupVersion.get(settings)).toBe(CURRENT_SETUP_VERSION);
 	});
 
 	it("can run a targeted scene without setup-version or welcome-intro side effects", async () => {
@@ -266,7 +255,7 @@ describe("setup wizard persistence", () => {
 		component?.handleInput?.("\n");
 		await pending;
 
-		expect(settings.get("setupVersion")).toBe(0);
+		expect(cfgSetupVersion.get(settings)).toBe(0);
 		expect(playWelcomeIntro).not.toHaveBeenCalled();
 		expect(hideOverlay).toHaveBeenCalledTimes(1);
 		expect(setFocus).toHaveBeenCalled();
@@ -507,7 +496,7 @@ describe("setup wizard theme previews", () => {
 
 		controller.handleInput?.("2");
 		await Bun.sleep(20);
-		expect(settings.get("symbolPreset")).toBe("nerd");
+		expect(cfgSymbolPreset.get(settings)).toBe("nerd");
 		expect(theme.getSymbolPreset()).toBe("nerd");
 	});
 });
@@ -537,7 +526,7 @@ describe("setup wizard glyph scene", () => {
 		controller.handleInput?.("3");
 		controller.handleInput?.("\n");
 		expect(await finished.promise).toBe("done");
-		expect(settings.get("symbolPreset")).toBe("emoji");
+		expect(cfgSymbolPreset.get(settings)).toBe("emoji");
 		expect(theme.getSymbolPreset()).toBe("emoji");
 	});
 
@@ -560,61 +549,8 @@ describe("setup wizard glyph scene", () => {
 		controller.handleInput?.("1");
 		controller.handleInput?.("\x1b");
 		expect(await finished.promise).toBe("skipped");
-		expect(settings.get("symbolPreset")).toBe("nerd");
+		expect(cfgSymbolPreset.get(settings)).toBe("nerd");
 		expect(theme.getSymbolPreset()).toBe("nerd");
-	});
-});
-
-describe("setup wizard web search tab", () => {
-	const webModels = (webModelManagerOptions().staticModels ?? []).map(model => buildModel(model));
-
-	it("persists the highlighted provider as the web model role", async () => {
-		const settings = Settings.isolated();
-		const host = bindSceneHost({
-			ctx: {
-				settings,
-				session: { modelRegistry: { authStorage: { keys: { source: () => undefined } }, getAll: () => webModels } },
-			},
-			requestRender: () => {},
-			finish: () => {},
-			setFocus: () => {},
-			restoreFocus: () => {},
-		} as unknown as SetupApplicationSceneHost);
-
-		const tab = new WebSearchTab(host);
-		tab.handleInput("\x1b[B"); // move off "auto" to the next provider
-		tab.handleInput("\n"); // confirm the highlighted provider
-		await Bun.sleep(20);
-
-		const expected = SEARCH_PROVIDER_OPTIONS[1]!.value;
-		expect(expected).not.toBe("auto");
-		expect(settings.getModelRole("web")).toBe(`web/${expected}`);
-	});
-
-	it("can select the last provider in the setup TUI list", async () => {
-		const settings = Settings.isolated();
-		const host = bindSceneHost({
-			ctx: {
-				settings,
-				session: { modelRegistry: { authStorage: { keys: { source: () => undefined } }, getAll: () => webModels } },
-			},
-			requestRender: () => {},
-			finish: () => {},
-			setFocus: () => {},
-			restoreFocus: () => {},
-		} as unknown as SetupApplicationSceneHost);
-
-		const tab = new WebSearchTab(host);
-		for (let i = 1; i < SEARCH_PROVIDER_OPTIONS.length; i++) {
-			tab.handleInput("\x1b[B");
-		}
-		tab.handleInput("\n");
-		await Bun.sleep(20);
-
-		const lastOption = SEARCH_PROVIDER_OPTIONS[SEARCH_PROVIDER_OPTIONS.length - 1]!;
-		const lastValue = lastOption.value;
-		if (lastValue === "auto") throw new Error("last option must be a concrete provider");
-		expect(settings.getModelRole("web")).toBe(`web/${lastValue}`);
 	});
 });
 

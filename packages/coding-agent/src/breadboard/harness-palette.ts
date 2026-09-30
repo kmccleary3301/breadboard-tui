@@ -1,5 +1,5 @@
 import type { SlashCommand } from "@oh-my-pi/pi-tui";
-import type { SlashCommandIconName } from "@oh-my-pi/pi-tui/theme/symbols";
+import { getSlashCommandTypeIcon } from "@oh-my-pi/pi-tui/theme/tui-adapters";
 import type { Settings } from "../config/settings";
 import type { HarnessPort } from "./harness-port";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES } from "../slash-commands/builtin-registry";
@@ -8,8 +8,6 @@ import {
 	harnessCommandsAsSlashCommands,
 	readHarnessPaletteSettings,
 } from "../slash-commands/harness";
-
-export type ThemedSlashCommand = Omit<SlashCommand, "icon"> & { icon?: SlashCommandIconName };
 
 /** A builtin the harness does not own; the palette never replaces or adds over one. */
 function isOtherBuiltin(name: string): boolean {
@@ -26,7 +24,8 @@ export class HarnessPaletteController {
 		this.#harnessPort = harnessPort;
 	}
 
-	apply(staticSlashCommands: readonly ThemedSlashCommand[]): ThemedSlashCommand[] {
+	/** Commands arrive with icons already resolved; replacements keep the static entry's icon. */
+	apply(staticSlashCommands: readonly SlashCommand[]): SlashCommand[] {
 		const snapshot = this.#harnessPort?.current() ?? null;
 		if (!snapshot) {
 			this.#harnessPaletteNames.clear();
@@ -44,7 +43,7 @@ export class HarnessPaletteController {
 			...dynamicCommands.keys(),
 		]);
 		this.#harnessPaletteNames = new Set(dynamicCommands.keys());
-		const result: ThemedSlashCommand[] = [];
+		const result: SlashCommand[] = [];
 		for (const command of staticSlashCommands) {
 			if (isOtherBuiltin(command.name)) {
 				result.push(command);
@@ -52,7 +51,7 @@ export class HarnessPaletteController {
 			}
 			const replacement = dynamicCommands.get(command.name);
 			if (replacement) {
-				result.push({ ...command, ...replacement, icon: command.icon });
+				result.push({ ...command, ...replacement, icon: command.icon, iconName: command.iconName });
 				dynamicCommands.delete(command.name);
 			} else if (!namesToReplace.has(command.name)) {
 				// Custom / third-party commands outside harness ownership are preserved
@@ -61,7 +60,7 @@ export class HarnessPaletteController {
 		}
 		for (const command of dynamicCommands.values()) {
 			if (!isOtherBuiltin(command.name)) {
-				result.push({ ...command, icon: "action" });
+				result.push({ ...command, icon: getSlashCommandTypeIcon("action"), iconName: "action" });
 			}
 		}
 		return result;

@@ -17,6 +17,8 @@ import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mo
 import { applyNativeHarnessSessionOptions } from "@oh-my-pi/pi-coding-agent/breadboard/native-harness-session";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgEditMode } from "@oh-my-pi/pi-coding-agent/edit/settings";
+import { cfgTodoEnabled, cfgToolsIntentTracing } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -74,7 +76,7 @@ async function nativeSession(
 		"compaction.enabled": false,
 		"retry.enabled": false,
 	});
-	if (options.editMode !== undefined) settings.override("edit.mode", options.editMode);
+	if (options.editMode !== undefined) cfgEditMode.override(settings, options.editMode);
 	const sessionOptions: CreateAgentSessionOptions = {
 		cwd,
 		agentDir: cwd,
@@ -411,9 +413,9 @@ describe("bb-omp.native session", () => {
 		expect(native.session.getActiveToolNames()).toEqual(
 			expect.arrayContaining(["bash", "eval", "task", "read", "edit"]),
 		);
-		expect(native.session.settings.get("todo.enabled")).toBe(stock.session.settings.get("todo.enabled"));
-		expect(native.session.settings.get("tools.intentTracing")).toBe(
-			stock.session.settings.get("tools.intentTracing"),
+		expect(cfgTodoEnabled.get(native.session.settings)).toBe(cfgTodoEnabled.get(stock.session.settings));
+		expect(cfgToolsIntentTracing.get(native.session.settings)).toBe(
+			cfgToolsIntentTracing.get(stock.session.settings),
 		);
 
 		for (const { session } of [stock, native]) {

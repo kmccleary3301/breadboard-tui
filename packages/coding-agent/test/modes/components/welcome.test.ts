@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgDisplayReduceMotion } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
 import { formatWelcomeHarnessIdentity } from "../../../src/breadboard/ui/welcome";
@@ -18,7 +19,7 @@ describe("WelcomeComponent", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
-		settings.set("display.reduceMotion", false);
+		cfgDisplayReduceMotion.set(settings, false);
 	});
 
 	it("selects standard tip when preset is not unicode", () => {
@@ -70,7 +71,7 @@ describe("WelcomeComponent", () => {
 	});
 
 	it("stops a prepaint intro when persisted settings finish loading reduced motion", async () => {
-		settings.set("display.reduceMotion", false);
+		cfgDisplayReduceMotion.set(settings, false);
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
 		let renderRequests = 0;
 		welcome.playIntro(() => {
@@ -78,7 +79,7 @@ describe("WelcomeComponent", () => {
 		});
 		expect(welcome.isTranscriptBlockFinalized()).toBe(false);
 
-		settings.set("display.reduceMotion", true);
+		cfgDisplayReduceMotion.set(settings, true);
 		await Bun.sleep(50);
 
 		expect(welcome.isTranscriptBlockFinalized()).toBe(true);

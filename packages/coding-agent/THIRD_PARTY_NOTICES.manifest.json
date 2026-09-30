@@ -3,8 +3,8 @@
   "generator": "scripts/generate-third-party-notices.ts",
   "bundle": {
     "path": "packages/coding-agent/THIRD_PARTY_NOTICES.txt",
-    "sha256": "33d8bfe092a79c0596ba3a69b92736abf1c705409e7e495fcdd7a19bf6b1ae04",
-    "bytes": 3281837
+    "sha256": "2c50a841a0e1178f78bfac272020958375886372d604a66bbe7492e1949bdd71",
+    "bytes": 3286670
   },
   "packageLicense": {
     "path": "packages/coding-agent/LICENSE",
@@ -18,8 +18,8 @@
     },
     {
       "path": "THIRD-PARTY-NOTICES.txt",
-      "sha256": "83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7",
-      "bytes": 1076433
+      "sha256": "d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b",
+      "bytes": 1076437
     },
     {
       "path": "crates/pi-ast/LICENSE",
@@ -28,8 +28,8 @@
     },
     {
       "path": "crates/pi-builtins/LICENSE",
-      "sha256": "13ff1d17c220d45ac0aab751bf6abf28968470ab3c9c3734f88bf5c181e3d7ba",
-      "bytes": 9269
+      "sha256": "3bc4f1931cb12fbfbc44892cd1a33f2d3fd3c1aa2e09f7c655822eb34e024cce",
+      "bytes": 9273
     },
     {
       "path": "crates/pi-builtins/LICENSE-MIT",
@@ -82,9 +82,24 @@
       "bytes": 1739
     },
     {
+      "path": "crates/vendor/brush-parser/LICENSE",
+      "sha256": "1c2618836a777ebc734928c5a8b3aba0e98a7726d88cb7bdb227c7889e86e902",
+      "bytes": 1071
+    },
+    {
       "path": "crates/vendor/cfg_aliases/LICENSE",
       "sha256": "31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812",
       "bytes": 1076
+    },
+    {
+      "path": "crates/vendor/napi/LICENSE",
+      "sha256": "3f1ce66533302df3a32edbfdfc0b78f0dd34659e4c1f5817162e5ea3c2297215",
+      "bytes": 2138
+    },
+    {
+      "path": "crates/vendor/tree-sitter-go/LICENSE",
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+      "bytes": 1080
     },
     {
       "path": "packages/agent/LICENSE",
@@ -123,8 +138,8 @@
     },
     {
       "path": "packages/coding-agent/src/tools/browser/relay/extension-assets/THIRD-PARTY-NOTICES.txt",
-      "sha256": "83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7",
-      "bytes": 1076433
+      "sha256": "d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b",
+      "bytes": 1076437
     },
     {
       "path": "packages/mnemopi/LICENSE",
@@ -138,8 +153,8 @@
     },
     {
       "path": "packages/natives/THIRD-PARTY-NOTICES.txt",
-      "sha256": "83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7",
-      "bytes": 1076433
+      "sha256": "d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b",
+      "bytes": 1076437
     },
     {
       "path": "packages/omptype/LICENSE",

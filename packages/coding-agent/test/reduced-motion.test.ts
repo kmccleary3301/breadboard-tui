@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgDisplayReduceMotion } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { shimmerEnabled } from "@oh-my-pi/pi-tui/theme/shimmer";
 import { isReducedMotionEnabled } from "@oh-my-pi/pi-coding-agent/utils/reduced-motion";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -32,7 +33,7 @@ describe("reduced motion setting", () => {
 		fs.mkdirSync(projectDir, { recursive: true });
 		const active = await Settings.init({ agentDir, cwd: projectDir });
 
-		active.set("display.reduceMotion", true);
+		cfgDisplayReduceMotion.set(active, true);
 		await active.flush();
 
 		expect(shimmerEnabled()).toBe(false);

@@ -32,7 +32,7 @@ SOFTWARE.
 ===== END LICENSE =====
 
 ===== BEGIN THIRD-PARTY-NOTICES.txt =====
-SHA-256: 83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7
+SHA-256: d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b
 
 OMP THIRD-PARTY NOTICES
 =======================
@@ -114,8 +114,8 @@ below.
 uutils coreutils (https://github.com/uutils/coreutils), MIT
 --------------------------------------------------------------------------------
 Covers: base32, base64, basename, cat, cksum (shared checksum machinery),
-b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cut,
-date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
+b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cp,
+cut, date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
 printenv, readlink, realpath, rm, seq, sort, stat, tac, tail, tee, touch, tr,
 truncate, uname, uniq, wc, whoami, yes.
 
@@ -22965,7 +22965,7 @@ SOFTWARE.
 ===== END crates/pi-ast/LICENSE =====
 
 ===== BEGIN crates/pi-builtins/LICENSE =====
-SHA-256: 13ff1d17c220d45ac0aab751bf6abf28968470ab3c9c3734f88bf5c181e3d7ba
+SHA-256: 3bc4f1931cb12fbfbc44892cd1a33f2d3fd3c1aa2e09f7c655822eb34e024cce
 
 This crate began as a locally-patched copy of brush-builtins from the brush shell
 project (https://github.com/reubeno/brush), used under the MIT License, and still
@@ -22987,8 +22987,8 @@ below.
 uutils coreutils (https://github.com/uutils/coreutils), MIT
 --------------------------------------------------------------------------------
 Covers: base32, base64, basename, cat, cksum (shared checksum machinery),
-b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cut,
-date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
+b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cp,
+cut, date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
 printenv, readlink, realpath, rm, seq, sort, stat, tac, tail, tee, touch, tr,
 truncate, uname, uniq, wc, whoami, yes.
 
@@ -23447,6 +23447,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ===== END crates/vendor/brush-core/LICENSE =====
 
+===== BEGIN crates/vendor/brush-parser/LICENSE =====
+SHA-256: 1c2618836a777ebc734928c5a8b3aba0e98a7726d88cb7bdb227c7889e86e902
+
+MIT License
+
+Copyright (c) 2024 reuben olinsky
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+===== END crates/vendor/brush-parser/LICENSE =====
+
 ===== BEGIN crates/vendor/cfg_aliases/LICENSE =====
 SHA-256: 31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812
 
@@ -23460,6 +23486,80 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ===== END crates/vendor/cfg_aliases/LICENSE =====
+
+===== BEGIN crates/vendor/napi/LICENSE =====
+SHA-256: 3f1ce66533302df3a32edbfdfc0b78f0dd34659e4c1f5817162e5ea3c2297215
+
+MIT License
+
+Copyright (c) 2020-present LongYinan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+MIT License
+
+Copyright (c) 2018 GitHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+===== END crates/vendor/napi/LICENSE =====
+
+===== BEGIN crates/vendor/tree-sitter-go/LICENSE =====
+SHA-256: 2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Max Brunsfeld
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+===== END crates/vendor/tree-sitter-go/LICENSE =====
 
 ===== BEGIN packages/agent/LICENSE =====
 SHA-256: 16c45f9d667442781f03fa198914cc39abcaa48ec5ed8f644643e554ca2fbf63
@@ -23676,7 +23776,7 @@ SOFTWARE.
 ===== END packages/coding-agent/src/tools/browser/relay/extension-assets/LICENSE.txt =====
 
 ===== BEGIN packages/coding-agent/src/tools/browser/relay/extension-assets/THIRD-PARTY-NOTICES.txt =====
-SHA-256: 83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7
+SHA-256: d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b
 
 OMP THIRD-PARTY NOTICES
 =======================
@@ -23758,8 +23858,8 @@ below.
 uutils coreutils (https://github.com/uutils/coreutils), MIT
 --------------------------------------------------------------------------------
 Covers: base32, base64, basename, cat, cksum (shared checksum machinery),
-b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cut,
-date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
+b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cp,
+cut, date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
 printenv, readlink, realpath, rm, seq, sort, stat, tac, tail, tee, touch, tr,
 truncate, uname, uniq, wc, whoami, yes.
 
@@ -46636,7 +46736,7 @@ SOFTWARE.
 ===== END packages/natives/LICENSE =====
 
 ===== BEGIN packages/natives/THIRD-PARTY-NOTICES.txt =====
-SHA-256: 83ed283000678eeac9c538e5b4f3710a2917e92d8f126d5b7dbfe29d494348e7
+SHA-256: d0c2e7c05bb4d755044b13fa560be58d01ab7c980b87892400a979397e569a8b
 
 OMP THIRD-PARTY NOTICES
 =======================
@@ -46718,8 +46818,8 @@ below.
 uutils coreutils (https://github.com/uutils/coreutils), MIT
 --------------------------------------------------------------------------------
 Covers: base32, base64, basename, cat, cksum (shared checksum machinery),
-b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cut,
-date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
+b2sum, md5sum, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, comm, cp,
+cut, date, dirname, head, hostname, ln, ls, mkdir, mktemp, mv, nproc, paste,
 printenv, readlink, realpath, rm, seq, sort, stat, tac, tail, tee, touch, tr,
 truncate, uname, uniq, wc, whoami, yes.
 

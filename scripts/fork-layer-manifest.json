@@ -2,9 +2,9 @@
 	"schemaVersion": "bb-omp.delta-manifest.v2",
 	"policySchemaVersion": "bb-omp.delta-policy.v1",
 	"upstream": {
-		"tag": "v18.3.0",
-		"commit": "62bc57be1b03ef0802a33cf7f5f530e534527531",
-		"tree": "b36226cce6a225a4c0d2c2162da223d61d7123da"
+		"tag": "v18.4.5",
+		"commit": "79808c3bf8f8cd9826decc63e3e18b13035f64f8",
+		"tree": "49986d7e959d32d4c9ed3da58377cc708361745f"
 	},
 	"paths": [
 		{
@@ -316,11 +316,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/breadboard/settings-schema-extension.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/breadboard/ui/status-line/harness-state.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
@@ -397,11 +392,6 @@
 			"path": "packages/coding-agent/src/commands/setup.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/config/settings-schema.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/config/settings.ts",
@@ -584,11 +574,6 @@
 			"path": "packages/coding-agent/src/tools/ask.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/src/utils/command-usage.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
 		},
 		{
 			"path": "packages/coding-agent/src/utils/objects.ts",
@@ -980,17 +965,7 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/tui/src/chat/user-message.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/tui/src/chrome/diff.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/chrome/transcript-container.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1036,11 +1011,6 @@
 		},
 		{
 			"path": "packages/tui/src/overlays/login-dialog.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/overlays/logout-account-selector.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1534,11 +1504,6 @@
 		},
 		{
 			"path": "scripts/sync-themes.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "scripts/sync-versions.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},

@@ -4,7 +4,7 @@ import { getSettingTabs } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import { composerSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/composer";
 import { glyphSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/glyph";
 import { modelSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/model";
-import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/providers";
+import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/sign-in";
 import { themeSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/theme";
 import { getSetupScenes } from "@oh-my-pi/pi-tui/setup/wizard";
 import { informationLayoutSetupScene } from "../src/breadboard/ui/information-layout";

@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { expandWindowsLongPath } from "@oh-my-pi/pi-natives/path";
 import { engines } from "../package.json" with { type: "json" };
 import { isEnoent, isEnotdir } from "./fs-error";
 import { BREADBOARD_DISTRIBUTION_POLICY } from "./product-distribution";
@@ -23,6 +24,9 @@ export const IS_BREADBOARD_PRODUCT = process.env.BREADBOARD_PRODUCT === "1";
 
 /** App name used in user-facing paths, process titles, and CLI output. */
 export const APP_NAME: string = IS_BREADBOARD_PRODUCT ? BREADBOARD_DISTRIBUTION_POLICY.productName : "omp";
+
+/** Public homepage that inference gateways (OpenRouter, Vercel AI Gateway) credit omp traffic to. */
+export const APP_URL: string = "https://omp.sh/";
 
 /** Default config directory name (e.g. ".breadboard" or ".omp"). */
 export const CONFIG_DIR_NAME = IS_BREADBOARD_PRODUCT ? ".breadboard" : ".omp";
@@ -159,6 +163,11 @@ function standardizeMacOSPath(p: string): string {
 	return p;
 }
 
+/** Keep the current directory's spelling while expanding Windows 8.3 aliases. */
+function standardizeProjectPath(p: string): string {
+	return process.platform === "win32" ? expandWindowsLongPath(p) : standardizeMacOSPath(p);
+}
+
 export function resolveEquivalentPath(inputPath: string): string {
 	const resolvedPath = path.resolve(inputPath);
 	try {
@@ -205,29 +214,33 @@ let projectDir: string | undefined;
 /** Get the project directory. */
 export function getProjectDir(): string {
 	if (projectDir === undefined) {
+		let cwd: string | undefined;
 		try {
-			projectDir = standardizeMacOSPath(process.cwd());
+			cwd = process.cwd();
 		} catch {
 			const candidates = [process.env.PWD, os.homedir(), os.tmpdir()];
 			for (const candidate of candidates) {
 				if (!candidate || !path.isAbsolute(candidate)) continue;
 				try {
 					process.chdir(candidate);
-					projectDir = standardizeMacOSPath(candidate);
+					cwd = candidate;
 					break;
 				} catch {}
 			}
-			if (projectDir === undefined) {
+			if (cwd === undefined) {
 				throw new Error("Unable to determine an accessible working directory");
 			}
 		}
+		// Normalize outside the fallback: a native-addon failure is not an inaccessible cwd,
+		// and must surface as itself instead of relocating the process.
+		projectDir = standardizeProjectPath(cwd);
 	}
 	return projectDir;
 }
 
 /** Set the project directory. */
 export function setProjectDir(dir: string): void {
-	const resolved = standardizeMacOSPath(path.resolve(dir));
+	const resolved = standardizeProjectPath(path.resolve(dir));
 	process.chdir(resolved);
 	projectDir = resolved;
 }
@@ -615,15 +628,21 @@ export function getLogsDir(): string {
 	return dirs.rootSubdir("logs", "state");
 }
 
-function formatLocalDate(date: Date): string {
-	return (
-		`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-` + String(date.getDate()).padStart(2, "0")
-	);
+/**
+ * Local-timezone `YYYY-MM-DD` day key (zero-padded), formatted exactly like
+ * the rotating log sink's file naming: log files are named `omp.<day>.<pid>.log`
+ * with the LOCAL day, not the UTC day `toISOString()` yields. Anything that
+ * computes "today's" log path or matches same-day log files by name must use
+ * this key, or between local midnight and UTC midnight it points at files that
+ * do not exist (e.g. 00:00–08:00 in UTC+8).
+ */
+export function localDay(date: Date): string {
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 /** Get this process's dated log path using the active product and local calendar date. */
 export function getLogPath(date = new Date(), pid = process.pid): string {
-	return path.join(getLogsDir(), `${APP_NAME}.${formatLocalDate(date)}.${pid}.log`);
+	return path.join(getLogsDir(), `${APP_NAME}.${localDay(date)}.${pid}.log`);
 }
 
 /**
@@ -792,6 +811,16 @@ export function getCommitCacheDbPath(): string {
 	return dirs.rootSubdir(path.join("cache", "commit-inference.db"), "cache");
 }
 
+/**
+ * Get the judgment answer cache database path (~/.omp/cache/judgment-cache.db).
+ * Honors `OMP_JUDGMENT_CACHE_DB` so tests and operators can isolate the cache.
+ */
+export function getJudgmentCacheDbPath(): string {
+	const override = process.env.OMP_JUDGMENT_CACHE_DB;
+	if (override) return override;
+	return dirs.rootSubdir(path.join("cache", "judgment-cache.db"), "cache");
+}
+
 /** Get the legacy Pi extension parse cache database path. */
 export function getLegacyPiExtensionCacheDbPath(): string {
 	return dirs.rootSubdir(path.join("cache", "legacy-pi-extension-cache.db"), "cache");
@@ -896,9 +925,9 @@ export function getTinyModelsCacheDir(agentDir?: string): string {
 export function getDocumentConversionCacheDir(agentDir?: string): string {
 	return dirs.agentSubdir(agentDir, path.join("cache", "document-conversions"), "cache");
 }
-/** Get the per-project composer speculative cache directory (~/.omp/agent/cache/composer; XDG default: $XDG_CACHE_HOME/omp/cache/composer). */
-export function getComposerCacheDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, path.join("cache", "composer"), "cache");
+/** Get the composer speculative cache database (~/.omp/agent/cache/composer.db; XDG default: $XDG_CACHE_HOME/omp/cache/composer.db). */
+export function getComposerCacheDbPath(agentDir?: string): string {
+	return dirs.agentSubdir(agentDir, path.join("cache", "composer.db"), "cache");
 }
 
 /** Get the sessions directory (~/.omp/agent/sessions). */

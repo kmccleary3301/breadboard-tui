@@ -1,9 +1,13 @@
 import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { gradientEscape, gradientLogo } from "../../prompt/welcome";
+import { gradientEscape, gradientLogo, logoNode } from "../../prompt/welcome";
 import { getProductIdentity, type ProductAppearance, type ProductIdentity } from "../../product-identity";
 import { paintAnsi } from "../../theme/color";
 import type { ColorMode } from "../../theme/schema";
 import { theme } from "../../theme/theme";
+import { formatKeyHint } from "../../app-keybindings";
+import { col, node, span, text } from "../../native/describe";
+import type { NativeNode } from "../../native/node";
+import { Memo } from "../../native/memo";
 
 export const SETUP_SPLASH_MS = 2200;
 export const SETUP_TICK_MS = 33;
@@ -45,7 +49,11 @@ interface Rectangle {
 }
 
 const SNAKE_GLYPHS = ["━", "┃", "╭", "╮", "╯", "╰", "●"] as const;
-const SKIP_HINT = "press enter to skip";
+
+/** Skip affordance; built at render time so it follows the live symbol preset. */
+function skipHint(): string {
+	return `press ${formatKeyHint("enter")} to skip`;
+}
 
 /** A continuous clockwise spiral stops before touching the protected wordmark. */
 function spiralRoute(width: number, height: number, protectedArea: Rectangle): Point[] {
@@ -147,7 +155,7 @@ function createScene(
 		for (let column = x + 1; column < x + lineWidth; column++) cells[y][column] = "";
 	};
 	content.forEach((line, row) => placeLine(line, logoTop + row));
-	if (height > 2) placeLine(paintAnsi(mode === "none" ? "" : "\x1b[2m", SKIP_HINT), height - 2);
+	if (height > 2) placeLine(paintAnsi(mode === "none" ? "" : "\x1b[2m", skipHint()), height - 2);
 	const route = spiralRoute(width, height, {
 		left: logoLeft - 3,
 		right: logoLeft + contentWidth + 2,
@@ -222,4 +230,26 @@ export function renderStarfield(width: number, height: number, frame: number): s
 		lines.push(line);
 	}
 	return lines;
+}
+const splashMemo = new Memo();
+
+/**
+ * Native splash: the 2x brand mark with a terminal-clocked shimmer, the
+ * wordmark, and the skip hint pinned to the bottom. A click on the splash
+ * sends the `skip` action.
+ */
+export function describeSetupSplash(identity: ProductIdentity = getProductIdentity()): NativeNode {
+	const hint = skipHint();
+	return splashMemo.get([identity.id, hint], () =>
+		col(
+			[
+				node("spacer", { grow: 1 }),
+				logoNode(identity.logoArt, true),
+				text([span(identity.displayName, "strong")], { wrap: "none" }),
+				node("spacer", { grow: 1 }),
+				text([span(hint, "dim")], { wrap: "none" }),
+			],
+			{ align: "center", gap: "md", grow: 1, role: "omp.setup.splash", actions: { click: "skip" } },
+		),
+	);
 }

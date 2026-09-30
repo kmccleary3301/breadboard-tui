@@ -1,8 +1,13 @@
-import { registerBreadboardSettingsSchema } from "../../src/breadboard/settings-schema-extension";
+import {
+	cfgBreadboardFields,
+	cfgStatusLineBreadboard,
+	registerBreadboardSettings,
+} from "../../src/breadboard/settings";
 import { registerBreadboardStatusLine } from "../../src/breadboard/ui/status-line";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgComposerShape, cfgSymbolPreset } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { renderComposerShapePreview } from "@oh-my-pi/pi-tui/overlays/composer-shape-preview";
 import { BreadboardCustomizeSubmenu } from "../../src/breadboard/ui/customize-submenu";
 import { DEFAULT_BREADBOARD_FIELD_SETTINGS } from "../../src/breadboard/ui/status-line/breadboard-fields";
@@ -18,11 +23,11 @@ const snapshot = {
 	context: { tokens: 12_000, capacity: 100_000 },
 };
 function open(config: Settings) {
-	let fields = config.get("statusLine.breadboard");
+	let fields = cfgBreadboardFields.get(config);
 	const preview: Component = {
 		render: width =>
 			renderComposerShapePreview(
-				config.get("composer.shape") ?? "box",
+				cfgComposerShape.get(config) ?? "box",
 				width,
 				createBreadboardPreviewStatusSource(snapshot, "bb-balanced", fields),
 			),
@@ -34,7 +39,7 @@ function open(config: Settings) {
 		value => {
 			fields = value;
 		},
-		value => config.set("statusLine.breadboard", value),
+		value => cfgStatusLineBreadboard.set(config, { ...value }),
 		() => {},
 		preview,
 	);
@@ -48,7 +53,7 @@ describe("BreadBoard field customization", () => {
 	let unregisterStatusLine: () => void;
 	let unregisterSettings: () => void;
 	beforeEach(() => {
-		unregisterSettings = registerBreadboardSettingsSchema();
+		unregisterSettings = registerBreadboardSettings();
 		unregisterStatusLine = registerBreadboardStatusLine();
 	});
 	afterEach(() => {
@@ -62,7 +67,7 @@ describe("BreadBoard field customization", () => {
 		first.menu.handleInput("\x1b[C");
 		first.menu.handleInput("\x1b[C");
 		expect(first.preview()).toContain("~12K/100K");
-		expect(config.get("statusLine.breadboard").context).toBe("preset");
+		expect(cfgBreadboardFields.get(config).context).toBe("preset");
 		first.menu.handleInput("\x1b");
 		expect(first.preview()).toContain("~12%");
 		const second = open(config);
@@ -91,7 +96,7 @@ describe("BreadBoard field customization", () => {
 
 	it("resets layout overrides only after Apply and leaves shape and glyph preferences intact", () => {
 		const config = Settings.isolated({ "composer.shape": "rail", symbolPreset: "ascii" });
-		config.set("statusLine.breadboard", {
+		cfgStatusLineBreadboard.set(config, {
 			...DEFAULT_BREADBOARD_FIELD_SETTINGS,
 			folder: "full",
 			context: "tokens",
@@ -105,7 +110,7 @@ describe("BreadBoard field customization", () => {
 		editor.menu.handleInput("\x1b[B");
 		editor.menu.handleInput("\r");
 		expect(open(config).preview()).toContain("~12%");
-		expect(config.get("composer.shape")).toBe("rail");
-		expect(config.get("symbolPreset")).toBe("ascii");
+		expect(cfgComposerShape.get(config)).toBe("rail");
+		expect(cfgSymbolPreset.get(config)).toBe("ascii");
 	});
 });

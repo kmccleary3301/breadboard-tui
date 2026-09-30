@@ -12,7 +12,8 @@ const defaultOutDir = path.join(packageDir, "dist");
 const workspaceBreadboardSdkDir = path.join(packageDir, "..", "..", "node_modules", "@breadboard", "sdk");
 const bundledBreadboardSdkDir = path.join(packageDir, "node_modules", "@breadboard", "sdk");
 const shebang = "#!/usr/bin/env bun\n";
-const legacyHtmlExportAssetPattern = /^(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js)$/;
+const htmlExportAssetPattern =
+	/^(?:template-[^.]+\.(?:css|html|js)|tool-views\.generated-[^.]+\.js|(?:marked|highlight)\.min-[^.]+\.js)$/;
 
 // Native / optional / platform-specific deps are loaded from installed files.
 const ALWAYS_EXTERNAL = ["@oh-my-pi/pi-natives", "@huggingface/transformers", "fastembed", "onnxruntime-node"];
@@ -67,7 +68,7 @@ async function cleanBundleOutputs(outDir: string): Promise<void> {
 					entry.endsWith(".node") ||
 					entry.endsWith(".js.map") ||
 					(entry.startsWith("CHANGELOG-") && entry.endsWith(".md")) ||
-					legacyHtmlExportAssetPattern.test(entry),
+					htmlExportAssetPattern.test(entry),
 			)
 			.map(entry => fs.rm(path.join(outDir, entry), { force: true })),
 	);

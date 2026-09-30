@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import {
+	cfgComposerShape,
+	cfgDisplayShowTokenUsage,
+	cfgStatusLinePreset,
+	cfgSymbolPreset,
+	cfgThemeDark,
+} from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import {
@@ -70,12 +77,12 @@ describe("native profile migration", () => {
 		try {
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			expect(await Bun.file(migrationReceipt).exists()).toBe(true);
-			expect(settings.get("symbolPreset")).toBe("nerd");
-			expect(settings.get("composer.shape")).toBe("rule");
-			expect(settings.get("theme.dark")).toBe("titanium");
-			expect(settings.get("statusLine.preset")).toBe("bb-balanced");
+			expect(cfgSymbolPreset.get(settings)).toBe("nerd");
+			expect(cfgComposerShape.get(settings)).toBe("rule");
+			expect(cfgThemeDark.get(settings)).toBe("titanium");
+			expect(cfgStatusLinePreset.get(settings)).toBe("bb-balanced");
 
-			settings.set("display.showTokenUsage", true);
+			cfgDisplayShowTokenUsage.set(settings, true);
 			await settings.flush();
 			const migrated = await readSettings();
 			expect(migrated.breadboard).toEqual({

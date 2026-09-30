@@ -1,14 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import {
-	SETTING_TABS,
-	SETTINGS_SCHEMA,
-	type SettingPath,
-	TAB_GROUPS,
-} from "@oh-my-pi/pi-coding-agent/config/settings-schema";
+import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
-import { getSettingsForTab } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import { getSettingsForTab, SETTING_TABS, TAB_GROUPS } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import { registerBreadboardUi, unregisterBreadboardUi } from "../../../src/breadboard/ui";
-import { registerBreadboardSettingsSchema } from "../../../src/breadboard/settings-schema-extension";
+import { registerBreadboardSettings } from "../../../src/breadboard/settings";
+
 const BREADBOARD_PATHS = [
 	"breadboard.harness.default",
 	"breadboard.harness.paletteHeader",
@@ -18,20 +14,20 @@ const BREADBOARD_PATHS = [
 	"task.maxRecursionDepth",
 	"task.maxRuntimeMs",
 	"breadboard.harness.max_concurrent_agents",
-] as const satisfies readonly SettingPath[];
+] as const;
 
 let settingsHost = createSettingsHost();
-let unregisterSchema: (() => void) | undefined;
+let unregisterSettings: (() => void) | undefined;
 
 beforeAll(() => {
-	unregisterSchema = registerBreadboardSettingsSchema();
+	unregisterSettings = registerBreadboardSettings();
 	registerBreadboardUi();
 	settingsHost = createSettingsHost();
 });
 
 afterAll(() => {
 	unregisterBreadboardUi();
-	unregisterSchema?.();
+	unregisterSettings?.();
 });
 describe("BreadBoard settings definitions", () => {
 	it("exposes the eleventh tab and every declared group has at least one row", () => {
@@ -45,10 +41,10 @@ describe("BreadBoard settings definitions", () => {
 		}
 	});
 
-	it("resolves each BreadBoard row to an existing schema path", () => {
+	it("resolves each BreadBoard row to a registered setting", () => {
 		const definitions = getSettingsForTab(settingsHost.entries, "breadboard");
 		for (const path of BREADBOARD_PATHS) {
-			expect(Object.hasOwn(SETTINGS_SCHEMA, path), `schema path ${path}`).toBe(true);
+			expect(lookup(path), `registered setting ${path}`).toBeDefined();
 			expect(
 				definitions.some(definition => definition.path === path),
 				`settings row ${path}`,
@@ -64,21 +60,21 @@ describe("BreadBoard settings definitions", () => {
 		expect(definition?.readonly, `row ${path} must be read-only`).toBe(true);
 	});
 
-	it("omp (non-BreadBoard) has no breadboard tab and bb does", () => {
-		// Active BreadBoard state has breadboard tab and groups
+	it("omp (non-BreadBoard) has no breadboard tab or rows and bb does", () => {
 		expect(SETTING_TABS).toContain("breadboard");
 		expect(Object.hasOwn(TAB_GROUPS, "breadboard")).toBe(true);
 
-		// When unregistered (plain omp state), breadboard tab is absent
+		// Unregistered (plain omp state): no tab, and the shared subagent limits return to their stock tab.
 		unregisterBreadboardUi();
-		unregisterSchema?.();
+		unregisterSettings?.();
 		try {
 			expect(SETTING_TABS).not.toContain("breadboard");
 			expect(Object.hasOwn(TAB_GROUPS, "breadboard")).toBe(false);
-			expect(Object.hasOwn(SETTINGS_SCHEMA, "breadboard.harness.default")).toBe(false);
+			const stockHost = createSettingsHost();
+			expect(stockHost.entries.some(entry => entry.ui?.tab === "breadboard")).toBe(false);
+			expect(stockHost.entries.find(entry => entry.path === "task.maxConcurrency")?.ui?.tab).toBe("tasks");
 		} finally {
-			// Restore BreadBoard state
-			unregisterSchema = registerBreadboardSettingsSchema();
+			unregisterSettings = registerBreadboardSettings();
 			registerBreadboardUi();
 			settingsHost = createSettingsHost();
 		}
