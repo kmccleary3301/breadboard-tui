@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 ROWS = 36
 COLUMNS = 140
 GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
-ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+ANSI_RE = re.compile(rb"(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~]|\x1B[@-_])")
 TIMING_NONCE_ENV = "PI_TIMING_NONCE"
 TIMING_NONCE_RE = re.compile(r"^[0-9a-f]{32}$")
 MAX_FRAME_EVENTS = 1024
