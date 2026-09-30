@@ -28,8 +28,6 @@
 				"packages/coding-agent/src/modes/components/agent-hub/harness-view.ts",
 				"packages/coding-agent/src/modes/controllers/command-controller.ts",
 				"packages/coding-agent/src/modes/types.ts",
-				"packages/coding-agent/src/session/session-entries.ts",
-				"packages/coding-agent/src/session/session-manager.ts",
 				"packages/coding-agent/src/slash-commands/builtin-registry.ts",
 				"packages/coding-agent/src/slash-commands/harness.ts",
 				"packages/coding-agent/test/activity-index.test.ts",

@@ -374,13 +374,6 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/cli/update-cli.ts",
-			"class": "manual-review",
-			"rule": "manual-review-boundaries",
-			"owner": "omp-entrypoint",
-			"layer": 2
-		},
-		{
 			"path": "packages/coding-agent/src/collab/guest.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -553,19 +546,9 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/coding-agent/src/session/session-entries.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
 			"path": "packages/coding-agent/src/session/session-maintenance.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/coding-agent/src/session/session-manager.ts",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/session/session-stats.ts",
@@ -711,13 +694,6 @@
 			"path": "packages/coding-agent/test/cli-argv-routing.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/cli/update-cli.test.ts",
-			"class": "manual-review",
-			"rule": "manual-review-boundaries",
-			"owner": "omp-entrypoint",
-			"layer": 2
 		},
 		{
 			"path": "packages/coding-agent/test/collab/guest-ui-request.test.ts",
