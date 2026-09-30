@@ -77,10 +77,6 @@ describe("upstream sync policy", () => {
 			class: "generated",
 			rule: "generated-artifacts",
 		});
-		expect(classifyPath("docs/conformance/p31/e4-canonical-tui-evidence.md", policy)).toEqual({
-			class: "breadboard-owned",
-			rule: "breadboard-owned-adapters-and-controls",
-		});
 		expect(classifyPath("packages/coding-agent/package.json", policy)).toEqual({
 			class: "manual-review",
 			rule: "manual-review-boundaries",

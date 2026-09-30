@@ -5,12 +5,14 @@ import * as path from "node:path";
 import {
 	assertManifestUpstreamIdentity,
 	auditDeclarations,
+	BREADBOARD_LITERAL,
 	countUpstreamEntrypointPaths,
-	type ForkLayerManifest,
-	loadDeltaPolicy,
 	evaluatePathBudgets,
+	type ForkLayerManifest,
 	inspectTuiBreadboardIdentifiers,
+	loadDeltaPolicy,
 	readChangedPathPatch,
+	SDK_IMPORT,
 } from "./audit-fork-delta";
 
 const policy = await loadDeltaPolicy();
@@ -71,6 +73,31 @@ describe("fork delta audit declarations", () => {
 			code: "manual-boundary",
 			path: boundaryPath,
 			detail: "manual boundary must declare owner omp-entrypoint and ordered layer 2",
+		});
+	});
+
+	test("a manifest entry for an unchanged path fails the audit", () => {
+		const boundaryPath = "packages/coding-agent/src/cli.ts";
+		const unchangedPath = "packages/tui/src/setup/scenes/information-layout.ts";
+		const result = auditDeclarations(
+			[{ status: "M", path: boundaryPath }],
+			manifest([
+				{
+					path: boundaryPath,
+					class: "manual-review",
+					rule: "manual-review-boundaries",
+					owner: "omp-entrypoint",
+					layer: 2,
+				},
+				{ path: unchangedPath, class: "upstream-owned", rule: "upstream-ordinary-omp" },
+			]),
+			policy,
+		);
+		expect(result.violations).toContainEqual({
+			code: "manifest",
+			path: unchangedPath,
+			rule: "upstream-ordinary-omp",
+			detail: "manifest path is not changed in fork delta (rule: upstream-ordinary-omp)",
 		});
 	});
 
@@ -293,6 +320,39 @@ describe("fork delta non-package changed paths budget (Kyle's D12 decision)", ()
 			expect(loadDeltaPolicy(badPolicyPath)).rejects.toThrow("budgets.maxTotalChangedPaths is no longer supported");
 		} finally {
 			await rm(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("fork delta policy hygiene and regex consolidation (R6-3)", () => {
+	test("SDK_IMPORT regex is stateless and lacks /g", () => {
+		expect(SDK_IMPORT.global).toBe(false);
+		const snippet = "import { foo } " + 'from "@breadboard' + '/sdk";';
+		expect(SDK_IMPORT.test(snippet)).toBe(true);
+		expect(SDK_IMPORT.test(snippet)).toBe(true);
+	});
+
+	test("BREADBOARD_LITERAL matches both adapter boundaries and inline breadboard markers", () => {
+		expect(BREADBOARD_LITERAL.test("+const x = BreadBoard;")).toBe(true);
+		expect(BREADBOARD_LITERAL.test("+import '@breadboard" + "/sdk';")).toBe(true);
+	});
+
+	test("upstream-sync-policy.json does not retain dead bridge-era patterns", () => {
+		const deadPatterns = [
+			"packages/tui/src/setup/scenes/information-layout.ts",
+			"packages/tui/src/status-line/breadboard-fields.ts",
+			"packages/tui/src/status-line/breadboard-presentation.ts",
+			"packages/coding-agent/test/bbomp-core-52/**",
+			"packages/coding-agent/test/fixtures/breadboard-**",
+			"packages/coding-agent/src/modes/theme/defaults/breadboard*.json",
+			"docs/conformance/p30/**",
+			"docs/conformance/p31/**",
+		];
+		const adapterPatterns = policy.adapters.endpointAndSchemaLiterals;
+		const rulePatterns = policy.rules.flatMap(rule => rule.patterns);
+		for (const pattern of deadPatterns) {
+			expect(adapterPatterns).not.toContain(pattern);
+			expect(rulePatterns).not.toContain(pattern);
 		}
 	});
 });

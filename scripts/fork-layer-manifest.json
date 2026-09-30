@@ -286,7 +286,7 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
-			"path": "packages/coding-agent/src/breadboard/harness-lock-view.ts",
+			"path": "packages/coding-agent/src/breadboard/harness-palette.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -301,12 +301,37 @@
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
+			"path": "packages/coding-agent/src/breadboard/product-help.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
 			"path": "packages/coding-agent/src/breadboard/product-settings.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
 		{
 			"path": "packages/coding-agent/src/breadboard/runtime.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/settings-schema-extension.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/ui/status-line/harness-state.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/ui/welcome.ts",
+			"class": "breadboard-owned",
+			"rule": "breadboard-owned-adapters-and-controls"
+		},
+		{
+			"path": "packages/coding-agent/src/breadboard/update-refusal.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -634,11 +659,6 @@
 		},
 		{
 			"path": "packages/coding-agent/test/breadboard/fixtures/codex_e4.lock.json",
-			"class": "breadboard-owned",
-			"rule": "breadboard-owned-adapters-and-controls"
-		},
-		{
-			"path": "packages/coding-agent/test/breadboard/harness-lock-view.test.ts",
 			"class": "breadboard-owned",
 			"rule": "breadboard-owned-adapters-and-controls"
 		},
@@ -1019,6 +1039,11 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/src/frame-timing-terminal.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/tui/src/overlays/agent-hub.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1119,11 +1144,6 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/tui/src/setup/scenes/information-layout.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/tui/src/setup/scenes/model.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1159,16 +1179,6 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
-			"path": "packages/tui/src/status-line/breadboard-fields.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/status-line/breadboard-presentation.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
 			"path": "packages/tui/src/status-line/component.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1184,6 +1194,11 @@
 			"rule": "upstream-ordinary-omp"
 		},
 		{
+			"path": "packages/tui/src/status-line/theme-proxy.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
 			"path": "packages/tui/src/status-line/types.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
@@ -1195,21 +1210,6 @@
 		},
 		{
 			"path": "packages/tui/src/theme/color.ts",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/theme/defaults/breadboard-light.json",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/theme/defaults/breadboard.json",
-			"class": "upstream-owned",
-			"rule": "upstream-ordinary-omp"
-		},
-		{
-			"path": "packages/tui/src/theme/defaults/index.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},
@@ -1305,6 +1305,11 @@
 		},
 		{
 			"path": "packages/tui/test/editor.test.ts",
+			"class": "upstream-owned",
+			"rule": "upstream-ordinary-omp"
+		},
+		{
+			"path": "packages/tui/test/frame-timing-terminal.test.ts",
 			"class": "upstream-owned",
 			"rule": "upstream-ordinary-omp"
 		},

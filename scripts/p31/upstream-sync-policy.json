@@ -55,7 +55,6 @@
 				"packages/coding-agent/src/bb.ts",
 				"packages/coding-agent/src/omp.ts",
 				"packages/coding-agent/src/product-entrypoint.test.ts",
-				"packages/coding-agent/src/modes/theme/defaults/breadboard*.json",
 				"packages/coding-agent/src/cli/gallery-cli.ts",
 				"packages/coding-agent/test/interactive-mode-working-accent.test.ts",
 				"packages/coding-agent/test/modes/components/user-message-keywords.test.ts",
@@ -98,8 +97,6 @@
 				"scripts/verify-upstream-sync.ts",
 				"scripts/verify-upstream-sync.test.ts",
 				"packages/coding-agent/test/breadboard-*.test.ts",
-				"packages/coding-agent/test/bbomp-core-52/**",
-				"packages/coding-agent/test/fixtures/breadboard-**",
 				"packages/coding-agent/src/config/model-registry.ts",
 				"packages/coding-agent/src/modes/agent-hub-runtime.ts",
 				"packages/coding-agent/src/modes/setup.ts",
@@ -120,9 +117,7 @@
 				"packages/coding-agent/test/main-startup-initialization.test.ts",
 				"scripts/fork-layer-manifest.json",
 				"scripts/p31/**",
-				".github/workflows/fork-delta-audit.yml",
-				"docs/conformance/p30/**",
-				"docs/conformance/p31/**"
+				".github/workflows/fork-delta-audit.yml"
 			]
 		},
 		{
@@ -399,9 +394,6 @@
 			"packages/tui/src/overlays/settings-selector.ts",
 			"packages/tui/src/prompt/welcome.ts",
 			"packages/tui/src/setup/scenes/composer.ts",
-			"packages/tui/src/setup/scenes/information-layout.ts",
-			"packages/tui/src/status-line/breadboard-fields.ts",
-			"packages/tui/src/status-line/breadboard-presentation.ts",
 			"packages/tui/src/status-line/component.ts",
 			"packages/tui/src/status-line/index.ts",
 			"packages/tui/src/status-line/segments.ts",
@@ -418,8 +410,6 @@
 			"packages/natives/test/issue-823-repro.test.ts",
 			"packages/coding-agent/src/sdk.ts",
 			"packages/coding-agent/test/breadboard-*.test.ts",
-			"packages/coding-agent/test/bbomp-core-52/**",
-			"packages/coding-agent/test/fixtures/breadboard-**",
 			"packages/tui/src/setup/scenes/sign-in.ts"
 		]
 	},

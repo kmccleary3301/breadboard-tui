@@ -13,10 +13,8 @@ export const RECEIPT_SCHEMA = "bb-omp.delta-audit.v1" as const;
 
 const CLASSES = ["breadboard-owned", "upstream-owned", "generated", "manual-review"] as const;
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
-const SDK_IMPORT = /(?:from\s*|import\s*\(\s*)["']@breadboard\/sdk(?:\/[^"']*)?["']/g;
-const BREADBOARD_LITERAL =
-	/@breadboard\/sdk|https?:\/\/[^\s"'`]*breadboard[^\s"'`]*|\b(?:BreadBoard|BREADBOARD_[A-Z0-9_]+|P30_[A-Z0-9_]+|workspace:v1:sha256:|breadboard:[a-z][a-z0-9_-]*)\b/i;
-const INLINE_BREADBOARD =
+export const SDK_IMPORT = /(?:from\s*|import\s*\(\s*)["']@breadboard\/sdk(?:\/[^"']*)?["']/;
+export const BREADBOARD_LITERAL =
 	/@breadboard\/sdk|https?:\/\/[^\s"'`]*breadboard[^\s"'`]*|\b(?:BreadBoard|BREADBOARD_[A-Z0-9_]+|P30_[A-Z0-9_]+|workspace:v1:sha256:|breadboard:[a-z][a-z0-9_-]*)\b/i;
 
 type DeltaClass = (typeof CLASSES)[number];
@@ -54,15 +52,9 @@ export interface DeltaPolicy extends SyncPolicy {
 
 interface DistributionPolicy {
 	readonly packageRoot: string;
-	readonly packageName?: string;
-	readonly packageVersion?: string;
-	readonly artifactPath?: string;
-	readonly provenancePath?: string;
 	readonly packageLicensePath: string;
 	readonly noticeBundlePath: string;
 	readonly noticeManifestPath: string;
-	readonly expectedSdkDependency?: string;
-	readonly expectedSdkLicenseAssertion?: string;
 }
 
 export interface ManifestPathEntry {
@@ -117,6 +109,7 @@ export interface AuditViolation {
 		| "distribution";
 	readonly path?: string;
 	readonly detail: string;
+	readonly rule?: string;
 }
 
 export interface ForkDeltaReceipt {
@@ -432,6 +425,12 @@ export function auditDeclarations(
 	const declarations = new Map(manifest.paths.map(entry => [normalizePath(entry.path), entry]));
 	const paths: ClassifiedDeltaPath[] = [];
 	const violations: AuditViolation[] = [];
+	const changedPaths = new Set(
+		changedRecords.flatMap(record => [
+			normalizePath(record.path),
+			...(record.oldPath ? [normalizePath(record.oldPath)] : []),
+		]),
+	);
 	for (const record of [...changedRecords].sort((left, right) => compare(left.path, right.path))) {
 		const normalized = normalizePath(record.path);
 		const classification = classifyPath(normalized, policy);
@@ -490,6 +489,17 @@ export function auditDeclarations(
 			}
 		}
 	}
+	for (const entry of [...manifest.paths].sort((left, right) => compare(left.path, right.path))) {
+		const normalized = normalizePath(entry.path);
+		if (!changedPaths.has(normalized)) {
+			violations.push({
+				code: "manifest",
+				path: normalized,
+				rule: entry.rule,
+				detail: `manifest path is not changed in fork delta (rule: ${entry.rule})`,
+			});
+		}
+	}
 	return { paths, violations };
 }
 
@@ -505,7 +515,6 @@ async function inspectAdapters(repoRoot: string, state: AuditState): Promise<Aud
 		}
 		if (!SOURCE_EXTENSIONS.has(path.extname(entry.path).toLowerCase())) continue;
 		if (SDK_IMPORT.test(text)) {
-			SDK_IMPORT.lastIndex = 0;
 			violations.push({
 				code: "adapter-boundary",
 				path: entry.path,
@@ -630,7 +639,7 @@ async function inspectUpstreamInlineLogic(
 		const diff = await readChangedPathPatch(repoRoot, state.policy.upstream.tag, entry);
 		for (const line of diff.split(/\r?\n/)) {
 			if (!line.startsWith("+") || line.startsWith("+++")) continue;
-			if (INLINE_BREADBOARD.test(line)) {
+			if (BREADBOARD_LITERAL.test(line)) {
 				violations.push({
 					code: "inline-breadboard",
 					path: entry.path,
@@ -670,10 +679,7 @@ async function inspectFilesystemDependencies(repoRoot: string, state: AuditState
 			continue;
 		}
 		for (const dependency of dependencyValues(parsed)) {
-			const allowedSdk =
-				entry.path === "packages/coding-agent/package.json" &&
-				dependency === state.policy.distribution.expectedSdkDependency;
-			if (!allowedSdk && /^(?:workspace:|link:|file:)/.test(dependency)) {
+			if (/^(?:workspace:|link:|file:)/.test(dependency)) {
 				violations.push({
 					code: "monorepo-dependency",
 					path: entry.path,
