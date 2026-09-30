@@ -46,6 +46,8 @@
 - Chained Responses requests (`previous_response_id`) keep the harness system prompt. Before, `codex`, `opencode`, `pi` and `oh_my_pi` sent the second and later requests without their instructions or developer message.
 - Settings from a schema registered after startup can be read. Before, `Settings.get` on such a path threw a `TypeError`.
 - Stock `omp` no longer lists the BreadBoard Balanced, Quiet and Detailed status-line presets in settings. `bb` still lists them first.
+- `/team`, `/prompts`, `/evidence` and the other harness panel commands open the Agent Hub on the requested panel with the active harness loaded. Before, the hub dropped both, so it opened the overview with no harness data.
+- Stock `omp` no longer shows a Harness tab in the Agent Hub. It appears only when a harness is bound.
 
 ## [18.3.0] - 2026-09-24
 

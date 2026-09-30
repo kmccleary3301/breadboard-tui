@@ -139,13 +139,16 @@ describe("Agent hub Enter activation", () => {
 		const registry = new AgentRegistry();
 		let closed = false;
 		const hub = new AgentHubOverlayComponent({
-			...createAgentHubRuntime({ registry }),
+			...createAgentHubRuntime({
+				registry,
+				harnessPort: { current: () => null, refresh: async () => null, subscribe: () => () => {} },
+				initialHarnessPanel: "team",
+			}),
 			registry,
 			observers: new SessionObserverRegistry(),
 			irc: new IrcBus(registry),
 			hubKeys: [],
 			initialSection: "harness",
-			initialHarnessPanel: "team",
 			onDone: () => {
 				closed = true;
 			},

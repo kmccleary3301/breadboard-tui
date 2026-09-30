@@ -157,13 +157,18 @@ export interface AgentHubViewFactoryContext<TRecord extends AgentRecordLike = Ag
 	switchSection: (section: AgentHubSection) => void;
 	managePeer: (action: "r" | "x", peer: string) => string | undefined;
 	mutationRestriction: () => string | undefined;
-	harnessSnapshot: () => unknown;
-	initialHarnessPanel?: string;
+}
+
+/** A host section shown after the built-in tabs; the nth entry is selected with key n + 3. */
+export interface AgentHubHostSection {
+	id: string;
+	label: string;
+	view: AgentHubSectionView;
 }
 
 export type AgentHubViewFactory<TRecord extends AgentRecordLike = AgentRecordLike> = (
 	context: AgentHubViewFactoryContext<TRecord>,
-) => Partial<Record<string, AgentHubSectionView>>;
+) => readonly AgentHubHostSection[];
 
 export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike> {
 	/** Progress/status snapshot source (task lifecycle + progress channels). */
@@ -203,8 +208,6 @@ export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike>
 	viewFactory?: AgentHubViewFactory<TRecord>;
 	/** Host-owned native lifecycle policy for mutating subagents. */
 	nativeMutationRestriction?: () => string | undefined;
-	/** Initial harness panel when a host provides a harness view. */
-	initialHarnessPanel?: string;
 	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
 	/** Current main session file; used to seed parked historical subagents after restart. */
@@ -239,6 +242,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#remote: AgentHubRemote | undefined;
 	readonly #mainSessionFile: string | undefined;
 	#mainActivitySync: Promise<void> | undefined;
+	#hostSections: readonly AgentHubHostSection[] = [];
 	#sectionViews: Partial<Record<AgentHubSection, AgentHubSectionView>> = {};
 	#nativeMutationRestriction: () => string | undefined = () => undefined;
 	#disposed = false;
@@ -388,7 +392,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		this.#focusAgent = deps.focusAgent;
 		this.#cwd = deps.cwd ?? getProjectDir();
 		this.#nativeMutationRestriction = deps.nativeMutationRestriction ?? (() => undefined);
-		this.#sectionViews =
+		this.#hostSections =
 			deps.viewFactory?.({
 				registry: this.#registry,
 				irc: this.#irc,
@@ -399,9 +403,8 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				switchSection: section => this.#switchSection(section),
 				managePeer: (action, peer) => this.#manageMessagePeer(action, peer),
 				mutationRestriction: () => this.#nativeMutationRestriction(),
-				harnessSnapshot: () => null,
-				initialHarnessPanel: deps.initialHarnessPanel,
-			}) ?? {};
+			}) ?? [];
+		this.#sectionViews = Object.fromEntries(this.#hostSections.map(section => [section.id, section.view]));
 
 		if (!this.#remote) {
 			const history = this.#irc.history;
@@ -528,12 +531,9 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			this.#switchSection("activity");
 			return;
 		}
-		if (keyData === "3" && this.#sectionViews.messages) {
-			this.#switchSection("messages");
-			return;
-		}
-		if (keyData === "4" && this.#sectionViews.harness) {
-			this.#switchSection("harness");
+		const hostSection = /^[3-9]$/.test(keyData) ? this.#hostSections[Number(keyData) - 3] : undefined;
+		if (hostSection) {
+			this.#switchSection(hostSection.id);
 			return;
 		}
 		if (sectionView) {
@@ -824,8 +824,9 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				? theme.bg("selectedBg", theme.bold(theme.fg("accent", ` ${label} `)))
 				: theme.fg("muted", ` ${label} `);
 		const tabs = [tab("agents", "1 Agents"), tab("activity", "2 Activity")];
-		if (this.#sectionViews.messages) tabs.push(tab("messages", "3 Messages"));
-		if (this.#sectionViews.harness) tabs.push(tab("harness", "4 Harness"));
+		this.#hostSections.forEach((section, index) => {
+			tabs.push(tab(section.id, `${index + 3} ${section.label}`));
+		});
 		return tabs.join(theme.fg("dim", theme.sep.dot));
 	}
 

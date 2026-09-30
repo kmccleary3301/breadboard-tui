@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import type { AgentHubDeps, AgentHubRemote, AgentHubViewFactory } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import type { AgentTranscriptSource } from "@oh-my-pi/pi-tui/overlays/agent-transcript-viewer";
-import type { HarnessPort, HarnessSnapshot } from "../breadboard/harness-port";
+import type { HarnessPort } from "../breadboard/harness-port";
 import { AgentActivityIndex } from "../activity";
 import { getRoleInfo } from "../config/model-roles";
 import type { Settings } from "../config/settings";
@@ -31,6 +31,7 @@ export function createAgentHubRuntime(
 		settings?: Settings;
 		sessionFile?: string | null;
 		harnessPort?: HarnessPort;
+		initialHarnessPanel?: HarnessPanel;
 	} = {},
 ): Pick<
 	AgentHubDeps<AgentRef>,
@@ -48,25 +49,38 @@ export function createAgentHubRuntime(
 	const registry = options.registry ?? AgentRegistry.global();
 	const irc = options.irc ?? IrcBus.global();
 	const activity = options.activity ?? new AgentActivityIndex({ remote: options.remote });
-	const viewFactory: AgentHubViewFactory = context => ({
-		messages: new AgentHubMessagesView({
-			registry,
-			irc,
-			remote: options.remote,
-			renderTabs: context.renderTabs,
-			requestRender: context.requestRender,
-			onDone: context.onDone,
-			switchSection: () => context.switchSection("activity"),
-			managePeer: context.managePeer,
-			mutationRestriction: context.mutationRestriction,
-		}),
-		harness: new HarnessView({
-			getSnapshot: () => (options.harnessPort?.current() ?? context.harnessSnapshot()) as HarnessSnapshot | null,
-			requestRender: context.requestRender,
-			initialPanel: context.initialHarnessPanel as HarnessPanel | undefined,
-			renderTabs: context.renderTabs,
-		}),
-	});
+	const harnessPort = options.harnessPort;
+	const viewFactory: AgentHubViewFactory = context => [
+		{
+			id: "messages",
+			label: "Messages",
+			view: new AgentHubMessagesView({
+				registry,
+				irc,
+				remote: options.remote,
+				renderTabs: context.renderTabs,
+				requestRender: context.requestRender,
+				onDone: context.onDone,
+				switchSection: () => context.switchSection("activity"),
+				managePeer: context.managePeer,
+				mutationRestriction: context.mutationRestriction,
+			}),
+		},
+		...(harnessPort
+			? [
+					{
+						id: "harness",
+						label: "Harness",
+						view: new HarnessView({
+							getSnapshot: () => harnessPort.current(),
+							requestRender: context.requestRender,
+							initialPanel: options.initialHarnessPanel,
+							renderTabs: context.renderTabs,
+						}),
+					},
+				]
+			: []),
+	];
 	return {
 		registry,
 		lifecycle: () => options.lifecycle ?? AgentLifecycleManager.global(),

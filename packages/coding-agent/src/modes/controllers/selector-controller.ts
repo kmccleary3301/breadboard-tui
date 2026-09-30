@@ -2474,6 +2474,8 @@ export class SelectorController {
 				registry: this.ctx.collabGuest?.agentRegistry,
 				remote: this.ctx.collabGuest?.hubRemote,
 				sessionFile: this.ctx.sessionManager.getSessionFile() ?? null,
+				harnessPort: this.ctx.harnessPort,
+				initialHarnessPanel: options?.initialHarnessPanel,
 			}),
 			observers,
 			hubKeys,
