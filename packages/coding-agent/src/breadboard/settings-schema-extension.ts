@@ -4,7 +4,13 @@
  * BreadBoard UI overrides for task.* subagent settings, and the breadboard settings tab.
  */
 
-import type { SettingSchemaDef, UiBoolean, UiNumber, UiString } from "../config/settings-schema";
+import {
+	SETTINGS_SCHEMA,
+	type SettingSchemaDef,
+	type UiBoolean,
+	type UiNumber,
+	type UiString,
+} from "../config/settings-schema";
 import { registerSettingSchemas, type SettingTabDefinition } from "../config/settings-extensions";
 import { DEFAULT_BREADBOARD_FIELD_SETTINGS, type BreadboardFieldSettings } from "./ui/status-line/breadboard-fields";
 
@@ -57,7 +63,33 @@ export const BREADBOARD_SETTING_TABS: readonly SettingTabDefinition[] = [
 	},
 ];
 
+const STOCK_STATUS_LINE_PRESET = SETTINGS_SCHEMA["statusLine.preset"];
+
 export const BREADBOARD_SETTING_DEFINITIONS: Record<string, SettingSchemaDef> = {
+	"statusLine.preset": {
+		...STOCK_STATUS_LINE_PRESET,
+		ui: {
+			...STOCK_STATUS_LINE_PRESET.ui,
+			options: [
+				{
+					value: "bb-balanced",
+					label: "BreadBoard Balanced",
+					description: "Folder, session, model, compact context and available spend",
+				},
+				{
+					value: "bb-quiet",
+					label: "BreadBoard Quiet",
+					description: "Folder and model, with activity and context pressure when needed",
+				},
+				{
+					value: "bb-detailed",
+					label: "BreadBoard Detailed",
+					description: "Identity, harness, token counts, available spend and timing",
+				},
+				...STOCK_STATUS_LINE_PRESET.ui.options,
+			],
+		},
+	},
 	"breadboard.sessionConfigPath": {
 		type: "string",
 		default: undefined,

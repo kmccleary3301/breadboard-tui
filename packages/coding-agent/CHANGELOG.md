@@ -45,6 +45,7 @@
 - A tool call that reaches a harness generation which no longer defines that tool fails with `Tool "<name>" is not registered in the active generation`, and never runs the previous generation's handler.
 - Chained Responses requests (`previous_response_id`) keep the harness system prompt. Before, `codex`, `opencode`, `pi` and `oh_my_pi` sent the second and later requests without their instructions or developer message.
 - Settings from a schema registered after startup can be read. Before, `Settings.get` on such a path threw a `TypeError`.
+- Stock `omp` no longer lists the BreadBoard Balanced, Quiet and Detailed status-line presets in settings. `bb` still lists them first.
 
 ## [18.3.0] - 2026-09-24
 

@@ -738,21 +738,6 @@ const BUILTIN_SETTINGS_SCHEMA = {
 			label: "Status Line Preset",
 			description: "Information shown around the input editor; independent of shape and glyph style",
 			options: [
-				{
-					value: "bb-balanced",
-					label: "BreadBoard Balanced",
-					description: "Folder, session, model, compact context and available spend",
-				},
-				{
-					value: "bb-quiet",
-					label: "BreadBoard Quiet",
-					description: "Folder and model, with activity and context pressure when needed",
-				},
-				{
-					value: "bb-detailed",
-					label: "BreadBoard Detailed",
-					description: "Identity, harness, token counts, available spend and timing",
-				},
 				{ value: "default", label: "Default", description: "Model, path, git, context, tokens, cost" },
 				{ value: "minimal", label: "Minimal", description: "Path and git only" },
 				{ value: "compact", label: "Compact", description: "Model, git, cost, context" },
@@ -6279,9 +6264,7 @@ export function setDistributionSettingDefaults(defaults: SettingDefaultOverrides
 /**
  * Hook invoked by settings-extensions to apply registered schemas to the live SETTINGS_SCHEMA object.
  */
-export function applyRegisteredSettingSchemas(
-	definitions: Record<string, SettingSchemaDef>,
-): () => void {
+export function applyRegisteredSettingSchemas(definitions: Record<string, SettingSchemaDef>): () => void {
 	const previous = new Map<string, SettingSchemaDef | undefined>();
 	const target = SETTINGS_SCHEMA as Record<string, SettingSchemaDef>;
 	for (const [path, def] of Object.entries(definitions)) {
