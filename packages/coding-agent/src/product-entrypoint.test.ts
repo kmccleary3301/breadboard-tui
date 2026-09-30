@@ -285,4 +285,44 @@ describe("BreadBoard product entrypoint", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toBe("breadboard/product");
 	});
+
+	test("refuses bb update and cites local channel install script", async () => {
+		const home = await temporaryHome();
+		const result = await runProcess(["src/bb.ts", "update"], home);
+		expect(result.exitCode).toBe(2);
+		expect(result.stderr).toContain(
+			'bb: "bb update" is disabled because BreadBoard 1.0 has no public release channel.',
+		);
+		expect(result.stderr).toContain("bun scripts/install-product-release.ts install");
+		expect(result.stderr).toContain("bun scripts/install-product-release.ts update");
+	});
+
+	test("leaves omp update untouched without BreadBoard refusal", async () => {
+		const home = await temporaryHome();
+		const result = await runProcess(["src/omp.ts", "update", "--help"], home);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("Check for and install updates");
+		expect(result.stderr).not.toContain("BreadBoard 1.0 has no public release channel");
+	});
+
+	test("formats product version for bb --version and bb -v", async () => {
+		const home = await temporaryHome();
+		const [longResult, shortResult] = await Promise.all([
+			runProcess(["src/bb.ts", "--version"], home),
+			runProcess(["src/bb.ts", "-v"], home),
+		]);
+		expect(longResult.exitCode).toBe(0);
+		expect(longResult.stdout.trim()).toMatch(/^bb\/[^\s]+ omp\/[^\s]+$/);
+		expect(shortResult.exitCode).toBe(0);
+		expect(shortResult.stdout.trim()).toBe(longResult.stdout.trim());
+	});
+
+	test("refuses legacy Python bridge options before launch", async () => {
+		const home = await temporaryHome();
+		const result = await runProcess(["src/bb.ts", "-p", "hi"], home, {
+			BREADBOARD_ENGINE_MODE: "remote",
+		});
+		expect(result.exitCode).toBe(2);
+		expect(result.stderr).toContain("the Python engine bridge was removed");
+	});
 });

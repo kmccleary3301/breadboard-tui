@@ -1,18 +1,19 @@
 import "@oh-my-pi/pi-utils/env";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { APP_NAME, CONFIG_DIR_NAME, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
+import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+
+let extraHelpSectionProvider: (() => string) | undefined;
+
+export function registerExtraHelpSection(provider: () => string): () => void {
+	extraHelpSectionProvider = provider;
+	return () => {
+		if (extraHelpSectionProvider === provider) extraHelpSectionProvider = undefined;
+	};
+}
 
 export function getExtraHelpText(): string {
-	const breadboard = IS_BREADBOARD_PRODUCT
-		? `${chalk.bold("BreadBoard:")}
-  ${APP_NAME} runs OMP's own loop on a BreadBoard harness. --harness takes a built-in harness id
-  or a spec path (.yaml); /harness shows, lists and reloads harnesses.
-  BREADBOARD_OMP_AGENT_DIR   - Use an existing OMP authentication store
-  BREADBOARD_CONFIG_DIR      - BreadBoard configuration and native cache directory
-
-`
-		: "";
-	return `${breadboard}${chalk.bold("Environment Variables:")}
+	const header = extraHelpSectionProvider ? extraHelpSectionProvider() : "";
+	return `${header}${chalk.bold("Environment Variables:")}
   ${chalk.dim("# Core Providers")}
   ANTHROPIC_API_KEY          - Anthropic Claude models
   ANTHROPIC_OAUTH_TOKEN      - Anthropic OAuth (takes precedence over API key)

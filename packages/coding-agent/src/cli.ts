@@ -22,13 +22,11 @@ import type * as Postmortem from "@oh-my-pi/pi-utils/postmortem";
 import {
 	APP_NAME,
 	getActiveProfile,
-	IS_BREADBOARD_PRODUCT,
 	MIN_BUN_VERSION,
 	resolveProfileEnv,
 	setProfile,
 	VERSION,
 } from "@oh-my-pi/pi-utils/dirs";
-import { formatBreadboardVersion } from "@oh-my-pi/pi-utils/product-distribution";
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
 import noticeBundlePath from "../THIRD_PARTY_NOTICES.txt" with { type: "file" };
 import { extractProfileFlags } from "./cli/profile-bootstrap";
@@ -43,7 +41,6 @@ import {
 import type * as JsProcessEntry from "./eval/js/process-entry";
 import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
 import { parseStartupPrepaintArgs } from "./startup-prepaint-args";
-import { detectBridgeRefusal, detectSettingsBridgeRefusal, formatBridgeRefusal } from "./breadboard/bridge-refusal";
 
 if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
 	process.stderr.write(
@@ -439,25 +436,12 @@ async function runTinyWorker(): Promise<void> {
 	await startTinyWorkerFromEnvironment();
 }
 
-function writeProductVersion(): void {
-	process.stdout.write(`${formatBreadboardVersion()}\n`);
-}
-
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export async function runCli(argv: string[], options: { readonly processEntry?: boolean } = {}): Promise<void> {
 	let resolvedArgv = argv;
 	try {
 		const extracted = extractProfileFlags(resolvedArgv);
 		resolvedArgv = extracted.argv;
-		const refusal = IS_BREADBOARD_PRODUCT
-			? detectBridgeRefusal({ argv: resolvedArgv, environment: process.env })
-			: undefined;
-		if (refusal) {
-			process.stderr.write(`${formatBridgeRefusal(refusal.source, refusal.value)}\n`);
-			process.exitCode = 2;
-			if (isProcessEntry) process.exit(2);
-			return;
-		}
 		if (extracted.profile !== undefined) {
 			setProfile(extracted.profile);
 		} else {
@@ -499,10 +483,6 @@ export async function runCli(argv: string[], options: { readonly processEntry?: 
 
 	// Declare this module as the worker-host entry before worker selector dispatch.
 	if (isProcessEntry) declareWorkerHostEntry();
-	if (IS_BREADBOARD_PRODUCT && (resolvedArgv[0] === "--version" || resolvedArgv[0] === "-v")) {
-		writeProductVersion();
-		return;
-	}
 
 	// Worker-thread entry dispatch must run before the first `await`: the
 	// stats sync worker's buffering onmessage handler is installed in the
@@ -558,19 +538,7 @@ export async function runCli(argv: string[], options: { readonly processEntry?: 
 		resolvedArgv[0] === "--version" ||
 		resolvedArgv[0] === "-v" ||
 		resolvedArgv[0] === "help";
-	const [, , settingsRefusal] = await Promise.all([
-		setFullProcessName(),
-		helpOrVersion ? Promise.resolve() : installNetworkBootstrap(),
-		// Before any command opens agent.db or the auth store, bridge settings refuse every subcommand.
-		IS_BREADBOARD_PRODUCT && !helpOrVersion ? detectSettingsBridgeRefusal(resolvedArgv) : null,
-	]);
-	if (settingsRefusal) {
-		stopStartupComposer?.();
-		process.stderr.write(`${formatBridgeRefusal(settingsRefusal.source, settingsRefusal.value)}\n`);
-		process.exitCode = 2;
-		if (isProcessEntry) process.exit(2);
-		return;
-	}
+	await Promise.all([setFullProcessName(), helpOrVersion ? Promise.resolve() : installNetworkBootstrap()]);
 
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();

@@ -110,7 +110,6 @@ export interface StatusLinePresetRenderContext {
 	readonly layout: "box" | "band" | "plain-right" | "plain-left" | "plain-full" | "standalone";
 	readonly preset: string;
 	readonly options: StatusLineSegmentOptions;
-	readonly config?: unknown;
 	readonly customActivity?: unknown;
 	readonly placeholders?: boolean;
 	readonly previewTitle?: string;

@@ -2,7 +2,7 @@ import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Tool, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import type { CompactionBoundaries } from "./context-usage";
-import type { HarnessSnapshot, StatusLineSettings } from "./types";
+import type { StatusLineSettings } from "./types";
 
 export interface StatusAccountIdentity {
 	accountId?: string;
@@ -90,7 +90,6 @@ export interface StatusLineHost<TSession extends StatusLineSession = StatusLineS
 	calculateTokensPerSecond(messages: readonly AgentMessage[], isStreaming: boolean): number | null;
 	limitMatchesActiveAccount(report: UsageReport, limit: UsageLimit, identity: StatusAccountIdentity): boolean;
 	computeCompactionBoundaries(session: TSession, contextWindow: number, model?: Model): CompactionBoundaries | null;
-	getHarness?(session: TSession): HarnessSnapshot | null;
 	getIdentityMark?(): string | undefined;
 }
 

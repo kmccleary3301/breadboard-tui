@@ -4,7 +4,6 @@ import { colorToAnsi, paintAnsi } from "../theme/color";
 import { hexToOklch, oklchToHex, rgbToHex, type OKLCH } from "@oh-my-pi/pi-utils/color";
 import type { ColorMode } from "../theme/schema";
 import { theme } from "../theme/theme";
-import { sanitizeStatusText } from "../chrome/shared";
 import { isReducedMotionEnabled } from "../reduced-motion";
 import tipsText from "./tips.txt" with { type: "text" };
 
@@ -15,48 +14,6 @@ import {
 	type ProductAppearance,
 	type ProductIdentity,
 } from "../product-identity";
-
-export interface WelcomeHarnessSnapshot {
-	readonly name: string;
-	readonly mode: string | null;
-	readonly generation: string | null;
-	readonly lock: {
-		readonly effective_values?: readonly {
-			readonly path?: string;
-			readonly value?: unknown;
-			readonly value_kind?: string;
-			readonly visibility?: string;
-		}[];
-	} | null;
-}
-export interface WelcomeHarnessLockValue {
-	readonly [key: string]: unknown;
-}
-function lockValue(lock: WelcomeHarnessSnapshot["lock"], path: string): unknown {
-	const row = lock?.effective_values?.find(candidate => candidate.path === path);
-	return row && row.visibility !== "redacted" && row.value_kind !== "secret-ref" ? row.value : undefined;
-}
-function harnessTeamSize(lock: WelcomeHarnessSnapshot["lock"]): number | undefined {
-	if (lockValue(lock, "multi_agent.enabled") !== true) return undefined;
-	const value = lockValue(lock, "multi_agent.team_config.team.orchestration.scheduler.max_concurrent_agents");
-	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
-}
-function harnessPosture(lock: WelcomeHarnessSnapshot["lock"]): readonly string[] {
-	const parts: string[] = [];
-	const nativeTools = lockValue(lock, "provider_tools.use_native");
-	if (typeof nativeTools === "boolean") parts.push(nativeTools ? "native tools" : "prompted tools");
-	if (lockValue(lock, "provider_tools.api_variant") === "responses") parts.push("responses API");
-	const modes = lockValue(lock, "modes");
-	if (Array.isArray(modes)) {
-		const names: string[] = [];
-		for (const mode of modes) {
-			if (typeof mode !== "object" || mode === null || !("name" in mode) || typeof mode.name !== "string") continue;
-			if (mode.name !== "compact") names.push(mode.name);
-		}
-		if (names.length > 0) parts.push(names.join("→"));
-	}
-	return parts;
-}
 
 const NATIVE_ONLY_TIP_PREFIX = "[native-only]";
 
@@ -225,12 +182,13 @@ export class WelcomeComponent implements Component {
 		private readonly identity: ProductIdentity = getProductIdentity(),
 		private readonly appearance?: ProductAppearance,
 		private reduceMotion?: boolean,
-		private harness?: WelcomeHarnessSnapshot | null,
+		private harnessIdentity = "",
 	) {
 		this.#tips = getWelcomeTips(identity);
 	}
-	setHarness(harness: WelcomeHarnessSnapshot | null | undefined): void {
-		this.harness = harness ?? null;
+	/** One pre-rendered row naming the active harness, shown under "Get started"; empty hides it. */
+	setHarnessIdentity(text: string): void {
+		this.harnessIdentity = text;
 		this.invalidate();
 	}
 	get tip(): string | undefined {
@@ -449,29 +407,7 @@ export class WelcomeComponent implements Component {
 		// Right column hints
 		const loginHint = `${theme.fg("accent", "/login")}${theme.fg("muted", " sign in")}`;
 		const modelHint = `${theme.fg("accent", "/model")}${theme.fg("muted", " choose model")}`;
-		// The harness identity line is intentionally a single compact row.
-		const harness = this.harness;
-		let harnessIdentity = "";
-		if (harness) {
-			const identityParts = [`Harness ${sanitizeStatusText(harness.name)}`];
-			const detailParts: string[] = [];
-			if (harness.mode !== null) detailParts.push(sanitizeStatusText(harness.mode));
-			if (harness.generation !== null) {
-				const generation = sanitizeStatusText(harness.generation)
-					.replace(/^sha256:/, "")
-					.slice(0, 8);
-				detailParts.push(`g${generation}`);
-			}
-			if (detailParts.length > 0) identityParts[0] += ` (${detailParts.join(", ")})`;
-			const lock = harness.lock;
-			const size = harnessTeamSize(lock);
-			if (size !== undefined) identityParts.push(`team ${size}`);
-			const postureParts = harnessPosture(lock);
-			if (postureParts.length > 0) identityParts.push(...postureParts);
-			if (lock === null) identityParts.push("details unverified");
-			identityParts.push("/harness");
-			harnessIdentity = identityParts.join(" · ");
-		}
+		const harnessIdentity = this.harnessIdentity;
 		// Keep every known identity part and the hint visible in the fixed right column.
 		const harnessLines = harnessIdentity ? wrapTextWithAnsi(` ${harnessIdentity}`, rightCol) : [];
 		const rightLines = [

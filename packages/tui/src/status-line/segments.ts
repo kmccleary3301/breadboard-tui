@@ -11,7 +11,8 @@ import {
 	relativePathWithinNormalizedRoot,
 	relativePathWithinRoot,
 } from "@oh-my-pi/pi-utils";
-import { bindTheme, type SymbolKey, type Theme, type ThemeColor, theme as initialTheme } from "@oh-my-pi/pi-tui/theme";
+import type { SymbolKey, Theme, ThemeColor } from "../theme";
+import { theme } from "./theme-proxy";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { fileHyperlink } from "../render/hyperlink";
 import { getSessionAccentHex } from "../theme/session-color";
@@ -29,17 +30,6 @@ export type { SegmentContext } from "./types";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const STARTUP_PLACEHOLDER = "…";
-
-let activeTheme: Theme = initialTheme;
-bindTheme(value => {
-	activeTheme = value;
-});
-const theme = new Proxy({} as Theme, {
-	get: (_target, property: string | symbol) => {
-		const value = Reflect.get(activeTheme, property, activeTheme) as unknown;
-		return typeof value === "function" ? value.bind(activeTheme) : value;
-	},
-});
 
 function withIcon(icon: string, text: string): string {
 	return icon ? `${icon} ${text}` : text;

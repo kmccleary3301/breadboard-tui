@@ -8,7 +8,7 @@ import {
 } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
 import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
-import { createStatusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
+import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
 import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
 import { composerSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/composer";
@@ -18,6 +18,7 @@ import { initTheme, setTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
 	OMP_PRODUCT_IDENTITY,
+	productIdentityMark,
 	type ProductIdentity,
 } from "@oh-my-pi/pi-coding-agent/product-identity";
 import { type ComposerStyle, visibleWidth } from "@oh-my-pi/pi-tui";
@@ -83,7 +84,10 @@ describe("composer shape preview", () => {
 	}
 
 	function createPreviewStatus(identity: ProductIdentity): StatusLineComponent {
-		const status = new StatusLineComponent(createPreviewSession(), createStatusLineHost(identity));
+		const status = new StatusLineComponent(createPreviewSession(), {
+			...statusLineHost,
+			getIdentityMark: () => productIdentityMark(theme.getSymbolPreset(), identity),
+		});
 		status.updateSettings({
 			preset: "custom",
 			leftSegments: ["pi"],

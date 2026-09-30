@@ -137,7 +137,9 @@ import type { ShakeMode } from "../session/shake-types";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
-import { harnessCommandsAsSlashCommands, readHarnessPaletteSettings } from "../slash-commands/harness";
+import { HarnessPaletteController } from "../breadboard/harness-palette";
+import { setStatusLineHarness } from "../breadboard/ui/status-line/harness-state";
+import { formatWelcomeHarnessIdentity } from "../breadboard/ui/welcome";
 import { STTController, type SttState } from "../stt";
 import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
@@ -810,20 +812,6 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 	];
 }
 
-const HARNESS_PALETTE_BASE_NAMES = [
-	"harness",
-	"mode",
-	"role",
-	"team",
-	"spawn",
-	"wait",
-	"bus",
-	"longrun",
-	"checkpoint",
-	"prompts",
-	"evidence",
-] as const;
-
 type ThemedSlashCommand = Omit<SlashCommand, "icon"> & { icon?: SlashCommandIconName };
 
 const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
@@ -1049,9 +1037,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Commands (not components) queued while streaming, for the deferral hint. */
 	#pendingCommandOutputCommands = 0;
 	#pendingSlashCommands: ThemedSlashCommand[] = [];
-	/** Baseline command list before lock-derived harness entries are materialized. */
-	#staticSlashCommands: ThemedSlashCommand[] = [];
-	#harnessPaletteNames = new Set<string>();
+	#harnessPalette: HarnessPaletteController;
 	/** Built-in editor autocomplete provider, before extension wrapping. */
 	#baseAutocompleteProvider: AutocompleteProvider | undefined;
 	/** Extension-registered provider factories, applied in registration order (#4919). */
@@ -1447,7 +1433,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor);
 		this.statusLine = new StatusLineComponent(session, statusLineHost);
-		this.statusLine.setHarness(this.harnessPort?.current() ?? null);
+		setStatusLineHarness(this.harnessPort?.current() ?? null);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
 		this.#codexResetFireworksController = new CodexResetFireworksController(this);
 		this.statusLine.setCodexResetFireworksHandler(event => {
@@ -1490,8 +1476,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		const builtinCommands = buildTuiBuiltinSlashCommands({ ctx: this });
 		// Store pending commands for init() where file commands are loaded async.
-		this.#staticSlashCommands = [...builtinCommands, ...hookCommands, ...customCommands, ...skillCommandList];
-		this.#pendingSlashCommands = [...this.#staticSlashCommands];
+		this.#harnessPalette = new HarnessPaletteController(this.settings, nativeHarnessPort);
+		this.#pendingSlashCommands = [...builtinCommands, ...hookCommands, ...customCommands, ...skillCommandList];
 
 		this.#uiHelpers = new UiHelpers(this);
 		this.#btwController = new BtwController(this);
@@ -1646,7 +1632,8 @@ export class InteractiveMode implements InteractiveModeContext {
 				logger.warn("BreadBoard harness snapshot unavailable", { error: String(error) });
 			}
 		}
-		this.statusLine.setHarness(this.harnessPort?.current() ?? null);
+		setStatusLineHarness(this.harnessPort?.current() ?? null);
+		this.statusLine.invalidate();
 		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
 
 		await logger.time(
@@ -1678,7 +1665,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			recentSessions,
 			lspServers: this.#getWelcomeLspServers(),
 		});
-		this.composer.welcome?.setHarness(this.harnessPort?.current() ?? null);
+		this.composer.welcome?.setHarnessIdentity(formatWelcomeHarnessIdentity(this.harnessPort?.current()));
 		this.#persistComposerWelcome(modelName, providerName);
 		const headerBefore = this.#buildConfigWarningComponents();
 		const headerAfter: Component[] = [];
@@ -1915,9 +1902,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.harnessPort) {
 			this.#eventBusUnsubscribers.push(
 				this.harnessPort.subscribe(snapshot => {
-					this.statusLine.setHarness(snapshot);
-					this.composer.welcome?.setHarness(snapshot);
-					this.#refreshHarnessPaletteCommands();
+					setStatusLineHarness(snapshot);
+					this.statusLine.invalidate();
+					this.composer.welcome?.setHarnessIdentity(formatWelcomeHarnessIdentity(snapshot));
 					void this.refreshSlashCommandState().catch(error => {
 						logger.warn("BreadBoard harness palette refresh failed", { error: String(error) });
 					});
@@ -1940,10 +1927,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		);
 		this.#eventBusUnsubscribers.push(
 			this.session.subscribeCommandMetadataChanged(() => {
-				const retainedCommands = this.#staticSlashCommands.filter(command => !command.name.startsWith("skill:"));
+				const retainedCommands = this.#pendingSlashCommands.filter(command => !command.name.startsWith("skill:"));
 				const skillCommands = this.#rebuildSkillCommandsFromSession();
-				this.#staticSlashCommands = [...retainedCommands, ...skillCommands];
-				this.#refreshHarnessPaletteCommands();
+				this.#pendingSlashCommands = [...retainedCommands, ...skillCommands];
 			}),
 		);
 		// Set up theme file watcher
@@ -2044,40 +2030,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session.setTitleSystemPrompt(resolved);
 	}
 
-	#refreshHarnessPaletteCommands(): void {
-		const snapshot = this.harnessPort?.current() ?? null;
-		if (!snapshot) {
-			this.#harnessPaletteNames.clear();
-			this.#pendingSlashCommands = [...this.#staticSlashCommands];
-			return;
-		}
-		const dynamicCommands = new Map(
-			harnessCommandsAsSlashCommands(snapshot, readHarnessPaletteSettings(this.settings)).map(command => [
-				command.name,
-				command,
-			]),
-		);
-		const namesToReplace = new Set<string>([
-			...HARNESS_PALETTE_BASE_NAMES,
-			...this.#harnessPaletteNames,
-			...dynamicCommands.keys(),
-		]);
-		this.#harnessPaletteNames = new Set(dynamicCommands.keys());
-		this.#pendingSlashCommands = [];
-		for (const command of this.#staticSlashCommands) {
-			const replacement = dynamicCommands.get(command.name);
-			if (replacement) {
-				this.#pendingSlashCommands.push({ ...command, ...replacement, icon: command.icon });
-				dynamicCommands.delete(command.name);
-			} else if (!namesToReplace.has(command.name)) {
-				this.#pendingSlashCommands.push(command);
-			}
-		}
-		for (const command of dynamicCommands.values()) {
-			this.#pendingSlashCommands.push({ ...command, icon: "action" });
-		}
-	}
-
 	#rebuildSkillCommandsFromSession(): ThemedSlashCommand[] {
 		const commands: ThemedSlashCommand[] = [];
 		this.skillCommands.clear();
@@ -2094,15 +2046,13 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Reload session skills and the `/skill:<name>` command list. */
 	async refreshSkillState(): Promise<void> {
 		await this.session.refreshSkills();
-		const retainedCommands = this.#staticSlashCommands.filter(command => !command.name.startsWith("skill:"));
+		const retainedCommands = this.#pendingSlashCommands.filter(command => !command.name.startsWith("skill:"));
 		const skillCommands = this.#rebuildSkillCommandsFromSession();
-		this.#staticSlashCommands = [...retainedCommands, ...skillCommands];
-		this.#refreshHarnessPaletteCommands();
+		this.#pendingSlashCommands = [...retainedCommands, ...skillCommands];
 	}
 
 	/** Reload slash commands and autocomplete for the provided working directory. */
 	async refreshSlashCommandState(cwd?: string, preloaded?: ReadonlyArray<FileSlashCommand>): Promise<void> {
-		this.#refreshHarnessPaletteCommands();
 		const basePath = cwd ?? this.sessionManager.getCwd();
 		// Session construction already ran slash-command discovery for this cwd;
 		// init passes that result through instead of re-walking the providers.
@@ -2129,8 +2079,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// execution resolves aliases before template expansion. Mirror that command
 		// resolution order by skipping templates whose names already appear in any
 		// builtin/hook/custom/skill/file command token.
+		const activeSlashCommands = this.#harnessPalette.apply(this.#pendingSlashCommands);
 		const reservedNames = new Set<string>();
-		for (const command of this.#pendingSlashCommands) {
+		for (const command of activeSlashCommands) {
 			reservedNames.add(command.name);
 			for (const alias of command.aliases ?? []) reservedNames.add(alias);
 		}
@@ -2147,7 +2098,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				description: template.description,
 				icon: promptIcon,
 			}));
-		const themedCommands: SlashCommand[] = this.#pendingSlashCommands.map(command => ({
+		const themedCommands: SlashCommand[] = activeSlashCommands.map(command => ({
 			...command,
 			icon: getSlashCommandTypeIcon(command.icon ?? "action"),
 		}));
@@ -2893,7 +2844,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			segmentOptions: settings.get("statusLine.segmentOptions"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 			contextLine: settings.get("statusLine.contextLine"),
-			presetConfig: settings.get("statusLine.breadboard"),
 		});
 	}
 	syncComposerShape(): void {

@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
-import type { HarnessSnapshot } from "@oh-my-pi/pi-tui/status-line/types";
+import type { HarnessSnapshot } from "../../harness-port";
 import { thinkingLevelGlyph } from "@oh-my-pi/pi-tui/render/render-utils";
 import { sanitizeStatusText } from "@oh-my-pi/pi-tui/chrome/shared";
 import { type ThemeColor, theme } from "@oh-my-pi/pi-tui/theme/theme";

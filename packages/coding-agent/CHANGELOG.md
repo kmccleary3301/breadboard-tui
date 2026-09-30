@@ -18,7 +18,8 @@
 
 ### Changed
 
-- The downstream standalone distribution resolves update metadata and self-updates only through its own signed release channel. Upstream OMP and package-manager channels are unchanged for OMP builds.
+- `bb update` exits with status 2 and prints the `scripts/build-product-release.ts` and `scripts/install-product-release.ts` commands, because BreadBoard 1.0 has no public release channel. `omp update` is unchanged.
+- The harness commands (`/harness`, `/team`, `/prompts`, `/evidence`, `/mode`, `/role`, `/spawn`, `/wait`, `/bus`, `/longrun`, `/checkpoint`) are registered only by `bb`, and never under a name OMP already uses. `/model`, `/skills`, `/plan` and `/todo` always run OMP's own command. Stock `omp` lists none of the harness commands.
 - Task defaults in downstream builds are four concurrent subagents, one delegation level and a 30-minute wall clock. OMP builds keep their existing defaults.
 - The welcome screen shows `/login` and `/model`, including on narrow terminals.
 - Streaming Markdown reuses fixed ANSI styles, which reduces rendering overhead without changing terminal output.
@@ -38,6 +39,12 @@
 - The `claude_code` harness caches its system prompt with the one-hour TTL its reference config declares, whatever the auth type.
 - After `/harness reload`, the exported session transcript names the reloaded spec and graph hash rather than the first generation's.
 - Release third-party notices include the repository root, `packages/natives` and browser-relay aggregate notice files.
+- A harness tool whose definition declares `binding.handler: eval` returns the reference eval result shape. Other eval tools keep delegating to OMP's eval.
+- Tools added by a later harness stage get their native delegate. Before, only the first stage's tools were bound.
+- Each user message keeps the stage framing it was sent with. Before, a stage change reframed earlier messages on the next turn, so the request history changed.
+- A tool call that reaches a harness generation which no longer defines that tool fails with `Tool "<name>" is not registered in the active generation`, and never runs the previous generation's handler.
+- Chained Responses requests (`previous_response_id`) keep the harness system prompt. Before, `codex`, `opencode`, `pi` and `oh_my_pi` sent the second and later requests without their instructions or developer message.
+- Settings from a schema registered after startup can be read. Before, `Settings.get` on such a path threw a `TypeError`.
 
 ## [18.3.0] - 2026-09-24
 

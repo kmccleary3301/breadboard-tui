@@ -1,9 +1,10 @@
 import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
 import { NativeHarnessReloadError, builtinNativeHarnesses } from "@breadboard/harness";
-import type { HarnessCommandSpec, HarnessSnapshot } from "../breadboard/harness-port";
+import type { HarnessCommandSpec, HarnessPort, HarnessSnapshot } from "../breadboard/harness-port";
 import type { Settings } from "../config/settings";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
 import { parseSlashCommand, parseSubcommand } from "./helpers/parse";
+import { registerBuiltinSlashCommands } from "./builtin-registry";
 
 export interface HarnessPaletteSettings {
 	readonly defaultHarness: string;
@@ -11,13 +12,9 @@ export interface HarnessPaletteSettings {
 	readonly unsupportedCommands: "dim" | "hide";
 }
 
-const LOCK_COMMANDS = [
+export const LOCK_COMMANDS = [
 	["mode", "modes"],
-	["model", "providers.models"],
 	["role", "multi_agent.model_roles"],
-	["skills", "skills"],
-	["plan", "features.plan"],
-	["todo", "features.todos.enabled"],
 	["team", "multi_agent.enabled"],
 	["spawn", "multi_agent.enabled"],
 	["wait", "multi_agent.enabled"],
@@ -27,7 +24,6 @@ const LOCK_COMMANDS = [
 	["prompts", "prompts.*"],
 	["evidence", "evidence"],
 ] as const;
-
 const NO_HOST_IMPLEMENTATION: Readonly<Record<string, true>> = {
 	spawn: true,
 	wait: true,
@@ -96,20 +92,12 @@ function lockFieldPresent(lock: Readonly<Record<string, unknown>>, path: string)
 		return effectivePathPresent(lock, path.endsWith(".*") ? path : `${path}.*`);
 	const entry = effectiveValue(lock, path);
 	if (!entry.found) return false;
-	if (
-		path === "multi_agent.enabled" ||
-		path === "long_running.enabled" ||
-		path === "features.plan" ||
-		path === "features.todos.enabled"
-	)
-		return entry.value === true;
+	if (path === "multi_agent.enabled" || path === "long_running.enabled") return entry.value === true;
 	if (path === "modes") return Array.isArray(entry.value) && entry.value.length > 0;
-	if (path === "skills") return Array.isArray(entry.value) && entry.value.length > 0;
 	return entry.value !== undefined && entry.value !== null;
 }
 
-function noHostReason(source: string, name: string): string {
-	if (name === "skills" && source === "skills") return "No skills leaf in harness lock";
+function noHostReason(source: string, _name: string): string {
 	return `Not enabled by harness lock section ${source}`;
 }
 
@@ -121,8 +109,7 @@ export function materializeHarnessCommands(
 	const lock = snapshot.lock ?? {};
 	const specs: HarnessCommandSpec[] = [{ name: "harness", source: "harness", enabled: true }];
 	for (const [name, source] of LOCK_COMMANDS) {
-		// Model selection is a live engine control, not a source-lock capability.
-		const enabledByLock = name === "model" || isStaticPanelCommand(name) || lockFieldPresent(lock, source);
+		const enabledByLock = isStaticPanelCommand(name) || lockFieldPresent(lock, source);
 		const hostAvailable = NO_HOST_IMPLEMENTATION[name] !== true;
 		const enabled = enabledByLock && hostAvailable;
 		const reason = enabled ? undefined : !enabledByLock ? noHostReason(source, name) : "no host implementation";
@@ -143,24 +130,15 @@ export function harnessPaletteHeader(
 }
 
 function completionValues(lock: Readonly<Record<string, unknown>>, name: string): readonly string[] {
-	const value = effectiveValue(
-		lock,
-		name === "mode" ? "modes" : name === "model" ? "providers.models" : "skills",
-	).value;
-	if (name === "mode" && Array.isArray(value)) {
-		return value.flatMap(item => {
-			const object = record(item);
-			return object && typeof object.name === "string" ? [object.name] : [];
-		});
+	if (name === "mode") {
+		const value = effectiveValue(lock, "modes").value;
+		if (Array.isArray(value)) {
+			return value.flatMap(item => {
+				const object = record(item);
+				return object && typeof object.name === "string" ? [object.name] : [];
+			});
+		}
 	}
-	if (name === "model" && Array.isArray(value)) {
-		return value.flatMap(item => {
-			const object = record(item);
-			return object && typeof object.id === "string" ? [object.id] : [];
-		});
-	}
-	if (name === "skills" && Array.isArray(value))
-		return value.filter((item): item is string => typeof item === "string");
 	if (name === "role") {
 		return effectiveEntries(lock, "multi_agent.model_roles").flatMap(item => {
 			const path = item.path;
@@ -194,18 +172,19 @@ export function harnessCommandsAsSlashCommands(
 					: `[Harness] ${spec.enabled ? "Lock-derived command" : `Unavailable: ${spec.reason ?? "unsupported"}`}`,
 			allowArgs: true,
 		};
-		if (snapshot && ["mode", "model", "role", "skills"].includes(spec.name)) {
+		if (snapshot && (spec.name === "mode" || spec.name === "role")) {
 			command.getArgumentCompletions = prefix => completionItems(snapshot, spec.name, prefix);
-			if (spec.name === "skills" && completionValues(snapshot.lock ?? {}, "skills").length === 0) {
-				command.getAutocompleteDescription = () => "Skills: no skills leaf in harness lock";
-			}
 		}
 		return command;
 	});
 }
 
+function getHarnessPort(runtime: TuiSlashCommandRuntime): HarnessPort | undefined {
+	return runtime.ctx.harnessPort;
+}
+
 function harnessList(runtime: TuiSlashCommandRuntime): boolean {
-	const snapshot = runtime.ctx.harnessPort?.current() ?? null;
+	const snapshot = getHarnessPort(runtime)?.current() ?? null;
 	const choices = builtinNativeHarnesses();
 	if (choices.length === 0) {
 		runtime.ctx.showStatus("No BreadBoard harnesses available");
@@ -234,7 +213,6 @@ function harnessList(runtime: TuiSlashCommandRuntime): boolean {
 }
 
 async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<boolean> {
-	if (parsed.name === "plan" || parsed.name === "todo") return false;
 	if (isStaticPanelCommand(parsed.name)) {
 		runtime.ctx.showAgentHub({ initialSection: "harness", initialHarnessPanel: parsed.name });
 		return true;
@@ -246,8 +224,7 @@ async function executeDynamicCommand(parsed: ParsedSlashCommand, runtime: TuiSla
 		parsed.name === "longrun" ||
 		parsed.name === "checkpoint" ||
 		parsed.name === "mode" ||
-		parsed.name === "role" ||
-		parsed.name === "skills"
+		parsed.name === "role"
 	) {
 		runtime.ctx.showStatus(`/${parsed.name} unavailable: no host implementation`);
 		return true;
@@ -261,7 +238,10 @@ export async function executeHarnessSlashCommand(
 ): Promise<string | boolean> {
 	const parsed = parseSlashCommand(text);
 	if (!parsed) return false;
-	const snapshot = runtime.ctx.harnessPort?.current() ?? null;
+	if (parsed.name !== "harness" && !LOCK_COMMANDS.some(([name]) => name === parsed.name)) {
+		return false;
+	}
+	const snapshot = getHarnessPort(runtime)?.current() ?? null;
 	const settings = readHarnessPaletteSettings(runtime.ctx.settings);
 	// Hiding unavailable commands is presentation only; direct invocation must still reject.
 	const specs = materializeHarnessCommands(snapshot, { ...settings, unsupportedCommands: "dim" });
@@ -277,7 +257,7 @@ export async function executeHarnessSlashCommand(
 		}
 		if (verb === "list") return harnessList(runtime);
 		if (verb === "reload") {
-			const port = runtime.ctx.harnessPort;
+			const port = getHarnessPort(runtime);
 			if (!port?.reloadNativeHarness) {
 				runtime.ctx.showStatus("Harness reload unavailable: this session has no live native harness.");
 				return true;
@@ -306,13 +286,25 @@ export async function executeHarnessSlashCommand(
 		return true;
 	}
 	const spec = specs.find(item => item.name === parsed.name);
-	if (!spec) return false;
+	if (!spec) {
+		if (isStaticPanelCommand(parsed.name)) {
+			runtime.ctx.showAgentHub({ initialSection: "harness", initialHarnessPanel: parsed.name });
+			return true;
+		}
+		runtime.ctx.showStatus(`/${parsed.name} unavailable: No BreadBoard harness snapshot loaded`);
+		return true;
+	}
 	if (!spec.enabled) {
 		runtime.ctx.showStatus(`/${spec.name} unavailable: ${spec.reason ?? "unsupported by harness lock"}`);
 		return true;
 	}
 	if (!snapshot) return true;
 	return executeDynamicCommand(parsed, runtime);
+}
+
+async function handleHarnessSlashCommand(parsed: ParsedSlashCommand, runtime: TuiSlashCommandRuntime): Promise<void> {
+	const text = `/${parsed.name}${parsed.args ? ` ${parsed.args}` : ""}`;
+	await executeHarnessSlashCommand(text, runtime);
 }
 
 export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
@@ -324,5 +316,84 @@ export const BUILTIN_HARNESS_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
 			{ name: "list", description: "List available harnesses" },
 			{ name: "reload", description: "Compile the workspace harness and apply it at the next turn", usage: "" },
 		],
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "team",
+		description: "Open the harness team panel",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "prompts",
+		description: "Open the harness prompts panel",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "evidence",
+		description: "Open the harness evidence panel",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "mode",
+		description: "Harness execution mode",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "role",
+		description: "Harness model role",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "spawn",
+		description: "Harness agent spawn",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "wait",
+		description: "Harness agent wait",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "bus",
+		description: "Harness message bus",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "longrun",
+		description: "Harness long running execution",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
+	},
+	{
+		name: "checkpoint",
+		description: "Harness state checkpoint",
+		allowArgs: true,
+		handleTui: async (command, runtime) => handleHarnessSlashCommand(command, runtime),
 	},
 ];
+
+/** Names of the harness commands, as registered in bb. */
+export const HARNESS_COMMAND_NAMES: ReadonlySet<string> = new Set(
+	BUILTIN_HARNESS_SLASH_COMMANDS.map(spec => spec.name),
+);
+
+let unregisterHarnessCommands: (() => void) | undefined;
+
+/** Adds the harness commands to the builtin registry; bb calls this, plain omp never does. */
+export function registerHarnessCommands(): () => void {
+	if (unregisterHarnessCommands) return unregisterHarnessCommands;
+	const unregister = registerBuiltinSlashCommands(BUILTIN_HARNESS_SLASH_COMMANDS);
+	unregisterHarnessCommands = () => {
+		unregister();
+		unregisterHarnessCommands = undefined;
+	};
+	return unregisterHarnessCommands;
+}

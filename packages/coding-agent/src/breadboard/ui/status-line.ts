@@ -9,25 +9,15 @@ import {
 	renderBreadboardStatusRows,
 	type BreadboardStatusSnapshot,
 } from "./status-line/breadboard-presentation";
+import { statusLineHarness } from "./status-line/harness-state";
+import { settings } from "../../config/settings";
 import { registerSettingValueNormalizer } from "../../config/settings-extensions";
+import "../settings-schema-extension";
 import {
-	BREADBOARD_FIELD_DEFINITIONS,
+	assertBreadboardFieldSettings,
 	type BreadboardFieldSettings,
 	DEFAULT_BREADBOARD_FIELD_SETTINGS,
 } from "./status-line/breadboard-fields";
-
-function assertBreadboardFieldSettings(value: unknown): asserts value is Partial<BreadboardFieldSettings> {
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error("statusLine.breadboard must be an object of field choices.");
-	}
-	for (const [key, choice] of Object.entries(value)) {
-		const field = BREADBOARD_FIELD_DEFINITIONS.find(candidate => candidate.key === key);
-		if (!field) throw new Error(`Unknown BreadBoard information field: ${key}`);
-		if (!field.options.some(option => option.value === choice)) {
-			throw new Error(`Invalid BreadBoard information choice for ${key}: ${String(choice)}`);
-		}
-	}
-}
 
 function buildBreadboardSnapshot(context: StatusLinePresetRenderContext): BreadboardStatusSnapshot {
 	const { ctx, session, placeholders, previewTitle, backgroundWait } = context;
@@ -45,7 +35,7 @@ function buildBreadboardSnapshot(context: StatusLinePresetRenderContext): Breadb
 			: path.basename(getProjectDir()),
 		workspacePath: getProjectDir(),
 		sessionName: s?.sessionManager?.getSessionName?.() ?? previewTitle,
-		harness: ctx?.harness,
+		harness: statusLineHarness(),
 		branch: ctx?.git?.branch,
 		activity: placeholders ? null : undefined,
 		elapsedMs: placeholders ? null : ctx?.turnElapsedMs,
@@ -84,7 +74,7 @@ export function registerBreadboardStatusLine(): () => void {
 					name,
 					context.width,
 					layout,
-					context.config as Partial<BreadboardFieldSettings> | undefined,
+					settings.get("statusLine.breadboard"),
 				);
 				return { content };
 			},
@@ -99,7 +89,7 @@ export function registerBreadboardStatusLine(): () => void {
 					name,
 					context.width,
 					layout,
-					context.config as Partial<BreadboardFieldSettings> | undefined,
+					settings.get("statusLine.breadboard"),
 				);
 				return { top: rows.top, bottom: rows.bottom };
 			},

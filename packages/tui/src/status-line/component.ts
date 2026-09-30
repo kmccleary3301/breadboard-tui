@@ -27,7 +27,8 @@ import type {
 } from "./host";
 import { getSessionAccentHex } from "../theme/session-color";
 import { sanitizeStatusText } from "../chrome/shared";
-import { bindTheme, getThemeEpoch, theme as initialTheme, type Theme } from "@oh-my-pi/pi-tui/theme";
+import { getThemeEpoch } from "../theme";
+import { theme } from "./theme-proxy";
 import { type CompactionBoundaries, EMPTY_STRING_PARTS, getToolSchemaMetadataRevision } from "./context-usage";
 import {
 	type CodexResetFireworksEvent,
@@ -42,7 +43,6 @@ import { getSeparator } from "./separators";
 import type {
 	CollabStatus,
 	EffectiveStatusLineSettings,
-	HarnessSnapshot,
 	StatusLineSegmentId,
 	StatusLineSegmentOptions,
 	StatusLineSettings,
@@ -55,17 +55,6 @@ const WATCHER_FAILURE_POLL_TTL_MS = 5000;
 const BRAND_FADE_MS = 450;
 /** Repaint cadence while the brand fade is in flight (rust omp's `FADE_FRAME`). */
 const BRAND_FADE_FRAME_MS = 40;
-
-let activeTheme: Theme = initialTheme;
-bindTheme(value => {
-	activeTheme = value;
-});
-const theme = new Proxy({} as Theme, {
-	get: (_target, property: string | symbol) => {
-		const value = Reflect.get(activeTheme, property, activeTheme) as unknown;
-		return typeof value === "function" ? value.bind(activeTheme) : value;
-	},
-});
 
 /**
  * Providers whose subscription quota is a single monthly bucket, so their
@@ -556,7 +545,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#collabStatus: CollabStatus | null = null;
 	#streamStatus: { viewers: number } | null = null;
 	#recording = false;
-	#harness: HarnessSnapshot | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -962,10 +950,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#collabStatus = status;
-		this.#invalidateStatusLineRenderCache();
-	}
-	setHarness(harness: HarnessSnapshot | null | undefined): void {
-		this.#harness = harness ?? null;
 		this.#invalidateStatusLineRenderCache();
 	}
 
@@ -2263,7 +2247,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			sessionAccent: sessionAccentEnabled,
 			previewTitle,
 			identityMark: this.host.getIdentityMark?.(),
-			harness: this.#harness ?? this.host.getHarness?.(this.session) ?? null,
 			activeRepo: activeRepoCache.activeRepo,
 			width,
 			options: segmentOptions ?? {},
@@ -2651,7 +2634,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				layout,
 				preset: effectiveSettings.preset ?? "default",
 				options: effectiveSettings.segmentOptions ?? {},
-				config: effectiveSettings.presetConfig,
 				placeholders,
 				previewTitle,
 				backgroundWait:
@@ -2667,7 +2649,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				layout,
 				preset: effectiveSettings.preset ?? "default",
 				options: effectiveSettings.segmentOptions ?? {},
-				config: effectiveSettings.presetConfig,
 				placeholders,
 				previewTitle,
 				backgroundWait:

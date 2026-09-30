@@ -1,6 +1,9 @@
 import { registerComposerPreviewStatusFactory } from "@oh-my-pi/pi-tui/setup/scenes/composer";
 import type { SetupSceneHost } from "@oh-my-pi/pi-tui/setup/wizard";
 import { registerSetupScene } from "@oh-my-pi/pi-tui/setup/wizard";
+import { getProductIdentity } from "@oh-my-pi/pi-tui/product-identity";
+import { BREADBOARD_PRODUCT_IDENTITY, registerProductIdentity } from "../../product-identity";
+import { registerBreadboardHelp } from "../product-help";
 import {
 	createBreadboardPreviewStatusSource,
 	informationLayoutSetupScene,
@@ -17,7 +20,11 @@ let unregister: (() => void) | undefined;
 /** Register bb themes, symbol presets, status-line, settings tab and setup scene once; later calls return the same handle. */
 export function registerBreadboardUi(): () => void {
 	if (unregister) return unregister;
+	const previousIdentity = getProductIdentity();
+	registerProductIdentity(BREADBOARD_PRODUCT_IDENTITY);
 	const handles = [
+		() => registerProductIdentity(previousIdentity),
+		registerBreadboardHelp(),
 		registerBreadboardThemes(),
 		registerBreadboardSymbols(),
 		registerBreadboardStatusLine(),

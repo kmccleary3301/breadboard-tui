@@ -14,7 +14,7 @@ import {
 import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import { DEFAULT_LIVE_VOICE, LIVE_VOICE_OPTIONS, LIVE_VOICE_VALUES } from "../live/voices";
 import { MAGIC_KEYWORDS, type MagicKeywordId } from "../modes/magic-keywords";
-import type { AnyUiMetadata } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import type { AnyUiMetadata, SettingTab } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import {
 	COMPACTION_METHOD_CHOICES,
 	type CompactionMethod,
@@ -47,10 +47,6 @@ import {
 	SERVICE_TIER_OPENAI_VALUES,
 	type ServiceTierInheritSettingValue,
 } from "./service-tier";
-import {
-	DEFAULT_BREADBOARD_FIELD_SETTINGS,
-	type BreadboardFieldSettings,
-} from "../breadboard/ui/status-line/breadboard-fields";
 
 /** Unified settings schema - single source of truth for all settings.
  *
@@ -153,92 +149,8 @@ export const STATUS_LINE_SEPARATOR_VALUES = [
 ] as const;
 export type StatusLineSeparatorStyle = (typeof STATUS_LINE_SEPARATOR_VALUES)[number];
 
-export type SettingTab =
-	| "appearance"
-	| "model"
-	| "interaction"
-	| "context"
-	| "memory"
-	| "files"
-	| "shell"
-	| "tools"
-	| "tasks"
-	| "providers"
-	| "breadboard";
-
-/** Tab display metadata - icon is resolved via theme.symbol() */
-export type TabMetadata = { label: string; icon: `tab.${string}` };
-
-/** Ordered list of tabs for UI rendering */
-export const SETTING_TABS: SettingTab[] = [
-	"appearance",
-	"model",
-	"interaction",
-	"context",
-	"memory",
-	"files",
-	"shell",
-	"tools",
-	"tasks",
-	"providers",
-	"breadboard",
-];
-
-/** Tab display metadata - icon is a symbol key from theme.ts (tab.*) */
-export const TAB_METADATA: Record<SettingTab, { label: string; icon: `tab.${string}` }> = {
-	appearance: { label: "Appearance", icon: "tab.appearance" },
-	model: { label: "Model", icon: "tab.model" },
-	interaction: { label: "Interaction", icon: "tab.interaction" },
-	context: { label: "Context", icon: "tab.context" },
-	memory: { label: "Memory", icon: "tab.memory" },
-	files: { label: "Files", icon: "tab.files" },
-	shell: { label: "Shell", icon: "tab.shell" },
-	tools: { label: "Tools", icon: "tab.tools" },
-	tasks: { label: "Tasks", icon: "tab.tasks" },
-	providers: { label: "Providers", icon: "tab.providers" },
-	breadboard: { label: "BreadBoard", icon: "tab.breadboard" },
-};
-
-/**
- * Ordered section groups per tab. Settings declare their section via `ui.group`;
- * the settings UI renders groups in this order with a heading row between them.
- * Ungrouped settings render first, before any section heading.
- */
-export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
-	appearance: ["Theme", "Composer", "Status Line", "Display", "Images"],
-	model: ["Thinking", "Sampling", "Prompt", "Retry & Fallback", "Advisor", "Prewalk", "Vision"],
-	interaction: [
-		"Input",
-		"Approvals",
-		"Notifications",
-		"Speech",
-		"Collab",
-		"Magic Keywords",
-		"Startup & Updates",
-		"Power",
-		"Agent",
-		"Git",
-	],
-	context: ["General", "Compaction", "Rules (TTSR)", "Experimental"],
-	memory: ["General", "Auto-Learn", "Mnemopi", "Hindsight", "Sharpshooter"],
-	files: ["Editing", "Reading", "Read Summaries", "LSP"],
-	shell: ["Bash", "Eval & Runtimes"],
-	tools: [
-		"Available Tools",
-		"Todos",
-		"Grep & Browser",
-		"Computer",
-		"GitHub",
-		"Output Limits",
-		"Execution",
-		"Discovery & MCP",
-		"Extensions",
-		"Developer",
-	],
-	tasks: ["Modes", "Subagents", "Isolation", "Commands & Skills"],
-	providers: ["Services", "Fireworks", "Tiny Model", "Protocol", "Timeouts", "Privacy"],
-	breadboard: ["Harness", "Subagents"],
-};
+export type { SettingTab, TabMetadata } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+export { SETTING_TABS, TAB_METADATA, TAB_GROUPS } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 
 /** Status line segment identifiers accepted by custom status-line settings. */
 export const STATUS_LINE_SEGMENT_IDS = [
@@ -292,7 +204,7 @@ export type SubmenuOption<V extends string = string> = {
 	description?: string;
 };
 
-interface UiBase {
+export interface UiBase {
 	tab: SettingTab;
 	/** Section within the tab; must be listed in TAB_GROUPS[tab]. Ungrouped settings render at the top. */
 	group?: string;
@@ -310,7 +222,7 @@ interface UiBase {
 	readonly?: boolean;
 }
 
-interface UiBoolean extends UiBase {}
+export interface UiBoolean extends UiBase {}
 
 interface MagicKeywordSettingDef {
 	readonly type: "boolean";
@@ -330,17 +242,17 @@ const MAGIC_KEYWORD_SETTINGS = Object.fromEntries(
 	]),
 ) as { readonly [K in MagicKeywordId as `magicKeywords.${K}`]: MagicKeywordSettingDef };
 
-interface UiEnum<T extends readonly string[]> extends UiBase {
+export interface UiEnum<T extends readonly string[]> extends UiBase {
 	/** Submenu options. When omitted, the enum renders as an inline toggle derived from `values`. */
 	options?: ReadonlyArray<SubmenuOption<T[number]>>;
 }
 
-interface UiNumber extends UiBase {
+export interface UiNumber extends UiBase {
 	/** Submenu options. Without options, a numeric setting has no UI representation (intentional hide). */
 	options?: ReadonlyArray<SubmenuOption>;
 }
 
-interface UiString extends UiBase {
+export interface UiString extends UiBase {
 	/** Mask the value in both the settings row and text editor. */
 	secret?: boolean;
 	/**
@@ -352,7 +264,7 @@ interface UiString extends UiBase {
 	options?: ReadonlyArray<SubmenuOption> | "runtime";
 }
 
-interface UiArray extends UiBase {
+export interface UiArray extends UiBase {
 	/** Membership choices. Without options, an array setting has no UI representation (config-file only). */
 	options?: ReadonlyArray<SubmenuOption>;
 	/** Selection order is meaningful; the editor renders positions and supports reordering. */
@@ -367,54 +279,55 @@ interface UiArray extends UiBase {
  * `ui.secret`. Read it through `isCredential`, which is the single accessor
  * both the CLI and the settings panel consult.
  */
-interface CredentialMarker {
+export interface CredentialMarker {
 	credential?: true;
 }
 
-interface BooleanDef extends CredentialMarker {
+export interface BooleanDef extends CredentialMarker {
 	type: "boolean";
 	default: boolean | undefined;
 	ui?: UiBoolean;
 }
 
-interface StringDef extends CredentialMarker {
+export interface StringDef extends CredentialMarker {
 	type: "string";
 	default: string | undefined;
 	ui?: UiString;
 }
 
-interface NumberDef extends CredentialMarker {
+export interface NumberDef extends CredentialMarker {
 	type: "number";
 	default: number | undefined;
 	ui?: UiNumber;
 }
 
-interface EnumDef<T extends readonly string[]> extends CredentialMarker {
+export interface EnumDef<T extends readonly string[]> extends CredentialMarker {
 	type: "enum";
 	values: T;
 	default: T[number];
 	ui?: UiEnum<T>;
 }
 
-interface ArrayDef<T> extends CredentialMarker {
+export interface ArrayDef<T> extends CredentialMarker {
 	type: "array";
 	default: T[];
 	ui?: UiArray;
 }
 
-interface RecordDef<T> extends CredentialMarker {
+export interface RecordDef<T = any> extends CredentialMarker {
 	type: "record";
-	default: Record<string, T>;
+	default: Record<string, T> | object;
 	ui?: UiBase;
 }
 
-type SettingDef =
+export type SettingDef =
 	| BooleanDef
 	| StringDef
 	| NumberDef
 	| EnumDef<readonly string[]>
-	| ArrayDef<unknown>
-	| RecordDef<unknown>;
+	| ArrayDef<any>
+	| RecordDef<any>;
+export type SettingSchemaDef = SettingDef;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Schema Definition
@@ -507,7 +420,7 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 const DEFAULT_AGENT_MODEL_OVERRIDES: Record<string, string | string[]> = {};
 const EMPTY_AUTH_ACCOUNT_POLICIES: AuthAccountPolicies = [];
 
-export const SETTINGS_SCHEMA = {
+const BUILTIN_SETTINGS_SCHEMA = {
 	// ────────────────────────────────────────────────────────────────────────
 	// General settings (no UI)
 	// ────────────────────────────────────────────────────────────────────────
@@ -520,61 +433,6 @@ export const SETTINGS_SCHEMA = {
 	"auth.broker.url": { type: "string", default: undefined },
 	"auth.broker.token": { type: "string", default: undefined, credential: true },
 	"auth.accountPolicies": { type: "array", default: EMPTY_AUTH_ACCOUNT_POLICIES },
-	"breadboard.sessionConfigPath": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Harness",
-			label: "Session config path",
-			description: "Path to the session configuration used by the selected harness",
-		},
-	},
-	"breadboard.harness.default": {
-		type: "string",
-		default: "daily_driver",
-		ui: {
-			tab: "breadboard",
-			group: "Harness",
-			label: "Default harness",
-			description: "Harness name or definition path selected when --harness is omitted",
-		},
-	},
-	"breadboard.harness.paletteHeader": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "breadboard",
-			group: "Harness",
-			label: "Palette header",
-			description: "Show the active harness identity in the command palette",
-		},
-	},
-	"breadboard.harness.unsupportedCommands": {
-		type: "string",
-		default: "dim",
-		ui: {
-			tab: "breadboard",
-			group: "Harness",
-			label: "Unsupported commands",
-			description: "How commands unavailable to the active harness appear in the palette",
-			options: [
-				{ value: "dim", label: "Dim" },
-				{ value: "hide", label: "Hide" },
-			],
-		},
-	},
-	"breadboard.harness.max_concurrent_agents": {
-		type: "number",
-		default: undefined,
-		ui: {
-			tab: "breadboard",
-			group: "Subagents",
-			label: "Harness max concurrent agents",
-			description: "Effective lock limit for concurrent agents (read-only)",
-			readonly: true,
-		},
-	},
 
 	autoResume: {
 		type: "boolean",
@@ -904,10 +762,6 @@ export const SETTINGS_SCHEMA = {
 				{ value: "custom", label: "Custom", description: "User-defined segments" },
 			],
 		},
-	},
-	"statusLine.breadboard": {
-		type: "record",
-		default: DEFAULT_BREADBOARD_FIELD_SETTINGS,
 	},
 
 	"statusLine.separator": {
@@ -5420,10 +5274,10 @@ export const SETTINGS_SCHEMA = {
 		type: "number",
 		default: 32,
 		ui: {
-			tab: "breadboard",
+			tab: "tasks",
 			group: "Subagents",
-			label: "BreadBoard concurrent agents",
-			description: "BreadBoard product policy for the maximum number of subagents running concurrently",
+			label: "Max Concurrent Tasks",
+			description: "Maximum number of subagents running concurrently",
 			options: [
 				{ value: "0", label: "Unlimited" },
 				{ value: "1", label: "1 task" },
@@ -5453,10 +5307,10 @@ export const SETTINGS_SCHEMA = {
 		type: "number",
 		default: 2,
 		ui: {
-			tab: "breadboard",
+			tab: "tasks",
 			group: "Subagents",
-			label: "BreadBoard recursion depth",
-			description: "BreadBoard product policy for how many levels deep subagents may spawn",
+			label: "Max Task Recursion",
+			description: "How many levels deep subagents can spawn their own subagents",
 			options: [
 				{ value: "-1", label: "Unlimited" },
 				{ value: "0", label: "None" },
@@ -5471,10 +5325,11 @@ export const SETTINGS_SCHEMA = {
 		type: "number",
 		default: 0,
 		ui: {
-			tab: "breadboard",
+			tab: "tasks",
 			group: "Subagents",
-			label: "BreadBoard runtime limit",
-			description: "BreadBoard product policy for each subagent's hard wall-clock limit (ms); 0 disables the limit.",
+			label: "Max Subagent Runtime",
+			description:
+				"Hard wall-clock limit per subagent (ms). 0 disables it. Defense-in-depth against provider-side stream hangs that escape the inference-layer watchdog; triggers a normal subagent abort with a 'timed out' reason.",
 			options: [
 				{ value: "0", label: "Unlimited", description: "Default" },
 				{ value: "300000", label: "5 minutes" },
@@ -6373,10 +6228,19 @@ export const SETTINGS_SCHEMA = {
 // Type Inference
 // ═══════════════════════════════════════════════════════════════════════════
 
-type Schema = typeof SETTINGS_SCHEMA;
+type BuiltinSchema = typeof BUILTIN_SETTINGS_SCHEMA;
+
+/** Extension interface for distributions to declare extra setting schema definitions. */
+export interface SettingSchemaRegistry {}
+
+export type Schema = BuiltinSchema & SettingSchemaRegistry;
 
 /** All valid setting paths */
 export type SettingPath = keyof Schema;
+
+export const SETTINGS_SCHEMA: Record<string, SettingSchemaDef> & Schema = {
+	...BUILTIN_SETTINGS_SCHEMA,
+} as unknown as Record<string, SettingSchemaDef> & Schema;
 
 /** Infer the value type for a setting path */
 export type SettingValue<P extends SettingPath> = Schema[P] extends { type: "boolean"; default: undefined }
@@ -6412,6 +6276,29 @@ export function setDistributionSettingDefaults(defaults: SettingDefaultOverrides
 	distributionSettingDefaults = { ...defaults };
 }
 
+/**
+ * Hook invoked by settings-extensions to apply registered schemas to the live SETTINGS_SCHEMA object.
+ */
+export function applyRegisteredSettingSchemas(
+	definitions: Record<string, SettingSchemaDef>,
+): () => void {
+	const previous = new Map<string, SettingSchemaDef | undefined>();
+	const target = SETTINGS_SCHEMA as Record<string, SettingSchemaDef>;
+	for (const [path, def] of Object.entries(definitions)) {
+		previous.set(path, target[path]);
+		target[path] = def;
+	}
+	return () => {
+		for (const [path, prev] of previous) {
+			if (prev === undefined) {
+				delete target[path];
+			} else {
+				target[path] = prev;
+			}
+		}
+	};
+}
+
 /** Get the active distribution's default value for a setting path. */
 export function getDefault<P extends SettingPath>(path: P): SettingValue<P> {
 	if (Object.hasOwn(distributionSettingDefaults, path)) {
@@ -6430,30 +6317,21 @@ export function getDefault<P extends SettingPath>(path: P): SettingValue<P> {
 
 /** Check if a path has UI metadata (should appear in settings panel) */
 export function hasUi(path: SettingPath): boolean {
-	return "ui" in SETTINGS_SCHEMA[path];
+	const def = SETTINGS_SCHEMA[path];
+	return def !== undefined && "ui" in def;
 }
 
-/**
- * Whether a setting holds a credential and must never be printed or exported
- * without an explicit request. Drives both CLI redaction and settings-panel
- * masking, so the two cannot disagree.
- */
 export function isCredential(path: SettingPath): boolean {
 	const def = SETTINGS_SCHEMA[path];
-	if ("credential" in def && def.credential === true) return true;
-	// `ui.secret` predates this marker and still means "never display". Reading
-	// both here keeps ONE accessor, so the two spellings cannot produce
-	// different behaviour on different surfaces.
+	if (def && "credential" in def && def.credential === true) return true;
 	return getUi(path)?.secret === true;
 }
 
-/** Get UI metadata for a path (undefined if no UI) */
 export function getUi(path: SettingPath): AnyUiMetadata | undefined {
 	const def = SETTINGS_SCHEMA[path];
-	return "ui" in def ? (def.ui as AnyUiMetadata) : undefined;
+	return def && "ui" in def ? (def.ui as AnyUiMetadata) : undefined;
 }
 
-/** Get all paths for a specific tab */
 export function getPathsForTab(tab: SettingTab): SettingPath[] {
 	return (Object.keys(SETTINGS_SCHEMA) as SettingPath[]).filter(path => {
 		const ui = getUi(path);
@@ -6461,15 +6339,13 @@ export function getPathsForTab(tab: SettingTab): SettingPath[] {
 	});
 }
 
-/** Get the type of a setting */
 export function getType(path: SettingPath): SettingDef["type"] {
-	return SETTINGS_SCHEMA[path].type;
+	return SETTINGS_SCHEMA[path]?.type;
 }
 
-/** Get enum values for an enum setting */
 export function getEnumValues(path: SettingPath): readonly string[] | undefined {
 	const def = SETTINGS_SCHEMA[path];
-	return "values" in def ? (def.values as readonly string[]) : undefined;
+	return def && "values" in def ? (def.values as readonly string[]) : undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6619,7 +6495,6 @@ export interface StatusLineSettings {
 	leftSegments: StatusLineSegmentId[];
 	rightSegments: StatusLineSegmentId[];
 	segmentOptions: Record<string, unknown>;
-	breadboard?: BreadboardFieldSettings;
 }
 
 export interface ThinkingBudgetsSettings {

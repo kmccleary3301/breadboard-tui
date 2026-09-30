@@ -65,4 +65,20 @@ export const ACTIVE_PRODUCT_IDENTITY: ProductIdentity = IS_BREADBOARD_PRODUCT
 	? BREADBOARD_PRODUCT_IDENTITY
 	: OMP_PRODUCT_IDENTITY;
 
-setProductIdentity(ACTIVE_PRODUCT_IDENTITY);
+export function registerProductIdentity(identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY): void {
+	setProductIdentity(identity);
+}
+
+registerProductIdentity(ACTIVE_PRODUCT_IDENTITY);
+
+/**
+ * Compact status-line mark for `identity` in symbol preset `preset`; `undefined` for the
+ * native identity so the renderer keeps its own `theme.icon.omp`.
+ */
+export function productIdentityMark(
+	preset: string,
+	identity: ProductIdentity = ACTIVE_PRODUCT_IDENTITY,
+): string | undefined {
+	if (identity.id === OMP_PRODUCT_IDENTITY.id) return undefined;
+	return (identity.compactLogo as Readonly<Record<string, string>>)[preset] ?? identity.compactLogo.unicode;
+}

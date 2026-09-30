@@ -1,5 +1,5 @@
 import { Args, type CommandMetadata, Flags } from "@oh-my-pi/pi-utils/cli";
-import { APP_NAME, CONFIG_DIR_NAME, IS_BREADBOARD_PRODUCT } from "@oh-my-pi/pi-utils/dirs";
+import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
 import { CLI_THINKING_LEVELS } from "@oh-my-pi/pi-tui/thinking";
 import { SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
 import { ACTIVE_PRODUCT_IDENTITY } from "../product-identity";
@@ -126,11 +126,10 @@ export const launchHelp = {
 	],
 } satisfies CommandMetadata;
 
-if (IS_BREADBOARD_PRODUCT) {
-	launchHelp.examples = [
-		`# Interactive mode in the selected workspace\n  ${APP_NAME}`,
-		`# Choose a harness and a model\n  ${APP_NAME} --harness path/to/harness.yaml --model provider/model`,
-		`# Run the supported setup flow\n  ${APP_NAME} setup`,
-		`# Export a session file to HTML\n  ${APP_NAME} --export path/to/session.jsonl`,
-	];
+export function registerLaunchExamples(examples: string[]): () => void {
+	const previous = launchHelp.examples;
+	launchHelp.examples = examples;
+	return () => {
+		launchHelp.examples = previous;
+	};
 }

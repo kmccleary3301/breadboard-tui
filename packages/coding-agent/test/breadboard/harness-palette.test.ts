@@ -6,7 +6,9 @@ import {
 	materializeHarnessCommands,
 	type HarnessPaletteSettings,
 } from "../../src/slash-commands/harness";
-
+import { registerBuiltinSlashCommands } from "../../src/slash-commands/builtin-registry";
+import { HarnessPaletteController } from "../../src/breadboard/harness-palette";
+import { Settings } from "../../src/config/settings";
 const lockFixture = JSON.parse(
 	await Bun.file(new URL("./fixtures/codex_e4.lock.json", import.meta.url)).text(),
 ) as Readonly<Record<string, unknown>>;
@@ -31,31 +33,21 @@ function snapshot(lock: Readonly<Record<string, unknown>>): HarnessSnapshot {
 }
 
 describe("lock-derived harness palette", () => {
-	test("keeps model selection available without granting unverified harness capabilities", () => {
-		const commands = materializeHarnessCommands({ ...snapshot({}), lock: null, verifiedIdentity: null }, settings);
-		expect(commands.find(command => command.name === "model")?.enabled).toBe(true);
-		expect(commands.find(command => command.name === "plan")?.enabled).toBe(false);
-		expect(commands.find(command => command.name === "mode")?.enabled).toBe(false);
+	test("registering a command under a taken builtin name or alias throws and registers nothing", () => {
+		const spec = (name: string) => ({ name, description: name, handleTui: async () => {} }) as never;
+		expect(() => registerBuiltinSlashCommands([spec("bb-test-free"), spec("model")])).toThrow("model");
+		const unregister = registerBuiltinSlashCommands([spec("bb-test-free")]);
+		unregister();
 	});
 
 	test("maps the real lock to the expected enabled command set and reasons", () => {
 		const commands = materializeHarnessCommands(snapshot(lockFixture), settings);
 		const enabled = new Set(commands.filter(command => command.enabled).map(command => command.name));
-		expect([...enabled].sort()).toEqual(["evidence", "harness", "mode", "model", "prompts", "team"].sort());
+		expect([...enabled].sort()).toEqual(["evidence", "harness", "mode", "prompts", "team"].sort());
 		expect(commands.find(command => command.name === "checkpoint")).toMatchObject({
 			enabled: false,
 			source: "long_running.enabled",
 			reason: expect.stringContaining("long_running.enabled"),
-		});
-		expect(commands.find(command => command.name === "plan")).toMatchObject({
-			enabled: false,
-			source: "features.plan",
-			reason: expect.stringContaining("features.plan"),
-		});
-		expect(commands.find(command => command.name === "todo")).toMatchObject({
-			enabled: false,
-			source: "features.todos.enabled",
-			reason: expect.stringContaining("features.todos.enabled"),
 		});
 		expect(commands.find(command => command.name === "team")).toMatchObject({
 			enabled: true,
@@ -74,18 +66,38 @@ describe("lock-derived harness palette", () => {
 	test("derives completions only from visible effective lock leaves", () => {
 		const commands = harnessCommandsAsSlashCommands(snapshot(lockFixture), settings);
 		const mode = commands.find(command => command.name === "mode");
-		const model = commands.find(command => command.name === "model");
-		const skills = commands.find(command => command.name === "skills");
+		const role = commands.find(command => command.name === "role");
 		expect(mode?.getArgumentCompletions?.("")).toEqual([
 			{ value: "plan", label: "plan" },
 			{ value: "build", label: "build" },
 			{ value: "compact", label: "compact" },
 		]);
-		expect(model?.getArgumentCompletions?.("")).toEqual([
-			{ value: "openai/gpt-5.1-codex-mini", label: "openai/gpt-5.1-codex-mini" },
-		]);
-		expect(skills?.getArgumentCompletions?.("")).toEqual([]);
-		expect(skills?.getAutocompleteDescription?.()).toContain("no skills leaf");
+		expect(role?.getArgumentCompletions?.("")).toEqual([]);
+	});
+
+	test("HarnessPaletteController.apply never replaces or modifies upstream builtin commands", () => {
+		const fakePort = { current: () => snapshot(lockFixture) };
+		const controller = new HarnessPaletteController(Settings.isolated(), fakePort as never);
+		const staticCommands = [
+			{ name: "skills", description: "Manage skills" },
+			{ name: "model", description: "Select model" },
+			{ name: "plan", description: "Toggle plan mode" },
+			{ name: "todo", description: "Manage todo list" },
+			{ name: "harness", description: "Inspect harness" },
+			{ name: "mode", description: "Harness execution mode" },
+		];
+		const result = controller.apply(staticCommands);
+		// Upstream commands are preserved verbatim
+		expect(result.find(c => c.name === "skills")?.description).toBe("Manage skills");
+		expect(result.find(c => c.name === "model")?.description).toBe("Select model");
+		expect(result.find(c => c.name === "plan")?.description).toBe("Toggle plan mode");
+		expect(result.find(c => c.name === "todo")?.description).toBe("Manage todo list");
+		// Harness commands receive lock-derived metadata and completions
+		const modeEntry = result.find(c => c.name === "mode");
+		expect(modeEntry?.getArgumentCompletions).toBeDefined();
+		// Each command name appears only once
+		const names = result.map(c => c.name);
+		expect(new Set(names).size).toBe(names.length);
 	});
 
 	test("dims unsupported commands with a reason and keeps static panels available", () => {

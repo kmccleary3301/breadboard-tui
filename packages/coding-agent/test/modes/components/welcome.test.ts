@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EFFECTIVE_HARNESS_SNAPSHOT } from "./effective-lock-fixture";
 import { pickWeightedTip, WelcomeComponent } from "@oh-my-pi/pi-tui/prompt/welcome";
+import { formatWelcomeHarnessIdentity } from "../../../src/breadboard/ui/welcome";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme/theme";
 import {
 	BREADBOARD_PRODUCT_IDENTITY,
@@ -131,7 +132,7 @@ describe("WelcomeComponent harness identity", () => {
 	it("renders the harness identity, team posture, and /harness hint", () => {
 		// Catches canonical-path regressions that drop lock-derived identity fields or the hint.
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness(harnessSnapshot);
+		welcome.setHarnessIdentity(formatWelcomeHarnessIdentity(harnessSnapshot));
 
 		const plain = welcome.render(220).map(stripAnsi).join("\n");
 
@@ -141,7 +142,7 @@ describe("WelcomeComponent harness identity", () => {
 	it("renders only name, known session fields, and hint when the lock is null", () => {
 		// Catches lock consumers that fabricate team or posture values when no lock exists.
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness({ ...harnessSnapshot, lock: null });
+		welcome.setHarnessIdentity(formatWelcomeHarnessIdentity({ ...harnessSnapshot, lock: null }));
 
 		const plain = welcome.render(220).map(stripAnsi).join("\n");
 
@@ -154,7 +155,7 @@ describe("WelcomeComponent harness identity", () => {
 	it("omits null mode and generation without empty punctuation", () => {
 		// Catches placeholder mode/generation text and dangling separators in partial snapshots.
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness({ ...harnessSnapshot, mode: null, generation: null });
+		welcome.setHarnessIdentity(formatWelcomeHarnessIdentity({ ...harnessSnapshot, mode: null, generation: null }));
 
 		const plain = welcome.render(220).map(stripAnsi).join("\n");
 
@@ -167,7 +168,7 @@ describe("WelcomeComponent harness identity", () => {
 	it("omits the harness identity line when no snapshot is active", () => {
 		// Catches stale identity surviving after the harness port clears its current snapshot.
 		const welcome = new WelcomeComponent("1.0.0", "model", "provider");
-		welcome.setHarness(null);
+		welcome.setHarnessIdentity(formatWelcomeHarnessIdentity(null));
 
 		const plain = welcome.render(140).map(stripAnsi).join("\n");
 		expect(plain).not.toContain("/harness");

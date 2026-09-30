@@ -9,13 +9,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { $env, $which, APP_NAME, compareVersions, IS_BREADBOARD_PRODUCT, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
+import { $env, $which, APP_NAME, compareVersions, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { $ } from "bun";
 import { settings } from "../config/settings";
 import { theme } from "@oh-my-pi/pi-tui/theme";
-import { BREADBOARD_PRODUCT_IDENTITY } from "../product-identity";
 import {
 	isTimeoutError,
 	isUnsupportedProxyError,
@@ -24,9 +23,6 @@ import {
 } from "../utils/fetch-timeout";
 
 const REPO = "can1357/oh-my-pi";
-const BREADBOARD_REPO = "kmccleary3301/breadboard-tui";
-const BREADBOARD_RELEASE_PREFIX = "product/breadboard-tui-v";
-const BREADBOARD_RELEASE_SUFFIX = "-canonical";
 const PACKAGE = "@oh-my-pi/pi-coding-agent";
 const HOMEBREW_FORMULA = "can1357/tap/omp";
 const MISE_TOOL = "github:can1357/oh-my-pi";
@@ -100,10 +96,6 @@ export interface ReleaseInfo {
 	dist?: ReleaseDist;
 	/** npm names to install, resolved after following any `omp.rename` pointers. */
 	packages: ReleasePackages;
-	/** GitHub repository that owns a binary release. Defaults to upstream OMP. */
-	repository?: string;
-	/** Exact GitHub prerelease state expected when validating a binary asset. */
-	prerelease?: boolean;
 }
 
 export interface ReleaseBinaryAsset {
@@ -228,26 +220,18 @@ export function shouldForceBinaryUpdate(
 }
 
 /**
- * Draft releases are always rejected. When `options.prerelease` is supplied,
- * the release must match that exact state (the signed BreadBoard product
- * channel uses this); otherwise prereleases are accepted only when
- * `options.allowPrerelease` is set for an OMP canary update.
+ * Select and validate the binary asset from GitHub release metadata.
+ *
+ * Draft releases are always rejected. Prereleases are rejected unless
+ * `options.allowPrerelease` is set, which the canary channel passes: canary
+ * GitHub releases are published as prereleases, and the exact-tag match below
+ * still pins the download to the specific requested version.
  */
-interface ReleaseBinaryAssetOptions {
-	repository?: string;
-	prerelease?: boolean;
-	allowPrerelease?: boolean;
-}
-
-interface ReleaseBinarySource extends Pick<ReleaseInfo, "tag" | "repository" | "prerelease"> {
-	allowPrerelease?: boolean;
-}
-
 export function resolveReleaseBinaryAsset(
 	release: unknown,
 	expectedTag: string,
 	binaryName: string,
-	options: ReleaseBinaryAssetOptions = {},
+	options: { allowPrerelease?: boolean } = {},
 ): ReleaseBinaryAsset {
 	if (!isRecord(release)) {
 		throw new Error("Invalid GitHub release metadata");
@@ -255,16 +239,10 @@ export function resolveReleaseBinaryAsset(
 	if (release.tag_name !== expectedTag) {
 		throw new Error(`GitHub release tag mismatch: expected ${expectedTag}`);
 	}
-	const expectedPrerelease = options.prerelease;
 	if (release.draft !== false) {
 		throw new Error(`GitHub release ${expectedTag} is a draft, not a published release`);
 	}
-	if (expectedPrerelease !== undefined) {
-		if (release.prerelease !== expectedPrerelease) {
-			const channel = expectedPrerelease ? "prerelease" : "stable release";
-			throw new Error(`GitHub release ${expectedTag} is not a published ${channel}`);
-		}
-	} else if (release.prerelease !== false && !options.allowPrerelease) {
+	if (release.prerelease !== false && !options.allowPrerelease) {
 		throw new Error(`GitHub release ${expectedTag} is a prerelease; only canary updates install prerelease assets`);
 	}
 	if (!Array.isArray(release.assets)) {
@@ -291,8 +269,7 @@ export function resolveReleaseBinaryAsset(
 		throw new Error(`GitHub release asset ${binaryName} has an unsupported digest`);
 	}
 
-	const repository = options.repository ?? REPO;
-	const expectedUrl = `https://github.com/${repository}/releases/download/${expectedTag}/${binaryName}`;
+	const expectedUrl = `https://github.com/${REPO}/releases/download/${expectedTag}/${binaryName}`;
 	if (asset.browser_download_url !== expectedUrl) {
 		throw new Error(`GitHub release asset ${binaryName} has an unexpected download URL`);
 	}
@@ -309,12 +286,9 @@ async function getReleaseBinaryAsset(
 	binaryName: string,
 	fetchImpl: Fetch = fetch,
 	githubToken?: string,
-	releaseSource: ReleaseBinarySource = {
-		tag: `v${expectedVersion}`,
-	},
+	allowPrerelease = false,
 ): Promise<ReleaseBinaryAsset> {
-	const tag = releaseSource.tag;
-	const repository = releaseSource.repository ?? REPO;
+	const tag = `v${expectedVersion}`;
 	const resolvedGitHubToken = githubToken ?? (await resolveGitHubToken());
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github+json",
@@ -324,7 +298,7 @@ async function getReleaseBinaryAsset(
 
 	let response: Response;
 	try {
-		response = await fetchImpl(`${GITHUB_API}/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`, {
+		response = await fetchImpl(`${GITHUB_API}/repos/${REPO}/releases/tags/${encodeURIComponent(tag)}`, {
 			headers,
 			signal: withTimeoutSignal(RELEASE_METADATA_TIMEOUT_MS),
 		});
@@ -344,11 +318,7 @@ async function getReleaseBinaryAsset(
 		throw new Error(`Failed to fetch GitHub release metadata: ${response.statusText}`);
 	}
 
-	return resolveReleaseBinaryAsset(await response.json(), tag, binaryName, {
-		repository,
-		prerelease: releaseSource.prerelease,
-		allowPrerelease: releaseSource.allowPrerelease,
-	});
+	return resolveReleaseBinaryAsset(await response.json(), tag, binaryName, { allowPrerelease });
 }
 
 export interface VerifiedBinaryDownloadOptions {
@@ -867,101 +837,16 @@ async function fetchLatestManifest(
 	return { version: data.version, manifest: data };
 }
 
-const SEMVER_PATTERN =
-	/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-
-function breadboardVersionFromReleaseTag(tag: string): string | undefined {
-	if (!tag.startsWith(BREADBOARD_RELEASE_PREFIX) || !tag.endsWith(BREADBOARD_RELEASE_SUFFIX)) {
-		return undefined;
-	}
-	const version = tag.slice(BREADBOARD_RELEASE_PREFIX.length, -BREADBOARD_RELEASE_SUFFIX.length);
-	return SEMVER_PATTERN.test(version) ? version : undefined;
-}
-
 /**
- * Select the highest canonical BreadBoard product release. Product releases
- * intentionally use their own GitHub tag namespace and may be prereleases.
- */
-export function resolveLatestBreadboardRelease(releases: unknown): ReleaseInfo {
-	if (!Array.isArray(releases)) {
-		throw new Error(
-			`Malformed ${BREADBOARD_PRODUCT_IDENTITY.displayName} GitHub release response: expected an array`,
-		);
-	}
-	let latest: ReleaseInfo | undefined;
-	for (const release of releases) {
-		if (!isRecord(release) || release.draft !== false || typeof release.prerelease !== "boolean") continue;
-		if (typeof release.tag_name !== "string") continue;
-		const version = breadboardVersionFromReleaseTag(release.tag_name);
-		if (!version || (latest && compareVersions(version, latest.version) <= 0)) continue;
-		latest = {
-			tag: release.tag_name,
-			version,
-			dist: "binary",
-			packages: { ...CURRENT_PACKAGES },
-			repository: BREADBOARD_REPO,
-			prerelease: release.prerelease,
-		};
-	}
-	if (!latest) {
-		throw new Error(`No published canonical ${BREADBOARD_PRODUCT_IDENTITY.displayName} release was found`);
-	}
-	return latest;
-}
-
-/** Fetch canonical BreadBoard releases from the product repository. */
-export async function getLatestBreadboardRelease(
-	options: { timeoutMs?: number; fetchImpl?: Fetch; githubToken?: string } = {},
-): Promise<ReleaseInfo> {
-	const timeoutMs = options.timeoutMs ?? RELEASE_METADATA_TIMEOUT_MS;
-	const githubToken = options.githubToken ?? $env.GITHUB_TOKEN ?? $env.GH_TOKEN;
-	const headers: Record<string, string> = {
-		Accept: "application/vnd.github+json",
-		"X-GitHub-Api-Version": "2022-11-28",
-	};
-	if (githubToken) headers.Authorization = `Bearer ${githubToken}`;
-	let response: Response;
-	try {
-		response = await (options.fetchImpl ?? fetch)(`${GITHUB_API}/repos/${BREADBOARD_REPO}/releases?per_page=100`, {
-			headers,
-			signal: withTimeoutSignal(timeoutMs),
-		});
-	} catch (err) {
-		if (isTimeoutError(err)) {
-			throw new Error(
-				`Timed out fetching ${BREADBOARD_PRODUCT_IDENTITY.displayName} release info after ${Math.round(timeoutMs / 1000)}s`,
-				{
-					cause: err,
-				},
-			);
-		}
-		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
-		throw err;
-	}
-	if ((response.status === 403 && !githubToken) || response.status === 429) {
-		throw new Error(
-			`GitHub API rate limit exceeded while fetching ${BREADBOARD_PRODUCT_IDENTITY.displayName} release metadata; retry later or set GITHUB_TOKEN or GH_TOKEN`,
-		);
-	}
-	if (!response.ok) {
-		throw new Error(
-			`Failed to fetch ${BREADBOARD_PRODUCT_IDENTITY.displayName} release info: ${response.statusText}`,
-		);
-	}
-	return resolveLatestBreadboardRelease(await response.json());
-}
-
-/**
- * Get release information for the active product. BreadBoard resolves only
- * canonical product releases from its own GitHub repository; native OMP keeps
- * its npm manifest and rename-pointer protocol.
+ * Get the latest release info from the npm registry, following `omp.rename`
+ * pointers ({@link resolveReleaseRename}) when the package has moved to a new
+ * npm name. Version, dist, and install names all come from the final manifest
+ * in the chain. Uses npm instead of GitHub API to avoid unauthenticated rate
+ * limiting.
  */
 export async function getLatestRelease(
 	options: { timeoutMs?: number; channel?: UpdateChannel } = {},
 ): Promise<ReleaseInfo> {
-	if (IS_BREADBOARD_PRODUCT) {
-		return getLatestBreadboardRelease({ timeoutMs: options.timeoutMs });
-	}
 	const timeoutMs = options.timeoutMs ?? RELEASE_METADATA_TIMEOUT_MS;
 	const channel = options.channel ?? "stable";
 	const packages: ReleasePackages = { ...CURRENT_PACKAGES };
@@ -1290,36 +1175,16 @@ function resolveOmpPath(): string | undefined {
 }
 
 /**
- * BreadBoard is distributed only as its signed standalone binary. Resolve the
- * mutable executable behind a PATH symlink without consulting OMP package
- * managers or channels.
+ * Parse the version a launcher reports from `omp --version` output
+ * (`omp/X.Y.Z`, or a prerelease such as `omp/X.Y.Z-canary.1`).
+ *
+ * The prerelease suffix is preserved so a correctly installed canary build
+ * verifies as up to date instead of appearing to report a stale `X.Y.Z` and
+ * being mistaken for an unreplaced launcher.
  */
-function resolveBreadboardUpdateTarget(): UpdateTarget {
-	const launcherPath = resolveOmpPath();
-	if (!launcherPath) throw new Error(`Could not resolve ${APP_NAME} binary path in PATH`);
-	const extension = path.extname(launcherPath).toLowerCase();
-	if (extension === ".cmd" || extension === ".ps1" || extension === ".bat") {
-		throw new Error(
-			`${BREADBOARD_PRODUCT_IDENTITY.displayName} updates require the standalone bb executable, not a package-manager script launcher`,
-		);
-	}
-	const targetPath = tryRealpath(launcherPath) ?? launcherPath;
-	if (isPathInDirectory(targetPath, NIX_STORE_DIR)) {
-		throw new Error(
-			`Cannot replace a ${BREADBOARD_PRODUCT_IDENTITY.displayName} binary inside the read-only Nix store`,
-		);
-	}
-	return { method: "binary", path: targetPath, replacesSymlink: false, validateExistingTarget: true };
-}
-
-/** Parse the active product's exact version token from `--version` output. */
-export function parseReportedVersion(output: string, appName: string = APP_NAME): string | undefined {
-	const prefix = `${appName}/`;
-	const token = output
-		.trim()
-		.split(/\s+/)
-		.find(value => value.startsWith(prefix));
-	return token?.slice(prefix.length) || undefined;
+export function parseReportedVersion(output: string): string | undefined {
+	if (!output.startsWith(`${APP_NAME}/`)) return undefined;
+	return output.slice(APP_NAME.length + 1).match(/^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/)?.[1];
 }
 
 async function reportedVersionAtPath(binaryPath: string): Promise<string | undefined> {
@@ -1958,7 +1823,6 @@ export async function updateViaBinaryAt(
 		/** Refuse replacement unless the existing path is a non-script OMP executable. */
 		validateExistingTarget?: boolean;
 		verifyInstalledVersion?: typeof verifyInstalledVersion;
-		releaseSource?: Pick<ReleaseInfo, "tag" | "repository" | "prerelease">;
 	} = {},
 ): Promise<void> {
 	if (options.validateExistingTarget) await validateExistingUpdateTarget(targetPath);
@@ -1980,7 +1844,7 @@ export async function updateViaBinaryAt(
 		binaryName,
 		options.fetchImpl,
 		options.githubToken,
-		options.releaseSource ?? { tag: `v${expectedVersion}`, allowPrerelease: options.allowPrerelease },
+		options.allowPrerelease,
 	);
 	console.log(chalk.dim(`Downloading ${binaryName}…`));
 	await downloadVerifiedBinary({
@@ -2061,7 +1925,6 @@ export async function updateViaShimTakeover(
 		githubToken?: string;
 		allowPrerelease?: boolean;
 		verifyBinary?: typeof verifyBinaryAtPath;
-		releaseSource?: Pick<ReleaseInfo, "tag" | "repository" | "prerelease">;
 	} = {},
 ): Promise<void> {
 	const binaryName = options.binaryName ?? getBinaryName();
@@ -2074,7 +1937,7 @@ export async function updateViaShimTakeover(
 		binaryName,
 		options.fetchImpl,
 		options.githubToken,
-		options.releaseSource ?? { tag: `v${expectedVersion}`, allowPrerelease: options.allowPrerelease },
+		options.allowPrerelease,
 	);
 	console.log(chalk.dim(`Downloading ${binaryName}…`));
 	await downloadVerifiedBinary({
@@ -2244,20 +2107,15 @@ export async function runUpdateCommand(opts: {
 		return;
 	}
 
-	// BreadBoard is a standalone downstream product and must never consult or
-	// mutate an OMP package-manager channel. Native OMP retains its installer
-	// ownership routing, including binary-only migration releases.
+	// Choose update method based on the prioritized omp binary in PATH. For
+	// binary-only releases the package managers are never consulted: a bun/npm
+	// symlink resolves to method "binary" and is replaced in place, keeping the
+	// same PATH entry live.
 	try {
+		const forceBinary = shouldForceBinaryUpdate(release);
 		const allowPrerelease = channel === "canary";
-		const forceBinary = IS_BREADBOARD_PRODUCT || shouldForceBinaryUpdate(release);
-		const target = IS_BREADBOARD_PRODUCT
-			? resolveBreadboardUpdateTarget()
-			: await resolveUpdateTarget({ allowPackageManagers: !forceBinary });
-		if (
-			!IS_BREADBOARD_PRODUCT &&
-			channel === "canary" &&
-			(target.method === "nix" || target.method === "brew" || target.method === "mise")
-		) {
+		const target = await resolveUpdateTarget({ allowPackageManagers: !forceBinary });
+		if (channel === "canary" && (target.method === "nix" || target.method === "brew" || target.method === "mise")) {
 			console.log(chalk.yellow("Canary updates are only supported for bun, npm, or binary installs."));
 			return;
 		}
@@ -2276,7 +2134,7 @@ export async function runUpdateCommand(opts: {
 				// skipped), so the launcher path is always known.
 				if (!target.path) throw new Error(`Could not resolve ${APP_NAME} launcher path in PATH`);
 				console.log(chalk.dim("This release ships as a standalone binary; replacing the script launcher."));
-				await updateViaShimTakeover(target.path, release.version, { releaseSource: release, allowPrerelease });
+				await updateViaShimTakeover(target.path, release.version, { allowPrerelease });
 				console.log(
 					chalk.yellow(
 						`This install is no longer managed by ${target.method}. Removing the old global package may delete this launcher; if it does, reinstall with: ${installerHint()}`,
@@ -2294,7 +2152,6 @@ export async function runUpdateCommand(opts: {
 				console.log(chalk.dim("Replacing the package-manager launcher with the standalone binary."));
 			}
 			await updateViaBinaryAt(target.path, release.version, {
-				releaseSource: release,
 				allowPrerelease,
 				validateExistingTarget: target.validateExistingTarget,
 			});

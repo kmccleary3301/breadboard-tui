@@ -5,17 +5,6 @@ import type { ActiveRepoContext, StatusLineSession } from "./host";
 import type { LoopConditionConfig, LoopLimitRuntime } from "./loop";
 
 export type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle };
-export interface HarnessSnapshot {
-	readonly harnessId: string;
-	readonly name: string;
-	readonly lockHash: string | null;
-	readonly verifiedIdentity?: { readonly harnessId: string; readonly lockHash: string } | null;
-	readonly generation: string | null;
-	readonly mode: string | null;
-	readonly lock: Readonly<Record<string, unknown>> | null;
-	readonly provenance: Readonly<Record<string, { readonly source: string; readonly line: number | null }>>;
-	readonly loadedAt: number;
-}
 
 /** Context-window occupancy shown by the status line and exposed to extensions. */
 export interface ContextUsage {
@@ -72,8 +61,6 @@ export interface StatusLineSettings {
 	 *  usage. `embedded` moves configured context segments into the annotated
 	 *  gauge as percentage and window labels. Box composer only. */
 	contextLine?: ContextLineMode;
-	/** Per-preset custom configuration; omitted means canonical defaults. */
-	presetConfig?: unknown;
 }
 
 export type EffectiveStatusLineSettings = Required<
@@ -105,8 +92,6 @@ export interface SegmentContext {
 	width: number;
 	/** Active product mark for the stable `pi` segment id. */
 	identityMark?: string;
-	/** Active harness identity, when running with an active harness. */
-	harness?: HarnessSnapshot | null;
 	options: StatusLineSegmentOptions;
 	/** Render the model segment's thinking level as a compact leading glyph. */
 	compactThinkingLevel: boolean;

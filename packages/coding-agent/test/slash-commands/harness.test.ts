@@ -2,7 +2,8 @@ import { beforeAll, expect, test, vi } from "bun:test";
 import type { HarnessSnapshot } from "../../src/breadboard/harness-port";
 import { Settings } from "../../src/config/settings";
 import { initTheme } from "@oh-my-pi/pi-tui/theme/theme";
-import { executeHarnessSlashCommand } from "../../src/slash-commands/harness";
+import { executeHarnessSlashCommand, registerHarnessCommands } from "../../src/slash-commands/harness";
+import { buildTuiBuiltinSlashCommands, executeBuiltinSlashCommand } from "../../src/slash-commands/builtin-registry";
 
 beforeAll(async () => {
 	await initTheme(false);
@@ -161,4 +162,89 @@ test("/mode does not reach the model and reports unavailable", async () => {
 	const result = await executeHarnessSlashCommand("/mode plan", runtime as never);
 	expect(result).toBe(true);
 	expect(showStatus).toHaveBeenCalledWith("/mode unavailable: no host implementation");
+});
+
+test("/skills, /todo, /plan, /model are not intercepted by executeHarnessSlashCommand", async () => {
+	const snapshot: HarnessSnapshot = {
+		harnessId: "bb-omp.native",
+		name: "BB OMP",
+		lockHash: "sha256:bb-omp",
+		verifiedIdentity: { harnessId: "bb-omp.native", lockHash: "sha256:bb-omp" },
+		generation: null,
+		mode: null,
+		lock: {},
+		provenance: {},
+		loadedAt: 1,
+	};
+	const runtime = {
+		ctx: {
+			settings: Settings.isolated(),
+			harnessPort: { current: () => snapshot },
+			showStatus: vi.fn(),
+		},
+	};
+	expect(await executeHarnessSlashCommand("/skills", runtime as never)).toBe(false);
+	expect(await executeHarnessSlashCommand("/todo", runtime as never)).toBe(false);
+	expect(await executeHarnessSlashCommand("/plan", runtime as never)).toBe(false);
+	expect(await executeHarnessSlashCommand("/model", runtime as never)).toBe(false);
+});
+
+test("/skills reaches upstream handler in harness sessions", async () => {
+	const snapshot: HarnessSnapshot = {
+		harnessId: "bb-omp.native",
+		name: "BB OMP",
+		lockHash: "sha256:bb-omp",
+		verifiedIdentity: { harnessId: "bb-omp.native", lockHash: "sha256:bb-omp" },
+		generation: null,
+		mode: null,
+		lock: {},
+		provenance: {},
+		loadedAt: 1,
+	};
+	const runtime = {
+		ctx: {
+			settings: Settings.isolated(),
+			harnessPort: { current: () => snapshot },
+			editor: { setText: vi.fn() },
+			sessionManager: { getCwd: () => "/tmp" },
+			showError: vi.fn(),
+			openSkillsOverlay: vi.fn(),
+		},
+	};
+	const result = await executeBuiltinSlashCommand("/skills", runtime as never);
+	expect(result).toBe(true);
+});
+
+test("plain omp exposes no harness commands; registration adds them", () => {
+	const harnessNames = [
+		"harness",
+		"team",
+		"prompts",
+		"evidence",
+		"mode",
+		"role",
+		"spawn",
+		"wait",
+		"bus",
+		"longrun",
+		"checkpoint",
+	];
+	const runtime = {} as never;
+
+	// In plain omp (before registration)
+	const ompCommands = buildTuiBuiltinSlashCommands(runtime).map(c => c.name);
+	expect(ompCommands.filter(name => harnessNames.includes(name))).toEqual([]);
+
+	// Register harness commands
+	const unregister = registerHarnessCommands();
+	try {
+		const bbCommands = buildTuiBuiltinSlashCommands(runtime).map(c => c.name);
+		expect(bbCommands.filter(name => harnessNames.includes(name)).sort()).toEqual([...harnessNames].sort());
+	} finally {
+		unregister();
+	}
+
+	// After unregister, back to plain omp
+	const revertedCommands = buildTuiBuiltinSlashCommands(runtime).map(c => c.name);
+	expect(revertedCommands.filter(name => harnessNames.includes(name))).toEqual([]);
 });

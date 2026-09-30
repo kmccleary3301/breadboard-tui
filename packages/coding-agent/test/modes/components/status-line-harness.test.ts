@@ -5,6 +5,7 @@ import { renderSegment } from "@oh-my-pi/pi-tui/status-line/segments";
 import { getPreset } from "@oh-my-pi/pi-tui/status-line/presets";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { registerBreadboardStatusLine } from "../../../src/breadboard/ui/status-line";
+import { setStatusLineHarness } from "../../../src/breadboard/ui/status-line/harness-state";
 
 const snapshot = EFFECTIVE_HARNESS_SNAPSHOT;
 
@@ -20,13 +21,14 @@ beforeEach(() => {
 
 afterEach(() => {
 	unregisterStatusLine();
+	setStatusLineHarness(null);
 });
 
 describe("harness status segment", () => {
 	it("renders the active harness identity and generation", () => {
 		// Catches canonical-lock wiring regressions that silently fall back to stale top-level fields.
 		const context = createGallerySegmentContext();
-		context.harness = snapshot;
+		setStatusLineHarness(snapshot);
 
 		const rendered = renderSegment("harness", context);
 
@@ -36,10 +38,10 @@ describe("harness status segment", () => {
 
 	it("shortens sha256 generation hashes to prevent status line overflow", () => {
 		const context = createGallerySegmentContext();
-		context.harness = {
+		setStatusLineHarness({
 			...snapshot,
 			generation: "sha256:1c756e4ff8ae7dee8dd96e37ba759dce661054245e387cd3dcba357b78dbd5af",
-		};
+		});
 
 		const rendered = renderSegment("harness", context);
 
@@ -50,7 +52,7 @@ describe("harness status segment", () => {
 	it("omits unavailable mode and generation members without placeholders", () => {
 		// Catches fabricated identity placeholders when nullable snapshot fields are absent.
 		const context = createGallerySegmentContext();
-		context.harness = { ...snapshot, mode: null, generation: null };
+		setStatusLineHarness({ ...snapshot, mode: null, generation: null });
 
 		const rendered = renderSegment("harness", context);
 
@@ -61,7 +63,7 @@ describe("harness status segment", () => {
 	it("renders empty and hidden when no harness is active", () => {
 		// Catches stale identity surviving after the harness port reports no active snapshot.
 		const context = createGallerySegmentContext();
-		context.harness = null;
+		setStatusLineHarness(null);
 
 		const rendered = renderSegment("harness", context);
 

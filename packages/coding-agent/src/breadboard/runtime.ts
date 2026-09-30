@@ -85,7 +85,7 @@ function configuredHarnessId(selected: Record<string, unknown>): string {
 export function resolveNativeHarnessSpec(
 	parsed: Pick<Args, "engineMode" | "engineUrl" | "harness">,
 	activeSettings: Settings,
-	isBreadboardProduct: boolean,
+	isBreadboardProduct = IS_BREADBOARD_PRODUCT,
 ): string | undefined {
 	if (resolveBreadboardEngineMode(parsed, activeSettings, isBreadboardProduct) !== "native") return undefined;
 	const selected = readBreadboardSettings(activeSettings);
@@ -116,4 +116,25 @@ export function resolveBreadboardOmpAgentDir(value: string | undefined): string 
 		// Do not let auth discovery create an empty replacement for a mistyped vault.
 	}
 	throw new Error("BREADBOARD_OMP_AGENT_DIR must contain an existing OMP agent.db");
+}
+
+export interface StartupNetworkPolicy {
+	readonly backgroundUpdates: boolean;
+	readonly modelRefreshStrategy: "offline" | "online-if-uncached";
+}
+
+export const BREADBOARD_STARTUP_NETWORK_POLICY: StartupNetworkPolicy = Object.freeze({
+	backgroundUpdates: false,
+	modelRefreshStrategy: "offline",
+});
+
+export const OMP_STARTUP_NETWORK_POLICY: StartupNetworkPolicy = Object.freeze({
+	backgroundUpdates: true,
+	modelRefreshStrategy: "online-if-uncached",
+});
+
+export function resolveStartupNetworkPolicy(
+	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
+): StartupNetworkPolicy {
+	return isBreadboardProduct ? BREADBOARD_STARTUP_NETWORK_POLICY : OMP_STARTUP_NETWORK_POLICY;
 }

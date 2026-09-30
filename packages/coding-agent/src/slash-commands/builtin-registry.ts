@@ -14,7 +14,6 @@ import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "./builtin-lifecycle";
 import { BUILTIN_MARKETPLACE_SLASH_COMMANDS, reloadTuiPluginState } from "./builtin-marketplace";
 import { BUILTIN_MODE_SLASH_COMMANDS } from "./builtin-modes";
 import { BUILTIN_SESSION_SLASH_COMMANDS } from "./builtin-session";
-import { BUILTIN_HARNESS_SLASH_COMMANDS, executeHarnessSlashCommand } from "./harness";
 import { BUILTIN_SKILLS_SLASH_COMMANDS } from "./builtin-skills";
 import { parseSlashCommand } from "./helpers/parse";
 import type {
@@ -37,7 +36,7 @@ export interface TuiBuiltinSlashCommand extends BuiltinSlashCommand {
 	getAutocompleteDescription?: () => string | undefined;
 }
 
-const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
+const BUILTIN_SLASH_COMMAND_REGISTRY: SlashCommandSpec[] = [
 	...BUILTIN_MODE_SLASH_COMMANDS,
 	...BUILTIN_COLLABORATION_SLASH_COMMANDS,
 	...BUILTIN_SESSION_SLASH_COMMANDS,
@@ -45,7 +44,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	...BUILTIN_MARKETPLACE_SLASH_COMMANDS,
 	...BUILTIN_SKILLS_SLASH_COMMANDS,
 	...BUILTIN_CONTROL_SLASH_COMMANDS,
-	...BUILTIN_HARNESS_SLASH_COMMANDS,
 ];
 
 const BUILTIN_SLASH_COMMAND_LOOKUP = new Map<string, SlashCommandSpec>();
@@ -56,11 +54,11 @@ for (const command of BUILTIN_SLASH_COMMAND_REGISTRY) {
 	}
 }
 
-export const BUILTIN_SLASH_COMMAND_RESERVED_NAMES: ReadonlySet<string> = new Set(BUILTIN_SLASH_COMMAND_LOOKUP.keys());
+const reservedNames = new Set(BUILTIN_SLASH_COMMAND_LOOKUP.keys());
+export const BUILTIN_SLASH_COMMAND_RESERVED_NAMES: ReadonlySet<string> = reservedNames;
 
-/** Builtin command metadata used for slash-command autocomplete and help text. */
-export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BUILTIN_SLASH_COMMAND_REGISTRY.map(
-	command => ({
+function builtinSlashCommandDef(command: SlashCommandSpec): BuiltinSlashCommand {
+	return {
 		name: command.name,
 		aliases: command.aliases,
 		allowArgs: command.allowArgs === true,
@@ -69,8 +67,47 @@ export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BU
 		subcommands: command.subcommands,
 		inlineHint: command.inlineHint,
 		getTuiAutocompleteDescription: command.getTuiAutocompleteDescription,
-	}),
-);
+	};
+}
+
+const builtinSlashCommandDefs = BUILTIN_SLASH_COMMAND_REGISTRY.map(builtinSlashCommandDef);
+
+/** Builtin command metadata used for slash-command autocomplete and help text. */
+export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = builtinSlashCommandDefs;
+
+/**
+ * Adds a distribution's own builtin commands. A name or alias that is already taken throws: a
+ * distribution command never shadows an existing one. Returns a function that removes them.
+ */
+export function registerBuiltinSlashCommands(specs: readonly SlashCommandSpec[]): () => void {
+	const names = specs.flatMap(spec => [spec.name, ...(spec.aliases ?? [])]);
+	const taken = names.filter(name => reservedNames.has(name));
+	if (taken.length > 0) throw new Error(`slash command name already registered: ${taken.join(", ")}`);
+	for (const spec of specs) {
+		BUILTIN_SLASH_COMMAND_REGISTRY.push(spec);
+		builtinSlashCommandDefs.push(builtinSlashCommandDef(spec));
+	}
+	for (const name of names) {
+		BUILTIN_SLASH_COMMAND_LOOKUP.set(
+			name,
+			specs.find(spec => spec.name === name || spec.aliases?.includes(name))!,
+		);
+		reservedNames.add(name);
+	}
+	return () => {
+		for (const spec of specs) {
+			BUILTIN_SLASH_COMMAND_REGISTRY.splice(BUILTIN_SLASH_COMMAND_REGISTRY.indexOf(spec), 1);
+			builtinSlashCommandDefs.splice(
+				builtinSlashCommandDefs.findIndex(def => def.name === spec.name),
+				1,
+			);
+		}
+		for (const name of names) {
+			BUILTIN_SLASH_COMMAND_LOOKUP.delete(name);
+			reservedNames.delete(name);
+		}
+	};
+}
 
 function materializeTuiBuiltinSlashCommand(
 	cmd: BuiltinSlashCommand,
@@ -130,13 +167,8 @@ export async function executeBuiltinSlashCommand(
 ): Promise<string | boolean> {
 	const parsed = parseSlashCommand(text);
 	if (!parsed) return false;
+
 	const command = BUILTIN_SLASH_COMMAND_LOOKUP.get(parsed.name);
-	if (runtime.ctx.harnessPort || parsed.name === "harness") {
-		const harnessText =
-			command && command.name !== parsed.name ? `/${command.name}${parsed.args ? ` ${parsed.args}` : ""}` : text;
-		const harnessResult = await executeHarnessSlashCommand(harnessText, runtime);
-		if (harnessResult !== false) return harnessResult;
-	}
 	if (!command) return false;
 	if (parsed.args.length > 0 && !command.allowArgs) {
 		return false;

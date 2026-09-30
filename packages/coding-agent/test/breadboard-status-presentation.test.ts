@@ -12,6 +12,7 @@ import {
 	renderBreadboardStatusLine,
 	renderBreadboardStatusRows,
 } from "../src/breadboard/ui/status-line/breadboard-presentation";
+import { registerBreadboardSettingsSchema } from "../src/breadboard/settings-schema-extension";
 import { registerBreadboardStatusLine } from "../src/breadboard/ui/status-line";
 import { initTheme, setSymbolPreset } from "@oh-my-pi/pi-tui/theme";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
@@ -214,7 +215,10 @@ describe("BreadBoard composer while background jobs hold the turn", () => {
 	let settingsState: SettingsTestState | undefined;
 	const statusLines = new StatusLineTestComponents();
 
+	let unregisterSettings: (() => void) | undefined;
+
 	beforeEach(async () => {
+		unregisterSettings = registerBreadboardSettingsSchema();
 		unregisterStatusLine = registerBreadboardStatusLine();
 		settingsState = beginSettingsTest();
 		await Settings.init({ inMemory: true });
@@ -225,6 +229,8 @@ describe("BreadBoard composer while background jobs hold the turn", () => {
 		statusLines.dispose();
 		restoreSettingsTestState(settingsState);
 		settingsState = undefined;
+		unregisterSettings?.();
+		unregisterSettings = undefined;
 	});
 
 	function runningJob(type: AsyncJobType, index: number): AsyncJobSnapshotItem {

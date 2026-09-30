@@ -225,6 +225,11 @@ const SETTING_PATH_SEGMENTS: Record<SettingPath, readonly string[]> = Object.fro
 	(Object.keys(SETTINGS_SCHEMA) as SettingPath[]).map(settingPath => [settingPath, settingPath.split(".")]),
 ) as unknown as Record<SettingPath, readonly string[]>;
 
+/** Path segments; paths from schemas registered after this module loaded are split on demand. */
+function settingPathSegments(path: SettingPath): readonly string[] {
+	return SETTING_PATH_SEGMENTS[path] ?? path.split(".");
+}
+
 /**
  * Schema members for each typed group, computed once. `getGroup` is hot during
  * startup and status rendering; it must not walk the full schema on every
@@ -718,7 +723,7 @@ export class Settings {
 			return this.#resolvedCache.get(path) as SettingValue<P>;
 		}
 
-		const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
+		const value = getByPath(this.#merged, settingPathSegments(path));
 		let resolved =
 			value !== undefined ? (resolvePathScopedStringArray(path, value, this.#cwd) ?? value) : getDefault(path);
 		const normalizer = getSettingValueNormalizer(path);
@@ -745,7 +750,7 @@ export class Settings {
 	 * config, or runtime override) rather than falling back to the schema default.
 	 */
 	isConfigured(path: SettingPath): boolean {
-		return getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]) !== undefined;
+		return getByPath(this.#merged, settingPathSegments(path)) !== undefined;
 	}
 
 	/**
@@ -3342,7 +3347,7 @@ export class Settings {
 
 	#warnUnknownStatusLineSegments(): void {
 		for (const path of STATUS_LINE_SEGMENT_PATHS) {
-			const value = getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]);
+			const value = getByPath(this.#merged, settingPathSegments(path));
 			for (const segment of getUnknownStatusLineSegments(value)) {
 				if (warnedUnknownStatusLineSegments.has(segment)) continue;
 				warnedUnknownStatusLineSegments.add(segment);

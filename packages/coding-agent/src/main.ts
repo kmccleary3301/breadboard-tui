@@ -14,7 +14,6 @@ import {
 	directoryIsMissing,
 	getLogPath,
 	getProjectDir,
-	IS_BREADBOARD_PRODUCT,
 	normalizePathForComparison,
 	setProjectDir,
 	VERSION,
@@ -28,7 +27,12 @@ import type { HarnessPort } from "./breadboard/harness-port";
 import { createNativeHarnessPort } from "./breadboard/native-harness-port";
 import { applyNativeHarnessSessionOptions } from "./breadboard/native-harness-session";
 import { BreadboardBridgeRefusalError } from "./breadboard/bridge-refusal";
-import { BreadboardSettingsError, resolveBreadboardOmpAgentDir, resolveNativeHarnessSpec } from "./breadboard/runtime";
+import {
+	BreadboardSettingsError,
+	resolveBreadboardOmpAgentDir,
+	resolveNativeHarnessSpec,
+	resolveStartupNetworkPolicy,
+} from "./breadboard/runtime";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
@@ -180,26 +184,6 @@ async function loadReadlineInterface() {
 
 export function writeStartupNotice(parsedArgs: Pick<Args, "mode">, text: string): void {
 	(parsedArgs.mode === "json" ? process.stderr : process.stdout).write(text);
-}
-
-export interface StartupNetworkPolicy {
-	readonly backgroundUpdates: boolean;
-	readonly modelRefreshStrategy: "offline" | "online-if-uncached";
-}
-
-const BREADBOARD_STARTUP_NETWORK_POLICY: StartupNetworkPolicy = Object.freeze({
-	backgroundUpdates: false,
-	modelRefreshStrategy: "offline",
-});
-const OMP_STARTUP_NETWORK_POLICY: StartupNetworkPolicy = Object.freeze({
-	backgroundUpdates: true,
-	modelRefreshStrategy: "online-if-uncached",
-});
-
-export function resolveStartupNetworkPolicy(
-	isBreadboardProduct: boolean = IS_BREADBOARD_PRODUCT,
-): StartupNetworkPolicy {
-	return isBreadboardProduct ? BREADBOARD_STARTUP_NETWORK_POLICY : OMP_STARTUP_NETWORK_POLICY;
 }
 
 async function checkForNewVersion(currentVersion: string): Promise<string | undefined> {
@@ -1255,7 +1239,7 @@ export async function loadStartupNativeHarness(
 	activeSettings: Settings,
 ): Promise<LoadedNativeHarness | undefined> {
 	const workspacePath = parsed.cwd ?? getProjectDir();
-	const specPath = resolveNativeHarnessSpec(parsed, activeSettings, IS_BREADBOARD_PRODUCT);
+	const specPath = resolveNativeHarnessSpec(parsed, activeSettings);
 	if (specPath === undefined) return undefined;
 	return await loadNativeHarness({ specPath, workspaceRoot: fsSync.realpathSync(workspacePath) });
 }
@@ -1801,7 +1785,7 @@ export async function runRootCommand(
 		settingsPromise.catch(() => {});
 		// Refuse removed-bridge requests and invalid BreadBoard settings before auth or session state opens.
 		try {
-			resolveNativeHarnessSpec(parsedArgs, await settingsPromise, IS_BREADBOARD_PRODUCT);
+			resolveNativeHarnessSpec(parsedArgs, await settingsPromise);
 		} catch (error) {
 			if (!(error instanceof BreadboardBridgeRefusalError || error instanceof BreadboardSettingsError)) throw error;
 			stopPendingStartupComposer();

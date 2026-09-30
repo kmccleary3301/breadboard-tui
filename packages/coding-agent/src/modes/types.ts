@@ -2,7 +2,6 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Component, Container, EditorTheme, Loader, Spacer, Text, TUI } from "@oh-my-pi/pi-tui";
-import type { HarnessPort } from "../breadboard/harness-port";
 import type { CollabController } from "../collab/controller";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
@@ -37,6 +36,7 @@ import type { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-executio
 import type { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
 import type { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
 import type { HarnessPanel } from "./components/agent-hub/harness-view";
+import type { HarnessPort } from "../breadboard/harness-port";
 import type { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
 import type { HookInputComponent } from "@oh-my-pi/pi-tui/overlays/hook-input";
 import type { HookSelectorComponent, HookSelectorOptions } from "@oh-my-pi/pi-tui/overlays/hook-selector";
@@ -131,7 +131,6 @@ export interface InteractiveModeContext {
 	syncEditorSpelling(): void;
 
 	// Session access
-	readonly harnessPort: HarnessPort | undefined;
 	session: AgentSession;
 	sessionManager: SessionManager;
 	/** The current session display name / title. */
@@ -173,7 +172,7 @@ export interface InteractiveModeContext {
 	eventBus?: EventBus;
 	/** Root-scoped bus carrying this session tree's `task:subagent:*` frames. */
 	subagentEventBus?: EventBus;
-
+	readonly harnessPort?: HarnessPort;
 	// State
 	isInitialized: boolean;
 	/**

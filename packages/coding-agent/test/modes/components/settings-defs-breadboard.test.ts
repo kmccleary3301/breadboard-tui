@@ -8,6 +8,7 @@ import {
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
 import { getSettingsForTab } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import { registerBreadboardUi, unregisterBreadboardUi } from "../../../src/breadboard/ui";
+import { registerBreadboardSettingsSchema } from "../../../src/breadboard/settings-schema-extension";
 const BREADBOARD_PATHS = [
 	"breadboard.harness.default",
 	"breadboard.harness.paletteHeader",
@@ -20,14 +21,17 @@ const BREADBOARD_PATHS = [
 ] as const satisfies readonly SettingPath[];
 
 let settingsHost = createSettingsHost();
+let unregisterSchema: (() => void) | undefined;
 
 beforeAll(() => {
+	unregisterSchema = registerBreadboardSettingsSchema();
 	registerBreadboardUi();
 	settingsHost = createSettingsHost();
 });
 
 afterAll(() => {
 	unregisterBreadboardUi();
+	unregisterSchema?.();
 });
 describe("BreadBoard settings definitions", () => {
 	it("exposes the eleventh tab and every declared group has at least one row", () => {
@@ -58,5 +62,25 @@ describe("BreadBoard settings definitions", () => {
 		const definition = definitions.find(item => item.path === path);
 		expect(definition, `missing read-only row ${path}`).toBeDefined();
 		expect(definition?.readonly, `row ${path} must be read-only`).toBe(true);
+	});
+
+	it("omp (non-BreadBoard) has no breadboard tab and bb does", () => {
+		// Active BreadBoard state has breadboard tab and groups
+		expect(SETTING_TABS).toContain("breadboard");
+		expect(Object.hasOwn(TAB_GROUPS, "breadboard")).toBe(true);
+
+		// When unregistered (plain omp state), breadboard tab is absent
+		unregisterBreadboardUi();
+		unregisterSchema?.();
+		try {
+			expect(SETTING_TABS).not.toContain("breadboard");
+			expect(Object.hasOwn(TAB_GROUPS, "breadboard")).toBe(false);
+			expect(Object.hasOwn(SETTINGS_SCHEMA, "breadboard.harness.default")).toBe(false);
+		} finally {
+			// Restore BreadBoard state
+			unregisterSchema = registerBreadboardSettingsSchema();
+			registerBreadboardUi();
+			settingsHost = createSettingsHost();
+		}
 	});
 });

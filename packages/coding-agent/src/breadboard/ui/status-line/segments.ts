@@ -3,6 +3,7 @@ import { theme } from "@oh-my-pi/pi-tui/theme/theme";
 import { truncateToWidth } from "@oh-my-pi/pi-tui";
 import type { StatusLineSegment } from "@oh-my-pi/pi-tui/status-line/types";
 import { renderBreadboardPolicy } from "./breadboard-presentation";
+import { statusLineHarness } from "./harness-state";
 
 const TRUNCATE_LENGTHS = {
 	SHORT: 20,
@@ -11,7 +12,7 @@ const TRUNCATE_LENGTHS = {
 export const harnessSegment: StatusLineSegment = {
 	id: "harness",
 	render(ctx) {
-		const harness = ctx.harness;
+		const harness = statusLineHarness();
 		if (!harness) return { content: "", visible: false };
 		const options = ctx.options.harness;
 		const name = options?.showGeneration === false ? harness.name.replace(/\.(?:harness|ya?ml)$/u, "") : harness.name;
@@ -27,8 +28,8 @@ export const harnessSegment: StatusLineSegment = {
 
 export const breadboardPolicySegment: StatusLineSegment = {
 	id: "bb_policy",
-	render(ctx) {
-		const content = renderBreadboardPolicy(ctx.harness);
+	render() {
+		const content = renderBreadboardPolicy(statusLineHarness());
 		return { content, visible: content.length > 0 };
 	},
 };
