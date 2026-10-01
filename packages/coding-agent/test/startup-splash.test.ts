@@ -96,6 +96,7 @@ describe("startup splash", () => {
 
 		expect(hidden).toBe(true);
 		expect(renderRequests).toBe(1);
-		expect(overlayComponent?.render(64).join("\n")).toContain("press enter to skip");
+		// The enter glyph follows the active symbol preset.
+		expect(overlayComponent?.render(64).join("\n")).toMatch(/press \S+ to skip/);
 	});
 });

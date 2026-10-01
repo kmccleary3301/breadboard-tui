@@ -419,7 +419,11 @@ export function adaptGrepInput(
 	let combinedPath: string | undefined;
 	if (rawPath !== undefined && rawInclude !== undefined) {
 		const p = String(rawPath).replace(/\/+$/, "");
-		combinedPath = p.length > 0 && p !== "." ? `${p}/${String(rawInclude)}` : String(rawInclude);
+		const include = String(rawInclude);
+		// Pack `include` filters match at any depth (ripgrep `--glob`). Host grep scopes `dir/*.ts` to `dir`
+		// itself, so a slash-free filter under a path becomes `dir/**/*.ts`.
+		const scoped = include.includes("/") ? include : `**/${include}`;
+		combinedPath = p.length > 0 && p !== "." ? `${p}/${scoped}` : include;
 	} else if (rawInclude !== undefined) {
 		combinedPath = String(rawInclude);
 	} else if (rawPath !== undefined) {
@@ -470,9 +474,11 @@ export function adaptTaskInput(
 	const baseContext = typeof input.context === "string" ? input.context : String(description || taskPrompt);
 	const context =
 		role === undefined || role === "" ? baseContext : `${baseContext}\nRequested agent role: ${String(role)}`;
+	// Single-task packs carry no solution-space field. Host `task` requires one; a blank value makes its
+	// auto-thinking classifier fall back to the task text, the same as omitting it.
 	return {
 		context,
-		tasks: [{ task: String(taskPrompt), name: String(description) }],
+		tasks: [{ task: String(taskPrompt), name: String(description), solutionSpace: "" }],
 	};
 }
 

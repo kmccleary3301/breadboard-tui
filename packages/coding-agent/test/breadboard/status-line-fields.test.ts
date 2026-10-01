@@ -5,6 +5,9 @@ import {
 } from "../../src/breadboard/settings";
 import { registerBreadboardStatusLine } from "../../src/breadboard/ui/status-line";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgComposerShape, cfgSymbolPreset } from "@oh-my-pi/pi-coding-agent/modes/settings";
@@ -112,5 +115,18 @@ describe("BreadBoard field customization", () => {
 		expect(open(config).preview()).toContain("~12%");
 		expect(cfgComposerShape.get(config)).toBe("rail");
 		expect(cfgSymbolPreset.get(config)).toBe("ascii");
+	});
+
+	it("loads settings that leave the field choices unset and rejects malformed ones", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-fields-"));
+		try {
+			const loaded = await Settings.loadReadOnly({ cwd: root, agentDir: path.join(root, "agent") });
+			expect(cfgBreadboardFields.get(loaded)).toEqual(DEFAULT_BREADBOARD_FIELD_SETTINGS);
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
+		expect(() => Settings.isolated({ "statusLine.breadboard": "full" })).toThrow(
+			"statusLine.breadboard must be an object of field choices.",
+		);
 	});
 });

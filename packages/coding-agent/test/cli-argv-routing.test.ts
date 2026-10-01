@@ -40,9 +40,10 @@ describe("BreadBoard product CLI identity", () => {
 				BREADBOARD_CONFIG_DIR: path.join(root, "config"),
 				OMP_SKIP_SETUP: "1",
 			};
+			// Without a TTY, interactive startup exits 2 before resolving a session; print mode reaches the lookup.
 			const [resume, fork, verb] = await Promise.all([
-				runBreadboardCli(["--resume", "01deadbeef"], env),
-				runBreadboardCli(["--fork", "01deadbeef"], env),
+				runBreadboardCli(["--resume", "01deadbeef", "-p", "hi"], env),
+				runBreadboardCli(["--fork", "01deadbeef", "-p", "hi"], env),
 				runBreadboardCli(["list"], env),
 			]);
 			const hint = "Run `bb --resume` without an argument to pick from recent sessions, or `bb` to start a new one.";

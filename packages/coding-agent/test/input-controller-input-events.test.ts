@@ -60,6 +60,8 @@ async function createHarness(factory: ExtensionFactory) {
 		followUp: vi.fn(async (_text: string, _images?: ImageContent[]) => {}),
 		promptCustomMessage: vi.fn(async () => true),
 		abort: vi.fn(async () => {}),
+		// Esc while streaming moves queued messages back into the editor before aborting.
+		clearQueue: vi.fn(() => ({ steering: [], followUp: [] })),
 		maybeStartTitleGeneration: vi.fn(),
 	};
 	const ctx = {

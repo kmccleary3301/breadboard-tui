@@ -1,9 +1,9 @@
 /**
  * BreadBoard-owned settings. Importing this module registers the `breadboard.*` and
- * `statusLine.breadboard` settings; their rows live on the `breadboard` settings tab, which only
- * `bb` registers (`ui/settings-tab.ts`), so stock `omp` never lists them.
- * {@link registerBreadboardSettings} moves the shared subagent limits onto that tab and puts the
- * BreadBoard status-line presets first.
+ * `statusLine.breadboard` settings without panel metadata, so a process that only imports it has
+ * no rows on a tab it never registered. {@link registerBreadboardSettings} puts the `breadboard.*`
+ * rows and the shared subagent limits on the `breadboard` tab (registered by `ui/settings-tab.ts`)
+ * and the BreadBoard status-line presets first.
  */
 import type { SubmenuOption } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import { type DefinitionOverride, overrideDefinitions, register, type UiString } from "../config/registry";
@@ -19,72 +19,40 @@ export const cfgBreadboardSessionConfigPath = register({
 	id: "breadboard.sessionConfigPath",
 	type: "string",
 	default: undefined,
-	ui: {
-		tab: "breadboard",
-		group: "Harness",
-		label: "Session config path",
-		description: "Path to the session configuration used by the selected harness",
-	},
 });
 
 export const cfgBreadboardHarnessDefault = register({
 	id: "breadboard.harness.default",
 	type: "string",
 	default: "daily_driver",
-	ui: {
-		tab: "breadboard",
-		group: "Harness",
-		label: "Default harness",
-		description: "Harness name or definition path selected when --harness is omitted",
-	},
 });
 
 export const cfgBreadboardHarnessPaletteHeader = register({
 	id: "breadboard.harness.paletteHeader",
 	type: "boolean",
 	default: true,
-	ui: {
-		tab: "breadboard",
-		group: "Harness",
-		label: "Palette header",
-		description: "Show the active harness identity in the command palette",
-	},
 });
 
 export const cfgBreadboardHarnessUnsupportedCommands = register({
 	id: "breadboard.harness.unsupportedCommands",
 	type: "string",
 	default: "dim",
-	ui: {
-		tab: "breadboard",
-		group: "Harness",
-		label: "Unsupported commands",
-		description: "How commands unavailable to the active harness appear in the palette",
-		options: [
-			{ value: "dim", label: "Dim" },
-			{ value: "hide", label: "Hide" },
-		],
-	},
 });
 
 export const cfgBreadboardHarnessMaxConcurrentAgents = register({
 	id: "breadboard.harness.max_concurrent_agents",
 	type: "number",
 	default: undefined,
-	ui: {
-		tab: "breadboard",
-		group: "Subagents",
-		label: "Harness max concurrent agents",
-		description: "Effective lock limit for concurrent agents (read-only)",
-		readonly: true,
-	},
 });
 
 export const cfgStatusLineBreadboard = register({
 	id: "statusLine.breadboard",
 	type: "record",
 	default: DEFAULT_BREADBOARD_FIELD_SETTINGS as unknown as Readonly<Record<string, unknown>>,
-	validate: assertBreadboardFieldSettings,
+	// Settings validates every registered id on load, configured or not; an unset value reads as the default.
+	validate: raw => {
+		if (raw !== undefined) assertBreadboardFieldSettings(raw);
+	},
 });
 
 /** BreadBoard status-line field choices, every field left unset at its default. */
@@ -121,6 +89,51 @@ function breadboardPanelOverrides(): Record<string, DefinitionOverride> {
 		description: string,
 	): DefinitionOverride => ({ ui: { ...ui!, tab: "breadboard", group: "Subagents", label, description } });
 	return {
+		[cfgBreadboardSessionConfigPath.id]: {
+			ui: {
+				tab: "breadboard",
+				group: "Harness",
+				label: "Session config path",
+				description: "Path to the session configuration used by the selected harness",
+			},
+		},
+		[cfgBreadboardHarnessDefault.id]: {
+			ui: {
+				tab: "breadboard",
+				group: "Harness",
+				label: "Default harness",
+				description: "Harness name or definition path selected when --harness is omitted",
+			},
+		},
+		[cfgBreadboardHarnessPaletteHeader.id]: {
+			ui: {
+				tab: "breadboard",
+				group: "Harness",
+				label: "Palette header",
+				description: "Show the active harness identity in the command palette",
+			},
+		},
+		[cfgBreadboardHarnessUnsupportedCommands.id]: {
+			ui: {
+				tab: "breadboard",
+				group: "Harness",
+				label: "Unsupported commands",
+				description: "How commands unavailable to the active harness appear in the palette",
+				options: [
+					{ value: "dim", label: "Dim" },
+					{ value: "hide", label: "Hide" },
+				],
+			},
+		},
+		[cfgBreadboardHarnessMaxConcurrentAgents.id]: {
+			ui: {
+				tab: "breadboard",
+				group: "Subagents",
+				label: "Harness max concurrent agents",
+				description: "Effective lock limit for concurrent agents (read-only)",
+				readonly: true,
+			},
+		},
 		[cfgStatusLinePreset.id]: {
 			ui: { ...presetUi, options: [...BREADBOARD_STATUS_LINE_PRESET_OPTIONS, ...stockPresetOptions] },
 		},

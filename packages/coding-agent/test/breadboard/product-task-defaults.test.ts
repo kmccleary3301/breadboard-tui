@@ -15,6 +15,7 @@ interface TaskDefaultsProbe {
 
 const settingsUrl = new URL("../../src/config/settings.ts", import.meta.url).href;
 const productSettingsUrl = new URL("../../src/breadboard/product-settings.ts", import.meta.url).href;
+const taskSettingsUrl = new URL("../../src/task/settings.ts", import.meta.url).href;
 
 async function probeTaskDefaults(breadboardProduct: boolean): Promise<TaskDefaultsProbe> {
 	const script = `
@@ -23,6 +24,7 @@ if (${breadboardProduct}) {
 	await activateBreadboardProduct();
 }
 const { Settings } = await import(${JSON.stringify(settingsUrl)});
+const { cfgTaskMaxConcurrency, cfgTaskMaxRecursionDepth, cfgTaskMaxRuntimeMs } = await import(${JSON.stringify(taskSettingsUrl)});
 
 const defaults = Settings.isolated();
 const overrides = Settings.isolated({
@@ -32,14 +34,14 @@ const overrides = Settings.isolated({
 });
 console.log(JSON.stringify({
 	defaults: {
-		maxConcurrency: defaults.get("task.maxConcurrency"),
-		maxRecursionDepth: defaults.get("task.maxRecursionDepth"),
-		maxRuntimeMs: defaults.get("task.maxRuntimeMs"),
+		maxConcurrency: cfgTaskMaxConcurrency.get(defaults),
+		maxRecursionDepth: cfgTaskMaxRecursionDepth.get(defaults),
+		maxRuntimeMs: cfgTaskMaxRuntimeMs.get(defaults),
 	},
 	overrides: {
-		maxConcurrency: overrides.get("task.maxConcurrency"),
-		maxRecursionDepth: overrides.get("task.maxRecursionDepth"),
-		maxRuntimeMs: overrides.get("task.maxRuntimeMs"),
+		maxConcurrency: cfgTaskMaxConcurrency.get(overrides),
+		maxRecursionDepth: cfgTaskMaxRecursionDepth.get(overrides),
+		maxRuntimeMs: cfgTaskMaxRuntimeMs.get(overrides),
 	},
 }));
 `;
@@ -65,9 +67,10 @@ async function probeProductSettingsImport(): Promise<{
 	const script = `
 await import(${JSON.stringify(productSettingsUrl)});
 const { Settings } = await import(${JSON.stringify(settingsUrl)});
+const { cfgTaskMaxConcurrency } = await import(${JSON.stringify(taskSettingsUrl)});
 console.log(JSON.stringify({
 	product: process.env.BREADBOARD_PRODUCT ?? null,
-	maxConcurrency: Settings.isolated().get("task.maxConcurrency"),
+	maxConcurrency: cfgTaskMaxConcurrency.get(Settings.isolated()),
 }));
 `;
 	const env = { ...process.env };
